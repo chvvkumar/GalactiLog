@@ -1,0 +1,28 @@
+name: Branch Merge Policy
+
+on:
+  pull_request:
+    branches: [main, dev]
+
+jobs:
+  check-source-branch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enforce merge policy
+        run: |
+          TARGET="${{ github.base_ref }}"
+          SOURCE="${{ github.head_ref }}"
+
+          echo "PR: $SOURCE → $TARGET"
+
+          if [[ "$TARGET" == "main" && "$SOURCE" != "dev" ]]; then
+            echo "❌ Only 'dev' can be merged into 'main'."
+            exit 1
+          fi
+
+          if [[ "$TARGET" == "dev" && "$SOURCE" != "snd" ]]; then
+            echo "❌ Only 'snd' can be merged into 'dev'."
+            exit 1
+          fi
+
+          echo "✅ Merge policy satisfied."

@@ -1,0 +1,52 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-astro}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-astro}
+      POSTGRES_DB: ${POSTGRES_DB:-astro_catalog}
+    volumes:
+      - ${POSTGRES_DATA_HOST_PATH:-postgres_data}:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U astro"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  app:
+    build: .
+    ports:
+      - "8080:80"
+    env_file: .env
+    environment:
+      ASTRO_DATABASE_URL: postgresql+asyncpg://astro:astro@postgres:5432/astro_catalog
+      ASTRO_REDIS_URL: redis://redis:6379/0
+      ASTRO_FITS_DATA_PATH: /app/data/fits
+      ASTRO_THUMBNAILS_PATH: /app/data/thumbnails
+    volumes:
+      - ./backend:/app
+      - ${THUMBNAILS_HOST_PATH:-thumbnails_data}:/app/data/thumbnails
+      - ${FITS_DATA_HOST_PATH:-./sample_fits}:/app/data/fits:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  # Named volumes used as fallbacks when host paths are not set in .env
+  # When POSTGRES_DATA_HOST_PATH / THUMBNAILS_HOST_PATH are set, bind mounts are used instead
+  postgres_data:
+  thumbnails_data:

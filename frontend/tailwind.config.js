@@ -1,0 +1,52 @@
+/** @type {import('tailwindcss').Config} */
+export default {
+  content: ["./src/**/*.{ts,tsx}", "./index.html"],
+  theme: {
+    extend: {
+      colors: {
+        theme: {
+          base: "var(--color-bg-base)",
+          surface: "var(--color-bg-surface)",
+          elevated: "var(--color-bg-elevated)",
+          border: "var(--color-border-default)",
+          "border-em": "var(--color-border-emphasis)",
+          "text-primary": "var(--color-text-primary)",
+          "text-secondary": "var(--color-text-secondary)",
+          "text-tertiary": "var(--color-text-tertiary)",
+          accent: "var(--color-accent)",
+          "accent-hover": "var(--color-accent-hover)",
+          success: "var(--color-success)",
+          warning: "var(--color-warning)",
+          error: "var(--color-error)",
+          info: "var(--color-info)",
+          "badge-bg": "var(--color-badge-bg)",
+          "badge-text": "var(--color-badge-text)",
+        },
+        metric: {
+          integration: "var(--color-metric-integration)",
+          frames: "var(--color-metric-frames)",
+          hfr: "var(--color-metric-hfr)",
+          eccentricity: "var(--color-metric-eccentricity)",
+          fwhm: "var(--color-metric-fwhm)",
+          stars: "var(--color-metric-stars)",
+          guiding: "var(--color-metric-guiding)",
+          temp: "var(--color-metric-temp)",
+          gain: "var(--color-metric-gain)",
+          time: "var(--color-metric-time)",
+          best: "var(--color-metric-best)",
+          worst: "var(--color-metric-worst)",
+        },
+        filter: {
+          ha: "var(--color-filter-ha)",
+          oiii: "var(--color-filter-oiii)",
+          sii: "var(--color-filter-sii)",
+          l: "var(--color-filter-l)",
+          r: "var(--color-filter-r)",
+          g: "var(--color-filter-g)",
+          b: "var(--color-filter-b)",
+        },
+      },
+    },
+  },
+  plugins: [],
+};

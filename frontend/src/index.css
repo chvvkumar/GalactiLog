@@ -1,0 +1,92 @@
+@import "tailwindcss";
+
+/*
+  Theme tokens are set at runtime by applyTheme() in themes.ts.
+  These fallbacks match the "Deep Space" default theme so the page
+  renders correctly before JS executes.
+*/
+:root {
+  --color-bg-base: #0e0e0e;
+  --color-bg-surface: #1a1a1a;
+  --color-bg-elevated: #242424;
+  --color-border-default: #1f1f1f;
+  --color-border-emphasis: #363636;
+  --color-text-primary: #e6e6e6;
+  --color-text-secondary: #9a9a9a;
+  --color-text-tertiary: #6b6b6b;
+  --color-accent: #7c8aff;
+  --color-accent-hover: #9ba6ff;
+  --color-success: #4ade80;
+  --color-warning: #fbbf24;
+  --color-error: #f87171;
+  --color-info: #60a5fa;
+  --color-metric-integration: #60a5fa;
+  --color-metric-frames: #4ade80;
+  --color-metric-hfr: #fbbf24;
+  --color-metric-eccentricity: #c084fc;
+  --color-metric-fwhm: #38bdf8;
+  --color-metric-stars: #2dd4bf;
+  --color-metric-guiding: #fb7185;
+  --color-metric-temp: #38bdf8;
+  --color-metric-gain: #86efac;
+  --color-metric-time: #fca5a5;
+  --color-metric-best: #4ade80;
+  --color-metric-worst: #f87171;
+  --color-badge-bg: #2a2a3a;
+  --color-badge-text: #d1d5db;
+  --color-filter-ha: #e05555;
+  --color-filter-oiii: #4a9fe8;
+  --color-filter-sii: #e8b84a;
+  --color-filter-l: #d8d8d8;
+  --color-filter-r: #e86060;
+  --color-filter-g: #60c060;
+  --color-filter-b: #6080e8;
+}
+
+/*
+  @theme tells Tailwind v4 to generate utility classes for these colors.
+  The var() references point to the :root values above, which get
+  swapped at runtime by applyTheme().
+*/
+@theme {
+  --color-theme-base: var(--color-bg-base);
+  --color-theme-surface: var(--color-bg-surface);
+  --color-theme-elevated: var(--color-bg-elevated);
+  --color-theme-border: var(--color-border-default);
+  --color-theme-border-em: var(--color-border-emphasis);
+  --color-theme-text-primary: var(--color-text-primary);
+  --color-theme-text-secondary: var(--color-text-secondary);
+  --color-theme-text-tertiary: var(--color-text-tertiary);
+  --color-theme-accent: var(--color-accent);
+  --color-theme-accent-hover: var(--color-accent-hover);
+  --color-theme-success: var(--color-success);
+  --color-theme-warning: var(--color-warning);
+  --color-theme-error: var(--color-error);
+  --color-theme-info: var(--color-info);
+  --color-theme-badge-bg: var(--color-badge-bg);
+  --color-theme-badge-text: var(--color-badge-text);
+  --color-metric-integration: var(--color-metric-integration);
+  --color-metric-frames: var(--color-metric-frames);
+  --color-metric-hfr: var(--color-metric-hfr);
+  --color-metric-eccentricity: var(--color-metric-eccentricity);
+  --color-metric-fwhm: var(--color-metric-fwhm);
+  --color-metric-stars: var(--color-metric-stars);
+  --color-metric-guiding: var(--color-metric-guiding);
+  --color-metric-temp: var(--color-metric-temp);
+  --color-metric-gain: var(--color-metric-gain);
+  --color-metric-time: var(--color-metric-time);
+  --color-metric-best: var(--color-metric-best);
+  --color-metric-worst: var(--color-metric-worst);
+  --color-filter-ha: var(--color-filter-ha);
+  --color-filter-oiii: var(--color-filter-oiii);
+  --color-filter-sii: var(--color-filter-sii);
+  --color-filter-l: var(--color-filter-l);
+  --color-filter-r: var(--color-filter-r);
+  --color-filter-g: var(--color-filter-g);
+  --color-filter-b: var(--color-filter-b);
+}
+
+body {
+  background-color: var(--color-bg-base);
+  color: var(--color-text-primary);
+}
