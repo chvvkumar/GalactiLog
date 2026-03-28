@@ -30,6 +30,8 @@ Thumbs.db
 # Generated data
 thumbnails/
 
+CLAUDE.md
+
 # Claude Code / Superpowers tooling
 .claude/
 .superpowers/
