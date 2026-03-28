@@ -148,7 +148,7 @@ export default function SessionMetricsChart(props: Props) {
   return (
     <div>
       <button
-        class="flex justify-between items-center w-full text-xs py-2.5 px-3 -mx-3 rounded-lg hover:bg-theme-elevated transition-colors cursor-pointer"
+        class="flex justify-between items-center w-full text-xs py-2.5 px-3 -mx-3 rounded-[var(--radius-md)] hover:bg-theme-hover transition-colors cursor-pointer"
         onClick={toggleExpanded}
       >
         <span class="font-bold text-theme-text-primary">Session Metrics</span>
@@ -157,7 +157,7 @@ export default function SessionMetricsChart(props: Props) {
         </span>
       </button>
       <Show when={expanded()}>
-        <div class="border border-theme-border rounded-lg p-3 bg-theme-base mt-2">
+        <div class="border border-theme-border rounded-[var(--radius-md)] p-3 bg-theme-base mt-2">
           <div class="flex justify-between items-start gap-4 mb-2">
             <div class="text-[9px] text-theme-text-tertiary uppercase tracking-wider">Metrics</div>
             <MetricTogglePills />

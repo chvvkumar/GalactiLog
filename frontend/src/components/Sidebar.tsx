@@ -14,17 +14,17 @@ const Sidebar: Component = () => {
 
   return (
     <aside class="w-72 min-h-[calc(100vh-57px)] border-r border-theme-border p-4 space-y-6 overflow-y-auto">
-      <SearchBar />
-      <ObjectTypeToggles />
-      <DateRangePicker />
-      <FilterToggles />
-      <HardwareSelects />
-      <QualityFilters />
-      <MetricFilters />
-      <FitsQueryBuilder />
+      <section><SearchBar /></section>
+      <section><ObjectTypeToggles /></section>
+      <section><DateRangePicker /></section>
+      <section><FilterToggles /></section>
+      <section><HardwareSelects /></section>
+      <section><QualityFilters /></section>
+      <section><MetricFilters /></section>
+      <section><FitsQueryBuilder /></section>
       <button
         onClick={resetFilters}
-        class="w-full py-2 text-xs text-theme-text-secondary hover:text-theme-text-primary border border-theme-border hover:border-theme-border-em rounded transition-colors"
+        class="w-full py-2 text-xs text-theme-text-secondary hover:text-theme-text-primary bg-theme-elevated hover:bg-theme-border-em rounded-[var(--radius-sm)] transition-colors"
       >
         Reset Filters
       </button>

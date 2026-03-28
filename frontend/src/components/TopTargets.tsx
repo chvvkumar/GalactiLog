@@ -5,7 +5,7 @@ const TopTargets: Component<{ targets: TopTarget[] }> = (props) => {
   const maxVal = () => Math.max(...props.targets.map((t) => t.integration_seconds), 1);
 
   return (
-    <div class="bg-theme-surface rounded-lg p-4 space-y-2">
+    <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-4 space-y-2">
       <h3 class="text-white font-medium text-sm">Top Targets</h3>
       <For each={props.targets.slice(0, 10)}>
         {(target, i) => (

@@ -40,7 +40,7 @@ const SearchBar: Component = () => {
 
   return (
     <div class="relative">
-      <label class="text-xs text-theme-text-secondary mb-1 block">Search Targets</label>
+      <label class="text-[11px] font-medium uppercase tracking-wider text-theme-text-tertiary mb-1 block">Search Targets</label>
       <input
         type="text"
         value={query()}
@@ -48,10 +48,10 @@ const SearchBar: Component = () => {
         onFocus={() => suggestions().length > 0 && setShowSuggestions(true)}
         onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
         placeholder="M31, NGC 7000..."
-        class="w-full px-3 py-2 bg-theme-base border border-theme-border rounded text-sm text-theme-text-primary placeholder-theme-text-secondary focus:outline-none focus:ring-1 focus:ring-theme-accent"
+        class="w-full px-3 py-2 bg-theme-input border border-theme-border rounded-[var(--radius-sm)] text-sm text-theme-text-primary placeholder:text-theme-text-tertiary focus:ring-1 focus:ring-theme-accent focus:border-theme-accent outline-none"
       />
       <Show when={showSuggestions()}>
-        <div class="absolute z-50 w-full mt-1 bg-theme-surface border border-theme-border rounded shadow-lg max-h-48 overflow-y-auto">
+        <div class="absolute z-50 w-full mt-1 bg-theme-surface shadow-[var(--shadow-md)] border border-theme-border rounded-[var(--radius-sm)] max-h-48 overflow-y-auto">
           <For each={suggestions()}>
             {(target) => (
               <button

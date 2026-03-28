@@ -16,7 +16,7 @@ const StorageBreakdown: Component<{
   const pct = (v: number) => total() > 0 ? ((v / total()) * 100).toFixed(1) : "0";
 
   return (
-    <div class="bg-theme-surface rounded-lg p-4 space-y-3">
+    <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-4 space-y-3">
       <h3 class="text-theme-text-primary font-medium text-sm">Storage Breakdown</h3>
       {/* Stacked bar */}
       <div class="w-full h-4 bg-theme-base rounded-full overflow-hidden flex">

@@ -10,13 +10,13 @@ const NavBar: Component = () => {
   const { targetData } = useCatalog();
 
   return (
-    <header class="border-b border-theme-border px-6 py-3 flex items-center gap-6">
-      <h1 class="text-theme-text-primary font-bold text-lg whitespace-nowrap">GalactiLog</h1>
+    <header class="sticky top-0 z-30 bg-theme-surface backdrop-blur-sm border-b border-theme-border px-6 py-3 flex items-center gap-6">
+      <h1 class="text-theme-text-primary font-bold tracking-tight text-lg whitespace-nowrap">GalactiLog</h1>
       <nav class="flex gap-4">
         <A
           href="/"
           class="text-sm text-theme-text-secondary hover:text-theme-text-primary transition-colors"
-          activeClass="text-theme-text-primary font-medium"
+          activeClass="text-theme-text-primary font-medium bg-theme-elevated rounded-[var(--radius-sm)] px-2.5 py-1"
           end
         >
           Dashboard
@@ -24,14 +24,14 @@ const NavBar: Component = () => {
         <A
           href="/admin"
           class="text-sm text-theme-text-secondary hover:text-theme-text-primary transition-colors"
-          activeClass="text-theme-text-primary font-medium"
+          activeClass="text-theme-text-primary font-medium bg-theme-elevated rounded-[var(--radius-sm)] px-2.5 py-1"
         >
           Admin & Stats
         </A>
         <A
           href="/settings"
           class="text-theme-text-secondary hover:text-theme-text-primary transition-colors text-sm"
-          activeClass="text-theme-text-primary font-medium"
+          activeClass="text-theme-text-primary font-medium bg-theme-elevated rounded-[var(--radius-sm)] px-2.5 py-1"
         >
           Settings
         </A>

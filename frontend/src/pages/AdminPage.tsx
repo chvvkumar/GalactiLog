@@ -32,7 +32,7 @@ const AdminPage: Component = () => {
               bestHfr={data().data_quality.best_hfr}
             />
 
-            <div class="grid grid-cols-3 gap-4">
+            <div class="grid grid-cols-3 gap-4 [&>*]:border [&>*]:border-theme-border [&>*]:rounded-[var(--radius-md)] [&>*]:shadow-[var(--shadow-sm)]">
               <FilterUsageChart usage={data().filter_usage} />
               <EquipmentInventory cameras={data().equipment.cameras} telescopes={data().equipment.telescopes} />
               <TopTargets targets={data().top_targets} />
@@ -40,7 +40,7 @@ const AdminPage: Component = () => {
 
             <ImagingTimeline timeline={data().timeline} />
 
-            <div class="grid grid-cols-2 gap-4">
+            <div class="grid grid-cols-2 gap-4 [&>*]:border [&>*]:border-theme-border [&>*]:rounded-[var(--radius-md)] [&>*]:shadow-[var(--shadow-sm)]">
               <StorageBreakdown
                 fitsBytes={data().storage.fits_bytes}
                 thumbnailBytes={data().storage.thumbnail_bytes}

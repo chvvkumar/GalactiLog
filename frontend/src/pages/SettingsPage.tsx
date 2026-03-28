@@ -25,17 +25,17 @@ export const SettingsPage: Component = () => {
 
   return (
     <div class="p-4 max-w-4xl mx-auto space-y-6">
-      <h1 class="text-xl font-bold text-theme-text-primary">Settings</h1>
+      <h1 class="text-xl font-semibold tracking-tight text-theme-text-primary">Settings</h1>
 
       {/* Tab bar */}
-      <div class="flex gap-1 border-b border-theme-border">
+      <div class="flex gap-1">
         {TABS.map((tab) => (
           <button
             onClick={() => setSearchParams({ tab: tab.id })}
-            class={`px-4 py-2 text-sm transition-colors border-b-2 -mb-px ${
+            class={`px-4 py-2 text-sm transition-colors duration-150 ${
               activeTab() === tab.id
-                ? "border-theme-accent text-theme-text-primary"
-                : "border-transparent text-theme-text-secondary hover:text-theme-text-primary"
+                ? "bg-theme-elevated text-theme-text-primary rounded-[var(--radius-sm)] font-medium"
+                : "text-theme-text-secondary hover:text-theme-text-primary hover:bg-theme-hover rounded-[var(--radius-sm)]"
             }`}
           >
             {tab.label}

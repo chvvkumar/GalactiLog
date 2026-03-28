@@ -225,7 +225,7 @@ export default function TargetMetricsChart(props: Props) {
 
   return (
     <Show when={props.expanded}>
-      <div class="border border-theme-border rounded-lg p-3 bg-theme-base mb-4">
+      <div class="border border-theme-border rounded-[var(--radius-md)] p-3 bg-theme-base mb-4">
         <div class="flex justify-between items-start gap-4 mb-2">
           <div class="flex items-center gap-3">
             <div class="text-[9px] text-theme-text-tertiary uppercase tracking-wider">
@@ -253,7 +253,7 @@ export default function TargetMetricsChart(props: Props) {
 export function MetricsTrendButton(props: { expanded: boolean; onToggle: () => void }) {
   return (
     <button
-      class="px-3 py-1.5 border border-theme-border-em rounded-lg bg-theme-surface text-[11px] text-theme-text-secondary hover:text-theme-text-primary hover:border-theme-accent transition-colors cursor-pointer flex items-center gap-1.5"
+      class="px-3 py-1.5 border border-theme-border-em rounded-[var(--radius-md)] bg-theme-surface text-[11px] text-theme-text-secondary hover:text-theme-text-primary hover:border-theme-accent transition-colors cursor-pointer flex items-center gap-1.5"
       onClick={props.onToggle}
     >
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">

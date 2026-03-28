@@ -32,7 +32,7 @@ const TargetRow: Component<{
   return (
     <>
       <tr
-        class="border-b border-theme-border cursor-pointer hover:bg-theme-elevated transition-colors"
+        class="border-b border-theme-border cursor-pointer hover:bg-theme-hover transition-colors duration-150"
         onClick={() => navigate(`/targets/${encodeURIComponent(props.target.target_id)}?view=sessions`)}
       >
         <td class="py-2.5 px-3 font-bold text-theme-text-primary hover:text-theme-accent transition-colors">

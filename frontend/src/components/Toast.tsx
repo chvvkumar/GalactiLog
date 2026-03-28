@@ -19,7 +19,7 @@ export const Toast: Component = () => {
     <Show when={toast()}>
       {(t) => (
         <div
-          class={`fixed bottom-4 right-4 px-4 py-2 rounded-lg text-sm text-white shadow-lg transition-opacity z-50 ${
+          class={`fixed bottom-4 right-4 px-4 py-2 rounded-[var(--radius-md)] text-sm text-white shadow-[var(--shadow-lg)] border border-theme-border animate-slide-in-right z-50 ${
             t().type === "success" ? "bg-theme-success" : "bg-theme-error"
           }`}
         >

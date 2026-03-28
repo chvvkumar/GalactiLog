@@ -69,25 +69,26 @@ const TargetTable: Component<{ targets: TargetAggregation[] }> = (props) => {
     return sortDir() === "asc" ? " \u2191" : " \u2193";
   };
 
-  const headerClass = "text-left py-2 px-3 font-medium cursor-pointer select-none hover:text-theme-text-primary transition-colors whitespace-nowrap";
-  const plainHeaderClass = "text-left py-2 px-3 font-medium whitespace-nowrap";
+  const headerClass = (key: SortKey) =>
+    `text-left py-2 px-3 text-[11px] font-medium uppercase tracking-wider text-theme-text-tertiary cursor-pointer select-none hover:text-theme-text-primary transition-colors whitespace-nowrap${sortKey() === key ? " border-b-2 border-theme-accent" : ""}`;
+  const plainHeaderClass = "text-left py-2 px-3 text-[11px] font-medium uppercase tracking-wider text-theme-text-tertiary whitespace-nowrap";
 
   return (
     <table class="w-full text-sm border-collapse">
       <thead>
-        <tr class="text-theme-text-secondary text-[11px] uppercase tracking-wider border-b border-theme-border">
-          <th class={headerClass} onClick={() => toggleSort("name")}>
+        <tr class="sticky top-0 bg-theme-surface border-b border-theme-border-em z-10 text-theme-text-tertiary text-[11px] uppercase tracking-wider">
+          <th class={headerClass("name")} onClick={() => toggleSort("name")}>
             Target Name{arrow("name")}
           </th>
           <th class={plainHeaderClass}>Designation</th>
           <th class={plainHeaderClass}>Palette</th>
-          <th class={headerClass} onClick={() => toggleSort("integration")}>
+          <th class={headerClass("integration")} onClick={() => toggleSort("integration")}>
             Integration Time{arrow("integration")}
           </th>
-          <th class={headerClass} onClick={() => toggleSort("equipment")}>
+          <th class={headerClass("equipment")} onClick={() => toggleSort("equipment")}>
             Equipment Profile{arrow("equipment")}
           </th>
-          <th class={headerClass} onClick={() => toggleSort("lastSession")}>
+          <th class={headerClass("lastSession")} onClick={() => toggleSort("lastSession")}>
             Last Session{arrow("lastSession")}
           </th>
           <th class={plainHeaderClass}></th>

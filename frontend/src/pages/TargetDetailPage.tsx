@@ -122,7 +122,7 @@ const TargetDetailPage: Component = () => {
             <div class="px-6 py-5 border-b border-theme-border">
               <div class="flex justify-between items-start">
                 <div>
-                  <h1 class="text-2xl font-bold text-theme-text-primary">
+                  <h1 class="text-2xl font-semibold tracking-tight text-theme-text-primary">
                     {detail().primary_name}
                   </h1>
                   <div class="text-xs text-theme-text-secondary mt-1 space-x-2">
@@ -151,55 +151,55 @@ const TargetDetailPage: Component = () => {
 
               {/* Cumulative stats bar */}
               <div class="flex flex-wrap gap-3 mt-4 items-center">
-                <div class="bg-theme-surface rounded-lg p-3 text-center min-w-[100px]">
-                  <div class="text-lg font-bold text-metric-integration">{formatHours(detail().total_integration_seconds)}</div>
+                <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-3 text-center min-w-[100px]">
+                  <div class="text-lg font-semibold text-metric-integration">{formatHours(detail().total_integration_seconds)}</div>
                   <div class="text-[10px] text-theme-text-secondary">Total Integration</div>
                 </div>
-                <div class="bg-theme-surface rounded-lg p-3 text-center min-w-[100px]">
-                  <div class="text-lg font-bold text-metric-frames">{detail().total_frames.toLocaleString()}</div>
+                <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-3 text-center min-w-[100px]">
+                  <div class="text-lg font-semibold text-metric-frames">{detail().total_frames.toLocaleString()}</div>
                   <div class="text-[10px] text-theme-text-secondary">Total Frames</div>
                 </div>
                 <Show when={visible("quality", "hfr")}>
-                  <div class="bg-theme-surface rounded-lg p-3 text-center min-w-[100px]">
-                    <div class="text-lg font-bold text-metric-hfr">
+                  <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-3 text-center min-w-[100px]">
+                    <div class="text-lg font-semibold text-metric-hfr">
                       {detail().avg_hfr?.toFixed(2) ?? "—"}
                     </div>
                     <div class="text-[10px] text-theme-text-secondary">Avg HFR</div>
                   </div>
                 </Show>
                 <Show when={visible("quality", "eccentricity")}>
-                  <div class="bg-theme-surface rounded-lg p-3 text-center min-w-[100px]">
-                    <div class="text-lg font-bold text-metric-eccentricity">
+                  <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-3 text-center min-w-[100px]">
+                    <div class="text-lg font-semibold text-metric-eccentricity">
                       {detail().avg_eccentricity?.toFixed(2) ?? "—"}
                     </div>
                     <div class="text-[10px] text-theme-text-secondary">Avg Eccentricity</div>
                   </div>
                 </Show>
                 <Show when={visible("quality", "fwhm")}>
-                  <div class="bg-theme-surface rounded-lg p-3 text-center min-w-[100px]">
-                    <div class="text-lg font-bold text-theme-info">
+                  <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-3 text-center min-w-[100px]">
+                    <div class="text-lg font-semibold text-theme-info">
                       {detail().avg_fwhm?.toFixed(2) ?? "—"}
                     </div>
                     <div class="text-[10px] text-theme-text-secondary">Avg FWHM</div>
                   </div>
                 </Show>
                 <Show when={visible("quality", "detected_stars")}>
-                  <div class="bg-theme-surface rounded-lg p-3 text-center min-w-[100px]">
-                    <div class="text-lg font-bold text-metric-stars">
+                  <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-3 text-center min-w-[100px]">
+                    <div class="text-lg font-semibold text-metric-stars">
                       {detail().avg_detected_stars?.toFixed(0) ?? "—"}
                     </div>
                     <div class="text-[10px] text-theme-text-secondary">Avg Stars</div>
                   </div>
                 </Show>
                 <Show when={visible("guiding", "rms_total")}>
-                  <div class="bg-theme-surface rounded-lg p-3 text-center min-w-[100px]">
-                    <div class="text-lg font-bold text-metric-guiding">
+                  <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-3 text-center min-w-[100px]">
+                    <div class="text-lg font-semibold text-metric-guiding">
                       {detail().avg_guiding_rms_arcsec !== null ? `${detail().avg_guiding_rms_arcsec?.toFixed(2)}"` : "—"}
                     </div>
                     <div class="text-[10px] text-theme-text-secondary">Avg Guide RMS</div>
                   </div>
                 </Show>
-                <div class="bg-theme-surface rounded-lg p-3 text-center flex flex-col items-center justify-center min-w-[100px]">
+                <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-3 text-center flex flex-col items-center justify-center min-w-[100px]">
                   <div class="mb-1">
                     <FilterBadges distribution={Object.fromEntries(detail().filters_used.map(f => [f, 0]))} compact />
                   </div>
@@ -223,7 +223,7 @@ const TargetDetailPage: Component = () => {
             <div class="px-6 py-4">
               <table class="w-full border-collapse">
                 <thead>
-                  <tr class="text-[10px] text-theme-text-secondary uppercase tracking-wider">
+                  <tr class="text-[10px] text-theme-text-tertiary uppercase tracking-wider border-b border-theme-border-em">
                     <Show when={targetChartExpanded()}>
                       <th class="py-2 pl-4 pr-1 w-8">
                         <input

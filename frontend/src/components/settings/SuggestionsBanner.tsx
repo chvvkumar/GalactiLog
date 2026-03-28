@@ -11,7 +11,7 @@ interface Props {
 export const SuggestionsBanner: Component<Props> = (props) => {
   return (
     <Show when={props.suggestions.length > 0}>
-      <div class="bg-theme-warning/20 border border-theme-warning/50 rounded-lg p-4 space-y-3">
+      <div class="bg-theme-warning/20 border border-theme-warning/50 rounded-[var(--radius-md)] p-4 space-y-3">
         <p class="text-sm text-theme-warning">
           Found {props.suggestions.length} possible duplicate{props.suggestions.length > 1 ? "s" : ""}
         </p>

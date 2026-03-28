@@ -71,7 +71,7 @@ const MetricRow: Component<MetricRowProps> = (props) => {
             apply(e.currentTarget.value, maxVal());
           }}
           placeholder="Min"
-          class="w-full px-2 py-1.5 bg-theme-base border border-theme-border rounded text-xs text-theme-text-primary placeholder-astro-muted focus:outline-none focus:ring-1 focus:border-theme-accent"
+          class="w-full px-2 py-1.5 bg-theme-input border border-theme-border rounded-[var(--radius-sm)] text-xs text-theme-text-primary placeholder:text-theme-text-tertiary focus:ring-1 focus:ring-theme-accent focus:border-theme-accent outline-none"
         />
         <span class="text-theme-text-secondary text-xs">&ndash;</span>
         <input
@@ -83,7 +83,7 @@ const MetricRow: Component<MetricRowProps> = (props) => {
             apply(minVal(), e.currentTarget.value);
           }}
           placeholder="Max"
-          class="w-full px-2 py-1.5 bg-theme-base border border-theme-border rounded text-xs text-theme-text-primary placeholder-astro-muted focus:outline-none focus:ring-1 focus:border-theme-accent"
+          class="w-full px-2 py-1.5 bg-theme-input border border-theme-border rounded-[var(--radius-sm)] text-xs text-theme-text-primary placeholder:text-theme-text-tertiary focus:ring-1 focus:ring-theme-accent focus:border-theme-accent outline-none"
         />
       </div>
     </div>
@@ -131,10 +131,10 @@ const MetricFilters: Component = () => {
       <div class="space-y-2">
         {/* Main section header */}
         <button
-          class="w-full flex items-center justify-between text-xs text-theme-text-secondary uppercase tracking-wider font-medium hover:text-theme-text-primary transition-colors"
+          class="w-full flex items-center justify-between hover:text-theme-text-primary transition-colors"
           onClick={() => setOpen((v) => !v)}
         >
-          <span>Metrics</span>
+          <span class="text-[11px] font-medium uppercase tracking-wider text-theme-text-tertiary">Metrics</span>
           <svg
             class={`w-3 h-3 transition-transform ${open() ? "rotate-180" : ""}`}
             fill="none"

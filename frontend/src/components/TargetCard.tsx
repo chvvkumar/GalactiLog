@@ -13,7 +13,7 @@ const TargetCard: Component<{ target: TargetAggregation }> = (props) => {
   const isOpen = () => expandedTargets().has(props.target.target_id);
 
   return (
-    <div class="bg-theme-surface rounded-lg p-4 space-y-2">
+    <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-4 space-y-2">
       <div
         class="flex items-center justify-between cursor-pointer"
         onClick={() => toggleExpanded(props.target.target_id)}

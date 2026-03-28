@@ -80,7 +80,7 @@ const ScanManager: Component = () => {
   };
 
   return (
-    <div class="bg-theme-surface rounded-lg p-4 space-y-3">
+    <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-4 space-y-3">
       <div class="flex justify-between items-center">
         <h3 class="text-theme-text-primary font-medium">Scan & Ingest</h3>
         <div class="flex gap-2">
@@ -126,7 +126,7 @@ const ScanManager: Component = () => {
 
       {/* Stalled state — explain what happened and offer remediation */}
       <Show when={scanStatus().state === "stalled"}>
-        <div class="bg-theme-warning/20 border border-theme-warning/50 rounded-lg p-3 space-y-2">
+        <div class="bg-theme-warning/20 border border-theme-warning/50 rounded-[var(--radius-md)] p-3 space-y-2">
           <div class="flex items-start gap-2">
             <span class="text-theme-warning text-sm font-medium">Scan stalled</span>
           </div>
@@ -402,7 +402,7 @@ const RebuildTargetsSection: Component<{ disabled: boolean; onRegenThumbnails: (
       </div>
 
       <Show when={showFullConfirm()}>
-        <div class="bg-theme-error/20 border border-theme-error/50 rounded-lg p-3 space-y-2">
+        <div class="bg-theme-error/20 border border-theme-error/50 rounded-[var(--radius-md)] p-3 space-y-2">
           <p class="text-sm text-theme-error font-medium">Are you sure?</p>
           <p class="text-xs text-theme-error/70">
             This will delete all target records, merge history, and suggested merges.

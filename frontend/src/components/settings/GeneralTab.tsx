@@ -35,7 +35,7 @@ export const GeneralTab: Component = () => {
     default_page_size: 50,
     include_calibration: true,
     filter_style: "solid",
-    theme: "deep-space",
+    theme: "default-dark",
     text_size: "medium",
   });
   const [saving, setSaving] = createSignal(false);
@@ -84,7 +84,7 @@ export const GeneralTab: Component = () => {
           onChange={(e) =>
             setLocal((p) => ({ ...p, auto_scan_interval: parseInt(e.currentTarget.value) }))
           }
-          class="w-full px-3 py-2 bg-theme-base border border-theme-border rounded text-sm text-theme-text-primary focus:outline-none focus:border-theme-accent"
+          class="w-full px-3 py-2 bg-theme-input border border-theme-border rounded-[var(--radius-sm)] text-sm text-theme-text-primary focus:ring-1 focus:ring-theme-accent focus:border-theme-accent outline-none"
         >
           {INTERVALS.map((opt) => (
             <option value={opt.value}>{opt.label}</option>
@@ -104,7 +104,7 @@ export const GeneralTab: Component = () => {
           onInput={(e) =>
             setLocal((p) => ({ ...p, thumbnail_width: parseInt(e.currentTarget.value) || 800 }))
           }
-          class="w-full px-3 py-2 bg-theme-base border border-theme-border rounded text-sm text-theme-text-primary focus:outline-none focus:border-theme-accent"
+          class="w-full px-3 py-2 bg-theme-input border border-theme-border rounded-[var(--radius-sm)] text-sm text-theme-text-primary focus:ring-1 focus:ring-theme-accent focus:border-theme-accent outline-none"
         />
       </div>
 
@@ -116,7 +116,7 @@ export const GeneralTab: Component = () => {
           onChange={(e) =>
             setLocal((p) => ({ ...p, default_page_size: parseInt(e.currentTarget.value) }))
           }
-          class="w-full px-3 py-2 bg-theme-base border border-theme-border rounded text-sm text-theme-text-primary focus:outline-none focus:border-theme-accent"
+          class="w-full px-3 py-2 bg-theme-input border border-theme-border rounded-[var(--radius-sm)] text-sm text-theme-text-primary focus:ring-1 focus:ring-theme-accent focus:border-theme-accent outline-none"
         >
           {PAGE_SIZES.map((s) => (
             <option value={s}>{s}</option>
@@ -133,7 +133,7 @@ export const GeneralTab: Component = () => {
             onChange={(e) =>
               setLocal((p) => ({ ...p, filter_style: e.currentTarget.value }))
             }
-            class="px-3 py-2 bg-theme-base border border-theme-border rounded text-sm text-theme-text-primary focus:outline-none focus:border-theme-accent"
+            class="px-3 py-2 bg-theme-input border border-theme-border rounded-[var(--radius-sm)] text-sm text-theme-text-primary focus:ring-1 focus:ring-theme-accent focus:border-theme-accent outline-none"
           >
             <For each={FILTER_STYLE_OPTIONS}>
               {(opt) => <option value={opt.value}>{opt.label}</option>}

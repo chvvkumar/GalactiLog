@@ -47,7 +47,7 @@ const FitsQueryBuilder: Component = () => {
 
   return (
     <div class="space-y-2">
-      <label class="text-xs text-theme-text-secondary">FITS Header Query</label>
+      <label class="text-[11px] font-medium uppercase tracking-wider text-theme-text-tertiary">FITS Header Query</label>
 
       {/* Existing rows */}
       <For each={filters().fitsQueries}>
@@ -65,7 +65,7 @@ const FitsQueryBuilder: Component = () => {
           <select
             value={newKey()}
             onChange={(e) => setNewKey(e.currentTarget.value)}
-            class="flex-1 px-1.5 py-1.5 bg-theme-base border border-theme-border rounded text-xs text-theme-text-primary font-mono focus:outline-none focus:ring-1 focus:border-theme-accent"
+            class="flex-1 px-1.5 py-1.5 bg-theme-input border border-theme-border rounded-[var(--radius-sm)] text-xs text-theme-text-primary font-mono focus:ring-1 focus:ring-theme-accent focus:border-theme-accent outline-none"
           >
             <option value="" disabled>Header Key</option>
             <Show when={fitsKeys()}>
@@ -77,7 +77,7 @@ const FitsQueryBuilder: Component = () => {
           <select
             value={newOp()}
             onChange={(e) => setNewOp(e.currentTarget.value)}
-            class="w-16 px-1 py-1.5 bg-theme-base border border-theme-border rounded text-xs text-theme-text-primary focus:outline-none"
+            class="w-16 px-1 py-1.5 bg-theme-input border border-theme-border rounded-[var(--radius-sm)] text-xs text-theme-text-primary focus:ring-1 focus:ring-theme-accent focus:border-theme-accent outline-none"
           >
             <For each={OPERATORS}>{(op) => <option value={op.value}>{op.label}</option>}</For>
           </select>
@@ -89,9 +89,9 @@ const FitsQueryBuilder: Component = () => {
             onInput={(e) => setNewVal(e.currentTarget.value)}
             onKeyDown={onKeyDown}
             placeholder="Value"
-            class="flex-1 px-2 py-1.5 bg-theme-base border border-theme-border rounded text-xs text-theme-text-primary focus:outline-none focus:ring-1 focus:border-theme-accent"
+            class="flex-1 px-2 py-1.5 bg-theme-input border border-theme-border rounded-[var(--radius-sm)] text-xs text-theme-text-primary placeholder:text-theme-text-tertiary focus:ring-1 focus:ring-theme-accent focus:border-theme-accent outline-none"
           />
-          <button onClick={addRow} class="px-3 py-1.5 bg-theme-accent text-theme-text-primary rounded text-xs hover:bg-theme-accent/80">+</button>
+          <button onClick={addRow} class="px-3 py-1.5 bg-theme-accent text-theme-text-primary rounded-[var(--radius-sm)] text-xs hover:bg-theme-accent/80 transition-colors duration-150">+</button>
         </div>
       </div>
     </div>

@@ -26,7 +26,7 @@ const DashboardPage: Component = () => {
   });
 
   return (
-    <div class="flex">
+    <div class="flex" data-layout="sidebar-main">
       <Sidebar />
       <main class="flex-1 min-h-[calc(100vh-57px)]">
         <TargetFeed />

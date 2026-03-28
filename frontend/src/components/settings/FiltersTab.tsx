@@ -122,7 +122,7 @@ export const FiltersTab: Component = () => {
           value={newFilterName()}
           onInput={(e) => setNewFilterName(e.currentTarget.value)}
           onKeyDown={(e) => e.key === "Enter" && addFilter()}
-          class="px-3 py-2 bg-theme-base border border-theme-border rounded text-sm text-theme-text-primary focus:outline-none focus:border-theme-accent"
+          class="px-3 py-2 bg-theme-input border border-theme-border rounded-[var(--radius-sm)] text-sm text-theme-text-primary focus:ring-1 focus:ring-theme-accent focus:border-theme-accent outline-none"
         />
         <button
           onClick={addFilter}

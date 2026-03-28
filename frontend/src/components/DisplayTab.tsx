@@ -17,7 +17,7 @@ export default function DisplayTab() {
   const [local, setLocal] = createSignal<DisplaySettings | null>(null);
   const [saving, setSaving] = createSignal(false);
   const [collapsed, setCollapsed] = createSignal<Record<string, boolean>>({});
-  const [selectedTheme, setSelectedTheme] = createSignal<string>("deep-space");
+  const [selectedTheme, setSelectedTheme] = createSignal<string>("default-dark");
   const [selectedTextSize, setSelectedTextSize] = createSignal<string>("medium");
   const [themeSaving, setThemeSaving] = createSignal(false);
 
@@ -87,39 +87,41 @@ export default function DisplayTab() {
   return (
     <div class="space-y-6">
       {/* Theme Chooser */}
-      <div class="space-y-3">
-        <h3 class="text-sm font-medium text-theme-text-primary">Theme</h3>
-        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <For each={THEMES}>
-            {(theme: ThemeMeta) => (
-              <button
-                type="button"
-                class={`rounded-lg p-3 text-left border-2 transition-colors ${
-                  selectedTheme() === theme.id
-                    ? "border-theme-accent"
-                    : "border-theme-border hover:border-theme-border-em"
-                }`}
-                style={{ "background-color": theme.tokens["bg-surface"] }}
-                onClick={() => handleThemeChange(theme.id)}
-                disabled={themeSaving()}
-              >
-                <div class="flex gap-1 mb-2">
-                  <span class="w-4 h-4 rounded-full" style={{ "background-color": theme.tokens["accent"] }} />
-                  <span class="w-4 h-4 rounded-full" style={{ "background-color": theme.tokens["success"] }} />
-                  <span class="w-4 h-4 rounded-full" style={{ "background-color": theme.tokens["warning"] }} />
-                  <span class="w-4 h-4 rounded-full" style={{ "background-color": theme.tokens["error"] }} />
-                </div>
-                <div class="text-xs font-medium" style={{ color: theme.tokens["text-primary"] }}>
-                  {theme.name}
-                </div>
-                <div class="text-[10px] mt-0.5" style={{ color: theme.tokens["text-secondary"] }}>
-                  {theme.description}
-                </div>
-              </button>
-            )}
-          </For>
+      <Show when={THEMES.length > 1}>
+        <div class="space-y-3">
+          <h3 class="text-sm font-medium text-theme-text-primary">Theme</h3>
+          <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <For each={THEMES}>
+              {(theme: ThemeMeta) => (
+                <button
+                  type="button"
+                  class={`rounded-[var(--radius-md)] p-3 text-left border-2 transition-colors ${
+                    selectedTheme() === theme.id
+                      ? "border-theme-accent"
+                      : "border-theme-border hover:border-theme-border-em"
+                  }`}
+                  style={{ "background-color": theme.tokens["bg-surface"] }}
+                  onClick={() => handleThemeChange(theme.id)}
+                  disabled={themeSaving()}
+                >
+                  <div class="flex gap-1 mb-2">
+                    <span class="w-4 h-4 rounded-full" style={{ "background-color": theme.tokens["accent"] }} />
+                    <span class="w-4 h-4 rounded-full" style={{ "background-color": theme.tokens["success"] }} />
+                    <span class="w-4 h-4 rounded-full" style={{ "background-color": theme.tokens["warning"] }} />
+                    <span class="w-4 h-4 rounded-full" style={{ "background-color": theme.tokens["error"] }} />
+                  </div>
+                  <div class="text-xs font-medium" style={{ color: theme.tokens["text-primary"] }}>
+                    {theme.name}
+                  </div>
+                  <div class="text-[10px] mt-0.5" style={{ color: theme.tokens["text-secondary"] }}>
+                    {theme.description}
+                  </div>
+                </button>
+              )}
+            </For>
+          </div>
         </div>
-      </div>
+      </Show>
 
       {/* Text Size */}
       <div class="space-y-3">
@@ -129,7 +131,7 @@ export default function DisplayTab() {
             {(size) => (
               <button
                 type="button"
-                class={`px-4 py-2 rounded-lg text-sm transition-colors border ${
+                class={`px-4 py-2 rounded-[var(--radius-sm)] text-sm transition-colors duration-150 border ${
                   selectedTextSize() === size.id
                     ? "border-theme-accent bg-theme-accent text-white"
                     : "border-theme-border bg-theme-surface text-theme-text-secondary hover:border-theme-border-em"
@@ -157,7 +159,7 @@ export default function DisplayTab() {
                   const gs = (): MetricGroupSettings => settings()[group.key];
                   const isCollapsed = () => !!collapsed()[group.key];
                   return (
-                    <div class="rounded-lg bg-theme-surface border border-theme-border">
+                    <div class="rounded-[var(--radius-md)] bg-theme-surface border border-theme-border">
                       <div class="flex items-center justify-between px-4 py-3">
                         <button type="button" class="flex items-center gap-2 text-sm font-medium text-theme-text-primary hover:text-theme-text-secondary" onClick={() => toggleCollapsed(group.key)}>
                           <svg class={`w-4 h-4 transition-transform ${isCollapsed() ? "-rotate-90" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" /></svg>
@@ -184,7 +186,7 @@ export default function DisplayTab() {
                 }}
               </For>
               <div class="flex justify-end pt-2">
-                <button type="button" class="px-4 py-2 text-sm font-medium rounded-lg bg-theme-accent hover:bg-theme-accent-hover text-white disabled:opacity-50" disabled={saving()} onClick={handleSave}>
+                <button type="button" class="px-3 py-1.5 text-sm font-medium rounded-[var(--radius-sm)] bg-theme-accent hover:bg-theme-accent-hover text-white disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-150" disabled={saving()} onClick={handleSave}>
                   {saving() ? "Saving..." : "Save"}
                 </button>
               </div>

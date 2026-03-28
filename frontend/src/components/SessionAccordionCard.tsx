@@ -91,7 +91,7 @@ const SessionAccordionCard: Component<{
       {/* Collapsed header row */}
       <tr
         ref={cardRef}
-        class={`border-b border-theme-border cursor-pointer hover:bg-theme-elevated transition-colors text-xs ${
+        class={`border-b border-theme-border cursor-pointer hover:bg-theme-hover transition-colors duration-150 text-xs ${
           props.isExpanded ? "bg-theme-surface" : ""
         }`}
         onClick={props.onToggle}
@@ -159,7 +159,7 @@ const SessionAccordionCard: Component<{
                   <div class="w-[110px] flex-shrink-0 flex items-center justify-center">
                     <ReferenceThumbnail url={detail().thumbnail_url} />
                   </div>
-                  <div class="flex-1 bg-theme-base rounded-lg overflow-hidden">
+                  <div class="flex-1 bg-theme-base rounded-[var(--radius-md)] overflow-hidden">
                     <table class="w-full text-xs table-fixed" style={{ "border-collapse": "collapse" }}>
                       <colgroup>
                         <col style={{ width: "100px" }} />
@@ -205,7 +205,7 @@ const SessionAccordionCard: Component<{
                             const m = metrics[i];
                             const f = filters[i];
                             rows.push(
-                              <tr class="border-b border-theme-border">
+                              <tr class="border-b border-theme-border hover:bg-theme-hover transition-colors duration-100">
                                 {m ? (
                                   <>
                                     <td class={`py-1.5 px-3 text-theme-text-secondary`}>{m.label}</td>
@@ -275,7 +275,7 @@ const SessionAccordionCard: Component<{
                 <Show when={detail().insights.length > 0}>
                   <div>
                     <h4 class="text-xs font-bold text-theme-text-primary mb-2">Session Insights</h4>
-                    <div class="bg-theme-base rounded-lg p-3 space-y-1">
+                    <div class="bg-theme-base rounded-[var(--radius-md)] p-3 space-y-1">
                       <For each={detail().insights}>
                         {(insight) => (
                           <div class={`text-xs ${INSIGHT_STYLES[insight.level]}`}>
@@ -290,7 +290,7 @@ const SessionAccordionCard: Component<{
                 {/* Row 4: Per-Frame Table (collapsed) */}
                 <div>
                   <button
-                    class="flex justify-between items-center w-full text-xs py-2.5 px-3 -mx-3 rounded-lg hover:bg-theme-elevated transition-colors cursor-pointer"
+                    class="flex justify-between items-center w-full text-xs py-2.5 px-3 -mx-3 rounded-[var(--radius-md)] hover:bg-theme-hover transition-colors cursor-pointer"
                     onClick={() => setShowFrames(!showFrames())}
                   >
                     <span class="font-bold text-theme-text-primary">
@@ -301,7 +301,7 @@ const SessionAccordionCard: Component<{
                     </span>
                   </button>
                   <Show when={showFrames()}>
-                    <div class="bg-theme-base rounded-lg overflow-x-auto max-h-[600px] overflow-y-auto mt-2">
+                    <div class="bg-theme-base rounded-[var(--radius-md)] overflow-x-auto max-h-[600px] overflow-y-auto mt-2">
                       <table class="w-full text-[11px]">
                         <thead class="sticky top-0 bg-theme-base">
                           <tr class="text-theme-text-secondary border-b border-theme-border">
@@ -394,7 +394,7 @@ const SessionAccordionCard: Component<{
                         <tbody>
                           <For each={sortedFrames()}>
                             {(frame) => (
-                              <tr class={`border-b border-theme-border/30 ${isOutlier(frame) ? "bg-theme-error/20" : ""}`}>
+                              <tr class={`border-b border-theme-border/30 hover:bg-theme-hover transition-colors duration-100 ${isOutlier(frame) ? "bg-theme-error/20" : ""}`}>
                                 <td class="py-1 px-2 text-theme-text-primary">{formatTime(frame.timestamp)}</td>
                                 <td class="py-1 px-2 text-theme-text-primary text-center">{frame.filter_used ?? "—"}</td>
                                 <td class="py-1 px-2 text-theme-text-primary text-right tabular-nums">{frame.exposure_time ?? "—"}s</td>
