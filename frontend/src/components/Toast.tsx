@@ -18,7 +18,7 @@ export const Toast: Component = () => {
   return (
     <Show when={toast()}>
       {(t) => (
-        <div class="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 animate-toast-up">
+        <div class="fixed top-6 left-1/2 -translate-x-1/2 z-50 animate-toast-down">
           <div
             class={`px-5 py-2.5 rounded-[var(--radius-md)] text-sm font-medium backdrop-blur-xl shadow-lg border ${
               t().type === "success"
