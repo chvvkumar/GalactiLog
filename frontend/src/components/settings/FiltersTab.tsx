@@ -14,17 +14,24 @@ export const FiltersTab: Component = () => {
   const [dismissed, setDismissed] = createSignal<string[][]>([]);
   const [saving, setSaving] = createSignal(false);
   const [newFilterName, setNewFilterName] = createSignal("");
+  const [ungroupedColors, setUngroupedColors] = createSignal<Record<string, string>>({});
 
-  // Convert settings filters to GroupEntry[]
+  // Convert settings filters to GroupEntry[] and ungrouped colors
   createEffect(() => {
     const s = settings();
     if (!s) return;
-    const entries: GroupEntry[] = Object.entries(s.filters).map(([name, cfg]) => ({
-      canonical: name,
-      aliases: cfg.aliases,
-      color: cfg.color,
-    }));
+    const entries: GroupEntry[] = [];
+    const colors: Record<string, string> = {};
+    for (const [name, cfg] of Object.entries(s.filters)) {
+      if (cfg.aliases.length > 0) {
+        entries.push({ canonical: name, aliases: cfg.aliases, color: cfg.color });
+      } else {
+        // Standalone filter with just a color — treat as ungrouped with color
+        colors[name] = cfg.color;
+      }
+    }
     setGroups(entries);
+    setUngroupedColors(colors);
     setDismissed(s.dismissed_suggestions || []);
   });
 
@@ -77,6 +84,10 @@ export const FiltersTab: Component = () => {
     setNewFilterName("");
   };
 
+  const handleUngroupedColorChange = (name: string, color: string) => {
+    setUngroupedColors((prev) => ({ ...prev, [name]: color }));
+  };
+
   const handleSave = async () => {
     setSaving(true);
     try {
@@ -86,6 +97,12 @@ export const FiltersTab: Component = () => {
           color: g.color || "#808080",
           aliases: g.aliases,
         };
+      }
+      // Include ungrouped filters that have custom colors
+      for (const [name, color] of Object.entries(ungroupedColors())) {
+        if (!filtersPayload[name]) {
+          filtersPayload[name] = { color, aliases: [] };
+        }
       }
       await saveFilters(filtersPayload);
       await api.updateDismissedSuggestions(dismissed());
@@ -100,45 +117,52 @@ export const FiltersTab: Component = () => {
   };
 
   return (
-    <div class="space-y-6">
+    <div class="space-y-4">
       <SuggestionsBanner
         suggestions={suggestions().suggestions}
         onMerge={handleMerge}
         onDismiss={handleDismiss}
       />
 
-      <GroupingEditor
-        discovered={discovered()}
-        groups={groups()}
-        showColorPicker={true}
-        onGroupsChange={setGroups}
-      />
+      <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-4 space-y-3">
+        <h3 class="text-theme-text-primary font-medium">Filter Groups</h3>
 
-      {/* Add filter */}
-      <div class="flex gap-2">
-        <input
-          type="text"
-          placeholder="New filter name"
-          value={newFilterName()}
-          onInput={(e) => setNewFilterName(e.currentTarget.value)}
-          onKeyDown={(e) => e.key === "Enter" && addFilter()}
-          class="px-3 py-2 bg-theme-input border border-theme-border rounded-[var(--radius-sm)] text-sm text-theme-text-primary focus:ring-1 focus:ring-theme-accent focus:border-theme-accent outline-none"
+        <GroupingEditor
+          discovered={discovered()}
+          groups={groups()}
+          showColorPicker={true}
+          ungroupedColors={ungroupedColors()}
+          onGroupsChange={setGroups}
+          onUngroupedColorChange={handleUngroupedColorChange}
         />
-        <button
-          onClick={addFilter}
-          class="px-3 py-2 border border-theme-border text-theme-text-secondary rounded text-sm hover:border-theme-accent hover:text-theme-text-primary transition-colors"
-        >
-          Add Filter
-        </button>
+
+        <div class="flex gap-2">
+          <input
+            type="text"
+            placeholder="New filter name"
+            value={newFilterName()}
+            onInput={(e) => setNewFilterName(e.currentTarget.value)}
+            onKeyDown={(e) => e.key === "Enter" && addFilter()}
+            class="px-3 py-1.5 bg-theme-input border border-theme-border rounded-[var(--radius-sm)] text-sm text-theme-text-primary focus:ring-1 focus:ring-theme-accent focus:border-theme-accent outline-none"
+          />
+          <button
+            onClick={addFilter}
+            class="px-3 py-1.5 border border-theme-border text-theme-text-secondary rounded text-sm hover:border-theme-accent hover:text-theme-text-primary transition-colors"
+          >
+            Add Filter
+          </button>
+        </div>
       </div>
 
-      <button
-        onClick={handleSave}
-        disabled={saving()}
-        class="px-4 py-2 bg-theme-accent text-white rounded text-sm hover:opacity-90 disabled:opacity-50 transition-opacity"
-      >
-        {saving() ? "Saving..." : "Save"}
-      </button>
+      <div class="flex justify-end">
+        <button
+          onClick={handleSave}
+          disabled={saving()}
+          class="px-3 py-1.5 bg-theme-accent text-white rounded text-sm hover:opacity-90 disabled:opacity-50 transition-opacity"
+        >
+          {saving() ? "Saving..." : "Save"}
+        </button>
+      </div>
     </div>
   );
 };

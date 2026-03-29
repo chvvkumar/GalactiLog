@@ -39,15 +39,17 @@ const FilterToggles: Component = () => {
   };
 
   const renderPill = (name: string, grouped = false) => {
-    const active = isActive(name);
+    const active = () => isActive(name);
     const color = getColor(name);
     const badgeStyle = () => getFilterBadgeStyle(filterBadgeStyle(), color);
     return (
       <button
         onClick={() => toggleOpticalFilter(name)}
-        class={`h-6 rounded text-caption font-bold flex items-center justify-center gap-0.5 transition-all ${
-          active ? "ring-1 ring-theme-accent brightness-110" : "ring-1 ring-transparent hover:brightness-110"
-        }`}
+        class={`h-6 rounded text-caption font-bold flex items-center justify-center gap-0.5 transition-all duration-150`}
+        classList={{
+          "ring-1 ring-white/40 brightness-125": active(),
+          "opacity-40 hover:opacity-70": !active(),
+        }}
         classList={{ "w-6": name.length <= 1 && !badgeStyle().dot && !grouped, "px-1.5": name.length > 1 || !!badgeStyle().dot || grouped }}
         style={badgeStyle().style}
         title={grouped ? `${name} (grouped: multiple filter aliases combined)` : name}
