@@ -38,7 +38,7 @@ const FilterToggles: Component = () => {
     return disc.map((d) => d.name).filter((name) => !covered.has(name));
   };
 
-  const renderPill = (name: string) => {
+  const renderPill = (name: string, grouped = false) => {
     const active = isActive(name);
     const color = getColor(name);
     const badgeStyle = () => getFilterBadgeStyle(filterBadgeStyle(), color);
@@ -48,14 +48,17 @@ const FilterToggles: Component = () => {
         class={`h-6 rounded text-caption font-bold flex items-center justify-center gap-0.5 transition-all ${
           active ? "ring-1 ring-theme-accent brightness-110" : "ring-1 ring-transparent hover:brightness-110"
         }`}
-        classList={{ "w-6": name.length <= 1 && !badgeStyle().dot, "px-1.5": name.length > 1 || !!badgeStyle().dot }}
+        classList={{ "w-6": name.length <= 1 && !badgeStyle().dot && !grouped, "px-1.5": name.length > 1 || !!badgeStyle().dot || grouped }}
         style={badgeStyle().style}
-        title={name}
+        title={grouped ? `${name} (grouped: multiple filter aliases combined)` : name}
       >
         <Show when={badgeStyle().dot}>
           <span class="w-1.5 h-1.5 rounded-full inline-block flex-shrink-0" style={{ "background-color": badgeStyle().dot }} />
         </Show>
         {name}
+        <Show when={grouped}>
+          <span class="text-[0.5rem] opacity-70">{"\u29C9"}</span>
+        </Show>
       </button>
     );
   };
@@ -67,7 +70,7 @@ const FilterToggles: Component = () => {
         <Show when={groupedFilters().length > 0}>
           <span class="text-caption text-theme-text-secondary">Grouped</span>
           <div class="flex gap-1.5 flex-wrap">
-            <For each={groupedFilters()}>{(f) => renderPill(f)}</For>
+            <For each={groupedFilters()}>{(f) => renderPill(f, true)}</For>
           </div>
         </Show>
         <Show when={ungroupedFilters().length > 0}>
