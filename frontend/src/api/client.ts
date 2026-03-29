@@ -106,6 +106,15 @@ export const api = {
   resetScan: () =>
     fetchJson<{ status: string }>("/scan/reset", { method: "POST" }),
 
+  stopScan: () =>
+    fetchJson<{ status: string; message?: string }>("/scan/stop", { method: "POST" }),
+
+  getActivity: () =>
+    fetchJson<import("../types").ActivityEntry[]>("/scan/activity"),
+
+  clearActivity: () =>
+    fetchJson<{ status: string }>("/scan/activity", { method: "DELETE" }),
+
   rebuildTargets: () =>
     fetchJson<{ status: string; message: string }>("/scan/rebuild-targets", { method: "POST" }),
 
