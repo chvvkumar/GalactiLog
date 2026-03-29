@@ -2,6 +2,7 @@ import { Component, Show } from "solid-js";
 import { useStats } from "../store/stats";
 import StatsOverview from "../components/StatsOverview";
 import EquipmentInventory from "../components/EquipmentInventory";
+import EquipmentPerformance from "../components/EquipmentPerformance";
 import FilterUsageChart from "../components/FilterUsageChart";
 import ImagingTimeline from "../components/ImagingTimeline";
 import TopTargets from "../components/TopTargets";
@@ -31,6 +32,8 @@ const StatisticsPage: Component = () => {
               avgEccentricity={data().data_quality.avg_eccentricity}
               bestHfr={data().data_quality.best_hfr}
             />
+
+            <EquipmentPerformance combos={data().equipment_performance} />
 
             <div class="grid grid-cols-3 gap-4 [&>*]:border [&>*]:border-theme-border [&>*]:rounded-[var(--radius-md)] [&>*]:shadow-[var(--shadow-sm)]">
               <FilterUsageChart usage={data().filter_usage} />
