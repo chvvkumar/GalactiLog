@@ -22,11 +22,11 @@ const NavBar: Component = () => {
           Dashboard
         </A>
         <A
-          href="/admin"
+          href="/statistics"
           class="text-sm text-theme-text-secondary hover:text-theme-text-primary transition-colors"
           activeClass="text-theme-text-primary font-medium bg-theme-elevated rounded-[var(--radius-sm)] px-2.5 py-1"
         >
-          Admin & Stats
+          Statistics
         </A>
         <A
           href="/settings"
@@ -48,7 +48,7 @@ const NavBar: Component = () => {
             <span class="text-theme-text-secondary">
               Frames <span class="text-theme-text-primary font-semibold">{data().aggregates.total_frames.toLocaleString()}</span>
             </span>
-            <span class="text-[10px] text-theme-text-tertiary italic">filtered</span>
+            <span class="text-caption text-theme-text-tertiary italic">filtered</span>
           </div>
         )}
       </Show>

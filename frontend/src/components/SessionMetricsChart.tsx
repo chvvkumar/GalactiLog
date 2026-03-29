@@ -2,7 +2,7 @@ import { createMemo, createSignal, createEffect, onCleanup, Show } from "solid-j
 import { Chart, LineController, CategoryScale, LinearScale, PointElement, LineElement, Tooltip } from "chart.js";
 import type { SessionDetail, FrameRecord } from "../types";
 import { useSettingsContext } from "./SettingsProvider";
-import { METRIC_DEFINITIONS, getMetricColor, getMetricDef } from "../utils/chartConfig";
+import { METRIC_DEFINITIONS, getMetricColor, getMetricDef, chartFontSize } from "../utils/chartConfig";
 import MetricTogglePills from "./MetricTogglePills";
 import FilterTogglePills from "./FilterTogglePills";
 
@@ -35,7 +35,7 @@ export default function SessionMetricsChart(props: Props) {
     );
     const labels = frames.map((f) => {
       const d = new Date(f.timestamp);
-      return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", timeZone: "UTC" });
     });
 
     const datasets: any[] = [];
@@ -92,26 +92,26 @@ export default function SessionMetricsChart(props: Props) {
           legend: { display: false },
           tooltip: {
             backgroundColor: "rgba(0,0,0,0.8)",
-            titleFont: { size: 11 },
-            bodyFont: { size: 10 },
+            titleFont: { size: chartFontSize.tooltipTitle() },
+            bodyFont: { size: chartFontSize.tooltipBody() },
             padding: 8,
           },
         },
         scales: {
           x: {
-            ticks: { color: "#64748b", font: { size: 9 }, maxTicksLimit: 12 },
+            ticks: { color: "#64748b", font: { size: chartFontSize.tick() }, maxTicksLimit: 12 },
             grid: { color: "rgba(255,255,255,0.05)" },
           },
           left: {
             type: "linear",
             position: "left",
-            ticks: { color: "#64748b", font: { size: 9 } },
+            ticks: { color: "#64748b", font: { size: chartFontSize.tick() } },
             grid: { color: "rgba(255,255,255,0.05)" },
           },
           right: {
             type: "linear",
             position: "right",
-            ticks: { color: "#64748b", font: { size: 9 } },
+            ticks: { color: "#64748b", font: { size: chartFontSize.tick() } },
             grid: { drawOnChartArea: false },
           },
         },
@@ -148,18 +148,19 @@ export default function SessionMetricsChart(props: Props) {
   return (
     <div>
       <button
-        class="flex justify-between items-center w-full text-xs py-2.5 px-3 -mx-3 rounded-[var(--radius-md)] hover:bg-theme-hover transition-colors cursor-pointer"
+        class="flex justify-between items-center w-full text-xs py-2.5 px-3 -mx-3 rounded-[var(--radius-md)] hover:bg-theme-hover transition-all cursor-pointer border-l-2 border-l-transparent hover:border-l-theme-accent/50"
+        classList={{ "!border-l-theme-accent bg-theme-hover/50": expanded() }}
         onClick={toggleExpanded}
       >
         <span class="font-bold text-theme-text-primary">Session Metrics</span>
-        <span class="px-2.5 py-1 border border-theme-border-em rounded text-[11px] text-theme-text-secondary hover:text-theme-text-primary hover:border-theme-accent transition-colors">
+        <span class="px-2.5 py-1 border border-theme-border-em rounded text-label text-theme-text-secondary hover:text-theme-text-primary hover:border-theme-accent transition-colors">
           {expanded() ? "Collapse" : "Expand"}
         </span>
       </button>
       <Show when={expanded()}>
         <div class="border border-theme-border rounded-[var(--radius-md)] p-3 bg-theme-base mt-2">
           <div class="flex justify-between items-start gap-4 mb-2">
-            <div class="text-[9px] text-theme-text-tertiary uppercase tracking-wider">Metrics</div>
+            <div class="text-tiny text-theme-text-tertiary uppercase tracking-wider">Metrics</div>
             <MetricTogglePills />
           </div>
           <div class="mb-3">

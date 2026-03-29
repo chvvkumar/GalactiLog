@@ -30,19 +30,26 @@ def scan_directory(
     root: Path,
     known_paths: set[str] | None = None,
     include_calibration: bool = True,
-) -> Iterator[Path]:
-    """Walk a directory tree yielding FITS file paths not in known_paths.
+) -> tuple[list[Path], set[str]]:
+    """Walk a directory tree finding new FITS files and all FITS paths on disk.
 
-    If include_calibration is False, only LIGHT / science frames are yielded.
+    Returns (new_files, all_disk_paths) where new_files are FITS files not in
+    known_paths and all_disk_paths is every FITS path found during the walk.
+    If include_calibration is False, only LIGHT / science frames are in new_files.
     """
     known = known_paths or set()
+    new_files: list[Path] = []
+    all_disk_paths: set[str] = set()
     for path in root.rglob("*"):
-        if path.suffix in FITS_EXTENSIONS and str(path) not in known:
-            if not include_calibration:
-                is_cal = _is_calibration_frame(path)
-                if is_cal is True:
-                    continue
-            yield path
+        if path.suffix in FITS_EXTENSIONS:
+            all_disk_paths.add(str(path))
+            if str(path) not in known:
+                if not include_calibration:
+                    is_cal = _is_calibration_frame(path)
+                    if is_cal is True:
+                        continue
+                new_files.append(path)
+    return new_files, all_disk_paths
 
 
 def _first_float(header, *keys) -> float | None:

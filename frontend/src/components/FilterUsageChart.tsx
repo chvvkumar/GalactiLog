@@ -25,7 +25,7 @@ const FilterUsageChart: Component<{ usage: Record<string, number> }> = (props) =
           return (
             <div class="flex items-center gap-2 text-xs">
               <span
-                class="w-12 text-center text-[10px] font-bold rounded px-1 py-0.5 inline-flex items-center justify-center gap-0.5"
+                class="w-12 text-center text-caption font-bold rounded px-1 py-0.5 inline-flex items-center justify-center gap-0.5"
                 style={badgeStyle().style}
               >
                 <Show when={badgeStyle().dot}>

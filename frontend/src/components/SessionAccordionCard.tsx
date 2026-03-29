@@ -91,8 +91,8 @@ const SessionAccordionCard: Component<{
       {/* Collapsed header row */}
       <tr
         ref={cardRef}
-        class={`border-b border-theme-border cursor-pointer hover:bg-theme-hover transition-colors duration-150 text-xs ${
-          props.isExpanded ? "bg-theme-surface" : ""
+        class={`border-b border-theme-border cursor-pointer hover:bg-theme-hover transition-all duration-150 text-xs border-l-2 ${
+          props.isExpanded ? "bg-theme-surface border-l-theme-accent" : "border-l-transparent hover:border-l-theme-accent/50"
         }`}
         onClick={props.onToggle}
       >
@@ -137,7 +137,11 @@ const SessionAccordionCard: Component<{
           </div>
         </td>
         <td class="py-3 px-2">
-          <span class="px-2.5 py-1 border border-theme-border-em rounded text-[11px] text-theme-text-secondary hover:text-theme-text-primary hover:border-theme-accent transition-colors">
+          <span class={`px-2.5 py-1 border rounded text-label transition-colors ${
+            props.isExpanded
+              ? "border-theme-accent text-theme-accent"
+              : "border-theme-border-em text-theme-text-tertiary hover:text-theme-text-primary hover:border-theme-accent"
+          }`}>
             {props.isExpanded ? "Collapse" : "Expand"}
           </span>
         </td>
@@ -173,11 +177,11 @@ const SessionAccordionCard: Component<{
                         <col style={{ width: "50px" }} />
                       </colgroup>
                       <thead>
-                        <tr class="text-[9px] text-theme-text-tertiary uppercase tracking-wider border-b border-theme-border">
+                        <tr class="text-tiny text-theme-text-tertiary uppercase tracking-wider border-b border-theme-border">
                           <th class="text-left px-3 pb-1.5 pt-2.5" colspan={4}>Session Summary</th>
                           <th class="text-left px-2 pb-1.5 pt-2.5 border-l border-theme-border" colspan={5}>Filters</th>
                         </tr>
-                        <tr class="text-[9px] text-theme-text-tertiary border-b border-theme-border">
+                        <tr class="text-tiny text-theme-text-tertiary border-b border-theme-border">
                           <th class="px-3 pb-1 text-left"></th>
                           <th class="px-2 pb-1 text-right">Avg</th>
                           <th class="px-2 pb-1 text-right">Min</th>
@@ -245,7 +249,7 @@ const SessionAccordionCard: Component<{
                 </div>
 
                 {/* Single-value metrics */}
-                <div class="flex flex-wrap gap-x-4 gap-y-1 mt-2 text-[11px]">
+                <div class="flex flex-wrap gap-x-4 gap-y-1 mt-2 text-label">
                   <span>
                     <span class="text-theme-text-tertiary">Integration:</span>{" "}
                     <span class="font-bold text-metric-integration">{formatHours(detail().integration_seconds)}</span>
@@ -290,22 +294,23 @@ const SessionAccordionCard: Component<{
                 {/* Row 4: Per-Frame Table (collapsed) */}
                 <div>
                   <button
-                    class="flex justify-between items-center w-full text-xs py-2.5 px-3 -mx-3 rounded-[var(--radius-md)] hover:bg-theme-hover transition-colors cursor-pointer"
+                    class="flex justify-between items-center w-full text-xs py-2.5 px-3 -mx-3 rounded-[var(--radius-md)] hover:bg-theme-hover transition-all cursor-pointer border-l-2 border-l-transparent hover:border-l-theme-accent/50"
+                    classList={{ "!border-l-theme-accent bg-theme-hover/50": showFrames() }}
                     onClick={() => setShowFrames(!showFrames())}
                   >
                     <span class="font-bold text-theme-text-primary">
                       Per-Frame Data <span class="text-theme-text-secondary font-normal">({detail().frames.length} frames)</span>
                     </span>
-                    <span class="px-2.5 py-1 border border-theme-border-em rounded text-[11px] text-theme-text-secondary hover:text-theme-text-primary hover:border-theme-accent transition-colors">
+                    <span class="px-2.5 py-1 border border-theme-border-em rounded text-label text-theme-text-secondary hover:text-theme-text-primary hover:border-theme-accent transition-colors">
                       {showFrames() ? "Collapse" : "Expand"}
                     </span>
                   </button>
                   <Show when={showFrames()}>
                     <div class="bg-theme-base rounded-[var(--radius-md)] overflow-x-auto max-h-[600px] overflow-y-auto mt-2">
-                      <table class="w-full text-[11px]">
+                      <table class="w-full text-label">
                         <thead class="sticky top-0 bg-theme-base">
                           <tr class="text-theme-text-secondary border-b border-theme-border">
-                            <SortHeader label="Time" column="timestamp" current={sortColumn()} asc={sortAsc()} onSort={toggleSort} />
+                            <SortHeader label="Time (UTC)" column="timestamp" current={sortColumn()} asc={sortAsc()} onSort={toggleSort} />
                             <SortHeader label="Filter" column="filter_used" current={sortColumn()} asc={sortAsc()} onSort={toggleSort} align="center" />
                             <SortHeader label="Exp" column="exposure_time" current={sortColumn()} asc={sortAsc()} onSort={toggleSort} align="right" />
                             <Show when={visible("quality", "hfr")}>
@@ -540,7 +545,7 @@ const SortHeader: Component<{
 function formatTime(iso: string): string {
   try {
     const d = new Date(iso);
-    return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", timeZone: "UTC" });
   } catch {
     return iso;
   }

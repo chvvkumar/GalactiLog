@@ -173,14 +173,14 @@ const ScanManager: Component = () => {
           <span class="text-theme-text-secondary">
             {scanStatus().completed} ingested
             {scanStatus().csv_enriched > 0 ? ` \u00b7 ${scanStatus().csv_enriched} with CSV metrics` : ""}
-            {scanStatus().completed_at ? ` \u00b7 ${new Date(scanStatus().completed_at! * 1000).toLocaleString()}` : ""}
+            {scanStatus().completed_at ? ` \u00b7 ${new Date(scanStatus().completed_at! * 1000).toLocaleString([], { timeZone: "UTC" })} UTC` : ""}
           </span>
         </div>
       </Show>
 
       <Show when={!isActive() && scanStatus().state === "idle" && scanStatus().completed_at}>
         <div class="text-xs text-theme-text-secondary">
-          Last scan: {new Date(scanStatus().completed_at! * 1000).toLocaleString()}
+          Last scan: {new Date(scanStatus().completed_at! * 1000).toLocaleString([], { timeZone: "UTC" })} UTC
           {scanStatus().completed > 0 ? ` \u00b7 ${scanStatus().completed} ingested` : ""}
           {scanStatus().csv_enriched > 0 ? ` \u00b7 ${scanStatus().csv_enriched} with CSV` : ""}
         </div>
@@ -249,7 +249,7 @@ const ScanManager: Component = () => {
               <div class="text-sm font-medium text-theme-text-primary">{dbSummary()!.resolved_targets}</div>
               <div class="text-xs text-theme-text-secondary">Targets</div>
             </div>
-            <div>
+            <div title="Light frames whose OBJECT name could not be matched to a known target in SIMBAD. Use Quick Fix or Full Rebuild to retry resolution.">
               <div class={`text-sm font-medium ${dbSummary()!.unresolved_images > 0 ? "text-theme-warning" : "text-theme-text-primary"}`}>
                 {dbSummary()!.unresolved_images}
               </div>
@@ -263,7 +263,7 @@ const ScanManager: Component = () => {
           <Show when={dbSummary()!.cached_simbad > 0 || dbSummary()!.pending_merges > 0}>
             <div class="flex gap-4 mt-2 text-xs text-theme-text-secondary justify-center">
               <Show when={dbSummary()!.cached_simbad > 0}>
-                <span>{dbSummary()!.cached_simbad} SIMBAD cached ({dbSummary()!.cached_negative} negative)</span>
+                <span title={`SIMBAD is an astronomical database used to identify targets by name. ${dbSummary()!.cached_simbad} lookups are cached locally to avoid repeated network requests. ${dbSummary()!.cached_negative} returned no match (negative cache) — these names could not be identified as known astronomical objects.`}>{dbSummary()!.cached_simbad} SIMBAD cached ({dbSummary()!.cached_negative} negative)</span>
               </Show>
               <Show when={dbSummary()!.pending_merges > 0}>
                 <span class="text-theme-warning">{dbSummary()!.pending_merges} pending merges</span>
@@ -444,7 +444,7 @@ const RebuildTargetsSection: Component<{ disabled: boolean; onRegenThumbnails: (
             <span class="text-xs text-theme-success">{rebuildState().message}</span>
             <span class="text-xs text-theme-text-secondary">
               {rebuildState().completed_at
-                ? new Date(rebuildState().completed_at! * 1000).toLocaleString()
+                ? new Date(rebuildState().completed_at! * 1000).toLocaleString([], { timeZone: "UTC" }) + " UTC"
                 : ""}
             </span>
           </div>

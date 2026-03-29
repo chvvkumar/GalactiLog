@@ -21,7 +21,7 @@ export default function FilterTogglePills(props: Props) {
           };
           return (
             <button
-              class="px-2 py-0.5 rounded text-[10px] font-medium border transition-colors cursor-pointer"
+              class="px-2 py-0.5 rounded text-caption font-medium border transition-colors cursor-pointer"
               style={{
                 "border-color": isActive() ? color() : "var(--color-border-default)",
                 "background-color": isActive() ? `${color()}22` : "var(--color-bg-elevated)",

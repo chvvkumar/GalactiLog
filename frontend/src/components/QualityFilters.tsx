@@ -33,7 +33,7 @@ const QualityFilters: Component = () => {
 
   return (
     <div class="space-y-2">
-      <label class="text-[11px] font-medium uppercase tracking-wider text-theme-text-tertiary">Quality (HFR)</label>
+      <label class="text-label font-medium uppercase tracking-wider text-theme-text-tertiary">Quality (HFR)</label>
       <div class="flex gap-2 items-center">
         <input
           type="number"

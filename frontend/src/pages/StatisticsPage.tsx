@@ -8,7 +8,7 @@ import TopTargets from "../components/TopTargets";
 import StorageBreakdown from "../components/StorageBreakdown";
 import IngestHistory from "../components/IngestHistory";
 
-const AdminPage: Component = () => {
+const StatisticsPage: Component = () => {
   const { stats } = useStats();
 
   return (
@@ -55,4 +55,4 @@ const AdminPage: Component = () => {
   );
 };
 
-export default AdminPage;
+export default StatisticsPage;

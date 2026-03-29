@@ -2,6 +2,17 @@ import { createSignal, createEffect, For, Show } from "solid-js";
 import { useSettingsContext } from "./SettingsProvider";
 import type { DisplaySettings, MetricGroupSettings } from "../types";
 import { THEMES, TEXT_SIZES, type ThemeMeta } from "../themes";
+import { FILTER_STYLE_OPTIONS, getFilterBadgeStyle, type FilterBadgeStyle } from "../utils/filterStyles";
+
+const PREVIEW_FILTERS: { name: string; color: string }[] = [
+  { name: "L", color: "#e0e0e0" },
+  { name: "R", color: "#e05050" },
+  { name: "G", color: "#50b050" },
+  { name: "B", color: "#5070e0" },
+  { name: "Sii", color: "#d4a43a" },
+  { name: "H", color: "#c44040" },
+  { name: "O", color: "#3a8fd4" },
+];
 
 const GROUP_META: { key: keyof DisplaySettings; label: string; fieldLabels: Record<string, string> }[] = [
   { key: "quality", label: "Quality Metrics", fieldLabels: { hfr: "HFR", hfr_stdev: "HFR StDev", fwhm: "FWHM", eccentricity: "Eccentricity", detected_stars: "Detected Stars" } },
@@ -20,6 +31,12 @@ export default function DisplayTab() {
   const [selectedTheme, setSelectedTheme] = createSignal<string>("default-dark");
   const [selectedTextSize, setSelectedTextSize] = createSignal<string>("medium");
   const [themeSaving, setThemeSaving] = createSignal(false);
+  const [filterStyle, setFilterStyle] = createSignal<string>("solid");
+
+  createEffect(() => {
+    const style = ctx.settings()?.general.filter_style;
+    if (style) setFilterStyle(style);
+  });
 
   createEffect(() => {
     const ds = ctx.settings()?.display;
@@ -76,6 +93,14 @@ export default function DisplayTab() {
     }
   };
 
+  const handleFilterStyleChange = async (style: string) => {
+    setFilterStyle(style);
+    const current = ctx.settings()?.general;
+    if (current) {
+      await ctx.saveGeneral({ ...current, filter_style: style });
+    }
+  };
+
   const handleTextSizeChange = async (sizeId: string) => {
     setSelectedTextSize(sizeId);
     const current = ctx.settings()?.general;
@@ -111,10 +136,7 @@ export default function DisplayTab() {
                     <span class="w-4 h-4 rounded-full" style={{ "background-color": theme.tokens["error"] }} />
                   </div>
                   <div class="text-xs font-medium" style={{ color: theme.tokens["text-primary"] }}>
-                    {theme.name}
-                  </div>
-                  <div class="text-[10px] mt-0.5" style={{ color: theme.tokens["text-secondary"] }}>
-                    {theme.description}
+                    {theme.name.replace(/\s*Glass\s*/i, " ").trim()}
                   </div>
                 </button>
               )}
@@ -142,6 +164,40 @@ export default function DisplayTab() {
               </button>
             )}
           </For>
+        </div>
+      </div>
+
+      {/* Filter badge style */}
+      <div class="space-y-3">
+        <h3 class="text-sm font-medium text-theme-text-primary">Filter Badge Style</h3>
+        <div class="flex items-center gap-4">
+          <select
+            value={filterStyle()}
+            onChange={(e) => handleFilterStyleChange(e.currentTarget.value)}
+            class="px-3 py-2 bg-theme-input border border-theme-border rounded-[var(--radius-sm)] text-sm text-theme-text-primary focus:ring-1 focus:ring-theme-accent focus:border-theme-accent outline-none"
+          >
+            <For each={FILTER_STYLE_OPTIONS}>
+              {(opt) => <option value={opt.value}>{opt.label}</option>}
+            </For>
+          </select>
+          <div class="flex gap-1.5 items-center">
+            <For each={PREVIEW_FILTERS}>
+              {(f) => {
+                const badgeStyle = () => getFilterBadgeStyle(filterStyle() as FilterBadgeStyle, f.color);
+                return (
+                  <span
+                    class="h-6 rounded text-caption font-bold flex items-center justify-center gap-0.5 px-1.5"
+                    style={badgeStyle().style}
+                  >
+                    <Show when={badgeStyle().dot}>
+                      <span class="w-1.5 h-1.5 rounded-full inline-block flex-shrink-0" style={{ "background-color": badgeStyle().dot }} />
+                    </Show>
+                    {f.name}
+                  </span>
+                );
+              }}
+            </For>
+          </div>
         </div>
       </div>
 

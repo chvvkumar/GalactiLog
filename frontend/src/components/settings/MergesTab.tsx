@@ -151,7 +151,7 @@ export const MergesTab: Component = () => {
                     <span class="text-theme-text-secondary text-xs mx-2">&larr; merged into &rarr;</span>
                     <span class="text-theme-text-primary text-sm font-medium">{m.merged_into_name}</span>
                     <div class="text-xs text-theme-text-secondary mt-0.5">
-                      {m.image_count} images {" \u00b7 "} {new Date(m.merged_at).toLocaleDateString()}
+                      {m.image_count} images {" \u00b7 "} {new Date(m.merged_at).toLocaleDateString([], { timeZone: "UTC" })}
                     </div>
                   </div>
                   <button

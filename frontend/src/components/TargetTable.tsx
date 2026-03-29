@@ -70,13 +70,13 @@ const TargetTable: Component<{ targets: TargetAggregation[] }> = (props) => {
   };
 
   const headerClass = (key: SortKey) =>
-    `text-left py-2 px-3 text-[11px] font-medium uppercase tracking-wider text-theme-text-tertiary cursor-pointer select-none hover:text-theme-text-primary transition-colors whitespace-nowrap${sortKey() === key ? " border-b-2 border-theme-accent" : ""}`;
-  const plainHeaderClass = "text-left py-2 px-3 text-[11px] font-medium uppercase tracking-wider text-theme-text-tertiary whitespace-nowrap";
+    `text-left py-2 px-3 text-label font-medium uppercase tracking-wider text-theme-text-tertiary cursor-pointer select-none hover:text-theme-text-primary transition-colors whitespace-nowrap${sortKey() === key ? " border-b-2 border-theme-accent" : ""}`;
+  const plainHeaderClass = "text-left py-2 px-3 text-label font-medium uppercase tracking-wider text-theme-text-tertiary whitespace-nowrap";
 
   return (
     <table class="w-full text-sm border-collapse">
       <thead>
-        <tr class="sticky top-0 bg-theme-surface border-b border-theme-border-em z-10 text-theme-text-tertiary text-[11px] uppercase tracking-wider">
+        <tr class="sticky top-0 bg-theme-surface border-b border-theme-border-em z-10 text-theme-text-tertiary text-label uppercase tracking-wider">
           <th class={headerClass("name")} onClick={() => toggleSort("name")}>
             Target Name{arrow("name")}
           </th>
@@ -89,7 +89,7 @@ const TargetTable: Component<{ targets: TargetAggregation[] }> = (props) => {
             Equipment Profile{arrow("equipment")}
           </th>
           <th class={headerClass("lastSession")} onClick={() => toggleSort("lastSession")}>
-            Last Session{arrow("lastSession")}
+            Last Session (UTC){arrow("lastSession")}
           </th>
           <th class={plainHeaderClass}></th>
         </tr>

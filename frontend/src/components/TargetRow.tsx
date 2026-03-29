@@ -53,7 +53,7 @@ const TargetRow: Component<{
         <td class="py-2.5 px-3 text-theme-accent text-xs">{lastSession()}</td>
         <td class="py-2.5 px-3">
           <button
-            class="px-2.5 py-1 border border-theme-border-em rounded text-[11px] text-theme-text-secondary hover:text-theme-text-primary hover:border-theme-accent transition-colors"
+            class="px-2.5 py-1 border border-theme-border-em rounded text-label text-theme-text-secondary hover:text-theme-text-primary hover:border-theme-accent transition-colors"
             onClick={(e) => { e.stopPropagation(); toggleExpanded(props.target.target_id); }}
           >
             {isOpen() ? "Collapse" : "Expand"}

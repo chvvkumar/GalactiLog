@@ -15,7 +15,7 @@ const SessionTable: Component<{
       <table class="w-full text-xs">
         <thead>
           <tr class="text-theme-text-secondary border-b border-theme-border">
-            <th class="text-left py-1.5 px-2 font-normal">Date</th>
+            <th class="text-left py-1.5 px-2 font-normal">Date (UTC)</th>
             <th class="text-right py-1.5 px-2 font-normal">Frames</th>
             <th class="text-right py-1.5 px-2 font-normal">Integration</th>
             <th class="text-left py-1.5 px-2 font-normal">Filters</th>
@@ -35,7 +35,7 @@ const SessionTable: Component<{
                 <td class="py-1.5 px-2 text-right">
                   <button
                     onClick={() => props.onDeepDive(session.session_date)}
-                    class="text-theme-accent hover:underline text-[11px]"
+                    class="text-theme-accent hover:underline text-label"
                   >
                     Deep Dive
                   </button>

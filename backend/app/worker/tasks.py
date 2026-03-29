@@ -56,13 +56,48 @@ def run_scan(self, include_calibration: bool = True) -> dict:
         known_paths = {row[0] for row in result.all()}
 
     fits_root = Path(settings.fits_data_path)
-    new_files = list(scan_directory(
+    new_files, all_disk_paths = scan_directory(
         fits_root, known_paths=known_paths, include_calibration=include_calibration,
-    ))
+    )
+
+    # Detect and remove orphaned DB records (files deleted from disk)
+    orphaned_paths = known_paths - all_disk_paths
+    removed = 0
+    if orphaned_paths and len(orphaned_paths) < len(known_paths) * 0.5:
+        # Safety: only clean up if less than 50% of files appear missing
+        # (protects against unmounted shares / unreachable storage)
+        with Session(_sync_engine) as session:
+            for batch_start in range(0, len(orphaned_paths), 500):
+                batch = list(orphaned_paths)[batch_start:batch_start + 500]
+                rows = session.execute(
+                    select(Image.id, Image.thumbnail_path).where(
+                        Image.file_path.in_(batch)
+                    )
+                ).all()
+                for img_id, thumb_path in rows:
+                    if thumb_path:
+                        try:
+                            Path(thumb_path).unlink(missing_ok=True)
+                        except OSError:
+                            pass
+                    session.execute(
+                        text("DELETE FROM images WHERE id = :id"),
+                        {"id": img_id},
+                    )
+                    removed += 1
+                session.commit()
+        if removed:
+            logger.info("Removed %d orphaned image records (files deleted from disk)", removed)
+    elif orphaned_paths:
+        logger.warning(
+            "Skipped orphan cleanup: %d of %d files missing (>50%%) — "
+            "possible unmounted share or unreachable storage",
+            len(orphaned_paths), len(known_paths),
+        )
 
     if not new_files:
         set_idle_sync(_redis)
-        return {"status": "complete", "new_files_queued": 0, "already_known": len(known_paths)}
+        return {"status": "complete", "new_files_queued": 0, "already_known": len(known_paths), "removed": removed}
 
     set_ingesting_sync(_redis, total=len(new_files))
 
@@ -76,6 +111,7 @@ def run_scan(self, include_calibration: bool = True) -> dict:
         "status": "ingesting",
         "new_files_queued": len(new_files),
         "already_known": len(known_paths),
+        "removed": removed,
     }
 
 
@@ -132,18 +168,22 @@ def ingest_file(self, fits_path: str) -> dict:
         # Step 1: Extract metadata
         meta = extract_metadata(path)
 
-        # Step 2: Generate thumbnail
-        import hashlib
-        path_hash = hashlib.md5(str(path).encode()).hexdigest()[:12]
-        thumb_filename = f"{path.stem}_{path_hash}.jpg"
-        thumb_path = Path(settings.thumbnails_path) / thumb_filename
-        generate_thumbnail(path, thumb_path, max_width=settings.thumbnail_max_width)
+        image_type = (meta.get("image_type") or "").upper()
+        is_calibration = image_type in ("DARK", "FLAT", "BIAS", "DARKFLAT")
+
+        # Step 2: Generate thumbnail (skip calibration frames)
+        thumb_path = None
+        if not is_calibration:
+            import hashlib
+            path_hash = hashlib.md5(str(path).encode()).hexdigest()[:12]
+            thumb_filename = f"{path.stem}_{path_hash}.jpg"
+            thumb_path = Path(settings.thumbnails_path) / thumb_filename
+            generate_thumbnail(path, thumb_path, max_width=settings.thumbnail_max_width)
 
         # Step 3: Resolve target (sync wrapper for async SIMBAD call)
         # Skip SIMBAD for calibration frames — they're not astronomical targets
         target_id = None
-        image_type = (meta.get("image_type") or "").upper()
-        if image_type not in ("DARK", "FLAT", "BIAS", "DARKFLAT"):
+        if not is_calibration:
             object_name = meta.get("object_name")
             if object_name:
                 target_id = _resolve_or_cache_target(object_name)
@@ -154,7 +194,7 @@ def ingest_file(self, fits_path: str) -> dict:
                 file_path=meta["file_path"],
                 file_name=meta["file_name"],
                 capture_date=meta.get("capture_date"),
-                thumbnail_path=str(thumb_path),
+                thumbnail_path=str(thumb_path) if thumb_path else None,
                 resolved_target_id=target_id,
                 exposure_time=meta.get("exposure_time"),
                 filter_used=meta.get("filter_used"),

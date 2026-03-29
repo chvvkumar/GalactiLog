@@ -1,10 +1,8 @@
 // frontend/src/components/settings/GeneralTab.tsx
-import { createSignal, createEffect, Show, For, type Component } from "solid-js";
+import { createSignal, createEffect, type Component } from "solid-js";
 import { useSettingsContext } from "../SettingsProvider";
 import { showToast } from "../Toast";
 import type { GeneralSettings } from "../../types";
-import { FILTER_STYLE_OPTIONS, getFilterBadgeStyle, type FilterBadgeStyle } from "../../utils/filterStyles";
-
 const INTERVALS = [
   { value: 60, label: "1 hour" },
   { value: 120, label: "2 hours" },
@@ -15,16 +13,6 @@ const INTERVALS = [
 ];
 
 const PAGE_SIZES = [25, 50, 100];
-
-const PREVIEW_FILTERS: { name: string; color: string }[] = [
-  { name: "L", color: "#e0e0e0" },
-  { name: "R", color: "#e05050" },
-  { name: "G", color: "#50b050" },
-  { name: "B", color: "#5070e0" },
-  { name: "Sii", color: "#d4a43a" },
-  { name: "H", color: "#c44040" },
-  { name: "O", color: "#3a8fd4" },
-];
 
 export const GeneralTab: Component = () => {
   const { settings, saveGeneral } = useSettingsContext();
@@ -122,42 +110,6 @@ export const GeneralTab: Component = () => {
             <option value={s}>{s}</option>
           ))}
         </select>
-      </div>
-
-      {/* Filter badge style */}
-      <div class="space-y-1">
-        <label class="text-sm text-theme-text-primary">Filter badge style</label>
-        <div class="flex items-center gap-4">
-          <select
-            value={local().filter_style || "solid"}
-            onChange={(e) =>
-              setLocal((p) => ({ ...p, filter_style: e.currentTarget.value }))
-            }
-            class="px-3 py-2 bg-theme-input border border-theme-border rounded-[var(--radius-sm)] text-sm text-theme-text-primary focus:ring-1 focus:ring-theme-accent focus:border-theme-accent outline-none"
-          >
-            <For each={FILTER_STYLE_OPTIONS}>
-              {(opt) => <option value={opt.value}>{opt.label}</option>}
-            </For>
-          </select>
-          <div class="flex gap-1.5 items-center">
-            <For each={PREVIEW_FILTERS}>
-              {(f) => {
-                const badgeStyle = () => getFilterBadgeStyle((local().filter_style || "solid") as FilterBadgeStyle, f.color);
-                return (
-                  <span
-                    class="h-6 rounded text-[10px] font-bold flex items-center justify-center gap-0.5 px-1.5"
-                    style={badgeStyle().style}
-                  >
-                    <Show when={badgeStyle().dot}>
-                      <span class="w-1.5 h-1.5 rounded-full inline-block flex-shrink-0" style={{ "background-color": badgeStyle().dot }} />
-                    </Show>
-                    {f.name}
-                  </span>
-                );
-              }}
-            </For>
-          </div>
-        </div>
       </div>
 
       {/* Save button */}

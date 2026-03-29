@@ -14,15 +14,15 @@ const DataQuality: Component<{
       <h3 class="text-theme-text-primary font-medium text-sm">Data Quality</h3>
       <div class="grid grid-cols-3 gap-2 text-center">
         <div class="bg-theme-base rounded p-2">
-          <div class="text-[10px] text-theme-text-secondary">Avg HFR</div>
+          <div class="text-caption text-theme-text-secondary">Avg HFR</div>
           <div class="text-theme-text-primary font-semibold text-sm">{props.avgHfr?.toFixed(2) ?? "—"}</div>
         </div>
         <div class="bg-theme-base rounded p-2">
-          <div class="text-[10px] text-theme-text-secondary">Avg Ecc.</div>
+          <div class="text-caption text-theme-text-secondary">Avg Ecc.</div>
           <div class="text-theme-text-primary font-semibold text-sm">{props.avgEccentricity?.toFixed(2) ?? "—"}</div>
         </div>
         <div class="bg-theme-base rounded p-2">
-          <div class="text-[10px] text-theme-text-secondary">Best HFR</div>
+          <div class="text-caption text-theme-text-secondary">Best HFR</div>
           <div class="text-theme-success font-semibold text-sm">{props.bestHfr?.toFixed(2) ?? "—"}</div>
         </div>
       </div>
@@ -37,7 +37,7 @@ const DataQuality: Component<{
                     class="w-full bg-theme-accent/70 rounded-t min-h-[2px]"
                     style={{ height: `${(bucket.count / maxCount()) * 100}%` }}
                   />
-                  <span class="text-[7px] text-theme-text-secondary mt-0.5">{bucket.bucket}</span>
+                  <span class="text-micro text-theme-text-secondary mt-0.5">{bucket.bucket}</span>
                 </div>
               )}
             </For>

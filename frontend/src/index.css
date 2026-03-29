@@ -44,6 +44,10 @@
   --color-filter-g: #60c060;
   --color-filter-b: #6080e8;
 
+  /* Glass theme fallbacks (overridden at runtime by applyTheme) */
+  --glass-blur: 0px;
+  --glass-saturate: 1;
+
   /* Shared design tokens (not theme-dependent) */
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
   --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
@@ -99,6 +103,11 @@
   --color-filter-r: var(--color-filter-r);
   --color-filter-g: var(--color-filter-g);
   --color-filter-b: var(--color-filter-b);
+  /* Text size tiers — rem-based so they scale with the root font-size preset */
+  --font-size-micro: 0.5rem;    /* 7px  at 14px root */
+  --font-size-tiny: 0.643rem;   /* 9px  at 14px root */
+  --font-size-caption: 0.714rem; /* 10px at 14px root */
+  --font-size-label: 0.786rem;  /* 11px at 14px root */
   --shadow-sm: var(--shadow-sm);
   --shadow-md: var(--shadow-md);
   --shadow-lg: var(--shadow-lg);
@@ -113,6 +122,31 @@ body {
   font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
   font-variant-numeric: tabular-nums;
   -webkit-font-smoothing: antialiased;
+}
+
+/* ── Glass theme support ── */
+[data-theme-style="glass"] body {
+  background: linear-gradient(
+    135deg,
+    var(--glass-gradient-from, #09090b) 0%,
+    var(--glass-gradient-to, #09090b) 100%
+  );
+}
+
+[data-theme-style="glass"] .bg-theme-surface,
+[data-theme-style="glass"] .bg-theme-elevated {
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+}
+
+[data-theme-style="glass"] .bg-theme-base {
+  backdrop-filter: blur(calc(var(--glass-blur) * 0.5)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(calc(var(--glass-blur) * 0.5)) saturate(var(--glass-saturate));
+}
+
+[data-theme-style="glass"] .bg-theme-input {
+  backdrop-filter: blur(calc(var(--glass-blur) * 0.75)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(calc(var(--glass-blur) * 0.75)) saturate(var(--glass-saturate));
 }
 
 /* Toast slide-in animation */

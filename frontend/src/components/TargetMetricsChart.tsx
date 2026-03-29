@@ -2,7 +2,7 @@ import { createMemo, createEffect, onCleanup, Show } from "solid-js";
 import { Chart, LineController, CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Filler } from "chart.js";
 import type { SessionDetail, FrameRecord } from "../types";
 import { useSettingsContext } from "./SettingsProvider";
-import { METRIC_DEFINITIONS, getMetricColor, getMetricDef } from "../utils/chartConfig";
+import { METRIC_DEFINITIONS, getMetricColor, getMetricDef, chartFontSize } from "../utils/chartConfig";
 import MetricTogglePills from "./MetricTogglePills";
 import FilterTogglePills from "./FilterTogglePills";
 
@@ -70,7 +70,7 @@ export default function TargetMetricsChart(props: Props) {
 
       for (const frame of frames) {
         const d = new Date(frame.timestamp);
-        const timeStr = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+        const timeStr = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", timeZone: "UTC" });
         labels.push(sortedDates.length > 1 ? `${date.slice(5)} ${timeStr}` : timeStr);
         framesByIndex.push(frame);
       }
@@ -144,9 +144,49 @@ export default function TargetMetricsChart(props: Props) {
       sessionBoundaries.includes(i) ? "rgba(255,255,255,0.2)" : "rgba(255,255,255,0.03)"
     );
 
+    // Plugin to draw session boundary lines + labels when multiple sessions shown
+    const sortedDates = [...props.selectedDates].sort();
+    const sessionBoundaryPlugin = {
+      id: "sessionBoundary",
+      afterDraw(chart: Chart) {
+        if (sessionBoundaries.length <= 1) return;
+        const ctx = chart.ctx;
+        const xScale = chart.scales["x"];
+        const yScale = chart.scales["left"] ?? chart.scales["right"];
+        if (!xScale || !yScale) return;
+
+        ctx.save();
+        for (let bi = 0; bi < sessionBoundaries.length; bi++) {
+          const idx = sessionBoundaries[bi];
+          const x = xScale.getPixelForValue(idx);
+
+          // Vertical dashed line
+          ctx.beginPath();
+          ctx.setLineDash([4, 4]);
+          ctx.strokeStyle = "rgba(255,255,255,0.25)";
+          ctx.lineWidth = 1;
+          ctx.moveTo(x, yScale.top);
+          ctx.lineTo(x, yScale.bottom);
+          ctx.stroke();
+          ctx.setLineDash([]);
+
+          // Session date label at top — match tick font size
+          const dateLabel = sortedDates[bi]?.slice(5) ?? "";
+          const tickFont = xScale.options.ticks?.font as { size?: number } | undefined;
+          const fontSize = tickFont?.size ?? chartFontSize.tick();
+          ctx.fillStyle = "rgba(255,255,255,0.5)";
+          ctx.font = `${fontSize}px sans-serif`;
+          ctx.textAlign = "left";
+          ctx.fillText(dateLabel, x + 3, yScale.top + fontSize + 2);
+        }
+        ctx.restore();
+      },
+    };
+
     chartInstance = new Chart(canvasRef, {
       type: "line",
       data: { labels, datasets },
+      plugins: [sessionBoundaryPlugin],
       options: {
         responsive: true,
         maintainAspectRatio: false,
@@ -155,8 +195,8 @@ export default function TargetMetricsChart(props: Props) {
           legend: { display: false },
           tooltip: {
             backgroundColor: "rgba(0,0,0,0.8)",
-            titleFont: { size: 11 },
-            bodyFont: { size: 10 },
+            titleFont: { size: chartFontSize.tooltipTitle() },
+            bodyFont: { size: chartFontSize.tooltipBody() },
             padding: 8,
             filter: (item) => item.raw !== null,
           },
@@ -165,7 +205,7 @@ export default function TargetMetricsChart(props: Props) {
           x: {
             ticks: {
               color: "#64748b",
-              font: { size: 9 },
+              font: { size: chartFontSize.tick() },
               maxTicksLimit: 15,
               callback: function(_, index) {
                 const label = labels[index];
@@ -179,13 +219,13 @@ export default function TargetMetricsChart(props: Props) {
           left: {
             type: "linear",
             position: "left",
-            ticks: { color: "#64748b", font: { size: 9 } },
+            ticks: { color: "#64748b", font: { size: chartFontSize.tick() } },
             grid: { color: "rgba(255,255,255,0.05)" },
           },
           right: {
             type: "linear",
             position: "right",
-            ticks: { color: "#64748b", font: { size: 9 } },
+            ticks: { color: "#64748b", font: { size: chartFontSize.tick() } },
             grid: { drawOnChartArea: false },
           },
         },
@@ -228,11 +268,11 @@ export default function TargetMetricsChart(props: Props) {
       <div class="border border-theme-border rounded-[var(--radius-md)] p-3 bg-theme-base mb-4">
         <div class="flex justify-between items-start gap-4 mb-2">
           <div class="flex items-center gap-3">
-            <div class="text-[9px] text-theme-text-tertiary uppercase tracking-wider">
+            <div class="text-tiny text-theme-text-tertiary uppercase tracking-wider">
               Target Metrics Across Sessions
             </div>
             <Show when={loadingCount() > 0}>
-              <div class="text-[9px] text-theme-text-tertiary">
+              <div class="text-tiny text-theme-text-tertiary">
                 Loading {loadingCount()} session{loadingCount() > 1 ? "s" : ""}...
               </div>
             </Show>
@@ -253,14 +293,14 @@ export default function TargetMetricsChart(props: Props) {
 export function MetricsTrendButton(props: { expanded: boolean; onToggle: () => void }) {
   return (
     <button
-      class="px-3 py-1.5 border border-theme-border-em rounded-[var(--radius-md)] bg-theme-surface text-[11px] text-theme-text-secondary hover:text-theme-text-primary hover:border-theme-accent transition-colors cursor-pointer flex items-center gap-1.5"
+      class="px-3 py-1.5 border border-theme-border-em rounded-[var(--radius-md)] bg-theme-surface text-label text-theme-text-secondary hover:text-theme-text-primary hover:border-theme-accent transition-colors cursor-pointer flex items-center gap-1.5"
       onClick={props.onToggle}
     >
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
       </svg>
       Metrics Trend
-      <span class="text-theme-text-tertiary text-[9px]">{props.expanded ? "\u25B2" : "\u25BC"}</span>
+      <span class="text-theme-text-tertiary text-tiny">{props.expanded ? "\u25B2" : "\u25BC"}</span>
     </button>
   );
 }

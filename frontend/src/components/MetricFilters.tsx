@@ -134,7 +134,7 @@ const MetricFilters: Component = () => {
           class="w-full flex items-center justify-between hover:text-theme-text-primary transition-colors"
           onClick={() => setOpen((v) => !v)}
         >
-          <span class="text-[11px] font-medium uppercase tracking-wider text-theme-text-tertiary">Metrics</span>
+          <span class="text-label font-medium uppercase tracking-wider text-theme-text-tertiary">Metrics</span>
           <svg
             class={`w-3 h-3 transition-transform ${open() ? "rotate-180" : ""}`}
             fill="none"

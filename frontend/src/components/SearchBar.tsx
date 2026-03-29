@@ -40,7 +40,7 @@ const SearchBar: Component = () => {
 
   return (
     <div class="relative">
-      <label class="text-[11px] font-medium uppercase tracking-wider text-theme-text-tertiary mb-1 block">Search Targets</label>
+      <label class="text-label font-medium uppercase tracking-wider text-theme-text-tertiary mb-1 block">Search Targets</label>
       <input
         type="text"
         value={query()}

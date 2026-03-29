@@ -13,7 +13,7 @@ export const METRIC_DEFINITIONS: MetricDefinition[] = [
   { key: "hfr", label: "HFR", colorVar: "--color-metric-hfr", yAxisId: "left", frameField: "median_hfr", overviewField: "median_hfr", decimals: 2 },
   { key: "eccentricity", label: "Ecc", colorVar: "--color-metric-eccentricity", yAxisId: "left", frameField: "eccentricity", overviewField: "median_eccentricity", decimals: 2 },
   { key: "fwhm", label: "FWHM", colorVar: "--color-metric-fwhm", yAxisId: "right", frameField: "fwhm", overviewField: "median_fwhm", decimals: 1 },
-  { key: "guiding_rms", label: "Guide", colorVar: "--color-metric-guiding", yAxisId: "left", frameField: "guiding_rms_arcsec", overviewField: "median_guiding_rms_arcsec", decimals: 2, unit: '"' },
+  { key: "guiding_rms", label: "RMS", colorVar: "--color-metric-guiding", yAxisId: "left", frameField: "guiding_rms_arcsec", overviewField: "median_guiding_rms_arcsec", decimals: 2, unit: '"' },
   { key: "detected_stars", label: "Stars", colorVar: "--color-metric-stars", yAxisId: "right", frameField: "detected_stars", overviewField: "median_detected_stars", decimals: 0 },
   { key: "sensor_temp", label: "Temp", colorVar: "--color-metric-temp", yAxisId: "right", frameField: "sensor_temp", overviewField: "", decimals: 0, unit: "°C" },
   { key: "ambient_temp", label: "Ambient", colorVar: "--color-metric-temp", yAxisId: "right", frameField: "ambient_temp", overviewField: "", decimals: 1, unit: "°C" },
@@ -21,6 +21,21 @@ export const METRIC_DEFINITIONS: MetricDefinition[] = [
   { key: "cloud_cover", label: "Cloud", colorVar: "--color-metric-temp", yAxisId: "right", frameField: "cloud_cover", overviewField: "", decimals: 0, unit: "%" },
   { key: "airmass", label: "Airmass", colorVar: "--color-metric-temp", yAxisId: "right", frameField: "airmass", overviewField: "", decimals: 2 },
 ];
+
+/** Convert a rem value to current px using the root font-size (set by text size preference). */
+export function remToPx(rem: number): number {
+  return Math.round(rem * (parseFloat(getComputedStyle(document.documentElement).fontSize) || 14));
+}
+
+/** Chart font sizes that scale with the text size preference. */
+export const chartFontSize = {
+  /** Axis ticks, boundary labels (tiny tier: 0.643rem) */
+  tick: () => remToPx(0.643),
+  /** Tooltip body (caption tier: 0.714rem) */
+  tooltipBody: () => remToPx(0.714),
+  /** Tooltip title (label tier: 0.786rem) */
+  tooltipTitle: () => remToPx(0.786),
+};
 
 export function getMetricColor(colorVar: string): string {
   return getComputedStyle(document.documentElement).getPropertyValue(colorVar).trim();

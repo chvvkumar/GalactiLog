@@ -30,7 +30,7 @@ const DatabaseOverview: Component<{
         <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-4 text-center">
           <div class="text-xs text-theme-text-secondary mb-1">{c.label}</div>
           <div class="text-white font-semibold text-xl">{c.value}</div>
-          {c.subtitle && <div class="text-[10px] text-theme-text-tertiary italic mt-1">{c.subtitle}</div>}
+          {c.subtitle && <div class="text-caption text-theme-text-tertiary italic mt-1">{c.subtitle}</div>}
         </div>
       ))}
     </div>

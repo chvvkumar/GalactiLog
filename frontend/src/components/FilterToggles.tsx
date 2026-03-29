@@ -45,7 +45,7 @@ const FilterToggles: Component = () => {
     return (
       <button
         onClick={() => toggleOpticalFilter(name)}
-        class={`h-6 rounded text-[10px] font-bold flex items-center justify-center gap-0.5 transition-all ${
+        class={`h-6 rounded text-caption font-bold flex items-center justify-center gap-0.5 transition-all ${
           active ? "ring-1 ring-theme-accent brightness-110" : "ring-1 ring-transparent hover:brightness-110"
         }`}
         classList={{ "w-6": name.length <= 1 && !badgeStyle().dot, "px-1.5": name.length > 1 || !!badgeStyle().dot }}
@@ -62,16 +62,16 @@ const FilterToggles: Component = () => {
 
   return (
     <div class="space-y-2">
-      <label class="text-[11px] font-medium uppercase tracking-wider text-theme-text-tertiary">Filters</label>
+      <label class="text-label font-medium uppercase tracking-wider text-theme-text-tertiary">Filters</label>
       <div class="space-y-1.5">
         <Show when={groupedFilters().length > 0}>
-          <span class="text-[10px] text-theme-text-secondary">Grouped</span>
+          <span class="text-caption text-theme-text-secondary">Grouped</span>
           <div class="flex gap-1.5 flex-wrap">
             <For each={groupedFilters()}>{(f) => renderPill(f)}</For>
           </div>
         </Show>
         <Show when={ungroupedFilters().length > 0}>
-          <span class="text-[10px] text-theme-text-secondary">Ungrouped</span>
+          <span class="text-caption text-theme-text-secondary">Ungrouped</span>
           <div class="flex gap-1.5 flex-wrap">
             <For each={ungroupedFilters()}>{(f) => renderPill(f)}</For>
           </div>

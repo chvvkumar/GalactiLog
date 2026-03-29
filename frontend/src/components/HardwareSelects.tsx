@@ -6,7 +6,7 @@ const HardwareSelects: Component = () => {
 
   return (
     <div class="space-y-2">
-      <label class="text-[11px] font-medium uppercase tracking-wider text-theme-text-tertiary">Equipment</label>
+      <label class="text-label font-medium uppercase tracking-wider text-theme-text-tertiary">Equipment</label>
       <Show when={equipment()} fallback={<p class="text-xs text-theme-text-secondary">Loading...</p>}>
         {(eq) => (
           <>

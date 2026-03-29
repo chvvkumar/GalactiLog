@@ -91,7 +91,7 @@ const FilterBadges: Component<{ distribution: Record<string, number>; compact?: 
             <Show
               when={props.compact}
               fallback={
-                <span class="px-2 py-0.5 rounded-full text-[11px] font-medium inline-flex items-center gap-1" style={badgeStyle().style}>
+                <span class="px-2 py-0.5 rounded-full text-label font-medium inline-flex items-center gap-1" style={badgeStyle().style}>
                   <Show when={badgeStyle().dot}>
                     <span class="w-1.5 h-1.5 rounded-full inline-block" style={{ "background-color": badgeStyle().dot }} />
                   </Show>
@@ -100,7 +100,7 @@ const FilterBadges: Component<{ distribution: Record<string, number>; compact?: 
               }
             >
               <span
-                class="h-6 rounded text-[10px] font-bold flex items-center justify-center gap-0.5"
+                class="h-6 rounded text-caption font-bold flex items-center justify-center gap-0.5"
                 style={badgeStyle().style}
                 classList={{ "w-6": (SHORT_LABEL[name] || name).length <= 1 && !badgeStyle().dot, "px-1.5": (SHORT_LABEL[name] || name).length > 1 || !!badgeStyle().dot }}
                 title={name}

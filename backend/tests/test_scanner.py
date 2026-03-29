@@ -37,15 +37,17 @@ def fits_tree(tmp_path: Path) -> Path:
 
 
 def test_scan_directory_finds_all_fits(fits_tree: Path):
-    found = list(scan_directory(fits_tree))
-    assert len(found) == 6
-    assert all(f.suffix == ".fits" for f in found)
+    new_files, all_disk_paths = scan_directory(fits_tree)
+    assert len(new_files) == 6
+    assert all(f.suffix == ".fits" for f in new_files)
+    assert len(all_disk_paths) == 6
 
 
 def test_scan_directory_excludes_known_paths(fits_tree: Path):
     known = {str(fits_tree / "2024-01-15" / "Light_000.fits")}
-    found = list(scan_directory(fits_tree, known_paths=known))
-    assert len(found) == 5
+    new_files, all_disk_paths = scan_directory(fits_tree, known_paths=known)
+    assert len(new_files) == 5
+    assert len(all_disk_paths) == 6  # all files still reported on disk
 
 
 def test_extract_metadata(fits_tree: Path):
