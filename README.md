@@ -82,10 +82,16 @@ GalactiLog reads data produced by N.I.N.A. and its plugins. The table below list
 |--------|----------|-----------------|
 | **N.I.N.A. Core** (FITS output) | Yes | Object name, exposure time, filter, camera, telescope, gain, sensor temp, capture date, image type |
 | **FITS Headers** (HFR, FWHM) | No | Median HFR, FWHM, eccentricity (when written by N.I.N.A. to FITS headers) |
-| **ImageMetaData.csv** | No | HFR stdev, FWHM, detected stars, guiding RMS (total/RA/Dec), ADU stats, focuser position/temp, rotator, pier side, airmass |
-| **WeatherData.csv** | No | Ambient temperature, humidity, dew point, pressure, wind speed/direction/gust, cloud cover, sky quality |
-| **Guiding Plugin** (PHD2, internal) | No | Guiding RMS data written to ImageMetaData.csv |
-| **Weather Plugin** (OpenWeatherMap, station hardware) | No | Weather data written to WeatherData.csv |
+| **[Session Metadata](https://github.com/tcpalmer/nina.plugin.sessionmetadata) plugin** | No | Per-frame CSV files with extended metrics (see below) |
+| **Guiding Plugin** (PHD2, internal) | No | Guiding RMS data captured by Session Metadata plugin |
+| **Weather source** (OpenWeatherMap, ASCOM station, etc.) | No | Weather data captured by Session Metadata plugin |
+
+The **Session Metadata** plugin for N.I.N.A. generates the CSV files that GalactiLog uses for extended analytics:
+
+| CSV File | Metrics |
+|----------|---------|
+| `ImageMetaData.csv` | HFR, HFR stdev, FWHM, eccentricity, detected stars, guiding RMS (total/RA/Dec), ADU stats (mean/median/stdev/min/max), focuser position/temp, rotator position, pier side, airmass |
+| `WeatherData.csv` | Ambient temperature, humidity, dew point, pressure, wind speed/direction/gust, cloud cover, sky quality/brightness/temperature |
 
 See [N.I.N.A. Setup Guide](guides/NINA-SETUP.md) for detailed configuration instructions.
 
@@ -140,38 +146,6 @@ For manual installation, custom paths, or building from source, see the [Install
 - [Install Guide](guides/INSTALL.md) -- Installation, updating, uninstalling, and troubleshooting
 - [N.I.N.A. Setup Guide](guides/NINA-SETUP.md) -- Configuring N.I.N.A. for use with GalactiLog
 - [Configuration Guide](guides/CONFIGURATION.md) -- Environment variables, themes, filter/equipment aliases, and display settings
-
-## CI/CD
-
-GalactiLog uses GitHub Actions with a self-hosted runner for automated builds and releases.
-
-| Workflow | Trigger | Action |
-|----------|---------|--------|
-| **Build & Push** | Merge to `dev` | Builds Docker image, pushes to DockerHub with pre-release tag (`1.0.0-rc.N`) and `dev` tag |
-| **Build & Push** | Merge to `main` | Builds Docker image, pushes to DockerHub with release tag (`1.0.N`) and `latest` tag |
-| **PR Description** | PR opened | Generates PR title and description using Gemini AI |
-| **Release Notes** | Tag pushed | Creates GitHub Release with AI-generated release notes |
-
-### Branch strategy
-
-```
-snd  -->  dev (pre-release builds)  -->  main (stable releases)
-```
-
-- `snd` -> `dev`: creates a pre-release Docker image and GitHub pre-release
-- `dev` -> `main`: creates a stable Docker image and GitHub release
-- Version tags are auto-incremented (patch for releases, rc number for pre-releases)
-
-### Docker images
-
-All images are published to [DockerHub](https://hub.docker.com/r/chvvkumar/galactilog):
-
-| Tag | Description |
-|-----|-------------|
-| `latest` | Latest stable release |
-| `dev` | Latest pre-release build from `dev` branch |
-| `X.Y.Z` | Specific stable release (e.g., `1.0.0`) |
-| `X.Y.Z-rc.N` | Specific pre-release (e.g., `1.0.0-rc.1`) |
 
 ## Tech Stack
 
