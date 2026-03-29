@@ -1,4 +1,4 @@
-import { Component, For } from "solid-js";
+import { Component, For, Show } from "solid-js";
 import type { EquipmentItem } from "../types";
 
 const EquipmentTable: Component<{ title: string; items: EquipmentItem[] }> = (props) => (
@@ -13,7 +13,12 @@ const EquipmentTable: Component<{ title: string; items: EquipmentItem[] }> = (pr
       <tbody>
         <For each={props.items}>{(item) => (
           <tr class="border-b border-theme-border/30">
-            <td class="text-left text-theme-text-primary py-1 pr-4">{item.name}</td>
+            <td class="text-left text-theme-text-primary py-1 pr-4">
+              {item.name}
+              <Show when={item.grouped}>
+                <span class="text-theme-text-secondary text-[0.65rem] ml-1 cursor-help" title="Grouped: multiple equipment aliases are combined under this name">&#x29C9;</span>
+              </Show>
+            </td>
             <td class="text-right text-theme-text-secondary py-1 whitespace-nowrap">{item.frame_count.toLocaleString()}</td>
           </tr>
         )}</For>

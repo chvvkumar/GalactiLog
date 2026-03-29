@@ -18,7 +18,7 @@ const HardwareSelects: Component = () => {
               class="w-full px-2 py-1.5 bg-theme-input border border-theme-border rounded-[var(--radius-sm)] text-xs text-theme-text-primary focus:ring-1 focus:ring-theme-accent focus:border-theme-accent outline-none"
             >
               <option value="">All Cameras</option>
-              <For each={eq().cameras}>{(c) => <option value={c}>{c}</option>}</For>
+              <For each={eq().cameras}>{(c) => <option value={c.name}>{c.name}{c.grouped ? " \u29C9" : ""}</option>}</For>
             </select>
             <select
               value={filters().telescope || ""}
@@ -26,7 +26,7 @@ const HardwareSelects: Component = () => {
               class="w-full px-2 py-1.5 bg-theme-input border border-theme-border rounded-[var(--radius-sm)] text-xs text-theme-text-primary focus:ring-1 focus:ring-theme-accent focus:border-theme-accent outline-none"
             >
               <option value="">All Telescopes</option>
-              <For each={eq().telescopes}>{(t) => <option value={t}>{t}</option>}</For>
+              <For each={eq().telescopes}>{(t) => <option value={t.name}>{t.name}{t.grouped ? " \u29C9" : ""}</option>}</For>
             </select>
           </>
         )}

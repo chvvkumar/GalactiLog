@@ -4,7 +4,7 @@ import time
 from pathlib import Path
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import select, func
+from sqlalchemy import select, func, case
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -15,6 +15,7 @@ from app.schemas.stats import (
     StatsResponse, OverviewStats, EquipmentStats, EquipmentItem,
     TimelineEntry, TopTarget, DataQualityStats, HfrBucket,
     StorageStats, IngestEntry,
+    EquipmentComboMetrics, EquipmentFilterMetrics,
 )
 
 router = APIRouter(prefix="/stats", tags=["stats"])
@@ -93,22 +94,156 @@ async def get_stats(session: AsyncSession = Depends(get_session)):
     ).group_by(Image.camera).order_by(func.count(Image.id).desc())
     cam_result = await session.execute(cam_q)
     raw_cam_counts: dict[str, int] = {}
+    cam_raw_names: dict[str, set[str]] = {}
     for r in cam_result.all():
         canonical = normalize_equipment(r[0], cam_map) or r[0]
         raw_cam_counts[canonical] = raw_cam_counts.get(canonical, 0) + r[1]
-    cameras = [EquipmentItem(name=name, frame_count=count) for name, count in sorted(raw_cam_counts.items(), key=lambda x: x[1], reverse=True)]
+        cam_raw_names.setdefault(canonical, set()).add(r[0])
+    cameras = [EquipmentItem(name=name, frame_count=count, grouped=len(cam_raw_names[name]) > 1) for name, count in sorted(raw_cam_counts.items(), key=lambda x: x[1], reverse=True)]
 
     tel_q = select(Image.telescope, func.count(Image.id)).where(
         Image.telescope.isnot(None)
     ).group_by(Image.telescope).order_by(func.count(Image.id).desc())
     tel_result = await session.execute(tel_q)
     raw_tel_counts: dict[str, int] = {}
+    tel_raw_names: dict[str, set[str]] = {}
     for r in tel_result.all():
         canonical = normalize_equipment(r[0], tel_map) or r[0]
         raw_tel_counts[canonical] = raw_tel_counts.get(canonical, 0) + r[1]
-    telescopes = [EquipmentItem(name=name, frame_count=count) for name, count in sorted(raw_tel_counts.items(), key=lambda x: x[1], reverse=True)]
+        tel_raw_names.setdefault(canonical, set()).add(r[0])
+    telescopes = [EquipmentItem(name=name, frame_count=count, grouped=len(tel_raw_names[name]) > 1) for name, count in sorted(raw_tel_counts.items(), key=lambda x: x[1], reverse=True)]
 
     equipment = EquipmentStats(cameras=cameras, telescopes=telescopes)
+
+    # Equipment Performance — metrics per telescope+camera+filter combo
+    # Use nullif to treat 0 as missing data for all metrics
+    hfr_nz = func.nullif(Image.median_hfr, 0)
+    ecc_nz = func.nullif(Image.eccentricity, 0)
+    fwhm_nz = func.nullif(Image.fwhm, 0)
+    perf_q = select(
+        Image.telescope,
+        Image.camera,
+        Image.filter_used,
+        func.count(Image.id).label("frame_count"),
+        func.coalesce(func.sum(Image.exposure_time), 0).label("total_seconds"),
+        func.percentile_cont(0.5).within_group(hfr_nz).label("med_hfr"),
+        func.min(hfr_nz).label("best_hfr"),
+        func.percentile_cont(0.5).within_group(ecc_nz).label("med_ecc"),
+        func.percentile_cont(0.5).within_group(fwhm_nz).label("med_fwhm"),
+    ).where(
+        Image.image_type == "LIGHT",
+        Image.telescope.isnot(None),
+        Image.camera.isnot(None),
+    ).group_by(Image.telescope, Image.camera, Image.filter_used)
+    perf_result = await session.execute(perf_q)
+
+    # Aggregate by normalized telescope+camera, with per-filter breakdown
+    combo_data: dict[tuple[str, str], dict] = {}
+    for r in perf_result.all():
+        tel = normalize_equipment(r.telescope, tel_map) or r.telescope
+        cam = normalize_equipment(r.camera, cam_map) or r.camera
+        filt = normalize_filter(r.filter_used, filter_map) or r.filter_used
+        key = (tel, cam)
+
+        if key not in combo_data:
+            combo_data[key] = {
+                "frame_count": 0,
+                "total_seconds": 0.0,
+                "hfr_vals": [],
+                "ecc_vals": [],
+                "fwhm_vals": [],
+                "best_hfr": None,
+                "filters": set(),
+                "filter_rows": {},
+                "raw_telescopes": set(),
+                "raw_cameras": set(),
+            }
+
+        combo_data[key]["raw_telescopes"].add(r.telescope)
+        combo_data[key]["raw_cameras"].add(r.camera)
+
+        cd = combo_data[key]
+        cd["frame_count"] += r.frame_count
+        cd["total_seconds"] += float(r.total_seconds)
+        cd["filters"].add(filt)
+
+        # Collect per-filter row
+        fr = cd["filter_rows"].get(filt)
+        if fr is None:
+            fr = {
+                "frame_count": 0,
+                "total_seconds": 0.0,
+                "hfr_vals": [],
+                "ecc_vals": [],
+                "fwhm_vals": [],
+                "best_hfr": None,
+            }
+            cd["filter_rows"][filt] = fr
+
+        fr["frame_count"] += r.frame_count
+        fr["total_seconds"] += float(r.total_seconds)
+
+        if r.med_hfr is not None:
+            cd["hfr_vals"].append((r.med_hfr, r.frame_count))
+            fr["hfr_vals"].append((r.med_hfr, r.frame_count))
+        if r.best_hfr is not None:
+            if cd["best_hfr"] is None or r.best_hfr < cd["best_hfr"]:
+                cd["best_hfr"] = r.best_hfr
+            if fr["best_hfr"] is None or r.best_hfr < fr["best_hfr"]:
+                fr["best_hfr"] = r.best_hfr
+        if r.med_ecc is not None:
+            cd["ecc_vals"].append((r.med_ecc, r.frame_count))
+            fr["ecc_vals"].append((r.med_ecc, r.frame_count))
+        if r.med_fwhm is not None:
+            cd["fwhm_vals"].append((r.med_fwhm, r.frame_count))
+            fr["fwhm_vals"].append((r.med_fwhm, r.frame_count))
+
+    def weighted_median_approx(vals: list[tuple[float, int]]) -> float | None:
+        """Approximate median from per-group medians weighted by frame count."""
+        if not vals:
+            return None
+        vals_sorted = sorted(vals, key=lambda x: x[0])
+        total = sum(c for _, c in vals_sorted)
+        half = total / 2
+        running = 0
+        for val, count in vals_sorted:
+            running += count
+            if running >= half:
+                return round(float(val), 2)
+        return round(float(vals_sorted[-1][0]), 2)
+
+    def safe_round(v: float | None) -> float | None:
+        return round(float(v), 2) if v is not None else None
+
+    def build_filter_metrics(filter_rows: dict) -> list[EquipmentFilterMetrics]:
+        result = []
+        for fname, fr in sorted(filter_rows.items(), key=lambda x: x[1]["frame_count"], reverse=True):
+            result.append(EquipmentFilterMetrics(
+                filter_name=fname,
+                frame_count=fr["frame_count"],
+                total_integration_seconds=fr["total_seconds"],
+                median_hfr=weighted_median_approx(fr["hfr_vals"]),
+                best_hfr=safe_round(fr["best_hfr"]),
+                median_eccentricity=weighted_median_approx(fr["ecc_vals"]),
+                median_fwhm=weighted_median_approx(fr["fwhm_vals"]),
+            ))
+        return result
+
+    equipment_performance = []
+    for (tel, cam), cd in sorted(combo_data.items(), key=lambda x: x[1]["frame_count"], reverse=True):
+        equipment_performance.append(EquipmentComboMetrics(
+            telescope=tel,
+            camera=cam,
+            frame_count=cd["frame_count"],
+            total_integration_seconds=cd["total_seconds"],
+            median_hfr=weighted_median_approx(cd["hfr_vals"]),
+            best_hfr=safe_round(cd["best_hfr"]),
+            median_eccentricity=weighted_median_approx(cd["ecc_vals"]),
+            median_fwhm=weighted_median_approx(cd["fwhm_vals"]),
+            grouped=len(cd["raw_telescopes"]) > 1 or len(cd["raw_cameras"]) > 1,
+            filters=sorted(cd["filters"]),
+            filter_breakdown=build_filter_metrics(cd["filter_rows"]),
+        ))
 
     # Filter usage (total seconds per optical filter)
     filter_q = select(
@@ -204,6 +339,7 @@ async def get_stats(session: AsyncSession = Depends(get_session)):
     return StatsResponse(
         overview=overview,
         equipment=equipment,
+        equipment_performance=equipment_performance,
         filter_usage=filter_usage,
         timeline=timeline,
         top_targets=top_targets,

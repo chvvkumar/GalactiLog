@@ -162,8 +162,20 @@ async def get_equipment(session: AsyncSession = Depends(get_session)):
     )
     raw_cameras = [r[0] for r in cam_result.all() if r[0]]
     raw_telescopes = [r[0] for r in tel_result.all() if r[0]]
-    cameras = list(dict.fromkeys(normalize_equipment(c, cam_map) or c for c in raw_cameras))
-    telescopes = list(dict.fromkeys(normalize_equipment(t, tel_map) or t for t in raw_telescopes))
+
+    # Track which canonical names have multiple raw names (grouped)
+    cam_canonical: dict[str, set[str]] = {}
+    for c in raw_cameras:
+        canonical = normalize_equipment(c, cam_map) or c
+        cam_canonical.setdefault(canonical, set()).add(c)
+    tel_canonical: dict[str, set[str]] = {}
+    for t in raw_telescopes:
+        canonical = normalize_equipment(t, tel_map) or t
+        tel_canonical.setdefault(canonical, set()).add(t)
+
+    from app.schemas.target import EquipmentOption
+    cameras = [EquipmentOption(name=name, grouped=len(raw) > 1) for name, raw in sorted(cam_canonical.items())]
+    telescopes = [EquipmentOption(name=name, grouped=len(raw) > 1) for name, raw in sorted(tel_canonical.items())]
     return EquipmentResponse(
         cameras=cameras,
         telescopes=telescopes,
