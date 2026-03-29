@@ -51,9 +51,33 @@ class IngestEntry(BaseModel):
     files_added: int
 
 
+class EquipmentFilterMetrics(BaseModel):
+    filter_name: str
+    frame_count: int
+    total_integration_seconds: float
+    median_hfr: float | None
+    best_hfr: float | None
+    median_eccentricity: float | None
+    median_fwhm: float | None
+
+
+class EquipmentComboMetrics(BaseModel):
+    telescope: str
+    camera: str
+    frame_count: int
+    total_integration_seconds: float
+    median_hfr: float | None
+    best_hfr: float | None
+    median_eccentricity: float | None
+    median_fwhm: float | None
+    filters: list[str]
+    filter_breakdown: list[EquipmentFilterMetrics]
+
+
 class StatsResponse(BaseModel):
     overview: OverviewStats
     equipment: EquipmentStats
+    equipment_performance: list[EquipmentComboMetrics]
     filter_usage: dict[str, float]
     timeline: list[TimelineEntry]
     top_targets: list[TopTarget]
