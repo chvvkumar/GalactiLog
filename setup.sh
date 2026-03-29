@@ -133,15 +133,18 @@ ENVEOF
 
 success "Created $ENV_FILE"
 
-# ── Build ─────────────────────────────────────────────────────────────────────
-header "Building Container"
+# ── Pull Image ────────────────────────────────────────────────────────────────
+header "Pulling Docker Image"
 
-info "Building app Docker image (this may take a few minutes on first run)..."
-if ! docker compose build app; then
-    die "Docker build failed. Check the output above for errors."
+info "Pulling latest GalactiLog image from DockerHub..."
+if ! docker compose pull app; then
+    warn "Failed to pull image from DockerHub. Attempting to build locally..."
+    if ! docker compose build app; then
+        die "Docker build failed. Check the output above for errors."
+    fi
 fi
 
-success "Build complete!"
+success "Image ready!"
 
 # ── Start services ────────────────────────────────────────────────────────────
 header "Starting Services"

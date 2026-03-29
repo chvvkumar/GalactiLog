@@ -91,8 +91,10 @@ See [N.I.N.A. Setup Guide](guides/NINA-SETUP.md) for detailed configuration inst
 
 ## Quickstart
 
+### Using pre-built images (recommended)
+
 ```bash
-# 1. Clone the repository
+# 1. Clone the repository (for docker-compose.yml and config files)
 git clone https://github.com/chvvkumar/GalactiLog.git
 cd GalactiLog
 
@@ -103,15 +105,73 @@ bash setup.sh
 # Default: http://localhost:8080
 ```
 
-The setup script handles Docker image building, database initialization, and service startup. It expects your FITS files at `/astro_incoming` by default.
+The setup script pulls the latest image from [DockerHub](https://hub.docker.com/r/chvvkumar/galactilog), initializes the database, and starts all services. It expects your FITS files at `/astro_incoming` by default.
 
-For manual installation, custom paths, or Windows/Mac-specific instructions, see the [Install Guide](guides/INSTALL.md).
+### Updating
+
+```bash
+cd GalactiLog
+docker compose pull app
+docker compose up -d
+```
+
+### Using a specific version
+
+Pin to a specific release or pre-release tag in your `.env` or `docker-compose.yml`:
+
+```yaml
+# Stable release
+image: chvvkumar/galactilog:1.0.0
+
+# Pre-release (release candidate)
+image: chvvkumar/galactilog:1.0.0-rc.1
+
+# Latest stable (default)
+image: chvvkumar/galactilog:latest
+
+# Latest dev build
+image: chvvkumar/galactilog:dev
+```
+
+For manual installation, custom paths, or building from source, see the [Install Guide](guides/INSTALL.md).
 
 ## Guides
 
 - [Install Guide](guides/INSTALL.md) -- Installation, updating, uninstalling, and troubleshooting
 - [N.I.N.A. Setup Guide](guides/NINA-SETUP.md) -- Configuring N.I.N.A. for use with GalactiLog
 - [Configuration Guide](guides/CONFIGURATION.md) -- Environment variables, themes, filter/equipment aliases, and display settings
+
+## CI/CD
+
+GalactiLog uses GitHub Actions with a self-hosted runner for automated builds and releases.
+
+| Workflow | Trigger | Action |
+|----------|---------|--------|
+| **Build & Push** | Merge to `dev` | Builds Docker image, pushes to DockerHub with pre-release tag (`1.0.0-rc.N`) and `dev` tag |
+| **Build & Push** | Merge to `main` | Builds Docker image, pushes to DockerHub with release tag (`1.0.N`) and `latest` tag |
+| **PR Description** | PR opened | Generates PR title and description using Gemini AI |
+| **Release Notes** | Tag pushed | Creates GitHub Release with AI-generated release notes |
+
+### Branch strategy
+
+```
+snd  -->  dev (pre-release builds)  -->  main (stable releases)
+```
+
+- `snd` -> `dev`: creates a pre-release Docker image and GitHub pre-release
+- `dev` -> `main`: creates a stable Docker image and GitHub release
+- Version tags are auto-incremented (patch for releases, rc number for pre-releases)
+
+### Docker images
+
+All images are published to [DockerHub](https://hub.docker.com/r/chvvkumar/galactilog):
+
+| Tag | Description |
+|-----|-------------|
+| `latest` | Latest stable release |
+| `dev` | Latest pre-release build from `dev` branch |
+| `X.Y.Z` | Specific stable release (e.g., `1.0.0`) |
+| `X.Y.Z-rc.N` | Specific pre-release (e.g., `1.0.0-rc.1`) |
 
 ## Tech Stack
 

@@ -21,7 +21,7 @@ The script will:
 1. Verify Docker and Docker Compose are installed and running
 2. Create data directories for thumbnails and the database
 3. Generate the `.env` configuration file
-4. Build the Docker image (multi-stage: Node 20 + Python 3.12)
+4. Pull the latest Docker image from [DockerHub](https://hub.docker.com/r/chvvkumar/galactilog)
 5. Start PostgreSQL and Redis, wait for health checks
 6. Initialize the database schema
 7. Start the application on port 8080
@@ -91,17 +91,17 @@ THUMBNAILS_HOST_PATH=/home/user/galactilog/thumbnails
 POSTGRES_DATA_HOST_PATH=/home/user/galactilog/postgres
 ```
 
-### 4. Build and Start
+### 4. Pull and Start
 
 ```bash
-# Build the Docker image and start all services
-docker compose up -d --build
+# Pull the latest image and start all services
+docker compose up -d
 
 # Watch the logs during first startup
 docker compose logs -f app
 ```
 
-The first build takes a few minutes (downloads Node and Python dependencies). Subsequent builds are faster due to Docker layer caching.
+The image is pulled from [DockerHub](https://hub.docker.com/r/chvvkumar/galactilog). To build from source instead, use `docker compose up -d --build`.
 
 ### 5. Initialize the Database
 
@@ -157,11 +157,26 @@ Docker Compose
 
 ```bash
 cd GalactiLog
+docker compose pull app
+docker compose up -d
+```
+
+This pulls the latest image from DockerHub and restarts the application. Database migrations are applied automatically on startup.
+
+To update to a specific version, edit the image tag in `docker-compose.yml`:
+
+```yaml
+image: chvvkumar/galactilog:1.0.1
+```
+
+To build from source (e.g., after pulling the latest code):
+
+```bash
 git pull
 docker compose up -d --build
 ```
 
-Database migrations are applied automatically on startup. If you need to run them manually:
+If you need to run migrations manually:
 
 ```bash
 docker compose run --rm app alembic upgrade head
