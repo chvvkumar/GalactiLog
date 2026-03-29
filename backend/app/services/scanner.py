@@ -32,6 +32,7 @@ def scan_directory(
     include_calibration: bool = True,
     on_progress: "callable | None" = None,
     is_cancelled: "callable | None" = None,
+    on_new_file: "callable | None" = None,
 ) -> tuple[list[Path], set[str]]:
     """Walk a directory tree finding new FITS files and all FITS paths on disk.
 
@@ -41,6 +42,8 @@ def scan_directory(
 
     on_progress(discovered_count) is called periodically during discovery.
     is_cancelled() should return True to abort the scan early.
+    on_new_file(path) is called for each new file found, enabling parallel
+    ingestion during discovery.
     """
     known = known_paths or set()
     new_files: list[Path] = []
@@ -57,6 +60,8 @@ def scan_directory(
                     if is_cal is True:
                         continue
                 new_files.append(path)
+                if on_new_file:
+                    on_new_file(path)
             discovered += 1
             if on_progress and discovered % 50 == 0:
                 on_progress(discovered)

@@ -4,6 +4,8 @@ import type { DisplaySettings, MetricGroupSettings } from "../types";
 import { THEMES, TEXT_SIZES, type ThemeMeta } from "../themes";
 import { FILTER_STYLE_OPTIONS, getFilterBadgeStyle, type FilterBadgeStyle } from "../utils/filterStyles";
 
+const PAGE_SIZES = [25, 50, 100];
+
 const PREVIEW_FILTERS: { name: string; color: string }[] = [
   { name: "L", color: "#e0e0e0" },
   { name: "R", color: "#e05050" },
@@ -32,10 +34,16 @@ export default function DisplayTab() {
   const [selectedTextSize, setSelectedTextSize] = createSignal<string>("medium");
   const [themeSaving, setThemeSaving] = createSignal(false);
   const [filterStyle, setFilterStyle] = createSignal<string>("solid");
+  const [pageSize, setPageSize] = createSignal<number>(50);
 
   createEffect(() => {
     const style = ctx.settings()?.general.filter_style;
     if (style) setFilterStyle(style);
+  });
+
+  createEffect(() => {
+    const size = ctx.settings()?.general.default_page_size;
+    if (size) setPageSize(size);
   });
 
   createEffect(() => {
@@ -106,6 +114,14 @@ export default function DisplayTab() {
     const current = ctx.settings()?.general;
     if (current) {
       await ctx.saveGeneral({ ...current, text_size: sizeId });
+    }
+  };
+
+  const handlePageSizeChange = async (size: number) => {
+    setPageSize(size);
+    const current = ctx.settings()?.general;
+    if (current) {
+      await ctx.saveGeneral({ ...current, default_page_size: size });
     }
   };
 
@@ -198,6 +214,28 @@ export default function DisplayTab() {
               }}
             </For>
           </div>
+        </div>
+      </div>
+
+      {/* Default page size */}
+      <div class="space-y-3">
+        <h3 class="text-sm font-medium text-theme-text-primary">Default Page Size</h3>
+        <div class="flex gap-2">
+          <For each={PAGE_SIZES}>
+            {(size) => (
+              <button
+                type="button"
+                class={`px-4 py-2 rounded-[var(--radius-sm)] text-sm transition-colors duration-150 border ${
+                  pageSize() === size
+                    ? "border-theme-accent bg-theme-accent text-white"
+                    : "border-theme-border bg-theme-surface text-theme-text-secondary hover:border-theme-border-em"
+                }`}
+                onClick={() => handlePageSizeChange(size)}
+              >
+                {size}
+              </button>
+            )}
+          </For>
         </div>
       </div>
 

@@ -1,7 +1,6 @@
 // frontend/src/pages/SettingsPage.tsx
 import { Show, type Component } from "solid-js";
 import { useSearchParams } from "@solidjs/router";
-import { GeneralTab } from "../components/settings/GeneralTab";
 import { FiltersTab } from "../components/settings/FiltersTab";
 import { EquipmentTab } from "../components/settings/EquipmentTab";
 import { MergesTab } from "../components/settings/MergesTab";
@@ -9,7 +8,6 @@ import ScanManager from "../components/ScanManager";
 import DisplayTab from "../components/DisplayTab";
 
 const TABS = [
-  { id: "general", label: "General" },
   { id: "scan", label: "Scan & Ingest" },
   { id: "filters", label: "Filters" },
   { id: "equipment", label: "Equipment" },
@@ -21,7 +19,7 @@ type TabId = (typeof TABS)[number]["id"];
 
 export const SettingsPage: Component = () => {
   const [searchParams, setSearchParams] = useSearchParams();
-  const activeTab = () => (TABS.some((t) => t.id === searchParams.tab) ? (searchParams.tab as TabId) : "general");
+  const activeTab = () => (TABS.some((t) => t.id === searchParams.tab) ? (searchParams.tab as TabId) : "scan");
 
   return (
     <div class="p-4 max-w-4xl mx-auto space-y-6">
@@ -44,9 +42,6 @@ export const SettingsPage: Component = () => {
       </div>
 
       {/* Tab content */}
-      <Show when={activeTab() === "general"}>
-        <GeneralTab />
-      </Show>
       <Show when={activeTab() === "scan"}>
         <ScanManager />
       </Show>
