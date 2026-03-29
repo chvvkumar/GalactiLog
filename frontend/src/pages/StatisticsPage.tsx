@@ -1,6 +1,6 @@
 import { Component, Show } from "solid-js";
 import { useStats } from "../store/stats";
-import DatabaseOverview from "../components/DatabaseOverview";
+import StatsOverview from "../components/StatsOverview";
 import EquipmentInventory from "../components/EquipmentInventory";
 import FilterUsageChart from "../components/FilterUsageChart";
 import ImagingTimeline from "../components/ImagingTimeline";
@@ -25,7 +25,7 @@ const StatisticsPage: Component = () => {
       <Show when={stats()}>
         {(data) => (
           <>
-            <DatabaseOverview
+            <StatsOverview
               overview={data().overview}
               avgHfr={data().data_quality.avg_hfr}
               avgEccentricity={data().data_quality.avg_eccentricity}
