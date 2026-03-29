@@ -1,7 +1,15 @@
-import { Component } from "solid-js";
-import { A } from "@solidjs/router";
+import { Component, Show } from "solid-js";
+import { A, useNavigate } from "@solidjs/router";
+import { useAuth } from "./AuthProvider";
 
 const NavBar: Component = () => {
+  const { user, logout, isAdmin } = useAuth();
+  const navigate = useNavigate();
+
+  const handleLogout = async () => {
+    await logout();
+    navigate("/login");
+  };
 
   return (
     <header class="sticky top-0 z-30 bg-theme-surface backdrop-blur-sm border-b border-theme-border px-6 py-3 flex items-center gap-6">
@@ -33,7 +41,19 @@ const NavBar: Component = () => {
           Settings
         </A>
       </nav>
-      <div class="ml-auto">
+      <div class="ml-auto flex items-center gap-3">
+        <Show when={user()}>
+          <span class="text-xs text-theme-text-secondary">
+            {user()!.username}
+            <Show when={!isAdmin()}>{" "}(viewer)</Show>
+          </span>
+          <button
+            onClick={handleLogout}
+            class="text-xs text-theme-text-secondary hover:text-theme-text-primary transition-colors"
+          >
+            Sign out
+          </button>
+        </Show>
         <a
           href="https://github.com/chvvkumar/GalactiLog"
           target="_blank"
