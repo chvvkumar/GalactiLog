@@ -19,7 +19,7 @@ const DatabaseOverview: Component<{ summary: DbSummary | null }> = (props) => {
             title="Light frames whose OBJECT name could not be matched to a known target in SIMBAD."
             onClick={() => navigate("/?object_type=Unresolved")}
           />
-          <StatTile label="CSV Enriched" value={props.summary!.csv_enriched} info />
+          <StatTile label="From CSV" value={props.summary!.csv_enriched} info />
         </div>
         <Show when={props.summary!.cached_simbad > 0 || props.summary!.pending_merges > 0}>
           <div class="flex gap-4 mt-3 text-xs text-theme-text-secondary justify-center flex-wrap">
