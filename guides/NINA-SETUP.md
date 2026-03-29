@@ -47,11 +47,11 @@ The [Session Metadata](https://github.com/tcpalmer/nina.plugin.sessionmetadata) 
 
 ### Installation
 
-Install from the N.I.N.A. plugin manager: **Options > Plugins**, search for "Session Metadata", and install.
+Install from the N.I.N.A. plugin manager: **Plugins**, search for "Session Metadata", and install.
 
 ### Configuration
 
-Open **Options > Plugins > Session Metadata** and configure:
+Open **Plugins > Session Metadata** and configure:
 
 | Setting | Default | Description |
 |---------|---------|-------------|
@@ -141,7 +141,6 @@ The following table summarizes which N.I.N.A. components and plugins produce dat
 | **Hocus Focus** | Plugin | FWHM and eccentricity values (captured by Session Metadata plugin) |
 | **OpenWeatherMap** | Plugin | Weather data source for Session Metadata plugin |
 | **Weather Station** (ASCOM) | Hardware | Weather data source for Session Metadata plugin |
-| **Ground Station** | Plugin | Enhanced environmental monitoring |
 
 ## Directory Structure
 

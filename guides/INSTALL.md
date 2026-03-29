@@ -44,28 +44,16 @@ git clone https://github.com/chvvkumar/GalactiLog.git
 cd GalactiLog
 ```
 
-### 2. Create the Environment File
+### 2. Create Configuration Files
 
-Copy the example below into a `.env` file in the project root:
+Copy the example files and edit for your system:
 
 ```bash
-# PostgreSQL
-POSTGRES_USER=astro
-POSTGRES_PASSWORD=astro
-POSTGRES_DB=astro_catalog
-
-# Application
-ASTRO_DATABASE_URL=postgresql+asyncpg://astro:astro@postgres:5432/astro_catalog
-ASTRO_REDIS_URL=redis://redis:6379/0
-ASTRO_FITS_DATA_PATH=/app/data/fits
-ASTRO_THUMBNAILS_PATH=/app/data/thumbnails
-ASTRO_THUMBNAIL_MAX_WIDTH=800
-
-# Host paths -- change these to match your system
-FITS_DATA_HOST_PATH=/path/to/your/fits/files
-THUMBNAILS_HOST_PATH=/path/to/store/thumbnails
-POSTGRES_DATA_HOST_PATH=/path/to/store/database
+cp docker-compose.example.yml docker-compose.yml
+cp .env.example .env
 ```
+
+Edit `.env` with your paths (see [`.env.example`](../.env.example) for all options):
 
 ### 3. Configure Host Paths
 
@@ -77,18 +65,50 @@ Update the three `*_HOST_PATH` variables in `.env`:
 | `THUMBNAILS_HOST_PATH` | Where generated JPEG thumbnails are stored | Created automatically. Needs read/write access. |
 | `POSTGRES_DATA_HOST_PATH` | PostgreSQL data directory | Created automatically. Persists your database across container restarts. |
 
-**Windows examples:**
+**Windows (local paths):**
 ```
 FITS_DATA_HOST_PATH=D:/Astrophotography/Data
 THUMBNAILS_HOST_PATH=D:/GalactiLog/thumbnails
 POSTGRES_DATA_HOST_PATH=D:/GalactiLog/postgres
 ```
 
-**Linux/Mac examples:**
+**Linux (local paths):**
 ```
 FITS_DATA_HOST_PATH=/home/user/astro/data
 THUMBNAILS_HOST_PATH=/home/user/galactilog/thumbnails
 POSTGRES_DATA_HOST_PATH=/home/user/galactilog/postgres
+```
+
+**Linux (NFS mount):**
+
+If your FITS files are on a NAS or network share, mount the NFS export on the host first, then point `FITS_DATA_HOST_PATH` to the mount point:
+
+```bash
+# Mount the NFS share (add to /etc/fstab for persistence)
+sudo mkdir -p /mnt/astro
+sudo mount -t nfs nas.local:/volume1/astrophotography /mnt/astro
+```
+
+```
+FITS_DATA_HOST_PATH=/mnt/astro
+```
+
+The FITS directory is mounted read-only into the container, so GalactiLog will never modify your source files. To make the NFS mount persistent across reboots, add it to `/etc/fstab`:
+
+```
+nas.local:/volume1/astrophotography  /mnt/astro  nfs  ro,soft,timeo=30  0  0
+```
+
+**Windows (network share):**
+
+Map the network share to a drive letter or use the UNC path directly:
+
+```
+# Mapped drive
+FITS_DATA_HOST_PATH=Z:/Astrophotography
+
+# UNC path (use forward slashes)
+FITS_DATA_HOST_PATH=//NAS/Astrophotography
 ```
 
 ### 4. Pull and Start

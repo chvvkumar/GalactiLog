@@ -91,11 +91,13 @@ jobs:
 
           ${RANGE_DESC}
 
-          Git commit log:
+          Commit messages:
           ${GIT_LOG}
 
           Files changed summary:
           ${DIFF_STAT}
+
+          Write with confidence and authority. State what each change does, not what it seems to do. Never use hedging language like 'seems to', 'appears to', 'might', or 'likely'.
 
           Format the release notes in Markdown with these sections (omit a section if there is nothing relevant):
           - **What's New** -- new features or enhancements

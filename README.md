@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="images/logo-transparent.png" alt="GalactiLog" width="300">
+  <img src="images\logo-small.png" alt="GalactiLog" width="300">
 </p>
 
 <h3 align="center">Astrophotography FITS file catalog and session browser</h3>
@@ -65,6 +65,8 @@
 
 <p align="center">
   <img src="images/screenshots/dashboard.png" alt="GalactiLog Dashboard" width="100%">
+  
+  <img src="images/screenshots/Statistics.png" alt="GalactiLog Statistics" width="100%">
 </p>
 
 ## Requirements
@@ -100,18 +102,25 @@ See [N.I.N.A. Setup Guide](guides/NINA-SETUP.md) for detailed configuration inst
 ### Using pre-built images (recommended)
 
 ```bash
-# 1. Clone the repository (for docker-compose.yml and config files)
+# 1. Clone the repository (for config files)
 git clone https://github.com/chvvkumar/GalactiLog.git
 cd GalactiLog
 
-# 2. Run the setup script
+# 2. Copy the example files and edit for your system
+cp docker-compose.example.yml docker-compose.yml
+cp .env.example .env
+# Edit .env to set your FITS, thumbnails, and database paths
+
+# 3. Run the setup script
 bash setup.sh
 
-# 3. Open the web UI
+# 4. Open the web UI
 # Default: http://localhost:8080
 ```
 
-The setup script pulls the latest image from [DockerHub](https://hub.docker.com/r/chvvkumar/galactilog), initializes the database, and starts all services. It expects your FITS files at `/astro_incoming` by default.
+See [`.env.example`](.env.example) and [`docker-compose.example.yml`](docker-compose.example.yml) for all available configuration options.
+
+The setup script pulls the latest image from [DockerHub](https://hub.docker.com/r/chvvkumar/galactilog), initializes the database, and starts all services.
 
 ### Updating
 

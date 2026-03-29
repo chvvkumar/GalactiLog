@@ -19,33 +19,35 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Get PR diff
-        id: diff
+      - name: Get PR commits
+        id: commits
         run: |
-          DIFF=$(git diff ${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }} -- . ':!package-lock.json' ':!*.lock' 2>/dev/null || echo "Unable to generate diff")
-          # Truncate to ~8000 chars to stay within token limits
-          if [ ${#DIFF} -gt 8000 ]; then
-            DIFF="${DIFF:0:8000}
-          ... [diff truncated due to size]"
-          fi
-          # Write to file to avoid shell escaping issues
-          echo "$DIFF" > /tmp/pr_diff.txt
+          COMMITS=$(git log --pretty=format:"- %s (%h)" ${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }} 2>/dev/null || echo "Unable to retrieve commits")
+          FILES_CHANGED=$(git diff --stat ${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }} -- . ':!package-lock.json' ':!*.lock' 2>/dev/null || echo "Unable to get file stats")
+          {
+            echo "COMMITS:"
+            echo "$COMMITS"
+            echo ""
+            echo "FILES CHANGED:"
+            echo "$FILES_CHANGED"
+          } > /tmp/pr_context.txt
 
       - name: Generate PR description with Gemini
         id: gemini
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
-          DIFF=$(cat /tmp/pr_diff.txt)
+          CONTEXT=$(cat /tmp/pr_context.txt)
 
           # Build the prompt
-          PROMPT="You are a senior software engineer reviewing a pull request. Based on the following git diff, generate:
+          PROMPT="You are writing a pull request title and description based on the commit messages and files changed below. Write with confidence and authority -- these changes are definitive, not speculative. Never use hedging language like 'seems to', 'appears to', 'might', or 'likely'. State what the changes do, not what they seem to do.
 
+          Generate:
           1. A brief, professional PR title (under 70 characters, no prefix like 'feat:' unless appropriate)
-          2. A detailed PR description in markdown with these sections:
+          2. A PR description in markdown with these sections:
              - **Summary**: 1-2 sentence overview of what this PR does
-             - **Changes**: Bullet list of specific changes made
-             - **Impact**: What areas of the codebase are affected and any considerations for reviewers
+             - **Changes**: Bullet list of specific changes, derived from the commit messages
+             - **Impact**: What areas of the codebase are affected
 
           IMPORTANT: Return your response in this exact format with the delimiters shown:
           ---TITLE_START---
@@ -55,10 +57,9 @@ jobs:
           (your markdown description here)
           ---BODY_END---
 
-          Here is the diff:
+          $CONTEXT"
 
-          $DIFF"
-
+          # Escape the prompt for JSON
           # Escape the prompt for JSON
           ESCAPED_PROMPT=$(echo "$PROMPT" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read()))')
 
