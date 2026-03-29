@@ -106,8 +106,8 @@ jobs:
           fi
 
           # Extract title and body using delimiters
-          PR_TITLE=$(echo "$GENERATED" | sed -n '/---TITLE_START---/,/---TITLE_END---/p' | grep -v '---TITLE_' | head -1 | xargs)
-          PR_BODY=$(echo "$GENERATED" | sed -n '/---BODY_START---/,/---BODY_END---/p' | grep -v '---BODY_')
+          PR_TITLE=$(echo "$GENERATED" | sed -n '/---TITLE_START---/,/---TITLE_END---/p' | grep -v -- '---TITLE_' | head -1 | xargs)
+          PR_BODY=$(echo "$GENERATED" | sed -n '/---BODY_START---/,/---BODY_END---/p' | grep -v -- '---BODY_')
 
           if [ -z "$PR_TITLE" ] || [ -z "$PR_BODY" ]; then
             echo "::warning::Could not extract title or body from Gemini response. Skipping PR description update."
