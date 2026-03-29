@@ -1,0 +1,407 @@
+// === Target Aggregation ===
+
+export interface SessionSummary {
+  session_date: string;
+  integration_seconds: number;
+  frame_count: number;
+  filters_used: string[];
+}
+
+export interface TargetAggregation {
+  target_id: string;
+  primary_name: string;
+  aliases: string[];
+  total_integration_seconds: number;
+  total_frames: number;
+  filter_distribution: Record<string, number>;
+  equipment: string[];
+  sessions: SessionSummary[];
+  matched_sessions?: number | null;
+  total_sessions?: number | null;
+}
+
+export interface AggregateStats {
+  total_integration_seconds: number;
+  target_count: number;
+  total_frames: number;
+  disk_usage_bytes: number;
+  oldest_date: string | null;
+  newest_date: string | null;
+}
+
+export interface TargetAggregationResponse {
+  targets: TargetAggregation[];
+  aggregates: AggregateStats;
+}
+
+// === Session Detail ===
+
+export interface SessionDetail {
+  target_name: string;
+  session_date: string;
+  thumbnail_url: string | null;
+  frame_count: number;
+  integration_seconds: number;
+  median_hfr: number | null;
+  median_eccentricity: number | null;
+  filters_used: Record<string, number>;
+  equipment: { camera: string | null; telescope: string | null };
+  raw_reference_header: Record<string, unknown> | null;
+  // New fields
+  min_hfr: number | null;
+  max_hfr: number | null;
+  min_eccentricity: number | null;
+  max_eccentricity: number | null;
+  sensor_temp: number | null;
+  sensor_temp_min: number | null;
+  sensor_temp_max: number | null;
+  gain: number | null;
+  exposure_time: number | null;
+  first_frame_time: string | null;
+  last_frame_time: string | null;
+  filter_details: FilterDetail[];
+  insights: SessionInsight[];
+  frames: FrameRecord[];
+  median_fwhm: number | null;
+  min_fwhm: number | null;
+  max_fwhm: number | null;
+  median_guiding_rms: number | null;
+  min_guiding_rms: number | null;
+  max_guiding_rms: number | null;
+  median_detected_stars: number | null;
+  median_airmass: number | null;
+  median_ambient_temp: number | null;
+  median_humidity: number | null;
+  median_cloud_cover: number | null;
+}
+
+// === Target Detail (Deep Dive Page) ===
+
+export interface FilterMedian {
+  filter_name: string;
+  median_hfr: number | null;
+  median_eccentricity: number | null;
+  median_fwhm: number | null;
+  median_guiding_rms: number | null;
+  median_detected_stars: number | null;
+}
+
+export interface SessionOverview {
+  session_date: string;
+  integration_seconds: number;
+  frame_count: number;
+  median_hfr: number | null;
+  median_eccentricity: number | null;
+  filters_used: string[];
+  camera: string | null;
+  telescope: string | null;
+  median_fwhm: number | null;
+  median_detected_stars: number | null;
+  median_guiding_rms_arcsec: number | null;
+  filter_medians: FilterMedian[];
+}
+
+export interface TargetDetailResponse {
+  target_id: string;
+  primary_name: string;
+  aliases: string[];
+  object_type: string | null;
+  ra: number | null;
+  dec: number | null;
+  total_integration_seconds: number;
+  total_frames: number;
+  avg_hfr: number | null;
+  avg_eccentricity: number | null;
+  filters_used: string[];
+  equipment: string[];
+  first_session_date: string;
+  last_session_date: string;
+  session_count: number;
+  sessions: SessionOverview[];
+  avg_fwhm: number | null;
+  avg_guiding_rms_arcsec: number | null;
+  avg_detected_stars: number | null;
+}
+
+export interface FilterDetail {
+  filter_name: string;
+  frame_count: number;
+  integration_seconds: number;
+  median_hfr: number | null;
+  median_eccentricity: number | null;
+  exposure_time: number | null;
+}
+
+export interface SessionInsight {
+  level: "good" | "warning" | "info";
+  message: string;
+}
+
+export interface FrameRecord {
+  timestamp: string;
+  filter_used: string | null;
+  exposure_time: number | null;
+  median_hfr: number | null;
+  eccentricity: number | null;
+  sensor_temp: number | null;
+  gain: number | null;
+  file_name: string;
+  hfr_stdev: number | null;
+  fwhm: number | null;
+  detected_stars: number | null;
+  guiding_rms_arcsec: number | null;
+  guiding_rms_ra_arcsec: number | null;
+  guiding_rms_dec_arcsec: number | null;
+  adu_stdev: number | null;
+  adu_mean: number | null;
+  adu_median: number | null;
+  adu_min: number | null;
+  adu_max: number | null;
+  focuser_position: number | null;
+  focuser_temp: number | null;
+  rotator_position: number | null;
+  pier_side: string | null;
+  airmass: number | null;
+  ambient_temp: number | null;
+  dew_point: number | null;
+  humidity: number | null;
+  pressure: number | null;
+  wind_speed: number | null;
+  wind_direction: number | null;
+  wind_gust: number | null;
+  cloud_cover: number | null;
+  sky_quality: number | null;
+}
+
+// === Equipment ===
+
+export interface EquipmentList {
+  cameras: string[];
+  telescopes: string[];
+}
+
+// === Filters ===
+
+export interface ActiveFilters {
+  searchQuery: string;
+  camera: string | null;
+  telescope: string | null;
+  opticalFilters: string[];
+  objectTypes: string[];
+  dateRange: { start: string | null; end: string | null };
+  fitsQueries: { key: string; operator: string; value: string }[];
+  qualityFilters: { hfrMin?: number; hfrMax?: number };
+  metricFilters: Record<string, { min?: number; max?: number }>;
+}
+
+// === Scan (unchanged) ===
+
+export interface ScanResult {
+  status: string;
+  new_files_queued: number;
+  already_known: number;
+  state?: string;
+  total?: number;
+  completed?: number;
+  failed?: number;
+}
+
+export interface FailedFile {
+  file: string;
+  error: string;
+}
+
+export interface ScanStatus {
+  state: "idle" | "scanning" | "ingesting" | "complete" | "stalled";
+  total: number;
+  completed: number;
+  failed: number;
+  csv_enriched: number;
+  started_at: number | null;
+  completed_at: number | null;
+  failed_files?: FailedFile[];
+}
+
+export interface RebuildStatus {
+  state: "idle" | "running" | "complete" | "error";
+  mode: string;
+  message: string;
+  started_at: number | null;
+  completed_at: number | null;
+  details: Record<string, number>;
+}
+
+export interface DbSummary {
+  total_images: number;
+  light_frames: number;
+  resolved_targets: number;
+  unresolved_images: number;
+  cached_simbad: number;
+  cached_negative: number;
+  pending_merges: number;
+  csv_enriched: number;
+}
+
+// === Search ===
+
+export interface TargetSearchResult {
+  id: string;
+  primary_name: string;
+  object_type: string | null;
+}
+
+export interface TargetSearchResultFuzzy {
+  id: string;
+  primary_name: string;
+  object_type: string | null;
+  aliases: string[];
+  match_source: string | null;
+  similarity_score: number;
+}
+
+export interface ObjectTypeCount {
+  object_type: string;
+  count: number;
+}
+
+export interface MergeCandidateResponse {
+  id: string;
+  source_name: string;
+  source_image_count: number;
+  suggested_target_id: string;
+  suggested_target_name: string;
+  similarity_score: number;
+  method: string;
+  status: string;
+  created_at: string;
+}
+
+export interface MergedTargetResponse {
+  id: string;
+  primary_name: string;
+  merged_into_id: string;
+  merged_into_name: string;
+  merged_at: string;
+  image_count: number;
+}
+
+// === Stats (Admin) ===
+
+export interface EquipmentItem {
+  name: string;
+  frame_count: number;
+}
+
+export interface TimelineEntry {
+  month: string;
+  integration_seconds: number;
+}
+
+export interface TopTarget {
+  name: string;
+  integration_seconds: number;
+}
+
+export interface HfrBucket {
+  bucket: string;
+  count: number;
+}
+
+export interface StatsResponse {
+  overview: AggregateStats;
+  equipment: {
+    cameras: EquipmentItem[];
+    telescopes: EquipmentItem[];
+  };
+  filter_usage: Record<string, number>;
+  timeline: TimelineEntry[];
+  top_targets: TopTarget[];
+  data_quality: {
+    avg_hfr: number | null;
+    avg_eccentricity: number | null;
+    best_hfr: number | null;
+    hfr_distribution: HfrBucket[];
+  };
+  storage: {
+    fits_bytes: number;
+    thumbnail_bytes: number;
+    database_bytes: number;
+  };
+  ingest_history: { date: string; files_added: number }[];
+}
+
+// === Settings ===
+
+export interface MetricGroupSettings {
+  enabled: boolean;
+  fields: Record<string, boolean>;
+}
+
+export interface DisplaySettings {
+  quality: MetricGroupSettings;
+  guiding: MetricGroupSettings;
+  adu: MetricGroupSettings;
+  focuser: MetricGroupSettings;
+  weather: MetricGroupSettings;
+  mount: MetricGroupSettings;
+}
+
+export interface GeneralSettings {
+  auto_scan_enabled: boolean;
+  auto_scan_interval: number;
+  thumbnail_width: number;
+  default_page_size: number;
+  include_calibration: boolean;
+  filter_style: string;
+  theme: string;
+  text_size: string;
+}
+
+export interface FilterConfig {
+  color: string;
+  aliases: string[];
+}
+
+export interface EquipmentAliases {
+  aliases: string[];
+}
+
+export interface EquipmentConfig {
+  cameras: Record<string, EquipmentAliases>;
+  telescopes: Record<string, EquipmentAliases>;
+}
+
+export interface GraphSettings {
+  enabled_metrics: string[];
+  enabled_filters: string[];
+  session_chart_expanded: boolean;
+  target_chart_expanded: boolean;
+}
+
+export interface SettingsResponse {
+  general: GeneralSettings;
+  filters: Record<string, FilterConfig>;
+  equipment: EquipmentConfig;
+  dismissed_suggestions: string[][];
+  display: DisplaySettings;
+  graph: GraphSettings;
+}
+
+export interface SuggestionGroup {
+  group: string[];
+  counts: Record<string, number>;
+  section?: string;  // "cameras", "telescopes", or "filters"
+}
+
+export interface SuggestionsResponse {
+  suggestions: SuggestionGroup[];
+}
+
+export interface DiscoveredItem {
+  name: string;
+  count: number;
+}
+
+export interface DiscoveredResponse {
+  items: DiscoveredItem[];
+}

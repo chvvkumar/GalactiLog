@@ -1,0 +1,136 @@
+name: Auto-generate PR Description
+
+on:
+  pull_request:
+    types: [opened]
+
+permissions:
+  pull-requests: write
+  contents: read
+
+jobs:
+  generate-pr-description:
+    runs-on: [self-hosted, Linux, X64]
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get PR commits
+        id: commits
+        run: |
+          COMMITS=$(git log --pretty=format:"- %s (%h)" ${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }} 2>/dev/null || echo "Unable to retrieve commits")
+          FILES_CHANGED=$(git diff --stat ${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }} -- . ':!package-lock.json' ':!*.lock' 2>/dev/null || echo "Unable to get file stats")
+          {
+            echo "COMMITS:"
+            echo "$COMMITS"
+            echo ""
+            echo "FILES CHANGED:"
+            echo "$FILES_CHANGED"
+          } > /tmp/pr_context.txt
+
+      - name: Generate PR description with Gemini
+        id: gemini
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          CONTEXT=$(cat /tmp/pr_context.txt)
+
+          # Build the prompt
+          PROMPT="You are writing a pull request title and description based on the commit messages and files changed below. Write with confidence and authority -- these changes are definitive, not speculative. Never use hedging language like 'seems to', 'appears to', 'might', or 'likely'. State what the changes do, not what they seem to do.
+
+          Generate:
+          1. A brief, professional PR title (under 70 characters, no prefix like 'feat:' unless appropriate)
+          2. A PR description in markdown with these sections:
+             - **Summary**: 1-2 sentence overview of what this PR does
+             - **Changes**: Bullet list of specific changes, derived from the commit messages
+             - **Impact**: What areas of the codebase are affected
+
+          IMPORTANT: Return your response in this exact format with the delimiters shown:
+          ---TITLE_START---
+          (your title here)
+          ---TITLE_END---
+          ---BODY_START---
+          (your markdown description here)
+          ---BODY_END---
+
+          $CONTEXT"
+
+          # Escape the prompt for JSON
+          ESCAPED_PROMPT=$(echo "$PROMPT" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read()))')
+
+          # Call Gemini API
+          RESPONSE=$(curl -s -w "\n%{http_code}" \
+            -X POST "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=$GEMINI_API_KEY" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"contents\": [{
+                \"parts\": [{
+                  \"text\": $ESCAPED_PROMPT
+                }]
+              }],
+              \"generationConfig\": {
+                \"temperature\": 0.3,
+                \"maxOutputTokens\": 2048
+              }
+            }" 2>/dev/null)
+
+          HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+          BODY=$(echo "$RESPONSE" | sed '$d')
+
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "::warning::Gemini API returned HTTP $HTTP_CODE. Skipping PR description update."
+            echo "api_success=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Extract generated text from JSON response
+          GENERATED=$(echo "$BODY" | python3 -c '
+          import sys, json
+          try:
+              data = json.load(sys.stdin)
+              text = data["candidates"][0]["content"]["parts"][0]["text"]
+              print(text)
+          except (KeyError, IndexError, json.JSONDecodeError) as e:
+              print(f"PARSE_ERROR: {e}", file=sys.stderr)
+              sys.exit(1)
+          ' 2>/tmp/gemini_parse_err.txt)
+
+          if [ $? -ne 0 ]; then
+            echo "::warning::Failed to parse Gemini response: $(cat /tmp/gemini_parse_err.txt). Skipping PR description update."
+            echo "api_success=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Extract title and body using delimiters
+          PR_TITLE=$(echo "$GENERATED" | sed -n '/---TITLE_START---/,/---TITLE_END---/p' | grep -v -- '---TITLE_' | head -1 | xargs)
+          PR_BODY=$(echo "$GENERATED" | sed -n '/---BODY_START---/,/---BODY_END---/p' | grep -v -- '---BODY_')
+
+          if [ -z "$PR_TITLE" ] || [ -z "$PR_BODY" ]; then
+            echo "::warning::Could not extract title or body from Gemini response. Skipping PR description update."
+            echo "api_success=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Append footer
+          PR_BODY=$(printf '%s\n\n---\n*This PR description was automatically generated.*' "$PR_BODY")
+
+          # Write to files for the next step
+          echo "$PR_TITLE" > /tmp/pr_title.txt
+          echo "$PR_BODY" > /tmp/pr_body.txt
+          echo "api_success=true" >> "$GITHUB_OUTPUT"
+
+      - name: Update PR title and description
+        if: steps.gemini.outputs.api_success == 'true'
+        run: |
+          PR_NUMBER=${{ github.event.pull_request.number }}
+          PR_TITLE=$(cat /tmp/pr_title.txt)
+          PR_BODY=$(cat /tmp/pr_body.txt)
+
+          gh pr edit "$PR_NUMBER" \
+            --title "$PR_TITLE" \
+            --body-file /tmp/pr_body.txt \
+            --repo ${{ github.repository }}
