@@ -4,7 +4,7 @@ import time
 from pathlib import Path
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import select, func
+from sqlalchemy import select, func, case
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -112,16 +112,20 @@ async def get_stats(session: AsyncSession = Depends(get_session)):
     equipment = EquipmentStats(cameras=cameras, telescopes=telescopes)
 
     # Equipment Performance — metrics per telescope+camera+filter combo
+    # Use nullif to treat 0 as missing data for all metrics
+    hfr_nz = func.nullif(Image.median_hfr, 0)
+    ecc_nz = func.nullif(Image.eccentricity, 0)
+    fwhm_nz = func.nullif(Image.fwhm, 0)
     perf_q = select(
         Image.telescope,
         Image.camera,
         Image.filter_used,
         func.count(Image.id).label("frame_count"),
         func.coalesce(func.sum(Image.exposure_time), 0).label("total_seconds"),
-        func.percentile_cont(0.5).within_group(Image.median_hfr).label("med_hfr"),
-        func.min(Image.median_hfr).label("best_hfr"),
-        func.percentile_cont(0.5).within_group(Image.eccentricity).label("med_ecc"),
-        func.percentile_cont(0.5).within_group(Image.fwhm).label("med_fwhm"),
+        func.percentile_cont(0.5).within_group(hfr_nz).label("med_hfr"),
+        func.min(hfr_nz).label("best_hfr"),
+        func.percentile_cont(0.5).within_group(ecc_nz).label("med_ecc"),
+        func.percentile_cont(0.5).within_group(fwhm_nz).label("med_fwhm"),
     ).where(
         Image.image_type == "LIGHT",
         Image.telescope.isnot(None),
