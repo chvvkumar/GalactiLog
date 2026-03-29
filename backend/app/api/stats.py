@@ -151,7 +151,12 @@ async def get_stats(session: AsyncSession = Depends(get_session)):
                 "best_hfr": None,
                 "filters": set(),
                 "filter_rows": {},
+                "raw_telescopes": set(),
+                "raw_cameras": set(),
             }
+
+        combo_data[key]["raw_telescopes"].add(r.telescope)
+        combo_data[key]["raw_cameras"].add(r.camera)
 
         cd = combo_data[key]
         cd["frame_count"] += r.frame_count
@@ -231,6 +236,7 @@ async def get_stats(session: AsyncSession = Depends(get_session)):
             best_hfr=safe_round(cd["best_hfr"]),
             median_eccentricity=weighted_median_approx(cd["ecc_vals"]),
             median_fwhm=weighted_median_approx(cd["fwhm_vals"]),
+            grouped=len(cd["raw_telescopes"]) > 1 or len(cd["raw_cameras"]) > 1,
             filters=sorted(cd["filters"]),
             filter_breakdown=build_filter_metrics(cd["filter_rows"]),
         ))

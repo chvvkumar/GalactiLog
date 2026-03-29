@@ -334,6 +334,7 @@ export interface EquipmentComboMetrics {
   best_hfr: number | null;
   median_eccentricity: number | null;
   median_fwhm: number | null;
+  grouped: boolean;
   filters: string[];
   filter_breakdown: EquipmentFilterMetrics[];
 }

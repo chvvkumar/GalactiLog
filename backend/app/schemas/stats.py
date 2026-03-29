@@ -70,6 +70,7 @@ class EquipmentComboMetrics(BaseModel):
     best_hfr: float | None
     median_eccentricity: float | None
     median_fwhm: float | None
+    grouped: bool
     filters: list[str]
     filter_breakdown: list[EquipmentFilterMetrics]
 

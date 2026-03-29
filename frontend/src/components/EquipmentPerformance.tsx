@@ -74,6 +74,14 @@ const ComboRow: Component<{ combo: EquipmentComboMetrics }> = (props) => {
             <span class="font-medium text-theme-text-primary">
               {props.combo.telescope} + {props.combo.camera}
             </span>
+            <Show when={props.combo.grouped}>
+              <span
+                class="text-theme-text-secondary text-[0.65rem] cursor-help"
+                title="Grouped: multiple equipment aliases are combined under this name"
+              >
+                &#x229E;
+              </span>
+            </Show>
           </div>
         </td>
         <td class="text-right text-theme-text-secondary py-1.5 px-2 tabular-nums">
