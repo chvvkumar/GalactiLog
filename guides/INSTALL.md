@@ -93,23 +93,12 @@ sudo mount -t nfs nas.local:/volume1/astrophotography /mnt/astro
 FITS_DATA_HOST_PATH=/mnt/astro
 ```
 
-The FITS directory is mounted read-only into the container, so GalactiLog will never modify your source files. To make the NFS mount persistent across reboots, add it to `/etc/fstab`:
+The FITS directory is mounted read-only into the container, so GalactiLog will never modify your source files. To make the NFS mount persistent across reboots, add it to `/etc/fstab` (the `ro` option mounts the NFS share read-only on the host as well):
 
 ```
 nas.local:/volume1/astrophotography  /mnt/astro  nfs  ro,soft,timeo=30  0  0
 ```
 
-**Windows (network share):**
-
-Map the network share to a drive letter or use the UNC path directly:
-
-```
-# Mapped drive
-FITS_DATA_HOST_PATH=Z:/Astrophotography
-
-# UNC path (use forward slashes)
-FITS_DATA_HOST_PATH=//NAS/Astrophotography
-```
 
 ### 4. Pull and Start
 
