@@ -1,5 +1,6 @@
 import { createSignal, createEffect, For, Show } from "solid-js";
 import { useSettingsContext } from "./SettingsProvider";
+import { showToast } from "./Toast";
 import type { DisplaySettings, MetricGroupSettings } from "../types";
 import { THEMES, TEXT_SIZES, type ThemeMeta } from "../themes";
 import { FILTER_STYLE_OPTIONS, getFilterBadgeStyle, type FilterBadgeStyle } from "../utils/filterStyles";
@@ -85,7 +86,14 @@ export default function DisplayTab() {
     const data = local();
     if (!data) return;
     setSaving(true);
-    try { await ctx.saveDisplay(data); } finally { setSaving(false); }
+    try {
+      await ctx.saveDisplay(data);
+      showToast("Display settings saved");
+    } catch {
+      showToast("Failed to save display settings", "error");
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleThemeChange = async (themeId: string) => {
@@ -126,11 +134,11 @@ export default function DisplayTab() {
   };
 
   return (
-    <div class="space-y-6">
-      {/* Theme Chooser */}
+    <div class="space-y-4">
+      {/* Theme */}
       <Show when={THEMES.length > 1}>
-        <div class="space-y-3">
-          <h3 class="text-sm font-medium text-theme-text-primary">Theme</h3>
+        <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-4 space-y-3">
+          <h3 class="text-theme-text-primary font-medium">Theme</h3>
           <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <For each={THEMES}>
               {(theme: ThemeMeta) => (
@@ -161,99 +169,99 @@ export default function DisplayTab() {
         </div>
       </Show>
 
-      {/* Text Size */}
-      <div class="space-y-3">
-        <h3 class="text-sm font-medium text-theme-text-primary">Text Size</h3>
-        <div class="flex gap-2">
-          <For each={TEXT_SIZES}>
-            {(size) => (
-              <button
-                type="button"
-                class={`px-4 py-2 rounded-[var(--radius-sm)] text-sm transition-colors duration-150 border ${
-                  selectedTextSize() === size.id
-                    ? "border-theme-accent bg-theme-accent text-white"
-                    : "border-theme-border bg-theme-surface text-theme-text-secondary hover:border-theme-border-em"
-                }`}
-                onClick={() => handleTextSizeChange(size.id)}
-              >
-                {size.label}
-              </button>
-            )}
-          </For>
-        </div>
-      </div>
+      {/* Appearance */}
+      <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-4 space-y-4">
+        <h3 class="text-theme-text-primary font-medium">Appearance</h3>
 
-      {/* Filter badge style */}
-      <div class="space-y-3">
-        <h3 class="text-sm font-medium text-theme-text-primary">Filter Badge Style</h3>
-        <div class="flex items-center gap-4">
-          <select
-            value={filterStyle()}
-            onChange={(e) => handleFilterStyleChange(e.currentTarget.value)}
-            class="px-3 py-2 bg-theme-input border border-theme-border rounded-[var(--radius-sm)] text-sm text-theme-text-primary focus:ring-1 focus:ring-theme-accent focus:border-theme-accent outline-none"
-          >
-            <For each={FILTER_STYLE_OPTIONS}>
-              {(opt) => <option value={opt.value}>{opt.label}</option>}
+        <div class="flex items-center justify-between">
+          <span class="text-sm text-theme-text-secondary">Text Size</span>
+          <div class="flex gap-2">
+            <For each={TEXT_SIZES}>
+              {(size) => (
+                <button
+                  type="button"
+                  class={`px-3 py-1.5 rounded-[var(--radius-sm)] text-sm transition-colors duration-150 border ${
+                    selectedTextSize() === size.id
+                      ? "border-theme-accent bg-theme-accent text-white"
+                      : "border-theme-border text-theme-text-secondary hover:border-theme-border-em"
+                  }`}
+                  onClick={() => handleTextSizeChange(size.id)}
+                >
+                  {size.label}
+                </button>
+              )}
             </For>
-          </select>
-          <div class="flex gap-1.5 items-center">
-            <For each={PREVIEW_FILTERS}>
-              {(f) => {
-                const badgeStyle = () => getFilterBadgeStyle(filterStyle() as FilterBadgeStyle, f.color);
-                return (
-                  <span
-                    class="h-6 rounded text-caption font-bold flex items-center justify-center gap-0.5 px-1.5"
-                    style={badgeStyle().style}
-                  >
-                    <Show when={badgeStyle().dot}>
-                      <span class="w-1.5 h-1.5 rounded-full inline-block flex-shrink-0" style={{ "background-color": badgeStyle().dot }} />
-                    </Show>
-                    {f.name}
-                  </span>
-                );
-              }}
+          </div>
+        </div>
+
+        <div class="flex items-center justify-between">
+          <span class="text-sm text-theme-text-secondary">Filter Badge Style</span>
+          <div class="flex items-center gap-3">
+            <select
+              value={filterStyle()}
+              onChange={(e) => handleFilterStyleChange(e.currentTarget.value)}
+              class="px-3 py-1.5 bg-theme-input border border-theme-border rounded-[var(--radius-sm)] text-sm text-theme-text-primary focus:ring-1 focus:ring-theme-accent focus:border-theme-accent outline-none"
+            >
+              <For each={FILTER_STYLE_OPTIONS}>
+                {(opt) => <option value={opt.value}>{opt.label}</option>}
+              </For>
+            </select>
+            <div class="flex gap-1.5 items-center">
+              <For each={PREVIEW_FILTERS}>
+                {(f) => {
+                  const badgeStyle = () => getFilterBadgeStyle(filterStyle() as FilterBadgeStyle, f.color);
+                  return (
+                    <span
+                      class="h-6 rounded text-caption font-bold flex items-center justify-center gap-0.5 px-1.5"
+                      style={badgeStyle().style}
+                    >
+                      <Show when={badgeStyle().dot}>
+                        <span class="w-1.5 h-1.5 rounded-full inline-block flex-shrink-0" style={{ "background-color": badgeStyle().dot }} />
+                      </Show>
+                      {f.name}
+                    </span>
+                  );
+                }}
+              </For>
+            </div>
+          </div>
+        </div>
+
+        <div class="flex items-center justify-between">
+          <span class="text-sm text-theme-text-secondary">Default Page Size</span>
+          <div class="flex gap-2">
+            <For each={PAGE_SIZES}>
+              {(size) => (
+                <button
+                  type="button"
+                  class={`px-3 py-1.5 rounded-[var(--radius-sm)] text-sm transition-colors duration-150 border ${
+                    pageSize() === size
+                      ? "border-theme-accent bg-theme-accent text-white"
+                      : "border-theme-border text-theme-text-secondary hover:border-theme-border-em"
+                  }`}
+                  onClick={() => handlePageSizeChange(size)}
+                >
+                  {size}
+                </button>
+              )}
             </For>
           </div>
         </div>
       </div>
 
-      {/* Default page size */}
-      <div class="space-y-3">
-        <h3 class="text-sm font-medium text-theme-text-primary">Default Page Size</h3>
-        <div class="flex gap-2">
-          <For each={PAGE_SIZES}>
-            {(size) => (
-              <button
-                type="button"
-                class={`px-4 py-2 rounded-[var(--radius-sm)] text-sm transition-colors duration-150 border ${
-                  pageSize() === size
-                    ? "border-theme-accent bg-theme-accent text-white"
-                    : "border-theme-border bg-theme-surface text-theme-text-secondary hover:border-theme-border-em"
-                }`}
-                onClick={() => handlePageSizeChange(size)}
-              >
-                {size}
-              </button>
-            )}
-          </For>
-        </div>
-      </div>
-
-      {/* Divider */}
-      <hr class="border-theme-border" />
-
-      {/* Metric visibility */}
-      <div class="space-y-4">
+      {/* Metric Visibility */}
+      <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-4 space-y-3">
+        <h3 class="text-theme-text-primary font-medium">Metric Visibility</h3>
         <p class="text-sm text-theme-text-secondary">Choose which metric groups and individual fields appear on target detail pages.</p>
-        <Show when={local()} fallback={<p class="text-theme-text-secondary">Loading...</p>}>
+        <Show when={local()} fallback={<p class="text-theme-text-secondary text-sm">Loading...</p>}>
           {(settings) => (
-            <>
+            <div class="space-y-2">
               <For each={GROUP_META}>
                 {(group) => {
                   const gs = (): MetricGroupSettings => settings()[group.key];
                   const isCollapsed = () => !!collapsed()[group.key];
                   return (
-                    <div class="rounded-[var(--radius-md)] bg-theme-surface border border-theme-border">
+                    <div class="rounded-[var(--radius-md)] bg-theme-base/50 border border-theme-border">
                       <div class="flex items-center justify-between px-4 py-3">
                         <button type="button" class="flex items-center gap-2 text-sm font-medium text-theme-text-primary hover:text-theme-text-secondary" onClick={() => toggleCollapsed(group.key)}>
                           <svg class={`w-4 h-4 transition-transform ${isCollapsed() ? "-rotate-90" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" /></svg>
@@ -279,15 +287,18 @@ export default function DisplayTab() {
                   );
                 }}
               </For>
-              <div class="flex justify-end pt-2">
-                <button type="button" class="px-3 py-1.5 text-sm font-medium rounded-[var(--radius-sm)] bg-theme-accent hover:bg-theme-accent-hover text-white disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-150" disabled={saving()} onClick={handleSave}>
-                  {saving() ? "Saving..." : "Save"}
-                </button>
-              </div>
-            </>
+            </div>
           )}
         </Show>
       </div>
+
+      <Show when={local()}>
+        <div class="flex justify-end">
+          <button type="button" class="px-3 py-1.5 text-sm rounded-[var(--radius-sm)] bg-theme-accent hover:bg-theme-accent-hover text-white disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-150" disabled={saving()} onClick={handleSave}>
+            {saving() ? "Saving..." : "Save"}
+          </button>
+        </div>
+      </Show>
     </div>
   );
 }

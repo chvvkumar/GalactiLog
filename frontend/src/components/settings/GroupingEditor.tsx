@@ -14,8 +14,12 @@ interface Props {
   groups: GroupEntry[];
   /** Whether to show color pickers (filters mode) */
   showColorPicker?: boolean;
+  /** Colors for ungrouped items (keyed by name) — only used when showColorPicker is true */
+  ungroupedColors?: Record<string, string>;
   /** Called when user modifies groups locally */
   onGroupsChange: (groups: GroupEntry[]) => void;
+  /** Called when user changes color on an ungrouped item */
+  onUngroupedColorChange?: (name: string, color: string) => void;
 }
 
 export const GroupingEditor: Component<Props> = (props) => {
@@ -118,6 +122,18 @@ export const GroupingEditor: Component<Props> = (props) => {
                   onChange={() => toggleCheck(item.name)}
                   class="rounded border-theme-border bg-theme-base text-theme-accent focus:ring-theme-accent"
                 />
+                <Show when={props.showColorPicker}>
+                  <input
+                    type="color"
+                    value={props.ungroupedColors?.[item.name] || "#808080"}
+                    onInput={(e) => {
+                      e.stopPropagation();
+                      props.onUngroupedColorChange?.(item.name, e.currentTarget.value);
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                    class="w-5 h-5 rounded cursor-pointer border-0 bg-transparent flex-shrink-0"
+                  />
+                </Show>
                 <span class="text-sm text-theme-text-primary flex-1 truncate">{item.name}</span>
                 <span class="text-xs text-theme-text-secondary">{item.count} frames</span>
               </label>

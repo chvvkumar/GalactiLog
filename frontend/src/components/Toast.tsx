@@ -18,12 +18,16 @@ export const Toast: Component = () => {
   return (
     <Show when={toast()}>
       {(t) => (
-        <div
-          class={`fixed bottom-4 right-4 px-4 py-2 rounded-[var(--radius-md)] text-sm text-white shadow-[var(--shadow-lg)] border border-theme-border animate-slide-in-right z-50 ${
-            t().type === "success" ? "bg-theme-success" : "bg-theme-error"
-          }`}
-        >
-          {t().message}
+        <div class="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 animate-toast-up">
+          <div
+            class={`px-5 py-2.5 rounded-[var(--radius-md)] text-sm font-medium backdrop-blur-xl shadow-lg border ${
+              t().type === "success"
+                ? "bg-theme-success/20 text-theme-success border-theme-success/30"
+                : "bg-theme-error/20 text-theme-error border-theme-error/30"
+            }`}
+          >
+            {t().message}
+          </div>
         </div>
       )}
     </Show>

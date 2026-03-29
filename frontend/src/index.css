@@ -149,18 +149,18 @@ body {
   -webkit-backdrop-filter: blur(calc(var(--glass-blur) * 0.75)) saturate(var(--glass-saturate));
 }
 
-/* Toast slide-in animation */
-@keyframes slide-in-right {
+/* Toast slide-up animation */
+@keyframes toast-up {
   from {
-    transform: translateX(100%);
+    transform: translateY(1rem) translateX(-50%);
     opacity: 0;
   }
   to {
-    transform: translateX(0);
+    transform: translateY(0) translateX(-50%);
     opacity: 1;
   }
 }
 
-.animate-slide-in-right {
-  animation: slide-in-right 0.2s ease-out;
+.animate-toast-up {
+  animation: toast-up 0.2s ease-out;
 }
