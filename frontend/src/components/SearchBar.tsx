@@ -1,10 +1,10 @@
 import { Component, createSignal, For, Show } from "solid-js";
 import { api } from "../api/client";
-import { useCatalog } from "../store/catalog";
+import { useDashboardFilters } from "./DashboardFilterProvider";
 import type { TargetSearchResultFuzzy } from "../types";
 
 const SearchBar: Component = () => {
-  const { updateFilter } = useCatalog();
+  const { updateFilter } = useDashboardFilters();
   const [query, setQuery] = createSignal("");
   const [suggestions, setSuggestions] = createSignal<TargetSearchResultFuzzy[]>([]);
   const [showSuggestions, setShowSuggestions] = createSignal(false);
