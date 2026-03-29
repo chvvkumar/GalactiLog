@@ -87,17 +87,18 @@ jobs:
             exit 0
           fi
 
-          # Extract generated text from JSON response
-          GENERATED=$(echo "$BODY" | python3 -c '
+          # Extract generated text to file to avoid shell glob expansion
+          echo "$BODY" | python3 -c '
           import sys, json
           try:
               data = json.load(sys.stdin)
               text = data["candidates"][0]["content"]["parts"][0]["text"]
-              print(text)
+              with open("/tmp/gemini_raw.txt", "w") as f:
+                  f.write(text)
           except (KeyError, IndexError, json.JSONDecodeError) as e:
               print(f"PARSE_ERROR: {e}", file=sys.stderr)
               sys.exit(1)
-          ' 2>/tmp/gemini_parse_err.txt)
+          ' 2>/tmp/gemini_parse_err.txt
 
           if [ $? -ne 0 ]; then
             echo "::warning::Failed to parse Gemini response: $(cat /tmp/gemini_parse_err.txt). Skipping PR description update."
@@ -105,22 +106,20 @@ jobs:
             exit 0
           fi
 
-          # Extract title and body using delimiters
-          PR_TITLE=$(echo "$GENERATED" | sed -n '/---TITLE_START---/,/---TITLE_END---/p' | grep -v -- '---TITLE_' | head -1 | xargs)
-          PR_BODY=$(echo "$GENERATED" | sed -n '/---BODY_START---/,/---BODY_END---/p' | grep -v -- '---BODY_')
+          # Extract title and body using delimiters from file
+          PR_TITLE=$(sed -n '/---TITLE_START---/,/---TITLE_END---/p' /tmp/gemini_raw.txt | grep -v -- '---TITLE_' | head -1 | xargs)
+          sed -n '/---BODY_START---/,/---BODY_END---/p' /tmp/gemini_raw.txt | grep -v -- '---BODY_' > /tmp/pr_body.txt
 
-          if [ -z "$PR_TITLE" ] || [ -z "$PR_BODY" ]; then
+          if [ -z "$PR_TITLE" ] || [ ! -s /tmp/pr_body.txt ]; then
             echo "::warning::Could not extract title or body from Gemini response. Skipping PR description update."
             echo "api_success=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
           # Append footer
-          PR_BODY=$(printf '%s\n\n---\n*This PR description was automatically generated.*' "$PR_BODY")
+          printf '\n---\n*This PR description was automatically generated.*\n' >> /tmp/pr_body.txt
 
-          # Write to files for the next step
           echo "$PR_TITLE" > /tmp/pr_title.txt
-          echo "$PR_BODY" > /tmp/pr_body.txt
           echo "api_success=true" >> "$GITHUB_OUTPUT"
 
       - name: Update PR title and description
