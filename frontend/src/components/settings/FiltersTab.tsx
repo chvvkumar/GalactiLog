@@ -1,12 +1,14 @@
-import { createSignal, createEffect, onMount, type Component } from "solid-js";
+import { createSignal, createEffect, onMount, Show, type Component } from "solid-js";
 import { useSettingsContext } from "../SettingsProvider";
 import { showToast } from "../Toast";
+import { useAuth } from "../AuthProvider";
 import { SuggestionsBanner } from "./SuggestionsBanner";
 import { GroupingEditor, type GroupEntry } from "./GroupingEditor";
 import type { FilterConfig, SuggestionsResponse, DiscoveredItem, SuggestionGroup } from "../../types";
 import { api } from "../../api/client";
 
 export const FiltersTab: Component = () => {
+  const { isAdmin } = useAuth();
   const { settings, saveFilters } = useSettingsContext();
   const [groups, setGroups] = createSignal<GroupEntry[]>([]);
   const [discovered, setDiscovered] = createSignal<DiscoveredItem[]>([]);
@@ -154,15 +156,17 @@ export const FiltersTab: Component = () => {
         </div>
       </div>
 
-      <div class="flex justify-end">
-        <button
-          onClick={handleSave}
-          disabled={saving()}
-          class="px-3 py-1.5 bg-theme-accent text-white rounded text-sm hover:opacity-90 disabled:opacity-50 transition-opacity"
-        >
-          {saving() ? "Saving..." : "Save"}
-        </button>
-      </div>
+      <Show when={isAdmin()}>
+        <div class="flex justify-end">
+          <button
+            onClick={handleSave}
+            disabled={saving()}
+            class="px-3 py-1.5 bg-theme-accent text-white rounded text-sm hover:opacity-90 disabled:opacity-50 transition-opacity"
+          >
+            {saving() ? "Saving..." : "Save"}
+          </button>
+        </div>
+      </Show>
     </div>
   );
 };

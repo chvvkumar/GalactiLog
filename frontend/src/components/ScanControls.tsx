@@ -1,4 +1,5 @@
 import { Component, Show } from "solid-js";
+import { useAuth } from "./AuthProvider";
 
 type FrameFilter = "all" | "light_only";
 
@@ -10,28 +11,32 @@ const ScanControls: Component<{
   onStartScan: () => void;
   onStopScan: () => void;
 }> = (props) => {
+  const { isAdmin } = useAuth();
+
   return (
     <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-4 space-y-3">
       <div class="flex justify-between items-center flex-wrap gap-2">
         <h3 class="text-theme-text-primary font-medium">Scan & Ingest</h3>
-        <div class="flex gap-2 flex-shrink-0">
-          <Show when={props.isActive}>
+        <Show when={isAdmin()}>
+          <div class="flex gap-2 flex-shrink-0">
+            <Show when={props.isActive}>
+              <button
+                onClick={props.onStopScan}
+                disabled={props.stopping}
+                class="px-4 py-1.5 border border-theme-error/50 text-theme-error rounded text-sm font-medium hover:bg-theme-error/20 transition-colors disabled:opacity-50"
+              >
+                {props.stopping ? "Stopping..." : "Stop"}
+              </button>
+            </Show>
             <button
-              onClick={props.onStopScan}
-              disabled={props.stopping}
-              class="px-4 py-1.5 border border-theme-error/50 text-theme-error rounded text-sm font-medium hover:bg-theme-error/20 transition-colors disabled:opacity-50"
+              onClick={props.onStartScan}
+              disabled={props.isActive}
+              class="px-4 py-1.5 bg-theme-accent text-theme-text-primary rounded text-sm font-medium disabled:opacity-50 hover:bg-theme-accent/80 transition-colors"
             >
-              {props.stopping ? "Stopping..." : "Stop"}
+              {props.isActive ? (props.stopping ? "Stopping..." : "Scanning...") : "Scan Directory"}
             </button>
-          </Show>
-          <button
-            onClick={props.onStartScan}
-            disabled={props.isActive}
-            class="px-4 py-1.5 bg-theme-accent text-theme-text-primary rounded text-sm font-medium disabled:opacity-50 hover:bg-theme-accent/80 transition-colors"
-          >
-            {props.isActive ? (props.stopping ? "Stopping..." : "Scanning...") : "Scan Directory"}
-          </button>
-        </div>
+          </div>
+        </Show>
       </div>
       <div class="flex items-center gap-4 text-sm flex-wrap">
         <span class="text-theme-text-secondary text-xs">Include:</span>
