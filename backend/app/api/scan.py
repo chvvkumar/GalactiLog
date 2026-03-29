@@ -10,7 +10,8 @@ from app.database import get_session
 from app.models import Image, Target
 from app.services.scan_state import (
     get_scan_state, get_failed_files, start_scanning, set_ingesting, set_idle, reset_scan,
-    get_rebuild_state,
+    get_rebuild_state, request_cancel,
+    get_activity, clear_activity,
 )
 from app.services.simbad import resolve_target_name, normalize_object_name
 from app.worker.tasks import regenerate_thumbnail, run_scan, rebuild_targets, smart_rebuild_targets, backfill_csv_metrics
@@ -102,6 +103,41 @@ async def scan_status():
         if state.failed > 0:
             result["failed_files"] = await get_failed_files(r)
         return result
+    finally:
+        await r.aclose()
+
+
+@router.post("/stop")
+async def stop_scan():
+    """Request cancellation of the current scan."""
+    r = get_async_redis()
+    try:
+        state = await get_scan_state(r)
+        if state.state not in ("scanning", "ingesting"):
+            return {"status": "not_running", "state": state.state}
+        await request_cancel(r)
+        return {"status": "stopping", "message": "Cancel requested — scan will stop shortly"}
+    finally:
+        await r.aclose()
+
+
+@router.get("/activity")
+async def get_activity_log():
+    """Return persistent activity log (newest first)."""
+    r = get_async_redis()
+    try:
+        return await get_activity(r)
+    finally:
+        await r.aclose()
+
+
+@router.delete("/activity")
+async def clear_activity_log():
+    """Clear the activity log."""
+    r = get_async_redis()
+    try:
+        await clear_activity(r)
+        return {"status": "cleared"}
     finally:
         await r.aclose()
 

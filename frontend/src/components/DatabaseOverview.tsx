@@ -1,38 +1,73 @@
-import { Component } from "solid-js";
-import type { AggregateStats } from "../types";
+import { Component, Show } from "solid-js";
+import { useNavigate } from "@solidjs/router";
+import type { DbSummary } from "../types";
 
-function formatHours(s: number): string { return (s / 3600).toFixed(1) + "h"; }
-function formatBytes(b: number): string {
-  if (b < 1e9) return (b / 1e6).toFixed(0) + " MB";
-  if (b < 1e12) return (b / 1e9).toFixed(1) + " GB";
-  return (b / 1e12).toFixed(2) + " TB";
-}
-
-const DatabaseOverview: Component<{
-  overview: AggregateStats;
-  avgHfr: number | null;
-  avgEccentricity: number | null;
-  bestHfr: number | null;
-}> = (props) => {
-  const cards = () => [
-    { label: "Total Integration", subtitle: "all LIGHT frames", value: formatHours(props.overview.total_integration_seconds) },
-    { label: "Resolved Targets", subtitle: "via SIMBAD", value: String(props.overview.target_count) },
-    { label: "Total Frames", subtitle: "all LIGHT frames", value: props.overview.total_frames.toLocaleString() },
-    { label: "Total Storage", subtitle: "", value: formatBytes(props.overview.disk_usage_bytes) },
-    { label: "Avg HFR", subtitle: "", value: props.avgHfr?.toFixed(2) ?? "—" },
-    { label: "Avg Ecc", subtitle: "", value: props.avgEccentricity?.toFixed(2) ?? "—" },
-    { label: "Best HFR", subtitle: "", value: props.bestHfr?.toFixed(2) ?? "—" },
-  ];
+const DatabaseOverview: Component<{ summary: DbSummary | null }> = (props) => {
+  const navigate = useNavigate();
 
   return (
-    <div class="grid grid-cols-7 gap-3">
-      {cards().map((c) => (
-        <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-4 text-center">
-          <div class="text-xs text-theme-text-secondary mb-1">{c.label}</div>
-          <div class="text-white font-semibold text-xl">{c.value}</div>
-          {c.subtitle && <div class="text-caption text-theme-text-tertiary italic mt-1">{c.subtitle}</div>}
+    <Show when={props.summary}>
+      <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-4">
+        <div class="flex flex-wrap gap-4 justify-around">
+          <StatTile label="Total Images" value={props.summary!.total_images} />
+          <StatTile label="Light Frames" value={props.summary!.light_frames} />
+          <StatTile label="Targets" value={props.summary!.resolved_targets} />
+          <StatTile
+            label="Unresolved"
+            value={props.summary!.unresolved_images}
+            warn={props.summary!.unresolved_images > 0}
+            title="Light frames whose OBJECT name could not be matched to a known target in SIMBAD."
+            onClick={() => navigate("/?object_type=Unresolved")}
+          />
+          <StatTile label="From CSV" value={props.summary!.csv_enriched} info />
         </div>
-      ))}
+        <Show when={props.summary!.cached_simbad > 0 || props.summary!.pending_merges > 0}>
+          <div class="flex gap-4 mt-3 text-xs text-theme-text-secondary justify-center flex-wrap">
+            <Show when={props.summary!.cached_simbad > 0}>
+              <span title={`${props.summary!.cached_simbad} SIMBAD lookups cached locally. ${props.summary!.cached_negative} returned no match.`}>
+                {props.summary!.cached_simbad} SIMBAD cached ({props.summary!.cached_negative} negative)
+              </span>
+            </Show>
+            <Show when={props.summary!.pending_merges > 0}>
+              <span
+                class="text-theme-warning cursor-pointer hover:underline"
+                onClick={() => navigate("/settings?tab=merges")}
+              >
+                {props.summary!.pending_merges} pending merges
+              </span>
+            </Show>
+          </div>
+        </Show>
+      </div>
+    </Show>
+  );
+};
+
+const StatTile: Component<{
+  label: string;
+  value: number;
+  warn?: boolean;
+  info?: boolean;
+  title?: string;
+  onClick?: () => void;
+}> = (props) => {
+  const clickable = () => !!props.onClick;
+  return (
+    <div
+      class={`text-center min-w-[5rem] ${clickable() ? "cursor-pointer hover:opacity-80" : ""}`}
+      title={props.title}
+      onClick={props.onClick}
+    >
+      <div class={`text-sm font-medium ${
+        props.warn ? "text-theme-warning" :
+        props.info ? "text-theme-info" :
+        "text-theme-text-primary"
+      }`}>
+        {props.value.toLocaleString()}
+      </div>
+      <div class={`text-xs text-theme-text-secondary ${clickable() ? "underline decoration-dotted" : ""}`}>
+        {props.label}
+      </div>
     </div>
   );
 };

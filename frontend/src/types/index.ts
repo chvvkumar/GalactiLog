@@ -217,9 +217,17 @@ export interface ScanStatus {
   completed: number;
   failed: number;
   csv_enriched: number;
+  discovered: number;
   started_at: number | null;
   completed_at: number | null;
   failed_files?: FailedFile[];
+}
+
+export interface ActivityEntry {
+  type: "scan_complete" | "scan_stopped" | "scan_stalled" | "rebuild_complete" | "rebuild_failed" | "regen_complete";
+  message: string;
+  details: Record<string, any>;
+  timestamp: number;
 }
 
 export interface RebuildStatus {

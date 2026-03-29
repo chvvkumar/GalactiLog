@@ -14,6 +14,9 @@ import redis as sync_redis
 SCAN_KEY = "scan:state"
 SCAN_PROGRESS_KEY = "scan:last_progress"
 SCAN_FAILED_KEY = "scan:failed_files"
+SCAN_CANCEL_KEY = "scan:cancel"
+SCAN_ACTIVITY_KEY = "scan:activity"
+SCAN_ACTIVITY_MAX = 20
 EXPIRE_AFTER_COMPLETE = 86400  # 24 hours
 STALE_TIMEOUT = 300  # 5 minutes with no progress → consider stuck
 
@@ -27,6 +30,7 @@ class ScanStateSnapshot:
     started_at: float | None
     completed_at: float | None
     csv_enriched: int = 0
+    discovered: int = 0
 
     def to_dict(self) -> dict:
         return {
@@ -37,6 +41,7 @@ class ScanStateSnapshot:
             "started_at": self.started_at,
             "completed_at": self.completed_at,
             "csv_enriched": self.csv_enriched,
+            "discovered": self.discovered,
         }
 
 
@@ -54,6 +59,7 @@ def _parse_snapshot(data: dict | None) -> ScanStateSnapshot:
         started_at=float(data["started_at"]) if data.get("started_at") else None,
         completed_at=float(data["completed_at"]) if data.get("completed_at") else None,
         csv_enriched=int(data.get("csv_enriched", 0)),
+        discovered=int(data.get("discovered", 0)),
     )
 
 
@@ -112,11 +118,29 @@ async def set_complete_if_done(r: aioredis.Redis) -> None:
         await r.expire(SCAN_KEY, EXPIRE_AFTER_COMPLETE)
 
 
+async def request_cancel(r: aioredis.Redis) -> None:
+    """Set the cancel flag so the worker stops processing."""
+    await r.set(SCAN_CANCEL_KEY, "1", ex=600)  # auto-expire after 10 min
+
+
 async def reset_scan(r: aioredis.Redis) -> None:
     """Force-clear scan state back to idle. Used when scan is stalled."""
     await r.delete(SCAN_KEY)
     await r.delete(SCAN_PROGRESS_KEY)
     await r.delete(SCAN_FAILED_KEY)
+    await r.delete(SCAN_CANCEL_KEY)
+
+
+async def get_activity(r: aioredis.Redis) -> list[dict]:
+    """Return activity log entries (newest first)."""
+    import json
+    raw = await r.lrange(SCAN_ACTIVITY_KEY, 0, -1)
+    return [json.loads(item) for item in raw]
+
+
+async def clear_activity(r: aioredis.Redis) -> None:
+    """Clear the activity log."""
+    await r.delete(SCAN_ACTIVITY_KEY)
 
 
 async def set_idle(r: aioredis.Redis) -> None:
@@ -155,6 +179,13 @@ def _check_complete_sync(r: sync_redis.Redis) -> None:
             "completed_at": time.time(),
         })
         r.expire(SCAN_KEY, EXPIRE_AFTER_COMPLETE)
+        append_activity_sync(r, {
+            "type": "scan_complete",
+            "message": f"Scan complete: {snap.completed} ingested, {snap.failed} failed"
+                       + (f", {snap.csv_enriched} CSV enriched" if snap.csv_enriched > 0 else ""),
+            "details": {"completed": snap.completed, "failed": snap.failed, "csv_enriched": snap.csv_enriched, "total": snap.total},
+            "timestamp": time.time(),
+        })
 
 
 def start_scanning_sync(r: sync_redis.Redis) -> None:
@@ -189,6 +220,35 @@ def set_idle_sync(r: sync_redis.Redis) -> None:
         "completed_at": time.time(),
     })
     r.expire(SCAN_KEY, EXPIRE_AFTER_COMPLETE)
+
+
+def set_discovered_sync(r: sync_redis.Redis, count: int) -> None:
+    r.hset(SCAN_KEY, "discovered", count)
+    r.set(SCAN_PROGRESS_KEY, str(time.time()))
+
+
+def is_cancel_requested_sync(r: sync_redis.Redis) -> bool:
+    return r.exists(SCAN_CANCEL_KEY) == 1
+
+
+def clear_cancel_sync(r: sync_redis.Redis) -> None:
+    r.delete(SCAN_CANCEL_KEY)
+
+
+def set_cancelled_sync(r: sync_redis.Redis) -> None:
+    r.hset(SCAN_KEY, mapping={
+        "state": "complete",
+        "completed_at": time.time(),
+    })
+    r.expire(SCAN_KEY, EXPIRE_AFTER_COMPLETE)
+    r.delete(SCAN_CANCEL_KEY)
+
+
+def append_activity_sync(r: sync_redis.Redis, entry: dict) -> None:
+    """Append an activity entry and cap the list at SCAN_ACTIVITY_MAX."""
+    import json
+    r.lpush(SCAN_ACTIVITY_KEY, json.dumps(entry))
+    r.ltrim(SCAN_ACTIVITY_KEY, 0, SCAN_ACTIVITY_MAX - 1)
 
 
 # ── Rebuild status (Quick Fix / Full Rebuild) ────────────────────────────

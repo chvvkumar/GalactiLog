@@ -1,9 +1,9 @@
 import { Component, Show } from "solid-js";
-import { useCatalog } from "../store/catalog";
+import { useDashboardFilters } from "./DashboardFilterProvider";
 import TargetTable from "./TargetTable";
 
 const TargetFeed: Component = () => {
-  const { targetData } = useCatalog();
+  const { targetData } = useDashboardFilters();
 
   return (
     <div class="p-4">

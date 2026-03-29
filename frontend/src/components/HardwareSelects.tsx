@@ -1,8 +1,10 @@
 import { Component, Show, For } from "solid-js";
 import { useCatalog } from "../store/catalog";
+import { useDashboardFilters } from "./DashboardFilterProvider";
 
 const HardwareSelects: Component = () => {
-  const { filters, updateFilter, equipment } = useCatalog();
+  const { filters, updateFilter } = useDashboardFilters();
+  const { equipment } = useCatalog();
 
   return (
     <div class="space-y-2">

@@ -35,6 +35,8 @@ from app.services.scan_state import (
     increment_completed_sync, increment_failed_sync, increment_csv_enriched_sync,
     start_scanning_sync, set_ingesting_sync, set_idle_sync,
     set_rebuild_running_sync, set_rebuild_progress_sync, set_rebuild_complete_sync,
+    set_discovered_sync, is_cancel_requested_sync, clear_cancel_sync, set_cancelled_sync,
+    append_activity_sync,
 )
 
 _redis = get_sync_redis()
@@ -48,6 +50,7 @@ def run_scan(self, include_calibration: bool = True) -> dict:
     """
     from app.services.scanner import scan_directory
 
+    clear_cancel_sync(_redis)
     start_scanning_sync(_redis)
 
     # Get known paths from DB
@@ -58,7 +61,19 @@ def run_scan(self, include_calibration: bool = True) -> dict:
     fits_root = Path(settings.fits_data_path)
     new_files, all_disk_paths = scan_directory(
         fits_root, known_paths=known_paths, include_calibration=include_calibration,
+        on_progress=lambda count: set_discovered_sync(_redis, count),
+        is_cancelled=lambda: is_cancel_requested_sync(_redis),
     )
+
+    if is_cancel_requested_sync(_redis):
+        set_cancelled_sync(_redis)
+        append_activity_sync(_redis, {
+            "type": "scan_stopped",
+            "message": f"Scan stopped by user ({len(new_files)} files discovered before stop)",
+            "details": {"discovered": len(new_files)},
+            "timestamp": __import__('time').time(),
+        })
+        return {"status": "cancelled"}
 
     # Detect and remove orphaned DB records (files deleted from disk)
     orphaned_paths = known_paths - all_disk_paths
@@ -97,6 +112,12 @@ def run_scan(self, include_calibration: bool = True) -> dict:
 
     if not new_files:
         set_idle_sync(_redis)
+        append_activity_sync(_redis, {
+            "type": "scan_complete",
+            "message": f"Scan complete: no new files found ({len(known_paths)} already cataloged)",
+            "details": {"completed": 0, "failed": 0, "already_known": len(known_paths), "removed": removed},
+            "timestamp": __import__('time').time(),
+        })
         return {"status": "complete", "new_files_queued": 0, "already_known": len(known_paths), "removed": removed}
 
     set_ingesting_sync(_redis, total=len(new_files))
@@ -162,6 +183,12 @@ def ingest_file(self, fits_path: str) -> dict:
     4. Insert/update database record
     """
     path = Path(fits_path)
+
+    # Skip if scan was cancelled
+    if is_cancel_requested_sync(_redis):
+        increment_failed_sync(_redis, file_path=fits_path, error="Scan cancelled")
+        return {"status": "cancelled", "file": fits_path}
+
     logger.info("Ingesting: %s", path.name)
 
     try:
@@ -502,6 +529,12 @@ def rebuild_targets(self) -> dict:
         f"Resolved {resolved} targets, {failed} failed out of {total} object names",
         details,
     )
+    append_activity_sync(_redis, {
+        "type": "rebuild_complete",
+        "message": f"Full Rebuild: {resolved} resolved, {failed} failed out of {total} names",
+        "details": {"resolved": resolved, "failed": failed, "total": total},
+        "timestamp": __import__('time').time(),
+    })
     logger.info("rebuild_targets: done — resolved=%d, failed=%d", resolved, failed)
     return {"status": "complete", **details}
 
@@ -662,6 +695,12 @@ def smart_rebuild_targets(self) -> dict:
     message = "; ".join(parts) if parts else "No issues found"
 
     set_rebuild_complete_sync(_redis, message, stats)
+    append_activity_sync(_redis, {
+        "type": "rebuild_complete",
+        "message": f"Quick Fix: {stats['linked_unresolved']} linked, {stats['redirected_merged']} redirected, {stats['aliases_updated']} aliases updated",
+        "details": stats,
+        "timestamp": __import__('time').time(),
+    })
     logger.info("smart_rebuild: done — %s", stats)
     return {"status": "complete", **stats}
 

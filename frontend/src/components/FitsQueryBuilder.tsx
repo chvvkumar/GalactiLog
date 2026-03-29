@@ -1,5 +1,5 @@
 import { Component, For, Show, createSignal, createResource } from "solid-js";
-import { useCatalog } from "../store/catalog";
+import { useDashboardFilters } from "./DashboardFilterProvider";
 import { api } from "../api/client";
 
 const OPERATORS = [
@@ -13,7 +13,7 @@ const OPERATORS = [
 ];
 
 const FitsQueryBuilder: Component = () => {
-  const { filters, setFilters } = useCatalog();
+  const { filters, addFitsQuery, removeFitsQuery } = useDashboardFilters();
   const [newKey, setNewKey] = createSignal("");
   const [newOp, setNewOp] = createSignal("eq");
   const [newVal, setNewVal] = createSignal("");
@@ -23,19 +23,13 @@ const FitsQueryBuilder: Component = () => {
     const key = newKey().trim();
     const val = newVal().trim();
     if (!key || !val) return;
-    setFilters((prev) => ({
-      ...prev,
-      fitsQueries: [...prev.fitsQueries, { key, operator: newOp(), value: val }],
-    }));
+    addFitsQuery(key, newOp(), val);
     setNewKey("");
     setNewVal("");
   };
 
   const removeRow = (index: number) => {
-    setFilters((prev) => ({
-      ...prev,
-      fitsQueries: prev.fitsQueries.filter((_, i) => i !== index),
-    }));
+    removeFitsQuery(index);
   };
 
   const onKeyDown = (e: KeyboardEvent) => {

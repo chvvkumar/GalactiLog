@@ -1,5 +1,5 @@
 import { Component, For, Show, createSignal, createEffect } from "solid-js";
-import { useCatalog } from "../store/catalog";
+import { useDashboardFilters } from "./DashboardFilterProvider";
 import { useSettingsContext } from "./SettingsProvider";
 
 // Metric field definitions: key -> { label, step, isInt? }
@@ -91,7 +91,7 @@ const MetricRow: Component<MetricRowProps> = (props) => {
 };
 
 const MetricFilters: Component = () => {
-  const { filters, updateMetricFilter } = useCatalog();
+  const { filters, updateMetricFilter } = useDashboardFilters();
   const { displaySettings } = useSettingsContext();
   const [open, setOpen] = createSignal(false);
   const [groupOpen, setGroupOpen] = createSignal<Record<string, boolean>>({});

@@ -1,5 +1,5 @@
 import { Component, Show } from "solid-js";
-import { useCatalog } from "../store/catalog";
+import { useDashboardFilters } from "./DashboardFilterProvider";
 import SearchBar from "./SearchBar";
 import ObjectTypeToggles from "./ObjectTypeToggles";
 import DateRangePicker from "./DateRangePicker";
@@ -14,7 +14,7 @@ function formatHours(seconds: number): string {
 }
 
 const Sidebar: Component = () => {
-  const { resetFilters, targetData, filters } = useCatalog();
+  const { resetFilters, targetData, filters } = useDashboardFilters();
 
   const hasActiveFilters = () => {
     const f = filters();

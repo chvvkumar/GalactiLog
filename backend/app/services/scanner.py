@@ -30,17 +30,25 @@ def scan_directory(
     root: Path,
     known_paths: set[str] | None = None,
     include_calibration: bool = True,
+    on_progress: "callable | None" = None,
+    is_cancelled: "callable | None" = None,
 ) -> tuple[list[Path], set[str]]:
     """Walk a directory tree finding new FITS files and all FITS paths on disk.
 
     Returns (new_files, all_disk_paths) where new_files are FITS files not in
     known_paths and all_disk_paths is every FITS path found during the walk.
     If include_calibration is False, only LIGHT / science frames are in new_files.
+
+    on_progress(discovered_count) is called periodically during discovery.
+    is_cancelled() should return True to abort the scan early.
     """
     known = known_paths or set()
     new_files: list[Path] = []
     all_disk_paths: set[str] = set()
+    discovered = 0
     for path in root.rglob("*"):
+        if is_cancelled and is_cancelled():
+            break
         if path.suffix in FITS_EXTENSIONS:
             all_disk_paths.add(str(path))
             if str(path) not in known:
@@ -49,6 +57,11 @@ def scan_directory(
                     if is_cal is True:
                         continue
                 new_files.append(path)
+            discovered += 1
+            if on_progress and discovered % 50 == 0:
+                on_progress(discovered)
+    if on_progress:
+        on_progress(discovered)
     return new_files, all_disk_paths
 
 

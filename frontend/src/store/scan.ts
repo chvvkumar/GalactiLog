@@ -8,12 +8,14 @@ const defaultStatus: ScanStatus = {
   completed: 0,
   failed: 0,
   csv_enriched: 0,
+  discovered: 0,
   started_at: null,
   completed_at: null,
 };
 
 const [scanStatus, setScanStatus] = createSignal<ScanStatus>({ ...defaultStatus });
 const [scanError, setScanError] = createSignal<string | null>(null);
+const [stopping, setStopping] = createSignal(false);
 
 let pollInterval: ReturnType<typeof setInterval> | null = null;
 
@@ -26,6 +28,7 @@ async function fetchStatus() {
     // Stop polling when no longer active
     if (status.state !== "scanning" && status.state !== "ingesting") {
       stopPolling();
+      setStopping(false);
     }
   } catch {
     setScanError("Failed to reach API");
@@ -59,6 +62,7 @@ export function useScan() {
   return {
     scanStatus,
     scanError,
+    stopping,
 
     isActive: () => {
       const s = scanStatus().state;
@@ -67,8 +71,9 @@ export function useScan() {
 
     startScan: async (options?: { includeCalibration?: boolean }) => {
       setScanError(null);
+      setStopping(false);
       // Immediately show scanning state so the UI responds instantly
-      setScanStatus((prev) => ({ ...prev, state: "scanning", completed: 0, failed: 0, total: 0 }));
+      setScanStatus((prev) => ({ ...prev, state: "scanning", completed: 0, failed: 0, total: 0, discovered: 0 }));
       try {
         await api.triggerScan(options);
       } catch {
@@ -97,6 +102,16 @@ export function useScan() {
         setScanError(null);
       } catch {
         setScanError("Failed to reset scan state");
+      }
+    },
+
+    stopScan: async () => {
+      setStopping(true);
+      try {
+        await api.stopScan();
+      } catch {
+        setStopping(false);
+        setScanError("Failed to stop scan");
       }
     },
 

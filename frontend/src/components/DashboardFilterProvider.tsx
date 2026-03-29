@@ -1,0 +1,199 @@
+import { Component, JSX, createContext, createMemo, useContext } from "solid-js";
+import { useSearchParams } from "@solidjs/router";
+import { createResource } from "solid-js";
+import { api } from "../api/client";
+import type { ActiveFilters, TargetAggregationResponse } from "../types";
+
+interface DashboardFilterAPI {
+  filters: () => ActiveFilters;
+  targetData: ReturnType<typeof createResource<TargetAggregationResponse | undefined>>[0];
+  refetchTargets: () => void;
+  updateFilter: (key: string, value: any) => void;
+  toggleOpticalFilter: (name: string) => void;
+  toggleObjectType: (type: string) => void;
+  updateQualityFilters: (qf: { hfrMin?: number; hfrMax?: number }) => void;
+  updateMetricFilter: (metric: string, range: { min?: number; max?: number }) => void;
+  addFitsQuery: (key: string, operator: string, value: string) => void;
+  removeFitsQuery: (index: number) => void;
+  resetFilters: () => void;
+}
+
+const DashboardFilterContext = createContext<DashboardFilterAPI>();
+
+export function useDashboardFilters(): DashboardFilterAPI {
+  const ctx = useContext(DashboardFilterContext);
+  if (!ctx) throw new Error("useDashboardFilters must be used inside DashboardFilterProvider");
+  return ctx;
+}
+
+const FILTER_KEYS = [
+  "search", "camera", "telescope", "filters", "object_type",
+  "date_from", "date_to", "hfr_min", "hfr_max",
+  "fits_key", "fits_op", "fits_val",
+];
+const METRIC_KEYS = [
+  "fwhm", "eccentricity", "stars", "guiding_rms", "adu_mean",
+  "focuser_temp", "ambient_temp", "humidity", "airmass",
+];
+const ALL_PARAM_KEYS = [
+  ...FILTER_KEYS,
+  ...METRIC_KEYS.flatMap((k) => [`${k}_min`, `${k}_max`]),
+];
+
+function hasFilterParams(sp: Record<string, string | undefined>): boolean {
+  return ALL_PARAM_KEYS.some((k) => sp[k] !== undefined && sp[k] !== "");
+}
+
+function deriveFilters(sp: Record<string, string | undefined>): ActiveFilters {
+  const fitsKeys = sp.fits_key?.split(",").filter(Boolean) ?? [];
+  const fitsOps = sp.fits_op?.split(",").filter(Boolean) ?? [];
+  const fitsVals = sp.fits_val?.split(",").filter(Boolean) ?? [];
+  const fitsQueries = fitsKeys.map((key, i) => ({
+    key,
+    operator: fitsOps[i] ?? "eq",
+    value: fitsVals[i] ?? "",
+  }));
+
+  const qualityFilters: { hfrMin?: number; hfrMax?: number } = {};
+  if (sp.hfr_min) qualityFilters.hfrMin = parseFloat(sp.hfr_min);
+  if (sp.hfr_max) qualityFilters.hfrMax = parseFloat(sp.hfr_max);
+
+  const metricFilters: Record<string, { min?: number; max?: number }> = {};
+  for (const key of METRIC_KEYS) {
+    const min = sp[`${key}_min`];
+    const max = sp[`${key}_max`];
+    if (min != null || max != null) {
+      metricFilters[key] = {};
+      if (min != null) metricFilters[key].min = parseFloat(min);
+      if (max != null) metricFilters[key].max = parseFloat(max);
+    }
+  }
+
+  return {
+    searchQuery: sp.search ?? "",
+    camera: sp.camera || null,
+    telescope: sp.telescope || null,
+    opticalFilters: sp.filters?.split(",").filter(Boolean) ?? [],
+    objectTypes: sp.object_type?.split(",").filter(Boolean) ?? [],
+    dateRange: {
+      start: sp.date_from || null,
+      end: sp.date_to || null,
+    },
+    fitsQueries,
+    qualityFilters,
+    metricFilters,
+  };
+}
+
+const DashboardFilterProvider: Component<{ children: JSX.Element }> = (props) => {
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  const filters = createMemo(() => deriveFilters(searchParams));
+
+  const [targetData, { refetch: refetchTargets }] = createResource(filters, (f) => api.getTargets(f));
+
+  const set = (updates: Record<string, string | undefined>) => {
+    setSearchParams(updates, { replace: true });
+  };
+
+  const updateFilter = (key: string, value: any) => {
+    switch (key) {
+      case "searchQuery":
+        set({ search: value || undefined });
+        break;
+      case "camera":
+        set({ camera: value || undefined });
+        break;
+      case "telescope":
+        set({ telescope: value || undefined });
+        break;
+      case "dateRange": {
+        const dr = value as { start: string | null; end: string | null };
+        set({ date_from: dr.start || undefined, date_to: dr.end || undefined });
+        break;
+      }
+      default:
+        break;
+    }
+  };
+
+  const toggleOpticalFilter = (name: string) => {
+    const current = filters().opticalFilters;
+    const next = current.includes(name)
+      ? current.filter((x) => x !== name)
+      : [...current, name];
+    set({ filters: next.length > 0 ? next.join(",") : undefined });
+  };
+
+  const toggleObjectType = (type: string) => {
+    const current = filters().objectTypes;
+    const next = current.includes(type)
+      ? current.filter((x) => x !== type)
+      : [...current, type];
+    set({ object_type: next.length > 0 ? next.join(",") : undefined });
+  };
+
+  const updateQualityFilters = (qf: { hfrMin?: number; hfrMax?: number }) => {
+    set({
+      hfr_min: qf.hfrMin != null ? String(qf.hfrMin) : undefined,
+      hfr_max: qf.hfrMax != null ? String(qf.hfrMax) : undefined,
+    });
+  };
+
+  const updateMetricFilter = (metric: string, range: { min?: number; max?: number }) => {
+    set({
+      [`${metric}_min`]: range.min != null ? String(range.min) : undefined,
+      [`${metric}_max`]: range.max != null ? String(range.max) : undefined,
+    });
+  };
+
+  const addFitsQuery = (key: string, operator: string, value: string) => {
+    const current = filters().fitsQueries;
+    const next = [...current, { key, operator, value }];
+    set({
+      fits_key: next.map((q) => q.key).join(","),
+      fits_op: next.map((q) => q.operator).join(","),
+      fits_val: next.map((q) => q.value).join(","),
+    });
+  };
+
+  const removeFitsQuery = (index: number) => {
+    const next = filters().fitsQueries.filter((_, i) => i !== index);
+    set({
+      fits_key: next.length > 0 ? next.map((q) => q.key).join(",") : undefined,
+      fits_op: next.length > 0 ? next.map((q) => q.operator).join(",") : undefined,
+      fits_val: next.length > 0 ? next.map((q) => q.value).join(",") : undefined,
+    });
+  };
+
+  const resetFilters = () => {
+    const clear: Record<string, undefined> = {};
+    for (const key of ALL_PARAM_KEYS) {
+      clear[key] = undefined;
+    }
+    set(clear);
+  };
+
+  const value: DashboardFilterAPI = {
+    filters,
+    targetData,
+    refetchTargets,
+    updateFilter,
+    toggleOpticalFilter,
+    toggleObjectType,
+    updateQualityFilters,
+    updateMetricFilter,
+    addFitsQuery,
+    removeFitsQuery,
+    resetFilters,
+  };
+
+  return (
+    <DashboardFilterContext.Provider value={value}>
+      {props.children}
+    </DashboardFilterContext.Provider>
+  );
+};
+
+export { hasFilterParams, ALL_PARAM_KEYS };
+export default DashboardFilterProvider;

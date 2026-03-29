@@ -1,8 +1,8 @@
 import { Component, createSignal, createEffect } from "solid-js";
-import { useCatalog } from "../store/catalog";
+import { useDashboardFilters } from "./DashboardFilterProvider";
 
 const QualityFilters: Component = () => {
-  const { filters, updateQualityFilters } = useCatalog();
+  const { filters, updateQualityFilters } = useDashboardFilters();
   const [hfrMin, setHfrMin] = createSignal<string>("");
   const [hfrMax, setHfrMax] = createSignal<string>("");
 
