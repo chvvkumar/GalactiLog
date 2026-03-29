@@ -315,12 +315,36 @@ export interface HfrBucket {
   count: number;
 }
 
+export interface EquipmentFilterMetrics {
+  filter_name: string;
+  frame_count: number;
+  total_integration_seconds: number;
+  median_hfr: number | null;
+  best_hfr: number | null;
+  median_eccentricity: number | null;
+  median_fwhm: number | null;
+}
+
+export interface EquipmentComboMetrics {
+  telescope: string;
+  camera: string;
+  frame_count: number;
+  total_integration_seconds: number;
+  median_hfr: number | null;
+  best_hfr: number | null;
+  median_eccentricity: number | null;
+  median_fwhm: number | null;
+  filters: string[];
+  filter_breakdown: EquipmentFilterMetrics[];
+}
+
 export interface StatsResponse {
   overview: AggregateStats;
   equipment: {
     cameras: EquipmentItem[];
     telescopes: EquipmentItem[];
   };
+  equipment_performance: EquipmentComboMetrics[];
   filter_usage: Record<string, number>;
   timeline: TimelineEntry[];
   top_targets: TopTarget[];
