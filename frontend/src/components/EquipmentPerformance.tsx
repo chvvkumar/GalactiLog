@@ -11,18 +11,8 @@ function formatMetric(val: number | null, suffix = ""): string {
   return val.toFixed(2) + suffix;
 }
 
-function hfrClass(val: number | null): string {
-  if (val === null) return "text-theme-text-secondary";
-  if (val <= 2.0) return "text-green-400";
-  if (val <= 3.5) return "text-amber-400";
-  return "text-red-400";
-}
-
-function eccClass(val: number | null): string {
-  if (val === null) return "text-theme-text-secondary";
-  if (val <= 0.4) return "text-green-400";
-  if (val <= 0.575) return "text-amber-400";
-  return "text-red-400";
+function metricClass(val: number | null): string {
+  return val !== null ? "text-theme-text-primary" : "text-theme-text-secondary";
 }
 
 const FilterBreakdownRow: Component<{ row: EquipmentFilterMetrics }> = (props) => {
@@ -38,16 +28,16 @@ const FilterBreakdownRow: Component<{ row: EquipmentFilterMetrics }> = (props) =
       <td class="text-right text-theme-text-secondary py-1 px-2 tabular-nums">
         {formatHours(props.row.total_integration_seconds)}
       </td>
-      <td class={`text-right py-1 px-2 tabular-nums ${hfrClass(props.row.median_hfr)}`}>
+      <td class={`text-right py-1 px-2 tabular-nums ${metricClass(props.row.median_hfr)}`}>
         {formatMetric(props.row.median_hfr)}
       </td>
-      <td class={`text-right py-1 px-2 tabular-nums ${hfrClass(props.row.best_hfr)}`}>
+      <td class={`text-right py-1 px-2 tabular-nums ${metricClass(props.row.best_hfr)}`}>
         {formatMetric(props.row.best_hfr)}
       </td>
-      <td class={`text-right py-1 px-2 tabular-nums ${eccClass(props.row.median_eccentricity)}`}>
+      <td class={`text-right py-1 px-2 tabular-nums ${metricClass(props.row.median_eccentricity)}`}>
         {formatMetric(props.row.median_eccentricity)}
       </td>
-      <td class={`text-right py-1 px-2 tabular-nums ${props.row.median_fwhm !== null ? "text-theme-text-primary" : "text-theme-text-secondary"}`}>
+      <td class={`text-right py-1 px-2 tabular-nums ${metricClass(props.row.median_fwhm)}`}>
         {formatMetric(props.row.median_fwhm, "\u2033")}
       </td>
     </tr>
@@ -92,16 +82,16 @@ const ComboRow: Component<{ combo: EquipmentComboMetrics }> = (props) => {
         <td class="text-right text-theme-text-secondary py-1.5 px-2 tabular-nums">
           {formatHours(props.combo.total_integration_seconds)}
         </td>
-        <td class={`text-right py-1.5 px-2 tabular-nums ${hfrClass(props.combo.median_hfr)}`}>
+        <td class={`text-right py-1.5 px-2 tabular-nums ${metricClass(props.combo.median_hfr)}`}>
           {formatMetric(props.combo.median_hfr)}
         </td>
-        <td class={`text-right py-1.5 px-2 tabular-nums ${hfrClass(props.combo.best_hfr)}`}>
+        <td class={`text-right py-1.5 px-2 tabular-nums ${metricClass(props.combo.best_hfr)}`}>
           {formatMetric(props.combo.best_hfr)}
         </td>
-        <td class={`text-right py-1.5 px-2 tabular-nums ${eccClass(props.combo.median_eccentricity)}`}>
+        <td class={`text-right py-1.5 px-2 tabular-nums ${metricClass(props.combo.median_eccentricity)}`}>
           {formatMetric(props.combo.median_eccentricity)}
         </td>
-        <td class={`text-right py-1.5 px-2 tabular-nums ${props.combo.median_fwhm !== null ? "text-theme-text-primary" : "text-theme-text-secondary"}`}>
+        <td class={`text-right py-1.5 px-2 tabular-nums ${metricClass(props.combo.median_fwhm)}`}>
           {formatMetric(props.combo.median_fwhm, "\u2033")}
         </td>
         <td class="py-1.5 px-2">
