@@ -11,6 +11,7 @@ class OverviewStats(BaseModel):
 class EquipmentItem(BaseModel):
     name: str
     frame_count: int
+    grouped: bool = False
 
 
 class EquipmentStats(BaseModel):

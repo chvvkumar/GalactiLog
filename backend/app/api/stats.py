@@ -94,20 +94,24 @@ async def get_stats(session: AsyncSession = Depends(get_session)):
     ).group_by(Image.camera).order_by(func.count(Image.id).desc())
     cam_result = await session.execute(cam_q)
     raw_cam_counts: dict[str, int] = {}
+    cam_raw_names: dict[str, set[str]] = {}
     for r in cam_result.all():
         canonical = normalize_equipment(r[0], cam_map) or r[0]
         raw_cam_counts[canonical] = raw_cam_counts.get(canonical, 0) + r[1]
-    cameras = [EquipmentItem(name=name, frame_count=count) for name, count in sorted(raw_cam_counts.items(), key=lambda x: x[1], reverse=True)]
+        cam_raw_names.setdefault(canonical, set()).add(r[0])
+    cameras = [EquipmentItem(name=name, frame_count=count, grouped=len(cam_raw_names[name]) > 1) for name, count in sorted(raw_cam_counts.items(), key=lambda x: x[1], reverse=True)]
 
     tel_q = select(Image.telescope, func.count(Image.id)).where(
         Image.telescope.isnot(None)
     ).group_by(Image.telescope).order_by(func.count(Image.id).desc())
     tel_result = await session.execute(tel_q)
     raw_tel_counts: dict[str, int] = {}
+    tel_raw_names: dict[str, set[str]] = {}
     for r in tel_result.all():
         canonical = normalize_equipment(r[0], tel_map) or r[0]
         raw_tel_counts[canonical] = raw_tel_counts.get(canonical, 0) + r[1]
-    telescopes = [EquipmentItem(name=name, frame_count=count) for name, count in sorted(raw_tel_counts.items(), key=lambda x: x[1], reverse=True)]
+        tel_raw_names.setdefault(canonical, set()).add(r[0])
+    telescopes = [EquipmentItem(name=name, frame_count=count, grouped=len(tel_raw_names[name]) > 1) for name, count in sorted(raw_tel_counts.items(), key=lambda x: x[1], reverse=True)]
 
     equipment = EquipmentStats(cameras=cameras, telescopes=telescopes)
 

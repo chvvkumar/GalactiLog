@@ -298,6 +298,7 @@ export interface MergedTargetResponse {
 export interface EquipmentItem {
   name: string;
   frame_count: number;
+  grouped: boolean;
 }
 
 export interface TimelineEntry {
