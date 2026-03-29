@@ -1,8 +1,8 @@
 import { Component } from "solid-js";
-import { useCatalog } from "../store/catalog";
+import { useDashboardFilters } from "./DashboardFilterProvider";
 
 const DateRangePicker: Component = () => {
-  const { filters, updateFilter, targetData } = useCatalog();
+  const { filters, updateFilter, targetData } = useDashboardFilters();
 
   const dateBounds = () => {
     const data = targetData();
