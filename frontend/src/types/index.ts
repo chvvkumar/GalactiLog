@@ -175,9 +175,14 @@ export interface FrameRecord {
 
 // === Equipment ===
 
+export interface EquipmentOption {
+  name: string;
+  grouped: boolean;
+}
+
 export interface EquipmentList {
-  cameras: string[];
-  telescopes: string[];
+  cameras: EquipmentOption[];
+  telescopes: EquipmentOption[];
 }
 
 // === Filters ===

@@ -197,9 +197,14 @@ class SessionDetailResponse(BaseModel):
     median_cloud_cover: float | None = None
 
 
+class EquipmentOption(BaseModel):
+    name: str
+    grouped: bool = False
+
+
 class EquipmentResponse(BaseModel):
-    cameras: list[str]
-    telescopes: list[str]
+    cameras: list[EquipmentOption]
+    telescopes: list[EquipmentOption]
 
 
 class TargetSearchResultFuzzy(BaseModel):
