@@ -5,6 +5,13 @@ on:
     branches:
       - dev
       - main
+    paths-ignore:
+      - '*.md'
+      - '**/*.md'
+      - 'images/**'
+      - 'guides/**'
+      - 'docs/**'
+      - 'LICENSE'
 
 permissions:
   contents: write
@@ -201,22 +208,18 @@ jobs:
           BODY=$(echo "$RESPONSE" | sed '$d')
 
           if [ "$HTTP_CODE" = "200" ]; then
-            NOTES=$(echo "$BODY" | python3 -c '
+            echo "$BODY" | python3 -c '
           import sys, json
           try:
               data = json.load(sys.stdin)
               text = data["candidates"][0]["content"]["parts"][0]["text"]
-              print(text)
+              with open("/tmp/release_notes.txt", "w") as f:
+                  f.write(text)
+                  f.write("\n\n---\n*Release notes generated from commit messages automatically.*\n")
           except (KeyError, IndexError, json.JSONDecodeError):
               sys.exit(1)
-          ')
-            if [ $? -eq 0 ] && [ -n "$NOTES" ]; then
-              {
-                echo "$NOTES"
-                echo ""
-                echo "---"
-                echo "*Release notes generated from commit messages automatically.*"
-              } > /tmp/release_notes.txt
+          '
+            if [ $? -eq 0 ] && [ -s /tmp/release_notes.txt ]; then
               echo "generated=true" >> "$GITHUB_OUTPUT"
             else
               echo "generated=false" >> "$GITHUB_OUTPUT"

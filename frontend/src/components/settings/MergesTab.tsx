@@ -71,101 +71,106 @@ export const MergesTab: Component = () => {
   };
 
   return (
-    <div class="space-y-6">
-      <div class="flex gap-2 items-center">
-        <button
-          onClick={() => setView("suggestions")}
-          class={`px-3 py-1 text-sm rounded ${
-            view() === "suggestions" ? "bg-theme-accent text-theme-text-primary" : "bg-theme-elevated text-theme-text-secondary"
-          }`}
-        >
-          Suggestions ({candidates().length})
-        </button>
-        <button
-          onClick={() => setView("merged")}
-          class={`px-3 py-1 text-sm rounded ${
-            view() === "merged" ? "bg-theme-accent text-theme-text-primary" : "bg-theme-elevated text-theme-text-secondary"
-          }`}
-        >
-          Merged ({merged().length})
-        </button>
-        <button
-          onClick={handleDetect}
-          disabled={detecting()}
-          class="ml-auto px-3 py-1 text-sm bg-theme-elevated text-theme-text-secondary hover:text-theme-text-primary rounded disabled:opacity-50"
-        >
-          {detecting() ? "Detecting..." : "Run Detection"}
-        </button>
+    <div class="space-y-4">
+      <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-4 space-y-3">
+        <div class="flex justify-between items-center">
+          <h3 class="text-theme-text-primary font-medium">Target Merges</h3>
+          <button
+            onClick={handleDetect}
+            disabled={detecting()}
+            class="px-3 py-1.5 border border-theme-border-em text-theme-text-secondary rounded text-sm disabled:opacity-50 hover:text-theme-text-primary hover:border-theme-accent transition-colors"
+          >
+            {detecting() ? "Detecting..." : "Run Detection"}
+          </button>
+        </div>
+        <div class="flex gap-2">
+          <button
+            onClick={() => setView("suggestions")}
+            class={`px-3 py-1.5 text-sm rounded-[var(--radius-sm)] transition-colors ${
+              view() === "suggestions" ? "bg-theme-accent text-white" : "border border-theme-border text-theme-text-secondary hover:text-theme-text-primary"
+            }`}
+          >
+            Suggestions ({candidates().length})
+          </button>
+          <button
+            onClick={() => setView("merged")}
+            class={`px-3 py-1.5 text-sm rounded-[var(--radius-sm)] transition-colors ${
+              view() === "merged" ? "bg-theme-accent text-white" : "border border-theme-border text-theme-text-secondary hover:text-theme-text-primary"
+            }`}
+          >
+            Merged ({merged().length})
+          </button>
+        </div>
+
+        <Show when={view() === "suggestions"}>
+          <Show
+            when={candidates().length > 0}
+            fallback={<p class="text-sm text-theme-text-secondary">No pending suggestions. Run detection to scan for duplicates.</p>}
+          >
+            <div class="space-y-2">
+              <For each={candidates()}>
+                {(c) => (
+                  <div class="flex items-center justify-between p-3 bg-theme-base/50 border border-theme-border rounded-[var(--radius-sm)]">
+                    <div class="flex-1">
+                      <span class="text-theme-text-primary text-sm font-medium">{c.source_name}</span>
+                      <span class="text-theme-text-secondary text-xs mx-2">&rarr;</span>
+                      <span class="text-theme-accent text-sm">{c.suggested_target_name}</span>
+                      <div class="text-xs text-theme-text-secondary mt-0.5">
+                        {c.method === "simbad" ? "SIMBAD confirmed" : `${Math.round(c.similarity_score * 100)}% match`}
+                        {" \u00b7 "}{c.source_image_count} images
+                      </div>
+                    </div>
+                    <div class="flex gap-2">
+                      <button
+                        onClick={() => handleMerge(c)}
+                        class="px-2 py-1 text-xs bg-theme-success text-theme-text-primary rounded hover:opacity-90"
+                      >
+                        Merge
+                      </button>
+                      <button
+                        onClick={() => handleDismiss(c)}
+                        class="px-2 py-1 text-xs border border-theme-border text-theme-text-secondary rounded hover:text-theme-text-primary transition-colors"
+                      >
+                        Dismiss
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </For>
+            </div>
+          </Show>
+        </Show>
+
+        <Show when={view() === "merged"}>
+          <Show
+            when={merged().length > 0}
+            fallback={<p class="text-sm text-theme-text-secondary">No merged targets yet.</p>}
+          >
+            <div class="space-y-2">
+              <For each={merged()}>
+                {(m) => (
+                  <div class="flex items-center justify-between p-3 bg-theme-base/50 border border-theme-border rounded-[var(--radius-sm)]">
+                    <div class="flex-1">
+                      <span class="text-theme-text-secondary text-sm">{m.primary_name}</span>
+                      <span class="text-theme-text-secondary text-xs mx-2">&larr; merged into &rarr;</span>
+                      <span class="text-theme-text-primary text-sm font-medium">{m.merged_into_name}</span>
+                      <div class="text-xs text-theme-text-secondary mt-0.5">
+                        {m.image_count} images {" \u00b7 "} {new Date(m.merged_at).toLocaleDateString([], { timeZone: "UTC" })}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleUnmerge(m)}
+                      class="px-2 py-1 text-xs bg-theme-warning text-theme-text-primary rounded hover:opacity-90"
+                    >
+                      Unmerge
+                    </button>
+                  </div>
+                )}
+              </For>
+            </div>
+          </Show>
+        </Show>
       </div>
-
-      <Show when={view() === "suggestions"}>
-        <Show
-          when={candidates().length > 0}
-          fallback={<p class="text-sm text-theme-text-secondary">No pending suggestions. Run detection to scan for duplicates.</p>}
-        >
-          <div class="space-y-2">
-            <For each={candidates()}>
-              {(c) => (
-                <div class="flex items-center justify-between p-3 bg-theme-base border border-theme-border rounded">
-                  <div class="flex-1">
-                    <span class="text-theme-text-primary text-sm font-medium">{c.source_name}</span>
-                    <span class="text-theme-text-secondary text-xs mx-2">&rarr;</span>
-                    <span class="text-theme-accent text-sm">{c.suggested_target_name}</span>
-                    <div class="text-xs text-theme-text-secondary mt-0.5">
-                      {c.method === "simbad" ? "SIMBAD confirmed" : `${Math.round(c.similarity_score * 100)}% match`}
-                      {" \u00b7 "}{c.source_image_count} images
-                    </div>
-                  </div>
-                  <div class="flex gap-2">
-                    <button
-                      onClick={() => handleMerge(c)}
-                      class="px-2 py-1 text-xs bg-theme-success text-theme-text-primary rounded hover:opacity-90"
-                    >
-                      Merge
-                    </button>
-                    <button
-                      onClick={() => handleDismiss(c)}
-                      class="px-2 py-1 text-xs bg-theme-elevated text-theme-text-secondary rounded hover:text-theme-text-primary"
-                    >
-                      Dismiss
-                    </button>
-                  </div>
-                </div>
-              )}
-            </For>
-          </div>
-        </Show>
-      </Show>
-
-      <Show when={view() === "merged"}>
-        <Show
-          when={merged().length > 0}
-          fallback={<p class="text-sm text-theme-text-secondary">No merged targets yet.</p>}
-        >
-          <div class="space-y-2">
-            <For each={merged()}>
-              {(m) => (
-                <div class="flex items-center justify-between p-3 bg-theme-base border border-theme-border rounded">
-                  <div class="flex-1">
-                    <span class="text-theme-text-secondary text-sm">{m.primary_name}</span>
-                    <span class="text-theme-text-secondary text-xs mx-2">&larr; merged into &rarr;</span>
-                    <span class="text-theme-text-primary text-sm font-medium">{m.merged_into_name}</span>
-                    <div class="text-xs text-theme-text-secondary mt-0.5">
-                      {m.image_count} images {" \u00b7 "} {new Date(m.merged_at).toLocaleDateString([], { timeZone: "UTC" })}
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => handleUnmerge(m)}
-                    class="px-2 py-1 text-xs bg-theme-warning text-theme-text-primary rounded hover:opacity-90"
-                  >
-                    Unmerge
-                  </button>
-                </div>
-              )}
-            </For>
-          </div>
-        </Show>
-      </Show>
     </div>
   );
 };

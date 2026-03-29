@@ -103,15 +103,15 @@ export const EquipmentTab: Component = () => {
   };
 
   return (
-    <div class="space-y-8">
+    <div class="space-y-4">
       <SuggestionsBanner
         suggestions={suggestions().suggestions}
         onMerge={handleMerge}
         onDismiss={handleDismiss}
       />
 
-      <div class="space-y-2">
-        <h2 class="text-sm text-theme-text-secondary font-medium uppercase tracking-wide">Cameras</h2>
+      <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-4 space-y-3">
+        <h3 class="text-theme-text-primary font-medium">Cameras</h3>
         <GroupingEditor
           discovered={discoveredCameras()}
           groups={cameraGroups()}
@@ -119,8 +119,8 @@ export const EquipmentTab: Component = () => {
         />
       </div>
 
-      <div class="space-y-2">
-        <h2 class="text-sm text-theme-text-secondary font-medium uppercase tracking-wide">Telescopes</h2>
+      <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-4 space-y-3">
+        <h3 class="text-theme-text-primary font-medium">Telescopes</h3>
         <GroupingEditor
           discovered={discoveredTelescopes()}
           groups={telescopeGroups()}
@@ -128,13 +128,15 @@ export const EquipmentTab: Component = () => {
         />
       </div>
 
-      <button
-        onClick={handleSave}
-        disabled={saving()}
-        class="px-4 py-2 bg-theme-accent text-white rounded text-sm hover:opacity-90 disabled:opacity-50 transition-opacity"
-      >
-        {saving() ? "Saving..." : "Save"}
-      </button>
+      <div class="flex justify-end">
+        <button
+          onClick={handleSave}
+          disabled={saving()}
+          class="px-3 py-1.5 bg-theme-accent text-white rounded text-sm hover:opacity-90 disabled:opacity-50 transition-opacity"
+        >
+          {saving() ? "Saving..." : "Save"}
+        </button>
+      </div>
     </div>
   );
 };

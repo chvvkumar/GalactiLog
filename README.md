@@ -1,11 +1,11 @@
 <p align="center">
-  <img src="images\logo-small.png" alt="GalactiLog" width="300">
+  <img src="images\logo-transparent.png" alt="GalactiLog" width="300">
 </p>
 
 <h3 align="center">Astrophotography FITS file catalog and session browser</h3>
 
 <p align="center">
-  Self-hosted web application that automatically ingests N.I.N.A. imaging sessions, resolves targets via SIMBAD, and provides detailed analytics for your astrophotography data.
+  Self-hosted web application that automatically catalogs FITS files from N.I.N.A. imaging sessions and provides detailed analytics for your astrophotography data.
 </p>
 
 <table align="center">
@@ -21,8 +21,8 @@
   </tr>
   <tr>
     <td><strong>Release</strong></td>
-    <td><a href="https://github.com/chvvkumar/GalactiLog/releases/latest"><img src="https://img.shields.io/github/v/release/chvvkumar/GalactiLog?label=release" alt="Latest Release"></a></td>
-    <td><a href="https://github.com/chvvkumar/GalactiLog/releases"><img src="https://img.shields.io/github/v/release/chvvkumar/GalactiLog?include_prereleases&label=pre-release" alt="Pre-release"></a></td>
+    <td><a href="https://github.com/chvvkumar/GalactiLog/releases/latest"><img src="https://img.shields.io/github/v/release/chvvkumar/GalactiLog?filter=*&label=release" alt="Latest Release"></a></td>
+    <td><a href="https://github.com/chvvkumar/GalactiLog/releases"><img src="https://img.shields.io/github/v/release/chvvkumar/GalactiLog?include_prereleases&filter=*&label=pre-release" alt="Pre-release"></a></td>
   </tr>
   <tr>
     <td><strong>Docker Tag</strong></td>
@@ -52,24 +52,21 @@
 
 ---
 
+<p align="center">
+  <img src="images\logo-small.png" alt="GalactiLog" width="300">
+</p>
+
 ## Features
 
 ### Automatic Ingestion
 - Scans directories for FITS files and extracts metadata from headers
 - Backfills extended metrics from N.I.N.A. CSV session logs (HFR, FWHM, detected stars, guiding RMS, ADU statistics)
 - Configurable auto-scan scheduler with adjustable intervals
-- Supports LIGHT, DARK, FLAT, and BIAS frame types
 
 ### Target Resolution
-- Resolves object names to canonical designations via the SIMBAD astronomical database
+- Resolves object names to canonical designations via the SIMBAD database
 - Maintains aliases, catalog IDs (Messier, NGC, IC, Caldwell, Sharpless, etc.), and common names
 - Detects potential duplicate targets using trigram similarity scoring
-- Merge and unmerge targets with full history tracking
-
-### Image Processing
-- Generates JPEG thumbnails from raw FITS data using MTF (Midtones Transfer Function) auto-stretch
-- Stretch algorithm matches N.I.N.A. and PixInsight Auto STF output
-- Per-channel processing with median/MAD-based shadow clipping and midtone balancing
 
 ### Session Analytics
 - Per-session quality metrics: HFR, FWHM, eccentricity, detected stars, guiding RMS (total, RA, Dec)
@@ -88,22 +85,19 @@
 
 ### Advanced Filtering
 - Fuzzy target search with similarity scoring and alias matching
-- Object type toggles (Galaxy, Emission Nebula, Planetary Nebula, Open Cluster, etc.)
+- Object type filtering (Galaxy, Emission Nebula, Planetary Nebula, Open Cluster, etc.)
 - Date range filtering
-- Optical filter selection (Ha, OIII, SII, L, R, G, B, and custom filters)
+- Optical filter selection
 - Equipment filtering by camera and telescope
 - Quality metric ranges (HFR, FWHM, eccentricity, detected stars, guiding RMS)
 - Environmental metric ranges (ambient temperature, humidity, airmass)
-- Raw FITS header query builder with operators (=, !=, >, <, contains, etc.)
+- Raw FITS header query builder with operators (=, !=, >, <, contains, etc.) to be able to search sessions based on FITS information
 
 ### Customization
-- 5 built-in themes: Default Dark, Nebula Glass, Aurora Glass, Nebula Cyan, Stellar Glass
-- 9 filter badge display styles (solid, muted, outlined, text-only, indicator dots, and more)
-- 4 text size presets
 - Per-group metric visibility toggles (Quality, Guiding, ADU, Focuser, Weather, Mount)
-- Filter and equipment name aliasing with color customization
+- Filter and equipment name aliasing with color customization for filters
 
-## Screenshot
+## Screenshots
 
 <p align="center">
   <img src="images/screenshots/dashboard.png" alt="GalactiLog Dashboard" width="100%">

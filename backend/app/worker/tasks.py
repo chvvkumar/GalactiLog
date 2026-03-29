@@ -36,7 +36,7 @@ from app.services.scan_state import (
     start_scanning_sync, set_ingesting_sync, set_idle_sync,
     set_rebuild_running_sync, set_rebuild_progress_sync, set_rebuild_complete_sync,
     set_discovered_sync, is_cancel_requested_sync, clear_cancel_sync, set_cancelled_sync,
-    append_activity_sync,
+    append_activity_sync, _check_complete_sync,
 )
 
 _redis = get_sync_redis()
@@ -59,10 +59,16 @@ def run_scan(self, include_calibration: bool = True) -> dict:
         known_paths = {row[0] for row in result.all()}
 
     fits_root = Path(settings.fits_data_path)
+
+    # Dispatch ingest tasks as files are discovered (parallel discovery + ingestion)
+    def _queue_file(path: Path) -> None:
+        ingest_file.delay(str(path))
+
     new_files, all_disk_paths = scan_directory(
         fits_root, known_paths=known_paths, include_calibration=include_calibration,
         on_progress=lambda count: set_discovered_sync(_redis, count),
         is_cancelled=lambda: is_cancel_requested_sync(_redis),
+        on_new_file=_queue_file,
     )
 
     if is_cancel_requested_sync(_redis):
@@ -120,10 +126,10 @@ def run_scan(self, include_calibration: bool = True) -> dict:
         })
         return {"status": "complete", "new_files_queued": 0, "already_known": len(known_paths), "removed": removed}
 
+    # Transition to ingesting with final total — ingest tasks are already running
     set_ingesting_sync(_redis, total=len(new_files))
-
-    for fits_path in new_files:
-        ingest_file.delay(str(fits_path))
+    # Some tasks may have already completed during discovery, check now
+    _check_complete_sync(_redis)
 
     # Queue duplicate detection after ingest
     detect_duplicate_targets.apply_async(countdown=30)
