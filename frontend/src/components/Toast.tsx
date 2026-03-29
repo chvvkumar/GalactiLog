@@ -18,9 +18,9 @@ export const Toast: Component = () => {
   return (
     <Show when={toast()}>
       {(t) => (
-        <div class="fixed top-6 left-1/2 -translate-x-1/2 z-50 animate-toast-down">
+        <div class="fixed top-6 inset-x-0 flex justify-center z-50">
           <div
-            class={`px-5 py-2.5 rounded-[var(--radius-md)] text-sm font-medium backdrop-blur-xl shadow-lg border ${
+            class={`animate-toast-down px-5 py-2.5 rounded-[var(--radius-md)] text-sm font-medium backdrop-blur-xl shadow-lg border ${
               t().type === "success"
                 ? "bg-theme-success/20 text-theme-success border-theme-success/30"
                 : "bg-theme-error/20 text-theme-error border-theme-error/30"

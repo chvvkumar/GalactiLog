@@ -24,6 +24,8 @@ interface Props {
 
 export const GroupingEditor: Component<Props> = (props) => {
   const [checked, setChecked] = createSignal<Set<string>>(new Set());
+  const [editing, setEditing] = createSignal<number | null>(null);
+  const [editValue, setEditValue] = createSignal("");
 
   /** Names that are part of any group (as canonical or alias) */
   const groupedNames = createMemo(() => {
@@ -103,6 +105,27 @@ export const GroupingEditor: Component<Props> = (props) => {
       return { ...g, color };
     });
     props.onGroupsChange(updated);
+  };
+
+  /** Start editing a group's name */
+  const startRename = (groupIndex: number) => {
+    setEditing(groupIndex);
+    setEditValue(props.groups[groupIndex].canonical);
+  };
+
+  /** Commit the rename */
+  const commitRename = () => {
+    const idx = editing();
+    if (idx === null) return;
+    const newName = editValue().trim();
+    if (newName && newName !== props.groups[idx].canonical) {
+      const updated = props.groups.map((g, i) => {
+        if (i !== idx) return g;
+        return { ...g, canonical: newName };
+      });
+      props.onGroupsChange(updated);
+    }
+    setEditing(null);
   };
 
   return (
@@ -193,7 +216,29 @@ export const GroupingEditor: Component<Props> = (props) => {
                       class="w-6 h-6 rounded cursor-pointer border-0 bg-transparent"
                     />
                   </Show>
-                  <span class="text-sm text-theme-text-primary font-medium">{group.canonical}</span>
+                  <Show when={editing() === i()} fallback={
+                    <button
+                      type="button"
+                      onClick={() => startRename(i())}
+                      class="text-sm text-theme-text-primary font-medium hover:text-theme-accent transition-colors"
+                      title="Click to rename"
+                    >
+                      {group.canonical}
+                    </button>
+                  }>
+                    <input
+                      type="text"
+                      value={editValue()}
+                      onInput={(e) => setEditValue(e.currentTarget.value)}
+                      onBlur={commitRename}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") commitRename();
+                        if (e.key === "Escape") setEditing(null);
+                      }}
+                      ref={(el) => setTimeout(() => el.focus(), 0)}
+                      class="text-sm font-medium bg-theme-input border border-theme-accent rounded px-1.5 py-0.5 text-theme-text-primary outline-none w-40"
+                    />
+                  </Show>
                 </div>
                 <div class="flex flex-wrap gap-1">
                   <For each={group.aliases}>
