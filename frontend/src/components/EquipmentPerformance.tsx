@@ -79,7 +79,7 @@ const ComboRow: Component<{ combo: EquipmentComboMetrics }> = (props) => {
                 class="text-theme-text-secondary text-[0.65rem] cursor-help"
                 title="Grouped: multiple equipment aliases are combined under this name"
               >
-                &#x229E;
+                &#x29C9;
               </span>
             </Show>
           </div>
