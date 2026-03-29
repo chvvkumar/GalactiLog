@@ -168,22 +168,30 @@ jobs:
 
           Keep it concise. Do not include a title or heading with the version number. Do not use emojis."
 
-          PAYLOAD=$(jq -n --arg prompt "$PROMPT" '{
-            "contents": [{"parts": [{"text": $prompt}]}],
-            "generationConfig": {"temperature": 0.7, "maxOutputTokens": 1024}
-          }')
+          ESCAPED_PROMPT=$(echo "$PROMPT" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read()))')
 
           RESPONSE=$(curl -s -w "\n%{http_code}" \
             -X POST "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}" \
             -H "Content-Type: application/json" \
-            -d "$PAYLOAD" 2>/dev/null)
+            -d "{
+              \"contents\": [{\"parts\": [{\"text\": $ESCAPED_PROMPT}]}],
+              \"generationConfig\": {\"temperature\": 0.7, \"maxOutputTokens\": 1024}
+            }" 2>/dev/null)
 
           HTTP_CODE=$(echo "$RESPONSE" | tail -n 1)
           BODY=$(echo "$RESPONSE" | sed '$d')
 
           if [ "$HTTP_CODE" = "200" ]; then
-            NOTES=$(echo "$BODY" | jq -r '.candidates[0].content.parts[0].text // empty')
-            if [ -n "$NOTES" ]; then
+            NOTES=$(echo "$BODY" | python3 -c '
+          import sys, json
+          try:
+              data = json.load(sys.stdin)
+              text = data["candidates"][0]["content"]["parts"][0]["text"]
+              print(text)
+          except (KeyError, IndexError, json.JSONDecodeError):
+              sys.exit(1)
+          ')
+            if [ $? -eq 0 ] && [ -n "$NOTES" ]; then
               {
                 echo "$NOTES"
                 echo ""
