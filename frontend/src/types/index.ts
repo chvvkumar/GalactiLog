@@ -426,6 +426,24 @@ export interface SettingsResponse {
   graph: GraphSettings;
 }
 
+// === Auth ===
+
+export interface AuthUser {
+  id: string;
+  username: string;
+  role: "admin" | "viewer";
+}
+
+export interface LoginRequest {
+  username: string;
+  password: string;
+}
+
+export interface LoginResponse {
+  username: string;
+  role: string;
+}
+
 export interface SuggestionGroup {
   group: string[];
   counts: Record<string, number>;
