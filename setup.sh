@@ -238,7 +238,7 @@ echo "    docker compose down           # Stop"
 echo ""
 
 # ── Final ─────────────────────────────────────────────────────────────────────
-info "You can trigger your first scan from the Admin page in the web UI."
+info "You can trigger your first scan from the Settings page in the web UI."
 echo ""
 header "All Done!"
 

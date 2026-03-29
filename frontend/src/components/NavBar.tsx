@@ -5,7 +5,10 @@ const NavBar: Component = () => {
 
   return (
     <header class="sticky top-0 z-30 bg-theme-surface backdrop-blur-sm border-b border-theme-border px-6 py-3 flex items-center gap-6">
-      <h1 class="text-theme-text-primary font-bold tracking-tight text-lg whitespace-nowrap">GalactiLog</h1>
+      <A href="/" class="flex items-center gap-2 no-underline">
+        <img src="/logo-transparent.png" alt="GalactiLog logo" class="h-7 w-7" />
+        <h1 class="text-theme-text-primary font-bold tracking-tight text-lg whitespace-nowrap">GalactiLog</h1>
+      </A>
       <nav class="flex gap-4">
         <A
           href="/"
