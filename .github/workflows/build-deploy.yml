@@ -1,0 +1,90 @@
+name: Build and Push Docker Image
+
+on:
+  push:
+    branches:
+      - dev
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-push:
+    runs-on: [self-hosted, Linux, X64]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine next version
+        id: version
+        run: |
+          BRANCH="${GITHUB_REF##*/}"
+          git fetch --tags --force
+
+          if [ "$BRANCH" = "dev" ]; then
+            # Find the latest rc tag
+            LATEST_RC=$(git tag -l '*-rc.*' | sort -V | tail -n 1)
+
+            if [ -z "$LATEST_RC" ]; then
+              NEXT_VERSION="1.0.0-rc.1"
+            else
+              # Extract base version and rc number
+              BASE=$(echo "$LATEST_RC" | sed 's/-rc\.[0-9]*//')
+              RC_NUM=$(echo "$LATEST_RC" | grep -oP '(?<=-rc\.)\d+')
+              NEXT_RC=$((RC_NUM + 1))
+              NEXT_VERSION="${BASE}-rc.${NEXT_RC}"
+            fi
+
+            echo "version=${NEXT_VERSION}" >> "$GITHUB_OUTPUT"
+            echo "docker_tags=chvvkumar/galactilog:${NEXT_VERSION},chvvkumar/galactilog:dev" >> "$GITHUB_OUTPUT"
+
+          elif [ "$BRANCH" = "main" ]; then
+            # Find the latest release tag (exclude rc tags)
+            LATEST_RELEASE=$(git tag -l | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1)
+
+            if [ -z "$LATEST_RELEASE" ]; then
+              NEXT_VERSION="1.0.0"
+            else
+              # Increment patch version
+              MAJOR=$(echo "$LATEST_RELEASE" | cut -d. -f1)
+              MINOR=$(echo "$LATEST_RELEASE" | cut -d. -f2)
+              PATCH=$(echo "$LATEST_RELEASE" | cut -d. -f3)
+              NEXT_PATCH=$((PATCH + 1))
+              NEXT_VERSION="${MAJOR}.${MINOR}.${NEXT_PATCH}"
+            fi
+
+            echo "version=${NEXT_VERSION}" >> "$GITHUB_OUTPUT"
+            echo "docker_tags=chvvkumar/galactilog:${NEXT_VERSION},chvvkumar/galactilog:latest" >> "$GITHUB_OUTPUT"
+          fi
+
+          echo "Resolved next version: ${NEXT_VERSION}"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to DockerHub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.version.outputs.docker_tags }}
+          cache-from: type=local,src=/tmp/.buildx-cache
+          cache-to: type=local,dest=/tmp/.buildx-cache,mode=max
+
+      - name: Create and push git tag
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git tag "${VERSION}"
+          git push origin "${VERSION}"
