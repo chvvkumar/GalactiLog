@@ -8,6 +8,48 @@
   Self-hosted web application that automatically ingests N.I.N.A. imaging sessions, resolves targets via SIMBAD, and provides detailed analytics for your astrophotography data.
 </p>
 
+<table align="center">
+  <tr>
+    <th></th>
+    <th>main (stable)</th>
+    <th>dev (pre-release)</th>
+  </tr>
+  <tr>
+    <td><strong>Build</strong></td>
+    <td><a href="https://github.com/chvvkumar/GalactiLog/actions/workflows/build-deploy.yml?query=branch%3Amain"><img src="https://github.com/chvvkumar/GalactiLog/actions/workflows/build-deploy.yml/badge.svg?branch=main" alt="main build"></a></td>
+    <td><a href="https://github.com/chvvkumar/GalactiLog/actions/workflows/build-deploy.yml?query=branch%3Adev"><img src="https://github.com/chvvkumar/GalactiLog/actions/workflows/build-deploy.yml/badge.svg?branch=dev" alt="dev build"></a></td>
+  </tr>
+  <tr>
+    <td><strong>Release</strong></td>
+    <td><a href="https://github.com/chvvkumar/GalactiLog/releases/latest"><img src="https://img.shields.io/github/v/release/chvvkumar/GalactiLog?label=release" alt="Latest Release"></a></td>
+    <td><a href="https://github.com/chvvkumar/GalactiLog/releases"><img src="https://img.shields.io/github/v/release/chvvkumar/GalactiLog?include_prereleases&label=pre-release" alt="Pre-release"></a></td>
+  </tr>
+  <tr>
+    <td><strong>Docker Tag</strong></td>
+    <td><a href="https://hub.docker.com/r/chvvkumar/galactilog"><img src="https://img.shields.io/docker/v/chvvkumar/galactilog/latest?label=latest" alt="Docker latest"></a></td>
+    <td><a href="https://hub.docker.com/r/chvvkumar/galactilog"><img src="https://img.shields.io/docker/v/chvvkumar/galactilog/dev?label=dev" alt="Docker dev"></a></td>
+  </tr>
+  <tr>
+    <td><strong>Image Size</strong></td>
+    <td><a href="https://hub.docker.com/r/chvvkumar/galactilog"><img src="https://img.shields.io/docker/image-size/chvvkumar/galactilog/latest?label=size" alt="Docker Image Size (latest)"></a></td>
+    <td><a href="https://hub.docker.com/r/chvvkumar/galactilog"><img src="https://img.shields.io/docker/image-size/chvvkumar/galactilog/dev?label=size" alt="Docker Image Size (dev)"></a></td>
+  </tr>
+</table>
+
+<p align="center">
+  <a href="https://hub.docker.com/r/chvvkumar/galactilog"><img src="https://img.shields.io/docker/pulls/chvvkumar/galactilog" alt="Docker Pulls"></a>
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/SolidJS-335d92?logo=solid&logoColor=white" alt="SolidJS">
+  <img src="https://img.shields.io/badge/TypeScript-3178c6?logo=typescript&logoColor=white" alt="TypeScript">
+  <img src="https://img.shields.io/badge/Tailwind_CSS-06b6d4?logo=tailwindcss&logoColor=white" alt="Tailwind CSS">
+  <img src="https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white" alt="FastAPI">
+  <img src="https://img.shields.io/badge/PostgreSQL-4169e1?logo=postgresql&logoColor=white" alt="PostgreSQL">
+  <img src="https://img.shields.io/badge/Redis-dc382d?logo=redis&logoColor=white" alt="Redis">
+  <img src="https://img.shields.io/badge/Docker-2496ed?logo=docker&logoColor=white" alt="Docker">
+</p>
+
 ---
 
 ## Features
