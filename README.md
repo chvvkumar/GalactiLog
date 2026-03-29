@@ -100,9 +100,23 @@
 ## Screenshots
 
 <p align="center">
+  <em>Dashboard — target catalog with advanced filtering, filter palettes, and equipment profiles</em><br>
   <img src="images/screenshots/dashboard.png" alt="GalactiLog Dashboard" width="100%">
-  
+</p>
+
+<p align="center">
+  <em>Statistics — integration totals, equipment performance, filter usage, imaging timeline, and storage breakdown</em><br>
   <img src="images/screenshots/Statistics.png" alt="GalactiLog Statistics" width="100%">
+</p>
+
+<p align="center">
+  <em>Target Metrics — quality trends across sessions with multi-metric charting for HFR, eccentricity, FWHM, and more</em><br>
+  <img src="images/screenshots/target-session-metrics.png" alt="Target Metrics Across Sessions" width="100%">
+</p>
+
+<p align="center">
+  <em>Session Metrics — per-frame data table, session insights, and interactive metric charts</em><br>
+  <img src="images/screenshots/session-metrics.png" alt="Session Metrics" width="100%">
 </p>
 
 ## Requirements
