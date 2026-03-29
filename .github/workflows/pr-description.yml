@@ -42,6 +42,8 @@ jobs:
           # Build the prompt
           PROMPT="You are writing a pull request title and description based on the commit messages and files changed below. Write with confidence and authority -- these changes are definitive, not speculative. Never use hedging language like 'seems to', 'appears to', 'might', or 'likely'. State what the changes do, not what they seem to do.
 
+          Do NOT use AI phraseology or filler words. Avoid words like: leverage, enhance, streamline, robust, seamless, comprehensive, cutting-edge, utilize, facilitate, empower, elevate, harness, spearhead, foster, bolster, pivotal, groundbreaking, synergy, paradigm, holistic, transformative. Write like a human developer -- plain, direct, technical language only.
+
           Generate:
           1. A brief, professional PR title (under 70 characters, no prefix like 'feat:' unless appropriate)
           2. A PR description in markdown with these sections:
