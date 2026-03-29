@@ -29,6 +29,7 @@ Thumbs.db
 
 # Generated data
 thumbnails/
+celerybeat-schedule
 
 CLAUDE.md
 

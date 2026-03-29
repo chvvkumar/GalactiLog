@@ -159,11 +159,8 @@ const SessionAccordionCard: Component<{
             {(detail) => (
               <div class="space-y-5 pt-4">
                 {/* Unified session overview table */}
-                <div class="flex gap-4">
-                  <div class="w-[110px] flex-shrink-0 flex items-center justify-center">
-                    <ReferenceThumbnail url={detail().thumbnail_url} />
-                  </div>
-                  <div class="flex-1 bg-theme-base rounded-[var(--radius-md)] overflow-hidden">
+                <div class="grid gap-4" style={{ "grid-template-columns": "1fr 200px" }}>
+                  <div class="bg-theme-base rounded-[var(--radius-md)] overflow-hidden">
                     <table class="w-full text-xs table-fixed" style={{ "border-collapse": "collapse" }}>
                       <colgroup>
                         <col style={{ width: "100px" }} />
@@ -245,6 +242,11 @@ const SessionAccordionCard: Component<{
                         })()}
                       </tbody>
                     </table>
+                  </div>
+                  <div class="relative" style={{ "grid-row": "1", "grid-column": "2" }}>
+                    <div class="absolute inset-0 overflow-hidden">
+                      <ReferenceThumbnail url={detail().thumbnail_url} fill />
+                    </div>
                   </div>
                 </div>
 
