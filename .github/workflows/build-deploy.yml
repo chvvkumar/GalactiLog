@@ -1,0 +1,272 @@
+name: Build and Push Docker Image
+
+on:
+  push:
+    branches:
+      - dev
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-push:
+    runs-on: [self-hosted, Linux, X64]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine next version
+        id: version
+        run: |
+          BRANCH="${GITHUB_REF##*/}"
+          git fetch --tags --force
+
+          if [ "$BRANCH" = "dev" ]; then
+            # Find the latest rc tag
+            LATEST_RC=$(git tag -l | grep -E '^[0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+$' | sort -V | tail -n 1)
+
+            if [ -z "$LATEST_RC" ]; then
+              NEXT_VERSION="1.0.0-rc.1"
+            else
+              # Extract base version and rc number
+              BASE=$(echo "$LATEST_RC" | sed 's/-rc\.[0-9]*//')
+              RC_NUM=$(echo "$LATEST_RC" | grep -oP '(?<=-rc\.)\d+')
+              NEXT_RC=$((RC_NUM + 1))
+              NEXT_VERSION="${BASE}-rc.${NEXT_RC}"
+            fi
+
+            echo "version=${NEXT_VERSION}" >> "$GITHUB_OUTPUT"
+            echo "docker_tags=chvvkumar/galactilog:${NEXT_VERSION},chvvkumar/galactilog:dev" >> "$GITHUB_OUTPUT"
+
+          elif [ "$BRANCH" = "main" ]; then
+            # Find the latest release tag (exclude rc tags)
+            LATEST_RELEASE=$(git tag -l | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1)
+
+            if [ -z "$LATEST_RELEASE" ]; then
+              NEXT_VERSION="1.0.0"
+            else
+              # Increment patch version
+              MAJOR=$(echo "$LATEST_RELEASE" | cut -d. -f1)
+              MINOR=$(echo "$LATEST_RELEASE" | cut -d. -f2)
+              PATCH=$(echo "$LATEST_RELEASE" | cut -d. -f3)
+              NEXT_PATCH=$((PATCH + 1))
+              NEXT_VERSION="${MAJOR}.${MINOR}.${NEXT_PATCH}"
+            fi
+
+            echo "version=${NEXT_VERSION}" >> "$GITHUB_OUTPUT"
+            echo "docker_tags=chvvkumar/galactilog:${NEXT_VERSION},chvvkumar/galactilog:latest" >> "$GITHUB_OUTPUT"
+          fi
+
+          echo "Resolved next version: ${NEXT_VERSION}"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to DockerHub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.version.outputs.docker_tags }}
+          cache-from: type=local,src=/tmp/.buildx-cache
+          cache-to: type=local,dest=/tmp/.buildx-cache,mode=max
+
+      - name: Create and push git tag
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git tag "${VERSION}"
+          git push origin "${VERSION}"
+
+      - name: Determine release type and previous tag
+        id: release-version
+        run: |
+          TAG="${{ steps.version.outputs.version }}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+          if echo "$TAG" | grep -qE '\-rc\.[0-9]+$'; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+            PREV_TAG=$(git tag --list --sort=-version:refname \
+              | grep -E '^[0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+$' \
+              | grep -v "^${TAG}$" \
+              | head -n 1)
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+            PREV_TAG=$(git tag --list --sort=-version:refname \
+              | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' \
+              | grep -v "^${TAG}$" \
+              | head -n 1)
+          fi
+
+          if [ -z "$PREV_TAG" ]; then
+            echo "prev_tag=" >> "$GITHUB_OUTPUT"
+            echo "compare_base=$(git rev-list --max-parents=0 HEAD | head -n 1)" >> "$GITHUB_OUTPUT"
+          else
+            echo "prev_tag=$PREV_TAG" >> "$GITHUB_OUTPUT"
+            echo "compare_base=$PREV_TAG" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Gather changelog data
+        run: |
+          BASE="${{ steps.release-version.outputs.compare_base }}"
+          TAG="${{ steps.release-version.outputs.tag }}"
+
+          git log "${BASE}..${TAG}" --pretty=format:"- %s (%h)" --no-merges > /tmp/git_log.txt 2>/dev/null || echo "No commits found" > /tmp/git_log.txt
+          git diff --stat "${BASE}..${TAG}" > /tmp/diff_stat.txt 2>/dev/null || echo "No diff available" > /tmp/diff_stat.txt
+
+      - name: Generate release notes with Gemini
+        id: notes
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          TAG="${{ steps.release-version.outputs.tag }}"
+          PREV_TAG="${{ steps.release-version.outputs.prev_tag }}"
+          PRERELEASE="${{ steps.release-version.outputs.prerelease }}"
+
+          GIT_LOG=$(cat /tmp/git_log.txt)
+          DIFF_STAT=$(cat /tmp/diff_stat.txt)
+
+          if [ "$PRERELEASE" = "true" ]; then
+            RELEASE_TYPE="pre-release (release candidate)"
+          else
+            RELEASE_TYPE="stable release"
+          fi
+
+          if [ -n "$PREV_TAG" ]; then
+            RANGE_DESC="Changes from $PREV_TAG to $TAG"
+          else
+            RANGE_DESC="Initial release: $TAG"
+          fi
+
+          if [ -n "$PREV_TAG" ]; then
+            DIFF_SECTION="## Changes since ${PREV_TAG}
+
+          Summarize the key differences between this release and ${PREV_TAG}. Focus on what a user upgrading from ${PREV_TAG} needs to know: what changed, what was added, and what was fixed. Be specific about behavioral differences."
+          else
+            DIFF_SECTION=""
+          fi
+
+          PROMPT="Generate structured release notes for GalactiLog, an astrophotography FITS file catalog application. This is a ${RELEASE_TYPE}.
+
+          ${RANGE_DESC}
+
+          Commit messages:
+          ${GIT_LOG}
+
+          Files changed summary:
+          ${DIFF_STAT}
+
+          Write with confidence and authority. State what each change does, not what it seems to do. Never use hedging language like 'seems to', 'appears to', 'might', or 'likely'.
+
+          Format the release notes in Markdown with these sections. Omit any section that has no relevant content:
+
+          ## Summary
+          A 2-3 sentence overview of what this release delivers.
+
+          ## What's New
+          Bullet list of new features or enhancements, grouped by area (e.g. Frontend, Backend, API) if there are many.
+
+          ## Bug Fixes
+          Bullet list of bug fixes.
+
+          ## Technical Changes
+          Bullet list of infrastructure, refactoring, or dependency updates.
+
+          ${DIFF_SECTION}
+
+          Do not include a title or heading with the version number. Do not use emojis. Keep descriptions concise but specific."
+
+          ESCAPED_PROMPT=$(echo "$PROMPT" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read()))')
+
+          RESPONSE=$(curl -s -w "\n%{http_code}" \
+            -X POST "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"contents\": [{\"parts\": [{\"text\": $ESCAPED_PROMPT}]}],
+              \"generationConfig\": {\"temperature\": 0.7, \"maxOutputTokens\": 1024}
+            }" 2>/dev/null)
+
+          HTTP_CODE=$(echo "$RESPONSE" | tail -n 1)
+          BODY=$(echo "$RESPONSE" | sed '$d')
+
+          if [ "$HTTP_CODE" = "200" ]; then
+            NOTES=$(echo "$BODY" | python3 -c '
+          import sys, json
+          try:
+              data = json.load(sys.stdin)
+              text = data["candidates"][0]["content"]["parts"][0]["text"]
+              print(text)
+          except (KeyError, IndexError, json.JSONDecodeError):
+              sys.exit(1)
+          ')
+            if [ $? -eq 0 ] && [ -n "$NOTES" ]; then
+              {
+                echo "$NOTES"
+                echo ""
+                echo "---"
+                echo "*Release notes generated from commit messages automatically.*"
+              } > /tmp/release_notes.txt
+              echo "generated=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "generated=false" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            echo "generated=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${{ steps.release-version.outputs.tag }}"
+          PRERELEASE="${{ steps.release-version.outputs.prerelease }}"
+          AI_NOTES="${{ steps.notes.outputs.generated }}"
+
+          FLAGS=""
+          if [ "$PRERELEASE" = "true" ]; then
+            FLAGS="--prerelease"
+          else
+            FLAGS="--latest"
+          fi
+
+          if [ "$AI_NOTES" = "true" ]; then
+            gh release create "$TAG" \
+              --title "$TAG" \
+              --notes-file /tmp/release_notes.txt \
+              $FLAGS
+          else
+            gh release create "$TAG" \
+              --title "$TAG" \
+              --generate-notes \
+              $FLAGS
+          fi
+
+      - name: Clean up old dev pre-releases
+        if: github.ref == 'refs/heads/dev'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          KEEP=2
+
+          # List all pre-release tags sorted by version, newest first
+          OLD_TAGS=$(gh release list --json tagName,isPrerelease \
+            --jq '[.[] | select(.isPrerelease)] | .[].tagName' \
+            | grep -E '^[0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+$' \
+            | sort -rV \
+            | tail -n +$((KEEP + 1)))
+
+          for TAG in $OLD_TAGS; do
+            echo "Deleting release and tag: $TAG"
+            gh release delete "$TAG" --yes --cleanup-tag
+          done
