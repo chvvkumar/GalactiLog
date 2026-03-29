@@ -176,6 +176,8 @@ jobs:
 
           Write with confidence and authority. State what each change does, not what it seems to do. Never use hedging language like 'seems to', 'appears to', 'might', or 'likely'.
 
+          Do NOT use AI phraseology or filler words. Avoid words like: leverage, enhance, streamline, robust, seamless, comprehensive, cutting-edge, utilize, facilitate, empower, elevate, harness, spearhead, foster, bolster, pivotal, groundbreaking, synergy, paradigm, holistic, transformative. Write like a human developer -- plain, direct, technical language only.
+
           Format the release notes in Markdown with these sections. Omit any section that has no relevant content:
 
           ## Summary
