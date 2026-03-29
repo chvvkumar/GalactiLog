@@ -27,7 +27,7 @@ jobs:
 
           if [ "$BRANCH" = "dev" ]; then
             # Find the latest rc tag
-            LATEST_RC=$(git tag -l '*-rc.*' | sort -V | tail -n 1)
+            LATEST_RC=$(git tag -l | grep -E '^[0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+$' | sort -V | tail -n 1)
 
             if [ -z "$LATEST_RC" ]; then
               NEXT_VERSION="1.0.0-rc.1"
