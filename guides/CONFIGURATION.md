@@ -62,10 +62,10 @@ See the [Security Guide](security.md) for full details on authentication, cookie
 
 | Variable | Default | Description | When to Change |
 |----------|---------|-------------|----------------|
-| `ASTRO_ADMIN_PASSWORD` | *(none)* | Admin account password. On first start, if no users exist, an admin is auto-created with this password. Ignored once any user exists. | Required for first-time setup. Must be 12+ characters. |
+| `ASTRO_ADMIN_PASSWORD` | *(none)* | Admin account password. On first start, if no users exist, an admin is auto-created with this password. Ignored once any user exists. | Required for first-time setup. Must be 8+ characters. |
 | `ASTRO_ADMIN_USERNAME` | `admin` | Username for the auto-created admin account. | Only if you want a different admin username. |
 | `ASTRO_VIEWER_USERNAME` | *(none)* | Optional read-only viewer account username, created on first start alongside admin. | When you want to share access without admin privileges (e.g., family members, club members viewing your data). |
-| `ASTRO_VIEWER_PASSWORD` | *(none)* | Password for the viewer account. | Required if ASTRO_VIEWER_USERNAME is set. Must be 12+ characters. |
+| `ASTRO_VIEWER_PASSWORD` | *(none)* | Password for the viewer account. | Required if ASTRO_VIEWER_USERNAME is set. Must be 8+ characters. |
 | `ASTRO_HTTPS` | `true` | Controls the Secure flag on auth cookies. When true, cookies are only sent over HTTPS. | Set to `false` if accessing GalactiLog over plain HTTP (e.g., `http://localhost`, LAN without TLS). |
 | `ASTRO_JWT_SECRET` | *(auto-generated)* | Secret key for signing JWT access tokens (HS256). When not set, a random key is generated at startup, invalidating all sessions on restart. | Set to a long random string (`openssl rand -hex 32`) for persistent sessions across container restarts. |
 | `ASTRO_ACCESS_TOKEN_EXPIRY` | `1800` (30 min) | Access token lifetime in seconds. | Shorter values are more secure but cause more frequent silent refreshes. Increase if users report being logged out mid-session. |
