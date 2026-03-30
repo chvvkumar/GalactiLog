@@ -8,12 +8,12 @@
 # This file uses ${VAR:-default} syntax to reference variables from your .env
 # file. Docker Compose automatically loads the .env file from the same directory.
 #
-#   ${POSTGRES_USER:-astro}  — uses POSTGRES_USER from .env, or "astro" if not set
-#   ${FITS_DATA_HOST_PATH:-./sample_fits}  — uses the .env value, or ./sample_fits
+#   ${GALACTILOG_POSTGRES_USER:-galactilog}  — uses GALACTILOG_POSTGRES_USER from .env, or "galactilog" if not set
+#   ${GALACTILOG_FITS_HOST_PATH:-./sample_fits}  — uses the .env value, or ./sample_fits
 #
 # The `env_file: .env` directive on the app service passes ALL variables from
 # .env into the container as environment variables. The `environment:` block
-# below overrides specific variables (like ASTRO_DATABASE_URL) to use the
+# below overrides specific variables (like GALACTILOG_DATABASE_URL) to use the
 # docker-internal hostnames (e.g., "postgres" instead of "localhost").
 #
 # In short:
@@ -34,20 +34,20 @@ services:
     environment:
       # These come from .env. They configure the postgres container's init script
       # which creates the database and user on first start.
-      POSTGRES_USER: ${POSTGRES_USER:-astro}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-astro}
-      POSTGRES_DB: ${POSTGRES_DB:-astro_catalog}
+      POSTGRES_USER: ${GALACTILOG_POSTGRES_USER:-galactilog}
+      POSTGRES_PASSWORD: ${GALACTILOG_POSTGRES_PASSWORD:-galactilog}
+      POSTGRES_DB: ${GALACTILOG_POSTGRES_DB:-galactilog_catalog}
     volumes:
-      # Database storage. When POSTGRES_DATA_HOST_PATH is set in .env, a bind
-      # mount is used (recommended for production — easy to back up and locate).
+      # Database storage. When GALACTILOG_POSTGRES_DATA_HOST_PATH is set in .env,
+      # a bind mount is used (recommended for production — easy to back up and locate).
       # When not set, falls back to the "postgres_data" named volume.
-      - ${POSTGRES_DATA_HOST_PATH:-postgres_data}:/var/lib/postgresql/data
+      - ${GALACTILOG_POSTGRES_DATA_HOST_PATH:-postgres_data}:/var/lib/postgresql/data
     ports:
       # Exposed for local development tools (pgAdmin, psql, etc.).
       # Remove or comment out in production if external access is not needed.
       - "5432:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U astro"]
+      test: ["CMD-SHELL", "pg_isready -U ${GALACTILOG_POSTGRES_USER:-galactilog}"]
       interval: 5s
       timeout: 3s
       retries: 5
@@ -82,8 +82,8 @@ services:
       - "8080:80"
 
     # Load all variables from .env into the container environment.
-    # This is how ASTRO_ADMIN_PASSWORD, ASTRO_HTTPS, ASTRO_JWT_SECRET, and
-    # other app settings reach the application without listing each one here.
+    # This is how GALACTILOG_ADMIN_PASSWORD, GALACTILOG_HTTPS, GALACTILOG_JWT_SECRET,
+    # and other app settings reach the application without listing each one here.
     env_file: .env
 
     # Override specific variables with container-aware values.
@@ -92,26 +92,26 @@ services:
     environment:
       # Database URL built from .env credentials, using the docker-internal
       # hostname "postgres" (the service name above) instead of localhost.
-      ASTRO_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-astro}:${POSTGRES_PASSWORD:-astro}@postgres:5432/${POSTGRES_DB:-astro_catalog}
+      GALACTILOG_DATABASE_URL: postgresql+asyncpg://${GALACTILOG_POSTGRES_USER:-galactilog}:${GALACTILOG_POSTGRES_PASSWORD:-galactilog}@postgres:5432/${GALACTILOG_POSTGRES_DB:-galactilog_catalog}
 
       # Redis URL using the docker-internal hostname "redis".
-      ASTRO_REDIS_URL: redis://redis:6379/0
+      GALACTILOG_REDIS_URL: redis://redis:6379/0
 
       # Container-internal paths for FITS data and thumbnails.
       # These must match the right side of the volume mounts below.
-      ASTRO_FITS_DATA_PATH: /app/data/fits
-      ASTRO_THUMBNAILS_PATH: /app/data/thumbnails
+      GALACTILOG_FITS_DATA_PATH: /app/data/fits
+      GALACTILOG_THUMBNAILS_PATH: /app/data/thumbnails
 
     volumes:
-      # Thumbnail storage. When THUMBNAILS_HOST_PATH is set in .env, a bind
-      # mount is used. Otherwise falls back to the "thumbnails_data" named volume.
-      - ${THUMBNAILS_HOST_PATH:-thumbnails_data}:/app/data/thumbnails
+      # Thumbnail storage. When GALACTILOG_THUMBNAILS_HOST_PATH is set in .env,
+      # a bind mount is used. Otherwise falls back to the "thumbnails_data" named volume.
+      - ${GALACTILOG_THUMBNAILS_HOST_PATH:-thumbnails_data}:/app/data/thumbnails
 
       # FITS data directory (read-only). The :ro flag prevents the container
       # from modifying your original FITS files.
-      # When FITS_DATA_HOST_PATH is set in .env, that host directory is mounted.
+      # When GALACTILOG_FITS_HOST_PATH is set in .env, that host directory is mounted.
       # Otherwise falls back to ./sample_fits for testing.
-      - ${FITS_DATA_HOST_PATH:-./sample_fits}:/app/data/fits:ro
+      - ${GALACTILOG_FITS_HOST_PATH:-./sample_fits}:/app/data/fits:ro
 
     depends_on:
       postgres:
@@ -120,8 +120,8 @@ services:
         condition: service_healthy
 
 # Named volumes used as fallbacks when host paths are not set in .env.
-# When POSTGRES_DATA_HOST_PATH / THUMBNAILS_HOST_PATH are defined, Docker uses
-# bind mounts instead and these named volumes are not created.
+# When GALACTILOG_POSTGRES_DATA_HOST_PATH / GALACTILOG_THUMBNAILS_HOST_PATH are
+# defined, Docker uses bind mounts instead and these named volumes are not created.
 # For production, always set host paths in .env for predictable data locations.
 volumes:
   postgres_data:

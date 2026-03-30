@@ -57,31 +57,31 @@ Edit `.env` with your paths (see [`.env.example`](../.env.example) for all optio
 
 ### 3. Configure Host Paths
 
-Update the three `*_HOST_PATH` variables in `.env`:
+Update the three `GALACTILOG_*_HOST_PATH` variables in `.env`:
 
 | Variable | Description | Notes |
 |----------|-------------|-------|
-| `FITS_DATA_HOST_PATH` | Directory containing your FITS files | Mounted read-only in the container. Can be a nested directory structure; GalactiLog scans recursively. |
-| `THUMBNAILS_HOST_PATH` | Where generated JPEG thumbnails are stored | Created automatically. Needs read/write access. |
-| `POSTGRES_DATA_HOST_PATH` | PostgreSQL data directory | Created automatically. Persists your database across container restarts. |
+| `GALACTILOG_FITS_HOST_PATH` | Directory containing your FITS files | Mounted read-only in the container. Can be a nested directory structure; GalactiLog scans recursively. |
+| `GALACTILOG_THUMBNAILS_HOST_PATH` | Where generated JPEG thumbnails are stored | Created automatically. Needs read/write access. |
+| `GALACTILOG_POSTGRES_DATA_HOST_PATH` | PostgreSQL data directory | Created automatically. Persists your database across container restarts. |
 
 **Windows (local paths):**
 ```
-FITS_DATA_HOST_PATH=D:/Astrophotography/Data
-THUMBNAILS_HOST_PATH=D:/GalactiLog/thumbnails
-POSTGRES_DATA_HOST_PATH=D:/GalactiLog/postgres
+GALACTILOG_FITS_HOST_PATH=D:/Astrophotography/Data
+GALACTILOG_THUMBNAILS_HOST_PATH=D:/GalactiLog/thumbnails
+GALACTILOG_POSTGRES_DATA_HOST_PATH=D:/GalactiLog/postgres
 ```
 
 **Linux (local paths):**
 ```
-FITS_DATA_HOST_PATH=/home/user/astro/data
-THUMBNAILS_HOST_PATH=/home/user/galactilog/thumbnails
-POSTGRES_DATA_HOST_PATH=/home/user/galactilog/postgres
+GALACTILOG_FITS_HOST_PATH=/home/user/astro/data
+GALACTILOG_THUMBNAILS_HOST_PATH=/home/user/galactilog/thumbnails
+GALACTILOG_POSTGRES_DATA_HOST_PATH=/home/user/galactilog/postgres
 ```
 
 **Linux (NFS mount):**
 
-If your FITS files are on a NAS or network share, mount the NFS export on the host first, then point `FITS_DATA_HOST_PATH` to the mount point:
+If your FITS files are on a NAS or network share, mount the NFS export on the host first, then point `GALACTILOG_FITS_HOST_PATH` to the mount point:
 
 ```bash
 # Mount the NFS share (add to /etc/fstab for persistence)
@@ -90,7 +90,7 @@ sudo mount -t nfs nas.local:/volume1/astrophotography /mnt/astro
 ```
 
 ```
-FITS_DATA_HOST_PATH=/mnt/astro
+GALACTILOG_FITS_HOST_PATH=/mnt/astro
 ```
 
 The FITS directory is mounted read-only into the container, so GalactiLog will never modify your source files. To make the NFS mount persistent across reboots, add it to `/etc/fstab` (the `ro` option mounts the NFS share read-only on the host as well):
@@ -230,7 +230,7 @@ ports:
 
 ### FITS files not found during scan
 
-- Verify `FITS_DATA_HOST_PATH` in `.env` points to the correct directory
+- Verify `GALACTILOG_FITS_HOST_PATH` in `.env` points to the correct directory
 - The path is mounted read-only; ensure the directory exists and is readable
 - GalactiLog scans for files with extensions `.fits`, `.fit`, and `.fts` (case-insensitive)
 - Check container logs: `docker compose logs app`
@@ -258,7 +258,7 @@ docker compose up -d
 
 ### Thumbnails not generating
 
-- Check that `THUMBNAILS_HOST_PATH` exists and is writable
+- Check that `GALACTILOG_THUMBNAILS_HOST_PATH` exists and is writable
 - Calibration frames (DARK, FLAT, BIAS) do not generate thumbnails by design
 - View worker logs for errors: `docker compose logs app | grep celery`
 

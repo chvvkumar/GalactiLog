@@ -18,8 +18,8 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Warn if JWT secret was auto-generated (won't survive restarts)
-    if not os.environ.get("ASTRO_JWT_SECRET"):
-        logger.warning("ASTRO_JWT_SECRET is not set — using auto-generated secret. Sessions will not survive restarts. Set ASTRO_JWT_SECRET in .env for persistence.")
+    if not os.environ.get("GALACTILOG_JWT_SECRET"):
+        logger.warning("GALACTILOG_JWT_SECRET is not set — using auto-generated secret. Sessions will not survive restarts. Set GALACTILOG_JWT_SECRET in .env for persistence.")
 
     # Ensure database tables exist on startup
     from app.database import engine
@@ -75,7 +75,7 @@ def create_app() -> FastAPI:
         return JSONResponse(status_code=429, content={"detail": "Rate limit exceeded"})
 
     # CORS for dev mode
-    cors_origins = os.environ.get("ASTRO_CORS_ORIGINS")
+    cors_origins = os.environ.get("GALACTILOG_CORS_ORIGINS")
     if cors_origins:
         application.add_middleware(
             CORSMiddleware,

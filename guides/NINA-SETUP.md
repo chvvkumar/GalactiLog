@@ -147,7 +147,7 @@ The following table summarizes which N.I.N.A. components and plugins produce dat
 GalactiLog scans your FITS directory recursively. It works with any directory structure, but a typical N.I.N.A. layout looks like this:
 
 ```
-/astro_incoming/                        <-- FITS_DATA_HOST_PATH
+/astro_incoming/                        <-- GALACTILOG_FITS_HOST_PATH
   M31 - Andromeda Galaxy/
     2025-01-15/
       M31_Light_Ha_300s_001.fits

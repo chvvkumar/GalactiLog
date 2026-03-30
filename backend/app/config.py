@@ -4,7 +4,7 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    database_url: str = "postgresql+asyncpg://astro:astro@localhost:5432/astro_catalog"
+    database_url: str = "postgresql+asyncpg://galactilog:galactilog@localhost:5432/galactilog_catalog"
     redis_url: str = "redis://localhost:6379/0"
     fits_data_path: str = "/app/data/fits"
     thumbnails_path: str = "/app/data/thumbnails"
@@ -18,13 +18,13 @@ class Settings(BaseSettings):
     viewer_username: str = ""
     viewer_password: str = ""
 
-    model_config = {"env_prefix": "ASTRO_"}
+    model_config = {"env_prefix": "GALACTILOG_"}
 
 
 settings = Settings()
 
 # Auto-generate JWT secret if not set -- stable for the lifetime of the process,
-# but tokens won't survive a restart. Fine for getting started; set ASTRO_JWT_SECRET
+# but tokens won't survive a restart. Fine for getting started; set GALACTILOG_JWT_SECRET
 # in .env for persistence across restarts.
 if not settings.jwt_secret:
     settings.jwt_secret = secrets.token_hex(32)

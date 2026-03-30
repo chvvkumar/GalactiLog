@@ -2,15 +2,15 @@ services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-astro}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-astro}
-      POSTGRES_DB: ${POSTGRES_DB:-astro_catalog}
+      POSTGRES_USER: ${GALACTILOG_POSTGRES_USER:-galactilog}
+      POSTGRES_PASSWORD: ${GALACTILOG_POSTGRES_PASSWORD:-galactilog}
+      POSTGRES_DB: ${GALACTILOG_POSTGRES_DB:-galactilog_catalog}
     volumes:
-      - ${POSTGRES_DATA_HOST_PATH:-postgres_data}:/var/lib/postgresql/data
+      - ${GALACTILOG_POSTGRES_DATA_HOST_PATH:-postgres_data}:/var/lib/postgresql/data
     ports:
       - "5432:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U astro"]
+      test: ["CMD-SHELL", "pg_isready -U ${GALACTILOG_POSTGRES_USER:-galactilog}"]
       interval: 5s
       timeout: 3s
       retries: 5
@@ -32,14 +32,14 @@ services:
       - "8080:80"
     env_file: .env
     environment:
-      ASTRO_DATABASE_URL: postgresql+asyncpg://astro:astro@postgres:5432/astro_catalog
-      ASTRO_REDIS_URL: redis://redis:6379/0
-      ASTRO_FITS_DATA_PATH: /app/data/fits
-      ASTRO_THUMBNAILS_PATH: /app/data/thumbnails
+      GALACTILOG_DATABASE_URL: postgresql+asyncpg://${GALACTILOG_POSTGRES_USER:-galactilog}:${GALACTILOG_POSTGRES_PASSWORD:-galactilog}@postgres:5432/${GALACTILOG_POSTGRES_DB:-galactilog_catalog}
+      GALACTILOG_REDIS_URL: redis://redis:6379/0
+      GALACTILOG_FITS_DATA_PATH: /app/data/fits
+      GALACTILOG_THUMBNAILS_PATH: /app/data/thumbnails
     volumes:
       - ./backend:/app
-      - ${THUMBNAILS_HOST_PATH:-thumbnails_data}:/app/data/thumbnails
-      - ${FITS_DATA_HOST_PATH:-./sample_fits}:/app/data/fits:ro
+      - ${GALACTILOG_THUMBNAILS_HOST_PATH:-thumbnails_data}:/app/data/thumbnails
+      - ${GALACTILOG_FITS_HOST_PATH:-./sample_fits}:/app/data/fits:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -48,6 +48,6 @@ services:
 
 volumes:
   # Named volumes used as fallbacks when host paths are not set in .env
-  # When POSTGRES_DATA_HOST_PATH / THUMBNAILS_HOST_PATH are set, bind mounts are used instead
+  # When GALACTILOG_POSTGRES_DATA_HOST_PATH / GALACTILOG_THUMBNAILS_HOST_PATH are set, bind mounts are used instead
   postgres_data:
   thumbnails_data:

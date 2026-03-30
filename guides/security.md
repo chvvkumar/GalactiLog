@@ -49,11 +49,11 @@ Token families group all refresh tokens descended from a single login. If a revo
 | Attribute | Access Token Cookie | Refresh Token Cookie |
 |-----------|--------------------|--------------------|
 | HttpOnly | Yes | Yes |
-| Secure | Yes (configurable via `ASTRO_HTTPS`) | Yes (configurable via `ASTRO_HTTPS`) |
+| Secure | Yes (configurable via `GALACTILOG_HTTPS`) | Yes (configurable via `GALACTILOG_HTTPS`) |
 | SameSite | Strict | Strict |
 | Path | `/` | `/api/auth/refresh` |
 
-Set `ASTRO_HTTPS=false` for local development without HTTPS.
+Set `GALACTILOG_HTTPS=false` for local development without HTTPS.
 
 ## Security Headers
 
@@ -132,18 +132,18 @@ Backend enforces role permissions on all endpoints. Frontend hides controls for 
 
 Not needed in production (frontend and API are same-origin behind nginx).
 
-For development: set `ASTRO_CORS_ORIGINS` environment variable with an explicit allowlist (e.g., `http://localhost:3000`). Credentials are allowed (`allow_credentials=True`).
+For development: set `GALACTILOG_CORS_ORIGINS` environment variable with an explicit allowlist (e.g., `http://localhost:3000`). Credentials are allowed (`allow_credentials=True`).
 
 ## User Management
 
 ### First-Time Setup
 
-Set `ASTRO_ADMIN_PASSWORD` in `.env`. On first start, if no users exist, an admin account is created automatically:
+Set `GALACTILOG_ADMIN_PASSWORD` in `.env`. On first start, if no users exist, an admin account is created automatically:
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `ASTRO_ADMIN_PASSWORD` | *(none)* | Admin password. Required for auto-creation. |
-| `ASTRO_ADMIN_USERNAME` | `admin` | Admin username. |
+| `GALACTILOG_ADMIN_PASSWORD` | *(none)* | Admin password. Required for auto-creation. |
+| `GALACTILOG_ADMIN_USERNAME` | `admin` | Admin username. |
 
 Once a user exists in the database, these variables are ignored.
 
