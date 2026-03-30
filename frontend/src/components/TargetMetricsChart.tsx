@@ -233,12 +233,18 @@ export default function TargetMetricsChart(props: Props) {
     });
   };
 
+  const allSessionsLoaded = createMemo(() =>
+    props.selectedDates.length > 0 &&
+    props.selectedDates.every((date) => !!props.sessionDetails[date])
+  );
+
   createEffect(() => {
     // Track all reactive dependencies
     chartFrameData();
     graphSettings();
+    const ready = allSessionsLoaded();
     if (pendingRAF !== null) cancelAnimationFrame(pendingRAF);
-    if (props.expanded) {
+    if (props.expanded && ready) {
       pendingRAF = requestAnimationFrame(() => {
         pendingRAF = null;
         buildChart();
