@@ -292,15 +292,19 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
     quality_result = await session.execute(quality_q)
     avg_hfr, avg_ecc, best_hfr = quality_result.one()
 
-    # HFR distribution buckets (single query instead of N queries)
-    hfr_buckets = []
+    # HFR distribution buckets (single query using CASE expressions)
     bucket_ranges = [(0, 1.0), (1.0, 1.5), (1.5, 2.0), (2.0, 2.5), (2.5, 3.0), (3.0, 4.0), (4.0, 5.0), (5.0, 100)]
-    for low, high in bucket_ranges:
-        bucket_q = select(func.count(Image.id)).where(
-            Image.median_hfr >= low, Image.median_hfr < high, Image.image_type == "LIGHT"
-        )
-        br = await session.execute(bucket_q)
-        count = br.scalar_one()
+    bucket_cases = [
+        func.count(Image.id).filter(
+            Image.median_hfr >= low, Image.median_hfr < high
+        ).label(f"b{i}")
+        for i, (low, high) in enumerate(bucket_ranges)
+    ]
+    bucket_q = select(*bucket_cases).where(Image.image_type == "LIGHT")
+    bucket_result = (await session.execute(bucket_q)).one()
+    hfr_buckets = []
+    for i, (low, high) in enumerate(bucket_ranges):
+        count = bucket_result[i] or 0
         if count > 0:
             label = f"{low:.1f}-{high:.1f}" if high < 100 else f"{low:.1f}+"
             hfr_buckets.append(HfrBucket(bucket=label, count=count))

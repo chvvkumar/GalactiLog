@@ -54,13 +54,13 @@ def _set_auth_cookies(response: Response, access_token: str, refresh_token: str)
         httponly=True,
         secure=settings.https,
         samesite="strict",
-        path="/api/auth/refresh",
+        path="/api/auth",
     )
 
 
 def _clear_auth_cookies(response: Response) -> None:
     response.delete_cookie(key="access_token", path="/")
-    response.delete_cookie(key="refresh_token", path="/api/auth/refresh")
+    response.delete_cookie(key="refresh_token", path="/api/auth")
 
 
 def _get_client_ip(request: Request) -> str:

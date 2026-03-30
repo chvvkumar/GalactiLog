@@ -47,7 +47,7 @@ class ScanStateSnapshot:
         }
 
 
-def _parse_snapshot(data: dict | None) -> ScanStateSnapshot:
+def parse_snapshot(data: dict | None) -> ScanStateSnapshot:
     if not data or "state" not in data:
         return ScanStateSnapshot(
             state="idle", total=0, completed=0, failed=0,
@@ -70,7 +70,7 @@ def _parse_snapshot(data: dict | None) -> ScanStateSnapshot:
 
 async def get_scan_state(r: aioredis.Redis) -> ScanStateSnapshot:
     data = await r.hgetall(SCAN_KEY)
-    snap = _parse_snapshot(data)
+    snap = parse_snapshot(data)
     # Detect stale ingestion: no progress for STALE_TIMEOUT seconds
     if snap.state in ("scanning", "ingesting"):
         last_progress = await r.get(SCAN_PROGRESS_KEY)
@@ -112,7 +112,7 @@ async def set_ingesting(r: aioredis.Redis, total: int) -> None:
 async def set_complete_if_done(r: aioredis.Redis) -> None:
     """Check if all tasks finished and transition to complete."""
     data = await r.hgetall(SCAN_KEY)
-    snap = _parse_snapshot(data)
+    snap = parse_snapshot(data)
     if snap.state == "ingesting" and snap.total > 0 and (snap.completed + snap.failed) >= snap.total:
         await r.hset(SCAN_KEY, mapping={
             "state": "complete",
@@ -173,9 +173,9 @@ def increment_failed_sync(r: sync_redis.Redis, file_path: str = "", error: str =
     _check_complete_sync(r)
 
 
-def _check_complete_sync(r: sync_redis.Redis) -> None:
+def check_complete_sync(r: sync_redis.Redis) -> None:
     data = r.hgetall(SCAN_KEY)
-    snap = _parse_snapshot(data)
+    snap = parse_snapshot(data)
     if snap.state == "ingesting" and snap.total > 0 and (snap.completed + snap.failed) >= snap.total:
         r.hset(SCAN_KEY, mapping={
             "state": "complete",

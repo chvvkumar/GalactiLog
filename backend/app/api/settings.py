@@ -260,7 +260,7 @@ async def update_dismissed_suggestions(
     return _row_to_response(row)
 
 
-@router.put("/display")
+@router.put("/display", response_model=SettingsResponse)
 async def update_display(
     payload: DisplaySettings,
     session: AsyncSession = Depends(get_session),
@@ -272,7 +272,7 @@ async def update_display(
     return _row_to_response(row)
 
 
-@router.put("/graph")
+@router.put("/graph", response_model=SettingsResponse)
 async def update_graph(
     payload: GraphSettings,
     session: AsyncSession = Depends(get_session),

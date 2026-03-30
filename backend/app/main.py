@@ -32,14 +32,14 @@ async def lifespan(app: FastAPI):
     # Auto-create accounts from env vars if they don't already exist
     if settings.admin_password or settings.viewer_password:
         from app.database import async_session
-        from app.models.user import User
+        from app.models.user import User, UserRole
         from app.services.auth import hash_password
         from sqlalchemy import select
 
         async with async_session() as session:
             for username, password, role in [
-                (settings.admin_username, settings.admin_password, "admin"),
-                (settings.viewer_username, settings.viewer_password, "viewer"),
+                (settings.admin_username, settings.admin_password, UserRole.admin),
+                (settings.viewer_username, settings.viewer_password, UserRole.viewer),
             ]:
                 if not username or not password:
                     continue
@@ -53,7 +53,7 @@ async def lifespan(app: FastAPI):
                     password_hash=hash_password(password),
                     role=role,
                 ))
-                logger.info("%s user '%s' created from environment variables", role.capitalize(), username)
+                logger.info("%s user '%s' created from environment variables", role.value.capitalize(), username)
             await session.commit()
 
     yield

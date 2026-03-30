@@ -36,7 +36,7 @@ from app.services.scan_state import (
     start_scanning_sync, set_ingesting_sync, set_idle_sync,
     set_rebuild_running_sync, set_rebuild_progress_sync, set_rebuild_complete_sync,
     set_discovered_sync, is_cancel_requested_sync, clear_cancel_sync, set_cancelled_sync,
-    append_activity_sync, _check_complete_sync,
+    append_activity_sync, check_complete_sync,
 )
 
 _redis = get_sync_redis()
@@ -133,7 +133,7 @@ def run_scan(self, include_calibration: bool = True) -> dict:
     # Transition to ingesting with final total — ingest tasks are already running
     set_ingesting_sync(_redis, total=len(new_files), removed=removed)
     # Some tasks may have already completed during discovery, check now
-    _check_complete_sync(_redis)
+    check_complete_sync(_redis)
 
     # Queue duplicate detection after ingest
     detect_duplicate_targets.apply_async(countdown=30)
@@ -170,9 +170,9 @@ def auto_scan_tick():
             return
 
     # Check if a scan is already running
-    from app.services.scan_state import _parse_snapshot, SCAN_KEY
+    from app.services.scan_state import parse_snapshot, SCAN_KEY
     data = _redis.hgetall(SCAN_KEY)
-    snap = _parse_snapshot(data)
+    snap = parse_snapshot(data)
     if snap.state in ("scanning", "ingesting"):
         return
 
@@ -320,17 +320,12 @@ def regenerate_thumbnail(self, image_id: str, fits_path: str, thumb_path: str) -
 @celery_app.task(name="detect_duplicate_targets")
 def detect_duplicate_targets():
     """Detect potential duplicate targets by comparing unresolved names against resolved targets."""
-    from sqlalchemy import create_engine, text as sa_text, select as sa_select, func as sa_func
-    from sqlalchemy.orm import Session as SyncSession
-    from app.config import settings
+    from sqlalchemy import text as sa_text, select as sa_select, func as sa_func
     from app.models.target import Target
     from app.models.image import Image
     from app.models.merge_candidate import MergeCandidate
 
-    sync_url = settings.database_url.replace("+asyncpg", "")
-    engine = create_engine(sync_url)
-
-    with SyncSession(engine) as db:
+    with Session(_sync_engine) as db:
         # Find distinct unresolved OBJECT names with image counts
         unresolved_query = (
             sa_select(
