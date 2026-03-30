@@ -25,3 +25,11 @@ def get_async_redis() -> aioredis.Redis:
 
 def get_sync_redis() -> sync_redis.Redis:
     return sync_redis.from_url(settings.redis_url, decode_responses=True)
+
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+
+limiter = Limiter(
+    key_func=get_remote_address,
+    storage_uri=settings.redis_url,
+)

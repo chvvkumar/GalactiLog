@@ -3,7 +3,7 @@ import uuid
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import settings
+from app.config import settings, limiter, get_async_redis
 from app.database import get_session
 from app.models.user import User, UserRole
 from app.schemas.auth import (
@@ -69,11 +69,21 @@ def _get_client_ip(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
 
+async def _increment_login_failures(redis, username: str) -> None:
+    key = f"auth:failures:{username}"
+    failures = await redis.incr(key)
+    if failures == 1:
+        await redis.expire(key, 900)
+    if failures >= 5:
+        await redis.setex(f"auth:lockout:{username}", 1800, "locked")
+
+
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
 
 @router.post("/login", response_model=LoginResponse)
+@limiter.limit("20/minute")
 async def login(
     body: LoginRequest,
     request: Request,
@@ -81,14 +91,29 @@ async def login(
     session: AsyncSession = Depends(get_session),
 ):
     ip = _get_client_ip(request)
-    user = await get_user_by_username(session, body.username)
 
-    password_hash = user.password_hash if user else None
-    valid = verify_password_timing_safe(body.password, password_hash)
+    # Check account lockout
+    redis = get_async_redis()
+    try:
+        locked = await redis.exists(f"auth:lockout:{body.username}")
+        if locked:
+            audit_log("login", username=body.username, source_ip=ip, success=False, detail="Account locked")
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Account temporarily locked")
 
-    if not valid or user is None or not user.is_active:
-        audit_log("login", username=body.username, source_ip=ip, success=False, detail="Invalid credentials")
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+        user = await get_user_by_username(session, body.username)
+
+        password_hash = user.password_hash if user else None
+        valid = verify_password_timing_safe(body.password, password_hash)
+
+        if not valid or user is None or not user.is_active:
+            await _increment_login_failures(redis, body.username)
+            audit_log("login", username=body.username, source_ip=ip, success=False, detail="Invalid credentials")
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+
+        # Successful login — clear failure counter
+        await redis.delete(f"auth:failures:{body.username}")
+    finally:
+        await redis.aclose()
 
     access = create_access_token(user.id, user.role.value)
     refresh = generate_refresh_token()
@@ -102,6 +127,7 @@ async def login(
 
 
 @router.post("/refresh")
+@limiter.limit("10/minute")
 async def refresh(
     request: Request,
     response: Response,
