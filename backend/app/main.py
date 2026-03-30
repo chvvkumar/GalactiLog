@@ -29,24 +29,32 @@ async def lifespan(app: FastAPI):
         await conn.run_sync(Base.metadata.create_all)
     logger.info("Database tables verified/created")
 
-    # Auto-create admin account from env vars if no users exist
-    if settings.admin_password:
+    # Auto-create accounts from env vars if they don't already exist
+    if settings.admin_password or settings.viewer_password:
         from app.database import async_session
         from app.models.user import User
-        from sqlalchemy import select, func
+        from app.services.auth import hash_password
+        from sqlalchemy import select
 
         async with async_session() as session:
-            count = await session.scalar(select(func.count()).select_from(User))
-            if count == 0:
-                from app.services.auth import hash_password
-                admin = User(
-                    username=settings.admin_username,
-                    password_hash=hash_password(settings.admin_password),
-                    role="admin",
+            for username, password, role in [
+                (settings.admin_username, settings.admin_password, "admin"),
+                (settings.viewer_username, settings.viewer_password, "viewer"),
+            ]:
+                if not username or not password:
+                    continue
+                exists = await session.scalar(
+                    select(User.id).where(User.username == username)
                 )
-                session.add(admin)
-                await session.commit()
-                logger.info("Admin user '%s' created from environment variables", settings.admin_username)
+                if exists:
+                    continue
+                session.add(User(
+                    username=username,
+                    password_hash=hash_password(password),
+                    role=role,
+                ))
+                logger.info("%s user '%s' created from environment variables", role.capitalize(), username)
+            await session.commit()
 
     yield
 

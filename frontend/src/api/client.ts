@@ -118,6 +118,24 @@ export const api = {
     return resp.json();
   },
 
+  getUsers: () =>
+    fetchJson<import("../types").UserAccount[]>("/auth/users"),
+
+  createUser: (username: string, password: string, role: string) =>
+    fetchJson<import("../types").UserAccount>("/auth/users", {
+      method: "POST",
+      body: JSON.stringify({ username, password, role }),
+    }),
+
+  updateUser: (id: string, data: { role?: string; is_active?: boolean }) =>
+    fetchJson<import("../types").UserAccount>(`/auth/users/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+
+  deleteUser: (id: string) =>
+    fetchJson<void>(`/auth/users/${id}`, { method: "DELETE" }),
+
   getTargets: (filters: ActiveFilters) =>
     fetchJson<TargetAggregationResponse>(`/targets?${buildTargetQuery(filters)}`),
 

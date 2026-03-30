@@ -444,6 +444,15 @@ export interface LoginResponse {
   role: string;
 }
 
+export interface UserAccount {
+  id: string;
+  username: string;
+  role: "admin" | "viewer";
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface SuggestionGroup {
   group: string[];
   counts: Record<string, number>;

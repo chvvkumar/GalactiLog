@@ -1,6 +1,7 @@
 import uuid
 
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings, limiter, get_async_redis
@@ -216,6 +217,16 @@ async def change_password(
 
     audit_log("password_change", user_id=user.id, username=user.username, source_ip=ip, success=True)
     return {"status": "ok"}
+
+
+@router.get("/users", response_model=list[UserResponse])
+async def list_users(
+    session: AsyncSession = Depends(get_session),
+    admin: User = Depends(require_admin),
+):
+    result = await session.execute(select(User).order_by(User.created_at))
+    users = result.scalars().all()
+    return [UserResponse.model_validate(u) for u in users]
 
 
 @router.post("/users", response_model=UserResponse, status_code=status.HTTP_201_CREATED)

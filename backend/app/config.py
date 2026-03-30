@@ -15,6 +15,8 @@ class Settings(BaseSettings):
     https: bool = True
     admin_username: str = "admin"
     admin_password: str = ""
+    viewer_username: str = ""
+    viewer_password: str = ""
 
     model_config = {"env_prefix": "ASTRO_"}
 
