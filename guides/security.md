@@ -176,6 +176,3 @@ Admin cannot delete or deactivate their own account.
 | JWT signing secret | Environment variable or auto-generated at startup | Never in source code, never logged |
 | User IPs | Audit logs (stdout) | 30-day retention via Docker log rotation |
 
-## Vulnerability Reporting
-
-Report security issues by email to the repository maintainer. Fix SLA: 90 days.

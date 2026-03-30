@@ -119,6 +119,21 @@
   <img src="images/screenshots/session-metrics.png" alt="Session Metrics" width="100%">
 </p>
 
+<p align="center">
+  <em>Scan &amp; Ingest — auto-scan scheduler, ingest progress, activity log, and maintenance tools</em><br>
+  <img src="images/screenshots/scan-fits-files.png" alt="Scan and Ingest Settings" width="100%">
+</p>
+
+<p align="center">
+  <em>Filter Settings — duplicate detection, filter grouping, and per-filter frame counts</em><br>
+  <img src="images/screenshots/filters-config-settings.png" alt="Filter Configuration Settings" width="100%">
+</p>
+
+<p align="center">
+  <em>Equipment Settings — duplicate detection, camera and telescope grouping with frame counts</em><br>
+  <img src="images/screenshots/equipment-config-settings.png" alt="Equipment Configuration Settings" width="100%">
+</p>
+
 ## Requirements
 
 - **Docker** and **Docker Compose v2**
@@ -205,6 +220,7 @@ For manual installation, custom paths, or building from source, see the [Install
 - [Install Guide](guides/INSTALL.md) -- Installation, updating, uninstalling, and troubleshooting
 - [N.I.N.A. Setup Guide](guides/NINA-SETUP.md) -- Configuring N.I.N.A. for use with GalactiLog
 - [Configuration Guide](guides/CONFIGURATION.md) -- Environment variables, themes, filter/equipment aliases, and display settings
+- [Security Guide](guides/security.md) -- Authentication, HTTPS, cookie security, and user management
 
 ## Tech Stack
 

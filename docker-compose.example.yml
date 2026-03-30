@@ -1,13 +1,50 @@
+# =============================================================================
+# GalactiLog Docker Compose Configuration
+# =============================================================================
+# Copy this file to docker-compose.yml:
+#   cp docker-compose.example.yml docker-compose.yml
+#
+# HOW VARIABLES WORK:
+# This file uses ${VAR:-default} syntax to reference variables from your .env
+# file. Docker Compose automatically loads the .env file from the same directory.
+#
+#   ${POSTGRES_USER:-astro}  — uses POSTGRES_USER from .env, or "astro" if not set
+#   ${FITS_DATA_HOST_PATH:-./sample_fits}  — uses the .env value, or ./sample_fits
+#
+# The `env_file: .env` directive on the app service passes ALL variables from
+# .env into the container as environment variables. The `environment:` block
+# below overrides specific variables (like ASTRO_DATABASE_URL) to use the
+# docker-internal hostnames (e.g., "postgres" instead of "localhost").
+#
+# In short:
+#   .env           → defines your values (paths, credentials, settings)
+#   docker-compose → consumes those values for volume mounts and service config
+#   env_file       → passes all .env variables into the app container
+#   environment:   → overrides specific variables with container-aware values
+# =============================================================================
+
 services:
+  # ---------------------------------------------------------------------------
+  # PostgreSQL — application database
+  # ---------------------------------------------------------------------------
+  # Stores all target, session, image metadata, user accounts, and refresh tokens.
+  # Data is persisted via the volume mount below.
   postgres:
     image: postgres:16-alpine
     environment:
+      # These come from .env. They configure the postgres container's init script
+      # which creates the database and user on first start.
       POSTGRES_USER: ${POSTGRES_USER:-astro}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-astro}
       POSTGRES_DB: ${POSTGRES_DB:-astro_catalog}
     volumes:
+      # Database storage. When POSTGRES_DATA_HOST_PATH is set in .env, a bind
+      # mount is used (recommended for production — easy to back up and locate).
+      # When not set, falls back to the "postgres_data" named volume.
       - ${POSTGRES_DATA_HOST_PATH:-postgres_data}:/var/lib/postgresql/data
     ports:
+      # Exposed for local development tools (pgAdmin, psql, etc.).
+      # Remove or comment out in production if external access is not needed.
       - "5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U astro"]
@@ -15,9 +52,16 @@ services:
       timeout: 3s
       retries: 5
 
+  # ---------------------------------------------------------------------------
+  # Redis — task queue broker and caching
+  # ---------------------------------------------------------------------------
+  # Used by Celery for background task management (FITS scanning, thumbnail
+  # generation) and for rate limiting / account lockout tracking.
   redis:
     image: redis:7-alpine
     ports:
+      # Exposed for local development and debugging.
+      # Remove or comment out in production if external access is not needed.
       - "6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
@@ -25,27 +69,60 @@ services:
       timeout: 3s
       retries: 5
 
+  # ---------------------------------------------------------------------------
+  # App — GalactiLog application (frontend + backend + worker)
+  # ---------------------------------------------------------------------------
+  # Single container running nginx (frontend), FastAPI (backend), Celery (worker),
+  # and Celery Beat (scheduler), managed by Supervisor.
   app:
     image: chvvkumar/galactilog:latest
     ports:
+      # Web UI port. Access GalactiLog at http://localhost:8080
+      # Change the left side to use a different host port (e.g., "9090:80").
       - "8080:80"
+
+    # Load all variables from .env into the container environment.
+    # This is how ASTRO_ADMIN_PASSWORD, ASTRO_HTTPS, ASTRO_JWT_SECRET, and
+    # other app settings reach the application without listing each one here.
     env_file: .env
+
+    # Override specific variables with container-aware values.
+    # These take precedence over the same variables in .env because
+    # `environment:` has higher priority than `env_file:` in Docker Compose.
     environment:
+      # Database URL built from .env credentials, using the docker-internal
+      # hostname "postgres" (the service name above) instead of localhost.
       ASTRO_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-astro}:${POSTGRES_PASSWORD:-astro}@postgres:5432/${POSTGRES_DB:-astro_catalog}
+
+      # Redis URL using the docker-internal hostname "redis".
       ASTRO_REDIS_URL: redis://redis:6379/0
+
+      # Container-internal paths for FITS data and thumbnails.
+      # These must match the right side of the volume mounts below.
       ASTRO_FITS_DATA_PATH: /app/data/fits
       ASTRO_THUMBNAILS_PATH: /app/data/thumbnails
+
     volumes:
+      # Thumbnail storage. When THUMBNAILS_HOST_PATH is set in .env, a bind
+      # mount is used. Otherwise falls back to the "thumbnails_data" named volume.
       - ${THUMBNAILS_HOST_PATH:-thumbnails_data}:/app/data/thumbnails
+
+      # FITS data directory (read-only). The :ro flag prevents the container
+      # from modifying your original FITS files.
+      # When FITS_DATA_HOST_PATH is set in .env, that host directory is mounted.
+      # Otherwise falls back to ./sample_fits for testing.
       - ${FITS_DATA_HOST_PATH:-./sample_fits}:/app/data/fits:ro
+
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
 
+# Named volumes used as fallbacks when host paths are not set in .env.
+# When POSTGRES_DATA_HOST_PATH / THUMBNAILS_HOST_PATH are defined, Docker uses
+# bind mounts instead and these named volumes are not created.
+# For production, always set host paths in .env for predictable data locations.
 volumes:
-  # Named volumes used as fallbacks when host paths are not set in .env
-  # When POSTGRES_DATA_HOST_PATH / THUMBNAILS_HOST_PATH are set, bind mounts are used instead
   postgres_data:
   thumbnails_data:

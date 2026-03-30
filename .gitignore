@@ -45,3 +45,4 @@ resources/
 # Log files
 *.log
 .worktrees/
+repomix-output.*
