@@ -69,9 +69,9 @@ HOST_IP=$(detect_lan_ip)
 header "Configuration"
 
 # Hardcoded paths
-PG_USER="astro"
-PG_PASS="astro"
-PG_DB="astro_catalog"
+PG_USER="galactilog"
+PG_PASS="galactilog"
+PG_DB="galactilog_catalog"
 FITS_PATH="/astro_incoming"
 THUMBNAILS_PATH="/docker/astro_cataloger/thumbnails"
 PG_DATA_PATH="/docker/astro_cataloger/postgres"
@@ -79,7 +79,30 @@ APP_PORT="8080"
 WORKER_CONCURRENCY="4"
 THUMB_WIDTH="800"
 
+# Prompt for admin password
+echo ""
+echo -e "${BOLD}Admin Account${NC}"
+echo "  An admin account will be created on first start."
+read -rp "  Admin username [admin]: " ADMIN_USER
+ADMIN_USER="${ADMIN_USER:-admin}"
+while true; do
+    read -rsp "  Admin password (min 8 chars): " ADMIN_PASS
+    echo ""
+    if [ ${#ADMIN_PASS} -lt 8 ]; then
+        warn "Password must be at least 8 characters."
+        continue
+    fi
+    read -rsp "  Confirm password: " ADMIN_PASS_CONFIRM
+    echo ""
+    if [ "$ADMIN_PASS" != "$ADMIN_PASS_CONFIRM" ]; then
+        warn "Passwords do not match."
+        continue
+    fi
+    break
+done
+
 success "PostgreSQL:     ${PG_USER}@${PG_DB}"
+success "Admin user:     $ADMIN_USER"
 success "FITS files:     $FITS_PATH"
 success "Thumbnails:     $THUMBNAILS_PATH"
 success "Database:       $PG_DATA_PATH"
@@ -114,21 +137,25 @@ cat > "$ENV_FILE" <<ENVEOF
 # ──────────────────────────────────────────────────────────────
 
 # PostgreSQL
-POSTGRES_USER=${PG_USER}
-POSTGRES_PASSWORD=${PG_PASS}
-POSTGRES_DB=${PG_DB}
+GALACTILOG_POSTGRES_USER=${PG_USER}
+GALACTILOG_POSTGRES_PASSWORD=${PG_PASS}
+GALACTILOG_POSTGRES_DB=${PG_DB}
 
 # Application
-ASTRO_DATABASE_URL=postgresql+asyncpg://${PG_USER}:${PG_PASS}@postgres:5432/${PG_DB}
-ASTRO_REDIS_URL=redis://redis:6379/0
-ASTRO_FITS_DATA_PATH=/app/data/fits
-ASTRO_THUMBNAILS_PATH=/app/data/thumbnails
-ASTRO_THUMBNAIL_MAX_WIDTH=${THUMB_WIDTH}
+GALACTILOG_DATABASE_URL=postgresql+asyncpg://${PG_USER}:${PG_PASS}@postgres:5432/${PG_DB}
+GALACTILOG_REDIS_URL=redis://redis:6379/0
+GALACTILOG_FITS_DATA_PATH=/app/data/fits
+GALACTILOG_THUMBNAILS_PATH=/app/data/thumbnails
+GALACTILOG_THUMBNAIL_MAX_WIDTH=${THUMB_WIDTH}
 
 # Host paths (mapped into containers)
-FITS_DATA_HOST_PATH=${FITS_PATH}
-THUMBNAILS_HOST_PATH=${THUMBNAILS_PATH}
-POSTGRES_DATA_HOST_PATH=${PG_DATA_PATH}
+GALACTILOG_FITS_HOST_PATH=${FITS_PATH}
+GALACTILOG_THUMBNAILS_HOST_PATH=${THUMBNAILS_PATH}
+GALACTILOG_POSTGRES_DATA_HOST_PATH=${PG_DATA_PATH}
+
+# Authentication
+GALACTILOG_ADMIN_USERNAME=${ADMIN_USER}
+GALACTILOG_ADMIN_PASSWORD=${ADMIN_PASS}
 ENVEOF
 
 success "Created $ENV_FILE"
@@ -205,7 +232,7 @@ docker compose up -d app
 echo -n "  Waiting for application"
 APP_READY=false
 for i in $(seq 1 20); do
-    if curl -sf "http://localhost:${APP_PORT}/api/scan/status" &>/dev/null; then
+    if curl -sf "http://localhost:${APP_PORT}/api/health" &>/dev/null; then
         APP_READY=true
         break
     fi
@@ -241,6 +268,7 @@ echo "    docker compose down           # Stop"
 echo ""
 
 # ── Final ─────────────────────────────────────────────────────────────────────
+info "Log in with username '${ADMIN_USER}' and the password you set above."
 info "You can trigger your first scan from the Settings page in the web UI."
 echo ""
 header "All Done!"

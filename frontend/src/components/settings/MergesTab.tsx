@@ -1,9 +1,11 @@
 import { Component, For, Show, createSignal, onMount } from "solid-js";
 import { api } from "../../api/client";
 import { showToast } from "../Toast";
+import { useAuth } from "../AuthProvider";
 import type { MergeCandidateResponse, MergedTargetResponse } from "../../types";
 
 export const MergesTab: Component = () => {
+  const { isAdmin } = useAuth();
   const [candidates, setCandidates] = createSignal<MergeCandidateResponse[]>([]);
   const [merged, setMerged] = createSignal<MergedTargetResponse[]>([]);
   const [detecting, setDetecting] = createSignal(false);
@@ -75,13 +77,15 @@ export const MergesTab: Component = () => {
       <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-4 space-y-3">
         <div class="flex justify-between items-center">
           <h3 class="text-theme-text-primary font-medium">Target Merges</h3>
-          <button
-            onClick={handleDetect}
-            disabled={detecting()}
-            class="px-3 py-1.5 border border-theme-border-em text-theme-text-secondary rounded text-sm disabled:opacity-50 hover:text-theme-text-primary hover:border-theme-accent transition-colors"
-          >
-            {detecting() ? "Detecting..." : "Run Detection"}
-          </button>
+          <Show when={isAdmin()}>
+            <button
+              onClick={handleDetect}
+              disabled={detecting()}
+              class="px-3 py-1.5 border border-theme-border-em text-theme-text-secondary rounded text-sm disabled:opacity-50 hover:text-theme-text-primary hover:border-theme-accent transition-colors"
+            >
+              {detecting() ? "Detecting..." : "Run Detection"}
+            </button>
+          </Show>
         </div>
         <div class="flex gap-2">
           <button
@@ -120,20 +124,22 @@ export const MergesTab: Component = () => {
                         {" \u00b7 "}{c.source_image_count} images
                       </div>
                     </div>
-                    <div class="flex gap-2">
-                      <button
-                        onClick={() => handleMerge(c)}
-                        class="px-2 py-1 text-xs bg-theme-success text-theme-text-primary rounded hover:opacity-90"
-                      >
-                        Merge
-                      </button>
-                      <button
-                        onClick={() => handleDismiss(c)}
-                        class="px-2 py-1 text-xs border border-theme-border text-theme-text-secondary rounded hover:text-theme-text-primary transition-colors"
-                      >
-                        Dismiss
-                      </button>
-                    </div>
+                    <Show when={isAdmin()}>
+                      <div class="flex gap-2">
+                        <button
+                          onClick={() => handleMerge(c)}
+                          class="px-2 py-1 text-xs bg-theme-success text-theme-text-primary rounded hover:opacity-90"
+                        >
+                          Merge
+                        </button>
+                        <button
+                          onClick={() => handleDismiss(c)}
+                          class="px-2 py-1 text-xs border border-theme-border text-theme-text-secondary rounded hover:text-theme-text-primary transition-colors"
+                        >
+                          Dismiss
+                        </button>
+                      </div>
+                    </Show>
                   </div>
                 )}
               </For>
@@ -158,12 +164,14 @@ export const MergesTab: Component = () => {
                         {m.image_count} images {" \u00b7 "} {new Date(m.merged_at).toLocaleDateString([], { timeZone: "UTC" })}
                       </div>
                     </div>
-                    <button
-                      onClick={() => handleUnmerge(m)}
-                      class="px-2 py-1 text-xs bg-theme-warning text-theme-text-primary rounded hover:opacity-90"
-                    >
-                      Unmerge
-                    </button>
+                    <Show when={isAdmin()}>
+                      <button
+                        onClick={() => handleUnmerge(m)}
+                        class="px-2 py-1 text-xs bg-theme-warning text-theme-text-primary rounded hover:opacity-90"
+                      >
+                        Unmerge
+                      </button>
+                    </Show>
                   </div>
                 )}
               </For>

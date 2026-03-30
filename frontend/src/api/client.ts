@@ -20,15 +20,47 @@ import type {
   DiscoveredResponse,
   DisplaySettings,
   GraphSettings,
+  AuthUser,
+  LoginResponse,
 } from "../types";
 
 const API_BASE = import.meta.env.VITE_API_URL || "/api";
 
+let isRefreshing = false;
+
 async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
   const resp = await fetch(`${API_BASE}${path}`, {
-    headers: { "Content-Type": "application/json" },
+    credentials: "same-origin",
     ...init,
+    headers: { "Content-Type": "application/json", ...init?.headers },
   });
+
+  if (
+    resp.status === 401 &&
+    !isRefreshing &&
+    !path.startsWith("/auth/refresh") &&
+    !path.startsWith("/auth/login")
+  ) {
+    isRefreshing = true;
+    try {
+      const refreshResp = await fetch(`${API_BASE}/auth/refresh`, {
+        method: "POST",
+        credentials: "same-origin",
+      });
+      if (refreshResp.ok) {
+        isRefreshing = false;
+        return fetchJson<T>(path, init);
+      }
+    } catch {
+      // refresh failed
+    }
+    isRefreshing = false;
+    if (window.location.pathname !== "/login") {
+      window.location.href = "/login";
+    }
+    throw new Error("Session expired");
+  }
+
   if (!resp.ok) {
     throw new Error(`API error: ${resp.status} ${resp.statusText}`);
   }
@@ -67,6 +99,43 @@ function buildTargetQuery(filters: ActiveFilters): string {
 }
 
 export const api = {
+  // Auth
+  login: (username: string, password: string) =>
+    fetchJson<LoginResponse>("/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ username, password }),
+    }),
+
+  logout: () =>
+    fetch(`${API_BASE}/auth/logout`, {
+      method: "POST",
+      credentials: "same-origin",
+    }),
+
+  getMe: async (): Promise<AuthUser> => {
+    const resp = await fetch(`${API_BASE}/auth/me`, { credentials: "same-origin" });
+    if (!resp.ok) throw new Error("Not authenticated");
+    return resp.json();
+  },
+
+  getUsers: () =>
+    fetchJson<import("../types").UserAccount[]>("/auth/users"),
+
+  createUser: (username: string, password: string, role: string) =>
+    fetchJson<import("../types").UserAccount>("/auth/users", {
+      method: "POST",
+      body: JSON.stringify({ username, password, role }),
+    }),
+
+  updateUser: (id: string, data: { role?: string; is_active?: boolean }) =>
+    fetchJson<import("../types").UserAccount>(`/auth/users/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+
+  deleteUser: (id: string) =>
+    fetchJson<void>(`/auth/users/${id}`, { method: "DELETE" }),
+
   getTargets: (filters: ActiveFilters) =>
     fetchJson<TargetAggregationResponse>(`/targets?${buildTargetQuery(filters)}`),
 

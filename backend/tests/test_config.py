@@ -9,6 +9,6 @@ def test_settings_defaults():
 
 
 def test_settings_from_env(monkeypatch):
-    monkeypatch.setenv("ASTRO_THUMBNAIL_MAX_WIDTH", "400")
+    monkeypatch.setenv("GALACTILOG_THUMBNAIL_MAX_WIDTH", "400")
     s = Settings()
     assert s.thumbnail_max_width == 400

@@ -1,5 +1,6 @@
 import { createSignal, createEffect, For, Show } from "solid-js";
 import { useSettingsContext } from "./SettingsProvider";
+import { useAuth } from "./AuthProvider";
 import { showToast } from "./Toast";
 import type { DisplaySettings, MetricGroupSettings } from "../types";
 import { THEMES, TEXT_SIZES, type ThemeMeta } from "../themes";
@@ -27,6 +28,7 @@ const GROUP_META: { key: keyof DisplaySettings; label: string; fieldLabels: Reco
 ];
 
 export default function DisplayTab() {
+  const { isAdmin } = useAuth();
   const ctx = useSettingsContext();
   const [local, setLocal] = createSignal<DisplaySettings | null>(null);
   const [saving, setSaving] = createSignal(false);
@@ -292,7 +294,7 @@ export default function DisplayTab() {
         </Show>
       </div>
 
-      <Show when={local()}>
+      <Show when={local() && isAdmin()}>
         <div class="flex justify-end">
           <button type="button" class="px-3 py-1.5 text-sm rounded-[var(--radius-sm)] bg-theme-accent hover:bg-theme-accent-hover text-white disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-150" disabled={saving()} onClick={handleSave}>
             {saving() ? "Saving..." : "Save"}

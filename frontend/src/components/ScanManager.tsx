@@ -1,6 +1,7 @@
 import { Component, createSignal, createEffect, onCleanup, Show } from "solid-js";
 import { useScan } from "../store/scan";
 import { useSettingsContext } from "./SettingsProvider";
+import { useAuth } from "./AuthProvider";
 import { api } from "../api/client";
 import type { RebuildStatus } from "../types";
 import DatabaseOverview from "./DatabaseOverview";
@@ -23,6 +24,7 @@ const INTERVALS = [
 const ScanManager: Component = () => {
   const { scanStatus, scanError, isActive, stopping, startScan, startRegeneration, resetScan, stopScan, stopPolling } = useScan();
   const { settings, saveGeneral } = useSettingsContext();
+  const { isAdmin } = useAuth();
   const [frameFilter, setFrameFilter] = createSignal<FrameFilter>("all");
   const [dbSummary, setDbSummary] = createSignal<import("../types").DbSummary | null>(null);
   const [rebuildState, setRebuildState] = createSignal<RebuildStatus>({
@@ -118,38 +120,40 @@ const ScanManager: Component = () => {
   return (
     <div class="space-y-4">
       {/* Auto-scan settings */}
-      <div class="rounded-[var(--radius-md)] bg-theme-surface border border-theme-border p-4 space-y-4">
-        <h3 class="text-sm font-medium text-theme-text-primary">Auto-scan</h3>
-        <div class="flex items-center justify-between">
-          <label class="text-sm text-theme-text-secondary">Enable automatic scanning</label>
-          <button
-            onClick={handleAutoScanToggle}
-            class={`relative w-10 h-5 rounded-full transition-colors ${
-              autoScanEnabled() ? "bg-theme-accent" : "bg-theme-text-tertiary"
-            }`}
-          >
-            <span
-              class={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full transition-transform ${
-                autoScanEnabled() ? "translate-x-5" : ""
-              }`}
-            />
-          </button>
-        </div>
-        <Show when={autoScanEnabled()}>
+      <Show when={isAdmin()}>
+        <div class="rounded-[var(--radius-md)] bg-theme-surface border border-theme-border p-4 space-y-4">
+          <h3 class="text-sm font-medium text-theme-text-primary">Auto-scan</h3>
           <div class="flex items-center justify-between">
-            <label class="text-sm text-theme-text-secondary">Scan interval</label>
-            <select
-              value={autoScanInterval()}
-              onChange={(e) => handleIntervalChange(parseInt(e.currentTarget.value))}
-              class="px-3 py-1.5 bg-theme-input border border-theme-border rounded-[var(--radius-sm)] text-sm text-theme-text-primary focus:ring-1 focus:ring-theme-accent focus:border-theme-accent outline-none"
+            <label class="text-sm text-theme-text-secondary">Enable automatic scanning</label>
+            <button
+              onClick={handleAutoScanToggle}
+              class={`relative w-10 h-5 rounded-full transition-colors ${
+                autoScanEnabled() ? "bg-theme-accent" : "bg-theme-text-tertiary"
+              }`}
             >
-              {INTERVALS.map((opt) => (
-                <option value={opt.value}>{opt.label}</option>
-              ))}
-            </select>
+              <span
+                class={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full transition-transform ${
+                  autoScanEnabled() ? "translate-x-5" : ""
+                }`}
+              />
+            </button>
           </div>
-        </Show>
-      </div>
+          <Show when={autoScanEnabled()}>
+            <div class="flex items-center justify-between">
+              <label class="text-sm text-theme-text-secondary">Scan interval</label>
+              <select
+                value={autoScanInterval()}
+                onChange={(e) => handleIntervalChange(parseInt(e.currentTarget.value))}
+                class="px-3 py-1.5 bg-theme-input border border-theme-border rounded-[var(--radius-sm)] text-sm text-theme-text-primary focus:ring-1 focus:ring-theme-accent focus:border-theme-accent outline-none"
+              >
+                {INTERVALS.map((opt) => (
+                  <option value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+            </div>
+          </Show>
+        </div>
+      </Show>
 
       <DatabaseOverview summary={dbSummary()} />
 
@@ -171,13 +175,15 @@ const ScanManager: Component = () => {
         onDismissStalled={resetScan}
       />
 
-      <MaintenanceActions
-        disabled={isActive()}
-        rebuildRunning={rebuildState().state === "running"}
-        rebuildMode={rebuildState().mode}
-        onRegenThumbnails={startRegeneration}
-        onStartedAction={startRebuildPolling}
-      />
+      <Show when={isAdmin()}>
+        <MaintenanceActions
+          disabled={isActive()}
+          rebuildRunning={rebuildState().state === "running"}
+          rebuildMode={rebuildState().mode}
+          onRegenThumbnails={startRegeneration}
+          onStartedAction={startRebuildPolling}
+        />
+      </Show>
     </div>
   );
 };
