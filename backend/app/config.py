@@ -11,6 +11,8 @@ class Settings(BaseSettings):
     access_token_expiry: int = 1800
     refresh_token_expiry: int = 604800
     secure_cookies: bool = True
+    admin_username: str = "admin"
+    admin_password: str = ""
 
     model_config = {"env_prefix": "ASTRO_"}
 
