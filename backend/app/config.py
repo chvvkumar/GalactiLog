@@ -7,6 +7,10 @@ class Settings(BaseSettings):
     fits_data_path: str = "/app/data/fits"
     thumbnails_path: str = "/app/data/thumbnails"
     thumbnail_max_width: int = 800
+    jwt_secret: str = ""
+    access_token_expiry: int = 1800
+    refresh_token_expiry: int = 604800
+    secure_cookies: bool = True
 
     model_config = {"env_prefix": "ASTRO_"}
 
