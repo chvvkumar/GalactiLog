@@ -43,7 +43,7 @@ def _set_auth_cookies(response: Response, access_token: str, refresh_token: str)
         key="access_token",
         value=access_token,
         httponly=True,
-        secure=settings.secure_cookies,
+        secure=settings.https,
         samesite="strict",
         path="/",
     )
@@ -51,7 +51,7 @@ def _set_auth_cookies(response: Response, access_token: str, refresh_token: str)
         key="refresh_token",
         value=refresh_token,
         httponly=True,
-        secure=settings.secure_cookies,
+        secure=settings.https,
         samesite="strict",
         path="/api/auth/refresh",
     )
