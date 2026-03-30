@@ -49,11 +49,11 @@ Token families group all refresh tokens descended from a single login. If a revo
 | Attribute | Access Token Cookie | Refresh Token Cookie |
 |-----------|--------------------|--------------------|
 | HttpOnly | Yes | Yes |
-| Secure | Yes (configurable via `ASTRO_SECURE_COOKIES`) | Yes (configurable via `ASTRO_SECURE_COOKIES`) |
+| Secure | Yes (configurable via `ASTRO_HTTPS`) | Yes (configurable via `ASTRO_HTTPS`) |
 | SameSite | Strict | Strict |
 | Path | `/` | `/api/auth/refresh` |
 
-Set `ASTRO_SECURE_COOKIES=false` for local development without HTTPS.
+Set `ASTRO_HTTPS=false` for local development without HTTPS.
 
 ## Security Headers
 
