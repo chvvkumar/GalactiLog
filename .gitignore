@@ -37,7 +37,7 @@ CLAUDE.md
 .claude/
 .superpowers/
 .playwright-mcp/
-docs/superpowers/
+docs/
 
 # Local resources (MCP data, images, plans, etc.)
 resources/
