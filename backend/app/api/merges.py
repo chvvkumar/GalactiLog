@@ -5,6 +5,8 @@ from sqlalchemy import select, update, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 from app.database import get_session
+from app.api.deps import get_current_user, require_admin
+from app.models.user import User
 from app.models.target import Target
 from app.models.image import Image
 from app.models.merge_candidate import MergeCandidate
@@ -17,6 +19,7 @@ router = APIRouter(prefix="/targets", tags=["merges"])
 async def merge_targets(
     body: MergeRequest,
     session: AsyncSession = Depends(get_session),
+    user: User = Depends(require_admin),
 ):
     """Merge a loser target into a winner target."""
     # Load winner
@@ -112,7 +115,7 @@ async def merge_targets(
 
 
 @router.post("/detect-duplicates")
-async def trigger_duplicate_detection():
+async def trigger_duplicate_detection(user: User = Depends(require_admin)):
     """Manually trigger duplicate target detection."""
     from app.worker.tasks import detect_duplicate_targets
     task = detect_duplicate_targets.delay()
@@ -123,6 +126,7 @@ async def trigger_duplicate_detection():
 async def unmerge_target(
     target_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
+    user: User = Depends(require_admin),
 ):
     """Restore a soft-deleted (merged) target."""
     loser = await session.get(Target, target_id)
@@ -184,6 +188,7 @@ async def unmerge_target(
 @router.get("/merge-candidates/count")
 async def get_merge_candidate_count(
     session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
 ):
     """Return count of pending merge candidates (for badge display)."""
     result = await session.execute(
@@ -197,6 +202,7 @@ async def get_merge_candidate_count(
 async def list_merge_candidates(
     status: str = Query(default="pending"),
     session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
 ):
     """List merge candidates, joined with suggested target name, ordered by similarity."""
     result = await session.execute(
@@ -226,6 +232,7 @@ async def list_merge_candidates(
 @router.get("/merged-targets", response_model=list[MergedTargetResponse])
 async def list_merged_targets(
     session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
 ):
     """List all soft-deleted (merged) targets with winner name and image count."""
     winner_alias = aliased(Target, name="winner")
@@ -261,6 +268,7 @@ async def list_merged_targets(
 async def dismiss_merge_candidate(
     candidate_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
+    user: User = Depends(require_admin),
 ):
     """Set a merge candidate's status to dismissed."""
     candidate = await session.get(MergeCandidate, candidate_id)

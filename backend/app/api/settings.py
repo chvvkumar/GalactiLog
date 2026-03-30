@@ -6,6 +6,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_async_redis
 from app.database import get_session
+from app.api.deps import get_current_user, require_admin
+from app.models.user import User
 from app.models.user_settings import UserSettings, SETTINGS_ROW_ID
 from app.models import Image
 from app.schemas.settings import (
@@ -195,7 +197,7 @@ def _group_by_similarity(rows: list[tuple[str, int]]) -> list[SuggestionGroup]:
 # ---------------------------------------------------------------------------
 
 @router.get("", response_model=SettingsResponse)
-async def get_settings(session: AsyncSession = Depends(get_session)):
+async def get_settings(session: AsyncSession = Depends(get_session), user: User = Depends(get_current_user)):
     """Return the full settings object, creating defaults if not yet present."""
     row = await _get_or_create_settings(session)
     return _row_to_response(row)
@@ -205,6 +207,7 @@ async def get_settings(session: AsyncSession = Depends(get_session)):
 async def update_general(
     payload: GeneralSettings,
     session: AsyncSession = Depends(get_session),
+    user: User = Depends(require_admin),
 ):
     """Update general settings and return the full settings object."""
     row = await _get_or_create_settings(session)
@@ -218,6 +221,7 @@ async def update_general(
 async def update_filters(
     payload: dict[str, FilterConfig],
     session: AsyncSession = Depends(get_session),
+    user: User = Depends(require_admin),
 ):
     """Update filter config (colors + aliases) and return full settings."""
     row = await _get_or_create_settings(session)
@@ -231,6 +235,7 @@ async def update_filters(
 async def update_equipment(
     payload: EquipmentConfig,
     session: AsyncSession = Depends(get_session),
+    user: User = Depends(require_admin),
 ):
     """Update equipment aliases and return full settings."""
     row = await _get_or_create_settings(session)
@@ -244,6 +249,7 @@ async def update_equipment(
 async def update_dismissed_suggestions(
     payload: list[list[str]],
     session: AsyncSession = Depends(get_session),
+    user: User = Depends(require_admin),
 ):
     """Update dismissed suggestions list and return full settings."""
     row = await _get_or_create_settings(session)
@@ -258,6 +264,7 @@ async def update_dismissed_suggestions(
 async def update_display(
     payload: DisplaySettings,
     session: AsyncSession = Depends(get_session),
+    user: User = Depends(require_admin),
 ):
     row = await _get_or_create_settings(session)
     row.display = payload.model_dump()
@@ -269,6 +276,7 @@ async def update_display(
 async def update_graph(
     payload: GraphSettings,
     session: AsyncSession = Depends(get_session),
+    user: User = Depends(require_admin),
 ):
     row = await _get_or_create_settings(session)
     row.graph = payload.model_dump()
@@ -290,6 +298,7 @@ class DiscoveredSection(str, Enum):
 async def get_discovered(
     section: DiscoveredSection,
     session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
 ):
     """Return all distinct raw values from DB with frame counts for a section."""
     column_map = {
@@ -316,7 +325,7 @@ async def get_discovered(
 # ---------------------------------------------------------------------------
 
 @router.get("/suggestions/filters", response_model=SuggestionsResponse)
-async def suggest_filters(session: AsyncSession = Depends(get_session)):
+async def suggest_filters(session: AsyncSession = Depends(get_session), user: User = Depends(get_current_user)):
     """Return groups of similar filter names found in the image library."""
     q = (
         select(Image.filter_used, sa_func.count(Image.id))
@@ -342,7 +351,7 @@ async def suggest_filters(session: AsyncSession = Depends(get_session)):
 
 
 @router.get("/suggestions/equipment", response_model=SuggestionsResponse)
-async def suggest_equipment(session: AsyncSession = Depends(get_session)):
+async def suggest_equipment(session: AsyncSession = Depends(get_session), user: User = Depends(get_current_user)):
     """Return groups of similar camera/telescope names found in the image library."""
     cam_q = (
         select(Image.camera, sa_func.count(Image.id))

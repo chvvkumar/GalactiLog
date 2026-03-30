@@ -79,7 +79,30 @@ APP_PORT="8080"
 WORKER_CONCURRENCY="4"
 THUMB_WIDTH="800"
 
+# Prompt for admin password
+echo ""
+echo -e "${BOLD}Admin Account${NC}"
+echo "  An admin account will be created on first start."
+read -rp "  Admin username [admin]: " ADMIN_USER
+ADMIN_USER="${ADMIN_USER:-admin}"
+while true; do
+    read -rsp "  Admin password (min 12 chars): " ADMIN_PASS
+    echo ""
+    if [ ${#ADMIN_PASS} -lt 12 ]; then
+        warn "Password must be at least 12 characters."
+        continue
+    fi
+    read -rsp "  Confirm password: " ADMIN_PASS_CONFIRM
+    echo ""
+    if [ "$ADMIN_PASS" != "$ADMIN_PASS_CONFIRM" ]; then
+        warn "Passwords do not match."
+        continue
+    fi
+    break
+done
+
 success "PostgreSQL:     ${PG_USER}@${PG_DB}"
+success "Admin user:     $ADMIN_USER"
 success "FITS files:     $FITS_PATH"
 success "Thumbnails:     $THUMBNAILS_PATH"
 success "Database:       $PG_DATA_PATH"
@@ -129,6 +152,10 @@ ASTRO_THUMBNAIL_MAX_WIDTH=${THUMB_WIDTH}
 FITS_DATA_HOST_PATH=${FITS_PATH}
 THUMBNAILS_HOST_PATH=${THUMBNAILS_PATH}
 POSTGRES_DATA_HOST_PATH=${PG_DATA_PATH}
+
+# Authentication
+ASTRO_ADMIN_USERNAME=${ADMIN_USER}
+ASTRO_ADMIN_PASSWORD=${ADMIN_PASS}
 ENVEOF
 
 success "Created $ENV_FILE"
@@ -205,7 +232,7 @@ docker compose up -d app
 echo -n "  Waiting for application"
 APP_READY=false
 for i in $(seq 1 20); do
-    if curl -sf "http://localhost:${APP_PORT}/api/scan/status" &>/dev/null; then
+    if curl -sf "http://localhost:${APP_PORT}/api/health" &>/dev/null; then
         APP_READY=true
         break
     fi
@@ -241,6 +268,7 @@ echo "    docker compose down           # Stop"
 echo ""
 
 # ── Final ─────────────────────────────────────────────────────────────────────
+info "Log in with username '${ADMIN_USER}' and the password you set above."
 info "You can trigger your first scan from the Settings page in the web UI."
 echo ""
 header "All Done!"

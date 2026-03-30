@@ -7,6 +7,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_async_redis
 from app.database import get_session
+from app.api.deps import get_current_user, require_admin
+from app.models.user import User
 from app.models import Image, Target
 from app.services.scan_state import (
     get_scan_state, get_failed_files, start_scanning, set_ingesting, set_idle, reset_scan,
@@ -25,6 +27,7 @@ router = APIRouter(prefix="/scan", tags=["scan"])
 async def trigger_scan(
     include_calibration: bool = Query(True, description="Include calibration frames (BIAS, DARK, FLAT)"),
     session: AsyncSession = Depends(get_session),
+    user: User = Depends(require_admin),
 ):
     """Walk the FITS directory, queue new files for ingestion.
 
@@ -59,6 +62,7 @@ async def trigger_scan(
 @router.post("/regenerate-thumbnails")
 async def regenerate_thumbnails(
     session: AsyncSession = Depends(get_session),
+    user: User = Depends(require_admin),
 ):
     """Queue all existing images for thumbnail regeneration."""
     r = get_async_redis()
@@ -94,7 +98,7 @@ async def regenerate_thumbnails(
 
 
 @router.get("/status")
-async def scan_status():
+async def scan_status(user: User = Depends(get_current_user)):
     """Return current scan state from Redis."""
     r = get_async_redis()
     try:
@@ -108,7 +112,7 @@ async def scan_status():
 
 
 @router.post("/stop")
-async def stop_scan():
+async def stop_scan(user: User = Depends(require_admin)):
     """Request cancellation of the current scan."""
     r = get_async_redis()
     try:
@@ -122,7 +126,7 @@ async def stop_scan():
 
 
 @router.get("/activity")
-async def get_activity_log():
+async def get_activity_log(user: User = Depends(get_current_user)):
     """Return persistent activity log (newest first)."""
     r = get_async_redis()
     try:
@@ -132,7 +136,7 @@ async def get_activity_log():
 
 
 @router.delete("/activity")
-async def clear_activity_log():
+async def clear_activity_log(user: User = Depends(require_admin)):
     """Clear the activity log."""
     r = get_async_redis()
     try:
@@ -143,7 +147,7 @@ async def clear_activity_log():
 
 
 @router.post("/reset")
-async def reset_scan_state():
+async def reset_scan_state(user: User = Depends(require_admin)):
     """Force-clear a stalled scan back to idle."""
     r = get_async_redis()
     try:
@@ -163,6 +167,7 @@ async def reset_scan_state():
 @router.post("/backfill-targets")
 async def backfill_targets(
     session: AsyncSession = Depends(get_session),
+    user: User = Depends(require_admin),
 ):
     """Resolve targets for already-ingested images that have NULL resolved_target_id.
 
@@ -274,7 +279,7 @@ async def backfill_targets(
 
 
 @router.post("/rebuild-targets")
-async def trigger_rebuild_targets():
+async def trigger_rebuild_targets(user: User = Depends(require_admin)):
     """Delete all targets and re-resolve from FITS headers via SIMBAD.
 
     This is a destructive operation that clears all targets, merge history,
@@ -297,7 +302,7 @@ async def trigger_rebuild_targets():
 
 
 @router.post("/smart-rebuild-targets")
-async def trigger_smart_rebuild():
+async def trigger_smart_rebuild(user: User = Depends(require_admin)):
     """Quick fix: repair target data using local DB + SIMBAD cache only.
 
     No SIMBAD network calls. Fixes orphaned images, missing aliases,
@@ -319,7 +324,7 @@ async def trigger_smart_rebuild():
 
 
 @router.post("/backfill-csv")
-async def backfill_csv_metrics_endpoint():
+async def backfill_csv_metrics_endpoint(user: User = Depends(require_admin)):
     """Backfill Image rows with metrics from N.I.N.A. CSV files."""
     r = get_async_redis()
     try:
@@ -333,7 +338,7 @@ async def backfill_csv_metrics_endpoint():
 
 
 @router.get("/rebuild-status")
-async def rebuild_status():
+async def rebuild_status(user: User = Depends(get_current_user)):
     """Return current rebuild task state from Redis."""
     r = get_async_redis()
     try:
@@ -344,7 +349,7 @@ async def rebuild_status():
 
 
 @router.get("/db-summary")
-async def db_summary(session: AsyncSession = Depends(get_session)):
+async def db_summary(session: AsyncSession = Depends(get_session), user: User = Depends(get_current_user)):
     """Lightweight database summary for the Scan & Ingest page."""
     result = await session.execute(text("""
         SELECT
@@ -377,7 +382,7 @@ VALID_INTERVALS = {60, 120, 240, 480, 720, 1440}
 
 
 @router.get("/autoscan")
-async def get_autoscan(session: AsyncSession = Depends(get_session)):
+async def get_autoscan(session: AsyncSession = Depends(get_session), user: User = Depends(get_current_user)):
     """Return current auto-scan settings (deprecated — use /settings/general)."""
     from app.models.user_settings import UserSettings, SETTINGS_ROW_ID
     result = await session.execute(
@@ -396,6 +401,7 @@ async def set_autoscan(
     enabled: bool = Query(...),
     interval_minutes: int = Query(...),
     session: AsyncSession = Depends(get_session),
+    user: User = Depends(require_admin),
 ):
     """Update auto-scan settings (deprecated — use /settings/general)."""
     if interval_minutes not in VALID_INTERVALS:
