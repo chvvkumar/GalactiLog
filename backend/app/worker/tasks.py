@@ -118,16 +118,20 @@ def run_scan(self, include_calibration: bool = True) -> dict:
 
     if not new_files:
         set_idle_sync(_redis)
+        cataloged = len(known_paths) - removed
+        msg = f"Scan complete: no new files found ({cataloged} already cataloged)"
+        if removed:
+            msg += f", {removed} deleted files purged from catalog"
         append_activity_sync(_redis, {
             "type": "scan_complete",
-            "message": f"Scan complete: no new files found ({len(known_paths)} already cataloged)",
-            "details": {"completed": 0, "failed": 0, "already_known": len(known_paths), "removed": removed},
+            "message": msg,
+            "details": {"completed": 0, "failed": 0, "already_known": cataloged, "removed": removed},
             "timestamp": __import__('time').time(),
         })
-        return {"status": "complete", "new_files_queued": 0, "already_known": len(known_paths), "removed": removed}
+        return {"status": "complete", "new_files_queued": 0, "already_known": cataloged, "removed": removed}
 
     # Transition to ingesting with final total — ingest tasks are already running
-    set_ingesting_sync(_redis, total=len(new_files))
+    set_ingesting_sync(_redis, total=len(new_files), removed=removed)
     # Some tasks may have already completed during discovery, check now
     _check_complete_sync(_redis)
 
