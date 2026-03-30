@@ -9,7 +9,9 @@ from sqlalchemy import select, or_, and_, func, cast, Float, Date, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
+from app.api.deps import get_current_user
 from app.models import Target, Image
+from app.models.user import User
 from app.services.normalization import load_alias_maps, normalize_filter, normalize_equipment, expand_canonical
 from app.schemas.target import (
     TargetAggregationResponse, TargetAggregation, SessionSummary,
@@ -70,6 +72,7 @@ async def search_targets(
     q: str = Query(..., min_length=1),
     limit: int = Query(10, ge=1, le=50),
     session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
 ):
     """Search targets by name or alias with fuzzy trigram matching."""
     pattern = f"%{q}%"
@@ -151,7 +154,7 @@ async def search_targets(
 # --- 2. Equipment (SECOND — before path-parameter routes) ---
 
 @router.get("/equipment", response_model=EquipmentResponse)
-async def get_equipment(session: AsyncSession = Depends(get_session)):
+async def get_equipment(session: AsyncSession = Depends(get_session), user: User = Depends(get_current_user)):
     """Return distinct camera and telescope values."""
     filter_map, cam_map, tel_map = await load_alias_maps(session)
     cam_result = await session.execute(
@@ -185,7 +188,7 @@ async def get_equipment(session: AsyncSession = Depends(get_session)):
 # --- 2b. FITS keys (before path-parameter routes) ---
 
 @router.get("/fits-keys", response_model=list[str])
-async def get_fits_keys(session: AsyncSession = Depends(get_session)):
+async def get_fits_keys(session: AsyncSession = Depends(get_session), user: User = Depends(get_current_user)):
     """Return distinct FITS header keys found across all images."""
     result = await session.execute(
         text("SELECT DISTINCT key FROM images, jsonb_object_keys(raw_headers) AS key ORDER BY key")
@@ -198,6 +201,7 @@ async def get_fits_keys(session: AsyncSession = Depends(get_session)):
 @router.get("/object-types", response_model=list[ObjectTypeCount])
 async def get_object_types(
     session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
 ):
     """Return human-readable object type categories with target counts."""
     query = (
@@ -229,6 +233,7 @@ async def get_object_types(
 async def get_target_detail(
     target_id: str,
     session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
 ):
     """Return target identity with cumulative stats and session overviews."""
     if target_id.startswith("obj:"):
@@ -415,6 +420,7 @@ async def list_targets_aggregated(
     humidity_max: float | None = Query(None),
     airmass_min: float | None = Query(None),
     airmass_max: float | None = Query(None),
+    user: User = Depends(get_current_user),
 ):
     """Return targets with aggregated session data, filtered by query params."""
     filter_map, cam_map, tel_map = await load_alias_maps(session)
@@ -909,6 +915,7 @@ async def get_session_detail(
     target_id: str,
     date: str,
     session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
 ):
     """Return detailed session data for a target on a specific date."""
     if target_id.startswith("obj:"):
