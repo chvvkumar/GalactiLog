@@ -50,6 +50,26 @@ const SessionAccordionCard: Component<{
   const [showFrames, setShowFrames] = createSignal(false);
   const [sortColumn, setSortColumn] = createSignal<keyof FrameRecord>("timestamp");
   const [sortAsc, setSortAsc] = createSignal(true);
+  const [csvCopied, setCsvCopied] = createSignal(false);
+
+  const copyAstrobinCsv = () => {
+    const d = props.detail;
+    if (!d) return;
+    const header = "date,filter,number,duration,binning,gain,sensorCooling,fNumber,bortle,meanSqm,meanFwhm,temperature";
+    const rows = d.filter_details.map((f) => {
+      const duration = f.exposure_time ?? "";
+      const gain = d.gain !== null ? d.gain : "";
+      const sensorCooling = d.sensor_temp !== null ? Math.round(d.sensor_temp) : "";
+      const meanFwhm = d.median_fwhm !== null ? d.median_fwhm.toFixed(2) : "";
+      const temperature = d.median_ambient_temp !== null ? d.median_ambient_temp.toFixed(2) : "";
+      return `${d.session_date},,${f.frame_count},${duration},,${gain},${sensorCooling},,,,${meanFwhm},${temperature}`;
+    });
+    const csv = [header, ...rows].join("\n");
+    navigator.clipboard.writeText(csv).then(() => {
+      setCsvCopied(true);
+      setTimeout(() => setCsvCopied(false), 2000);
+    });
+  };
 
   createEffect(() => {
     if (props.autoScroll && props.isExpanded && cardRef) {
@@ -272,6 +292,16 @@ const SessionAccordionCard: Component<{
                       {detail().first_frame_time ? `${formatTime(detail().first_frame_time!)} → ${detail().last_frame_time ? formatTime(detail().last_frame_time!) : ""}` : "—"}
                     </span>
                   </span>
+                </div>
+
+                {/* Export to Astrobin */}
+                <div class="flex justify-end">
+                  <button
+                    class="text-label px-2.5 py-1 border border-theme-border-em rounded text-theme-text-secondary hover:text-theme-text-primary hover:border-theme-accent transition-colors cursor-pointer"
+                    onClick={copyAstrobinCsv}
+                  >
+                    {csvCopied() ? "Copied!" : "Copy Astrobin CSV"}
+                  </button>
                 </div>
 
                 {/* Session Metrics Chart */}
