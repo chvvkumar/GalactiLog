@@ -136,13 +136,24 @@ For development: set `ASTRO_CORS_ORIGINS` environment variable with an explicit 
 
 ## User Management
 
+### First-Time Setup
+
+Set `ASTRO_ADMIN_PASSWORD` in `.env`. On first start, if no users exist, an admin account is created automatically:
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `ASTRO_ADMIN_PASSWORD` | *(none)* | Admin password. Required for auto-creation. |
+| `ASTRO_ADMIN_USERNAME` | `admin` | Admin username. |
+
+Once a user exists in the database, these variables are ignored.
+
 ### CLI
 
 ```
 python -m app.cli create-user --username <name> --role <admin|viewer>
 ```
 
-Prompts for password interactively. No default passwords. Required for bootstrapping the first admin account.
+Prompts for password interactively. Useful for creating additional users without the web UI.
 
 ### Admin API
 
@@ -162,7 +173,7 @@ Admin cannot delete or deactivate their own account.
 | Refresh token hashes | PostgreSQL `refresh_token.token_hash` | SHA-256, revocable |
 | JWT access tokens | HttpOnly cookie (browser) | HS256 signed, 30-min expiry, Secure + SameSite=Strict |
 | Refresh tokens | HttpOnly cookie (browser), hashed server-side | 7-day expiry, rotation, family revocation |
-| JWT signing secret | Environment variable `ASTRO_JWT_SECRET` | Never in source code, never logged |
+| JWT signing secret | Environment variable or auto-generated at startup | Never in source code, never logged |
 | User IPs | Audit logs (stdout) | 30-day retention via Docker log rotation |
 
 ## Vulnerability Reporting
