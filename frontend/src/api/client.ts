@@ -55,7 +55,9 @@ async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
       // refresh failed
     }
     isRefreshing = false;
-    window.location.href = "/login";
+    if (window.location.pathname !== "/login") {
+      window.location.href = "/login";
+    }
     throw new Error("Session expired");
   }
 
@@ -110,7 +112,11 @@ export const api = {
       credentials: "same-origin",
     }),
 
-  getMe: () => fetchJson<AuthUser>("/auth/me"),
+  getMe: async (): Promise<AuthUser> => {
+    const resp = await fetch(`${API_BASE}/auth/me`, { credentials: "same-origin" });
+    if (!resp.ok) throw new Error("Not authenticated");
+    return resp.json();
+  },
 
   getTargets: (filters: ActiveFilters) =>
     fetchJson<TargetAggregationResponse>(`/targets?${buildTargetQuery(filters)}`),
