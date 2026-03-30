@@ -161,6 +161,7 @@ async def refresh(
     await session.commit()
 
     _set_auth_cookies(response, access, new_refresh)
+    audit_log("refresh", user_id=user.id, source_ip=ip)
     return {"status": "ok"}
 
 

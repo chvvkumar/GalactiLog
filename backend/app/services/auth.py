@@ -171,6 +171,7 @@ def audit_log(
     detail: str | None = None,
 ) -> None:
     entry = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "event": event,
         "user_id": str(user_id) if user_id else None,
         "username": username,
