@@ -1,23 +1,13 @@
-import { Component, createSignal, createEffect, Show } from "solid-js";
-import { useNavigate } from "@solidjs/router";
+import { Component, createSignal, Show } from "solid-js";
 import { useAuth } from "../components/AuthProvider";
 import { showToast } from "../components/Toast";
 
 const LoginPage: Component = () => {
-  const { login, user } = useAuth();
-  const navigate = useNavigate();
+  const { login } = useAuth();
   const [username, setUsername] = createSignal("");
   const [password, setPassword] = createSignal("");
   const [error, setError] = createSignal("");
   const [submitting, setSubmitting] = createSignal(false);
-
-  // Navigate to dashboard once user signal is set (reactive, avoids race)
-  createEffect(() => {
-    if (user()) {
-      showToast(`Welcome, ${user()!.username}`);
-      navigate("/", { replace: true });
-    }
-  });
 
   const handleSubmit = async (e: Event) => {
     e.preventDefault();
@@ -25,9 +15,10 @@ const LoginPage: Component = () => {
     setSubmitting(true);
     try {
       await login(username(), password());
+      showToast(`Welcome, ${username()}`);
+      window.location.href = "/";
     } catch (err: any) {
       setError(err?.message || "Login failed");
-    } finally {
       setSubmitting(false);
     }
   };
