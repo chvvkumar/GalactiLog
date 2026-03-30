@@ -103,13 +103,13 @@ export const UsersTab: Component = () => {
               />
             </div>
             <div>
-              <label class="block text-xs text-theme-text-secondary mb-1">Password (min 12 chars)</label>
+              <label class="block text-xs text-theme-text-secondary mb-1">Password (min 8 chars)</label>
               <input
                 type="password"
                 value={newPassword()}
                 onInput={(e) => setNewPassword(e.currentTarget.value)}
                 class="w-full bg-theme-base border border-theme-border rounded px-2 py-1.5 text-sm text-theme-text-primary"
-                minLength={12}
+                minLength={8}
                 required
               />
             </div>

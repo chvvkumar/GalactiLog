@@ -15,7 +15,7 @@ Cookie-based JWT authentication, same-origin behind nginx reverse proxy.
 
 | Rule | Detail |
 |------|--------|
-| Length | 12-128 characters |
+| Length | 8-128 characters |
 | Characters | Any Unicode, no restrictions |
 | Hashing | Argon2id via `pwdlib` (`PasswordHash.recommended()` defaults) |
 | Defaults | None; CLI forces interactive password input |

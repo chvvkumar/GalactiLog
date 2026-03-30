@@ -86,10 +86,10 @@ echo "  An admin account will be created on first start."
 read -rp "  Admin username [admin]: " ADMIN_USER
 ADMIN_USER="${ADMIN_USER:-admin}"
 while true; do
-    read -rsp "  Admin password (min 12 chars): " ADMIN_PASS
+    read -rsp "  Admin password (min 8 chars): " ADMIN_PASS
     echo ""
-    if [ ${#ADMIN_PASS} -lt 12 ]; then
-        warn "Password must be at least 12 characters."
+    if [ ${#ADMIN_PASS} -lt 8 ]; then
+        warn "Password must be at least 8 characters."
         continue
     fi
     read -rsp "  Confirm password: " ADMIN_PASS_CONFIRM

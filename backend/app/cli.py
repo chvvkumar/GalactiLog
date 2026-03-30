@@ -12,9 +12,9 @@ from app.services.auth import hash_password
 
 
 async def create_user(username: str, role: str) -> None:
-    password = getpass.getpass("Password (min 12 chars): ")
-    if len(password) < 12:
-        print("Error: Password must be at least 12 characters.")
+    password = getpass.getpass("Password (min 8 chars): ")
+    if len(password) < 8:
+        print("Error: Password must be at least 8 characters.")
         sys.exit(1)
     if len(password) > 128:
         print("Error: Password must be at most 128 characters.")
