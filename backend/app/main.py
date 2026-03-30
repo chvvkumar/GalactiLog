@@ -17,9 +17,9 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Warn if JWT secret is not configured
-    if not settings.jwt_secret:
-        logger.warning("ASTRO_JWT_SECRET is not set — authentication will be insecure!")
+    # Warn if JWT secret was auto-generated (won't survive restarts)
+    if not os.environ.get("ASTRO_JWT_SECRET"):
+        logger.warning("ASTRO_JWT_SECRET is not set — using auto-generated secret. Sessions will not survive restarts. Set ASTRO_JWT_SECRET in .env for persistence.")
 
     # Ensure database tables exist on startup
     from app.database import engine

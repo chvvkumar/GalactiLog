@@ -1,3 +1,5 @@
+import secrets
+
 from pydantic_settings import BaseSettings
 
 
@@ -18,6 +20,12 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+# Auto-generate JWT secret if not set -- stable for the lifetime of the process,
+# but tokens won't survive a restart. Fine for getting started; set ASTRO_JWT_SECRET
+# in .env for persistence across restarts.
+if not settings.jwt_secret:
+    settings.jwt_secret = secrets.token_hex(32)
 
 import redis.asyncio as aioredis
 import redis as sync_redis
