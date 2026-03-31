@@ -35,6 +35,7 @@ Base.metadata.create_all(_sync_engine)
 from app.config import get_sync_redis
 from app.services.scan_state import (
     increment_completed_sync, increment_failed_sync, increment_csv_enriched_sync,
+    increment_skipped_calibration_sync,
     start_scanning_sync, set_ingesting_sync, set_idle_sync,
     set_rebuild_running_sync, set_rebuild_progress_sync, set_rebuild_complete_sync,
     set_discovered_sync, is_cancel_requested_sync, clear_cancel_sync, set_cancelled_sync,
@@ -96,6 +97,12 @@ def run_scan(self, include_calibration: bool = True) -> dict:
 
     if changed_files:
         logger.info("Delta scan: %d changed files queued for re-ingest", len(changed_files))
+        append_activity_sync(_redis, {
+            "type": "delta_scan",
+            "message": f"Delta scan: {len(changed_files)} changed file{'s' if len(changed_files) != 1 else ''} detected and re-queued",
+            "details": {"changed_files": len(changed_files)},
+            "timestamp": __import__('time').time(),
+        })
 
     # Detect and remove orphaned DB records (files deleted from disk)
     orphaned_paths = known_paths - all_disk_paths
@@ -125,12 +132,24 @@ def run_scan(self, include_calibration: bool = True) -> dict:
                 session.commit()
         if removed:
             logger.info("Removed %d orphaned image records (files deleted from disk)", removed)
+            append_activity_sync(_redis, {
+                "type": "orphan_cleanup",
+                "message": f"Removed {removed} deleted file{'s' if removed != 1 else ''} from catalog",
+                "details": {"removed": removed},
+                "timestamp": __import__('time').time(),
+            })
     elif orphaned_paths:
         logger.warning(
             "Skipped orphan cleanup: %d of %d files missing (>50%%) — "
             "possible unmounted share or unreachable storage",
             len(orphaned_paths), len(known_paths),
         )
+        append_activity_sync(_redis, {
+            "type": "orphan_warning",
+            "message": f"Orphan cleanup skipped: {len(orphaned_paths)} of {len(known_paths)} files missing (>50%) — possible unmounted share",
+            "details": {"missing": len(orphaned_paths), "total_known": len(known_paths)},
+            "timestamp": __import__('time').time(),
+        })
 
     total_queued = len(new_files) + len(changed_files)
     if not total_queued:
@@ -233,6 +252,7 @@ def _do_ingest(fits_path: str, include_calibration: bool = True) -> dict:
     # to avoid opening every file during the directory walk)
     if is_calibration and not include_calibration:
         increment_completed_sync(_redis)
+        increment_skipped_calibration_sync(_redis)
         return {"file": str(path), "status": "skipped_calibration"}
 
     # Step 2: Generate thumbnail (skip calibration frames)

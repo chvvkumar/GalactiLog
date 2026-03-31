@@ -32,6 +32,7 @@ class ScanStateSnapshot:
     csv_enriched: int = 0
     discovered: int = 0
     removed: int = 0
+    skipped_calibration: int = 0
 
     def to_dict(self) -> dict:
         return {
@@ -44,6 +45,7 @@ class ScanStateSnapshot:
             "csv_enriched": self.csv_enriched,
             "discovered": self.discovered,
             "removed": self.removed,
+            "skipped_calibration": self.skipped_calibration,
         }
 
 
@@ -63,6 +65,7 @@ def parse_snapshot(data: dict | None) -> ScanStateSnapshot:
         csv_enriched=int(data.get("csv_enriched", 0)),
         discovered=int(data.get("discovered", 0)),
         removed=int(data.get("removed", 0)),
+        skipped_calibration=int(data.get("skipped_calibration", 0)),
     )
 
 
@@ -164,6 +167,10 @@ def increment_completed_sync(r: sync_redis.Redis) -> None:
     check_complete_sync(r)
 
 
+def increment_skipped_calibration_sync(r: sync_redis.Redis) -> None:
+    r.hincrby(SCAN_KEY, "skipped_calibration", 1)
+
+
 def increment_failed_sync(r: sync_redis.Redis, file_path: str = "", error: str = "") -> None:
     r.hincrby(SCAN_KEY, "failed", 1)
     r.set(SCAN_PROGRESS_KEY, str(time.time()))
@@ -183,6 +190,8 @@ def check_complete_sync(r: sync_redis.Redis) -> None:
         })
         r.expire(SCAN_KEY, EXPIRE_AFTER_COMPLETE)
         msg = f"Scan complete: {snap.completed} ingested, {snap.failed} failed"
+        if snap.skipped_calibration > 0:
+            msg += f", {snap.skipped_calibration} calibration frames skipped"
         if snap.csv_enriched > 0:
             msg += f", {snap.csv_enriched} CSV enriched"
         if snap.removed > 0:
@@ -190,7 +199,7 @@ def check_complete_sync(r: sync_redis.Redis) -> None:
         append_activity_sync(r, {
             "type": "scan_complete",
             "message": msg,
-            "details": {"completed": snap.completed, "failed": snap.failed, "csv_enriched": snap.csv_enriched, "total": snap.total, "removed": snap.removed},
+            "details": {"completed": snap.completed, "failed": snap.failed, "skipped_calibration": snap.skipped_calibration, "csv_enriched": snap.csv_enriched, "total": snap.total, "removed": snap.removed},
             "timestamp": time.time(),
         })
 
