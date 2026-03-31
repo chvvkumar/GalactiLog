@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import select, func as sa_func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import get_async_redis
+from app.config import async_redis
 from app.database import get_session
 from app.api.deps import get_current_user, require_admin
 from app.models.user import User
@@ -37,8 +37,7 @@ async def _get_or_create_settings(session: AsyncSession) -> UserSettings:
 
     # One-time migration: copy auto-scan state from Redis if not yet migrated
     if not row.general or not row.general.get("_migrated"):
-        r = get_async_redis()
-        try:
+        async with async_redis() as r:
             enabled = await r.get("autoscan:enabled")
             interval = await r.get("autoscan:interval")
             if enabled is not None or interval is not None:
@@ -49,8 +48,6 @@ async def _get_or_create_settings(session: AsyncSession) -> UserSettings:
                     "_migrated": True,
                 }
                 await session.flush()
-        finally:
-            await r.aclose()
 
     return row
 

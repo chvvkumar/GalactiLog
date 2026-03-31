@@ -31,9 +31,22 @@ if not settings.jwt_secret:
 
 import redis.asyncio as aioredis
 import redis as sync_redis
+from contextlib import asynccontextmanager
+
 
 def get_async_redis() -> aioredis.Redis:
     return aioredis.from_url(settings.redis_url, decode_responses=True)
+
+
+@asynccontextmanager
+async def async_redis():
+    """Async context manager that auto-closes the Redis connection."""
+    r = get_async_redis()
+    try:
+        yield r
+    finally:
+        await r.aclose()
+
 
 def get_sync_redis() -> sync_redis.Redis:
     return sync_redis.from_url(settings.redis_url, decode_responses=True)

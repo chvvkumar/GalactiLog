@@ -4,7 +4,7 @@ from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import settings, limiter, get_async_redis
+from app.config import settings, limiter, async_redis
 from app.database import get_session
 from app.models.user import User, UserRole
 from app.schemas.auth import (
@@ -101,8 +101,7 @@ async def login(
     ip = _get_client_ip(request)
 
     # Check account lockout
-    redis = get_async_redis()
-    try:
+    async with async_redis() as redis:
         locked = await redis.exists(f"auth:lockout:{body.username}")
         if locked:
             audit_log("login", username=body.username, source_ip=ip, success=False, detail="Account locked")
@@ -120,8 +119,6 @@ async def login(
 
         # Successful login — clear failure counter
         await redis.delete(f"auth:failures:{body.username}")
-    finally:
-        await redis.aclose()
 
     access = create_access_token(user.id, user.role.value)
     refresh = generate_refresh_token()
