@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 # Current data version — bump this and add a migration function when
 # code changes affect how stored target data is derived.
-DATA_VERSION = 1
+DATA_VERSION = 2
 
 
 def _migrate_v1_fix_catalog_designations(session: Session) -> str:
@@ -36,19 +36,35 @@ def _migrate_v1_fix_catalog_designations(session: Session) -> str:
 
     updated = 0
     for target in targets:
-        cached = get_cached_simbad(
-            normalize_object_name(target.catalog_id or target.primary_name),
-            session,
-        )
-        if cached and not cached.get("_negative"):
-            fits_result = session.execute(text("""
-                SELECT DISTINCT raw_headers->>'OBJECT'
-                FROM images
-                WHERE resolved_target_id = :tid
-                  AND raw_headers->>'OBJECT' IS NOT NULL
-            """), {"tid": target.id})
-            fits_names = [r[0] for r in fits_result.all() if r[0]]
+        # Try multiple cache lookup keys — the cache may be stored under
+        # the FITS object name, the catalog_id, or the primary_name
+        fits_result = session.execute(text("""
+            SELECT DISTINCT raw_headers->>'OBJECT'
+            FROM images
+            WHERE resolved_target_id = :tid
+              AND raw_headers->>'OBJECT' IS NOT NULL
+        """), {"tid": target.id})
+        fits_names = [r[0] for r in fits_result.all() if r[0]]
 
+        lookup_candidates = []
+        if target.catalog_id:
+            lookup_candidates.append(target.catalog_id)
+            # Strip NAME prefix for cache lookup
+            if target.catalog_id.upper().startswith("NAME "):
+                lookup_candidates.append(target.catalog_id[5:].strip())
+        if target.primary_name:
+            lookup_candidates.append(target.primary_name)
+        for fn in fits_names:
+            lookup_candidates.append(fn)
+
+        cached = None
+        for candidate in lookup_candidates:
+            cached = get_cached_simbad(normalize_object_name(candidate), session)
+            if cached and not cached.get("_negative"):
+                break
+            cached = None
+
+        if cached:
             curated = curate_simbad_result(cached, fits_names=fits_names)
             new_primary = curated["primary_name"]
             new_catalog = curated["catalog_id"]
@@ -98,6 +114,7 @@ def _migrate_v1_fix_catalog_designations(session: Session) -> str:
 # Version numbers must be sequential starting from 1.
 MIGRATIONS: dict[int, tuple[str, Callable[[Session], str]]] = {
     1: ("Fix catalog designations (strip NAME prefix, re-derive from cache)", _migrate_v1_fix_catalog_designations),
+    2: ("Re-derive designations with improved cache lookup (fixes targets v1 missed)", _migrate_v1_fix_catalog_designations),
 }
 
 
