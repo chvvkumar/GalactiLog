@@ -7,6 +7,7 @@ import FilterBadges from "../components/FilterBadges";
 import TargetMetricsChart, { MetricsTrendButton } from "../components/TargetMetricsChart";
 import { useSettingsContext } from "../components/SettingsProvider";
 import { isFieldVisible } from "../utils/displaySettings";
+import { timezoneLabel } from "../utils/dateTime";
 
 function formatHours(seconds: number): string {
   return (seconds / 3600).toFixed(1) + "h";
@@ -20,7 +21,8 @@ function formatCoord(val: number | null, label: string): string {
 const TargetDetailPage: Component = () => {
   const params = useParams<{ targetId: string }>();
   const [searchParams] = useSearchParams();
-  const { displaySettings, graphSettings, saveGraphSettings } = useSettingsContext();
+  const { displaySettings, graphSettings, saveGraphSettings, timezone } = useSettingsContext();
+  const tzLabel = () => timezoneLabel(timezone());
   const visible = (group: Parameters<typeof isFieldVisible>[1], field: string) =>
     isFieldVisible(displaySettings(), group, field);
 
@@ -144,7 +146,7 @@ const TargetDetailPage: Component = () => {
                 <div class="text-right text-xs text-theme-text-secondary">
                   <div>{detail().session_count} sessions</div>
                   <div class="mt-0.5">
-                    {detail().first_session_date} → {detail().last_session_date} (UTC)
+                    {detail().first_session_date} → {detail().last_session_date} ({tzLabel()})
                   </div>
                 </div>
               </div>
@@ -245,7 +247,7 @@ const TargetDetailPage: Component = () => {
                         />
                       </th>
                     </Show>
-                    <th class="py-2 px-4 text-left font-medium">Date (UTC)</th>
+                    <th class="py-2 px-4 text-left font-medium">Date ({tzLabel()})</th>
                     <th class="py-2 px-2 text-right font-medium"></th>
                     <th class="py-2 px-2 text-right font-medium">Frames</th>
                     <Show when={visible("quality", "hfr")}>
