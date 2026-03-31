@@ -236,7 +236,23 @@ async def get_target_detail(
     user: User = Depends(get_current_user),
 ):
     """Return target identity with cumulative stats and session overviews."""
-    if target_id.startswith("obj:"):
+    if target_id == "obj:__uncategorized__":
+        target_name = "Uncategorized"
+        target_obj = None
+        # Images with no resolved target AND no OBJECT header
+        query = (
+            select(Image)
+            .where(
+                Image.resolved_target_id.is_(None),
+                or_(
+                    ~Image.raw_headers.has_key("OBJECT"),
+                    Image.raw_headers["OBJECT"].astext == "",
+                    Image.raw_headers["OBJECT"].is_(None),
+                ),
+            )
+            .order_by(Image.capture_date)
+        )
+    elif target_id.startswith("obj:"):
         object_name = target_id[4:]
         target_name = object_name
         target_obj = None
