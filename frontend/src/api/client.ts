@@ -26,6 +26,13 @@ import type {
 
 const API_BASE = import.meta.env.VITE_API_URL || "/api";
 
+export class ApiError extends Error {
+  constructor(public status: number, message: string) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
 let refreshPromise: Promise<boolean> | null = null;
 
 async function doRefresh(): Promise<boolean> {
@@ -66,7 +73,7 @@ async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
   }
 
   if (!resp.ok) {
-    throw new Error(`API error: ${resp.status} ${resp.statusText}`);
+    throw new ApiError(resp.status, `API error: ${resp.status} ${resp.statusText}`);
   }
   return resp.json();
 }
