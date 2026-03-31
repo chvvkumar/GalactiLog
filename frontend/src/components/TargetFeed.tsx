@@ -4,7 +4,8 @@ import { showToast, dismissToast } from "./Toast";
 import TargetTable from "./TargetTable";
 
 const TargetFeed: Component = () => {
-  const { targetData, page, totalPages, totalCount, setPage, pageSize } = useDashboardFilters();
+  const { targetData, page, totalPages, totalCount, setPage, pageSize, setPageSize } = useDashboardFilters();
+  const PAGE_SIZES = [10, 25, 50, 100, 250];
 
   // Show loading as a toast; dismiss 1s after data arrives
   createEffect(() => {
@@ -55,11 +56,22 @@ const TargetFeed: Component = () => {
             when={data().targets.length > 0}
             fallback={<div class="text-center text-theme-text-secondary py-8">No targets match your filters</div>}
           >
-            <Show when={totalPages() > 1}>
-              <div class="flex items-center justify-between mb-2 px-1">
+            <div class="flex items-center justify-between mb-2 px-1">
+              <div class="flex items-center gap-3">
                 <span class="text-xs text-theme-text-tertiary">
                   Showing {showingRange().start}-{showingRange().end} of {totalCount()} targets
                 </span>
+                <select
+                  value={pageSize()}
+                  onChange={(e) => setPageSize(Number(e.currentTarget.value))}
+                  class="px-2 py-1 text-xs rounded border border-theme-border bg-theme-input text-theme-text-secondary cursor-pointer transition-colors hover:border-theme-border-em"
+                >
+                  <For each={PAGE_SIZES}>
+                    {(size) => <option value={size}>{size} / page</option>}
+                  </For>
+                </select>
+              </div>
+              <Show when={totalPages() > 1}>
                 <div class="flex items-center gap-1">
                   <button
                     onClick={() => setPage(page() - 1)}
@@ -95,8 +107,8 @@ const TargetFeed: Component = () => {
                     Next
                   </button>
                 </div>
-              </div>
-            </Show>
+              </Show>
+            </div>
 
             <div class={targetData.loading ? "opacity-50 pointer-events-none transition-opacity" : "transition-opacity"}>
               <TargetTable targets={data().targets} />

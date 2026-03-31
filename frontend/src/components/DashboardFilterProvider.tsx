@@ -22,6 +22,7 @@ interface DashboardFilterAPI {
   totalCount: () => number;
   totalPages: () => number;
   setPage: (page: number) => void;
+  setPageSize: (size: number) => void;
 }
 
 const DashboardFilterContext = createContext<DashboardFilterAPI>();
@@ -127,6 +128,15 @@ const DashboardFilterProvider: Component<{ children: JSX.Element }> = (props) =>
     setSearchParams({ page: p > 1 ? String(p) : undefined }, { replace: true });
   };
 
+  const setPageSize = (size: number) => {
+    const current = settingsCtx.settings()?.general;
+    if (current) {
+      settingsCtx.saveGeneral({ ...current, default_page_size: size });
+    }
+    // Reset to page 1 when page size changes
+    setSearchParams({ page: undefined }, { replace: true });
+  };
+
   const updateFilter = (key: string, value: any) => {
     switch (key) {
       case "searchQuery":
@@ -226,6 +236,7 @@ const DashboardFilterProvider: Component<{ children: JSX.Element }> = (props) =>
       return Math.max(1, Math.ceil(data.total_count / data.page_size));
     },
     setPage,
+    setPageSize,
   };
 
   return (
