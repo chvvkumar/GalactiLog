@@ -9,8 +9,7 @@ const ObjectTypeToggles: Component = () => {
   const isActive = (t: string) => filters().objectTypes.includes(t);
 
   return (
-    <div class="space-y-2">
-      <label class="text-label font-medium uppercase tracking-wider text-theme-text-tertiary">Object Type</label>
+    <div>
       <Show when={objectTypes() && objectTypes()!.length > 0}>
         <div class="flex gap-1.5 flex-wrap">
           <For each={objectTypes()}>

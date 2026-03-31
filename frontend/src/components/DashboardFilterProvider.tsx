@@ -2,6 +2,7 @@ import { Component, JSX, createContext, createMemo, useContext } from "solid-js"
 import { useSearchParams } from "@solidjs/router";
 import { createResource } from "solid-js";
 import { api } from "../api/client";
+import { useSettingsContext } from "./SettingsProvider";
 import type { ActiveFilters, TargetAggregationResponse } from "../types";
 
 interface DashboardFilterAPI {
@@ -16,6 +17,12 @@ interface DashboardFilterAPI {
   addFitsQuery: (key: string, operator: string, value: string) => void;
   removeFitsQuery: (index: number) => void;
   resetFilters: () => void;
+  page: () => number;
+  pageSize: () => number;
+  totalCount: () => number;
+  totalPages: () => number;
+  setPage: (page: number) => void;
+  setPageSize: (size: number) => void;
 }
 
 const DashboardFilterContext = createContext<DashboardFilterAPI>();
@@ -38,6 +45,7 @@ const METRIC_KEYS = [
 const ALL_PARAM_KEYS = [
   ...FILTER_KEYS,
   ...METRIC_KEYS.flatMap((k) => [`${k}_min`, `${k}_max`]),
+  "page",
 ];
 
 function hasFilterParams(sp: Record<string, string | undefined>): boolean {
@@ -87,13 +95,46 @@ function deriveFilters(sp: Record<string, string | undefined>): ActiveFilters {
 
 const DashboardFilterProvider: Component<{ children: JSX.Element }> = (props) => {
   const [searchParams, setSearchParams] = useSearchParams();
+  const settingsCtx = useSettingsContext();
 
   const filters = createMemo(() => deriveFilters(searchParams));
 
-  const [targetData, { refetch: refetchTargets }] = createResource(filters, (f) => api.getTargets(f));
+  const currentPage = createMemo(() => {
+    const raw = searchParams.page;
+    const p = parseInt(typeof raw === "string" ? raw : "1");
+    return isNaN(p) || p < 1 ? 1 : p;
+  });
+
+  const currentPageSize = createMemo(() => {
+    return settingsCtx.settings()?.general.default_page_size ?? 50;
+  });
+
+  // Resource key combines filters + pagination so changes to either trigger a refetch
+  const fetchKey = createMemo(() => ({ filters: filters(), page: currentPage(), pageSize: currentPageSize() }));
+
+  const [targetData, { refetch: refetchTargets }] = createResource(fetchKey, (k) =>
+    api.getTargets(k.filters, k.page, k.pageSize)
+  );
 
   const set = (updates: Record<string, string | undefined>) => {
+    // Reset to page 1 when any filter changes (but not when only page changes)
+    if (!("page" in updates)) {
+      updates.page = undefined;
+    }
     setSearchParams(updates, { replace: true });
+  };
+
+  const setPage = (p: number) => {
+    setSearchParams({ page: p > 1 ? String(p) : undefined }, { replace: true });
+  };
+
+  const setPageSize = (size: number) => {
+    const current = settingsCtx.settings()?.general;
+    if (current) {
+      settingsCtx.saveGeneral({ ...current, default_page_size: size });
+    }
+    // Reset to page 1 when page size changes
+    setSearchParams({ page: undefined }, { replace: true });
   };
 
   const updateFilter = (key: string, value: any) => {
@@ -186,6 +227,16 @@ const DashboardFilterProvider: Component<{ children: JSX.Element }> = (props) =>
     addFitsQuery,
     removeFitsQuery,
     resetFilters,
+    page: currentPage,
+    pageSize: currentPageSize,
+    totalCount: () => targetData()?.total_count ?? 0,
+    totalPages: () => {
+      const data = targetData();
+      if (!data) return 1;
+      return Math.max(1, Math.ceil(data.total_count / data.page_size));
+    },
+    setPage,
+    setPageSize,
   };
 
   return (

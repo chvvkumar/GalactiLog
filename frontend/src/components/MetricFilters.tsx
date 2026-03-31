@@ -1,6 +1,7 @@
 import { Component, For, Show, createSignal, createEffect } from "solid-js";
 import { useDashboardFilters } from "./DashboardFilterProvider";
 import { useSettingsContext } from "./SettingsProvider";
+import { debounce } from "../utils/debounce";
 
 // Metric field definitions: key -> { label, step, isInt? }
 const METRIC_FIELDS: Record<string, { label: string; step: number; isInt?: boolean }> = {
@@ -43,20 +44,15 @@ const MetricRow: Component<MetricRowProps> = (props) => {
     props.initialMax != null ? String(props.initialMax) : ""
   );
 
-  let debounceTimer: ReturnType<typeof setTimeout>;
-
-  const apply = (min: string, max: string) => {
-    clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(() => {
-      const parseFn = props.isInt ? parseInt : parseFloat;
-      const minNum = min ? parseFn(min) : undefined;
-      const maxNum = max ? parseFn(max) : undefined;
-      props.onChange(
-        minNum != null && !isNaN(minNum) ? minNum : undefined,
-        maxNum != null && !isNaN(maxNum) ? maxNum : undefined
-      );
-    }, 500);
-  };
+  const apply = debounce((min: string, max: string) => {
+    const parseFn = props.isInt ? parseInt : parseFloat;
+    const minNum = min ? parseFn(min) : undefined;
+    const maxNum = max ? parseFn(max) : undefined;
+    props.onChange(
+      minNum != null && !isNaN(minNum) ? minNum : undefined,
+      maxNum != null && !isNaN(maxNum) ? maxNum : undefined
+    );
+  }, 500);
 
   return (
     <div class="space-y-1">
@@ -93,7 +89,7 @@ const MetricRow: Component<MetricRowProps> = (props) => {
 const MetricFilters: Component = () => {
   const { filters, updateMetricFilter } = useDashboardFilters();
   const { displaySettings } = useSettingsContext();
-  const [open, setOpen] = createSignal(false);
+
   const [groupOpen, setGroupOpen] = createSignal<Record<string, boolean>>({});
 
   const toggleGroup = (key: string) => {
@@ -128,25 +124,7 @@ const MetricFilters: Component = () => {
 
   return (
     <Show when={visibleGroups().length > 0}>
-      <div class="space-y-2">
-        {/* Main section header */}
-        <button
-          class="w-full flex items-center justify-between hover:text-theme-text-primary transition-colors"
-          onClick={() => setOpen((v) => !v)}
-        >
-          <span class="text-label font-medium uppercase tracking-wider text-theme-text-tertiary">Metrics</span>
-          <svg
-            class={`w-3 h-3 transition-transform ${open() ? "rotate-180" : ""}`}
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
-          </svg>
-        </button>
-
-        <Show when={open()}>
-          <div class="space-y-3">
+      <div class="space-y-3">
             <For each={visibleGroups()}>
               {(group) => {
                 const fields = visibleFields(group);
@@ -197,8 +175,6 @@ const MetricFilters: Component = () => {
                 );
               }}
             </For>
-          </div>
-        </Show>
       </div>
     </Show>
   );

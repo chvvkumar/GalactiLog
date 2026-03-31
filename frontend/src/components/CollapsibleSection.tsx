@@ -1,0 +1,56 @@
+import { Component, JSX, Show, createSignal, onMount } from "solid-js";
+
+const STORAGE_KEY = "sidebar_collapsed";
+
+function getCollapsedState(): Record<string, boolean> {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveCollapsedState(state: Record<string, boolean>) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  } catch { /* ignore */ }
+}
+
+const CollapsibleSection: Component<{ id: string; label: string; children: JSX.Element }> = (props) => {
+  const [collapsed, setCollapsed] = createSignal(false);
+
+  onMount(() => {
+    const state = getCollapsedState();
+    if (state[props.id]) setCollapsed(true);
+  });
+
+  const toggle = () => {
+    const next = !collapsed();
+    setCollapsed(next);
+    const state = getCollapsedState();
+    if (next) {
+      state[props.id] = true;
+    } else {
+      delete state[props.id];
+    }
+    saveCollapsedState(state);
+  };
+
+  return (
+    <section>
+      <button
+        onClick={toggle}
+        class="flex items-center justify-between w-full text-label font-medium uppercase tracking-wider text-theme-text-tertiary hover:text-theme-text-secondary transition-colors cursor-pointer select-none"
+      >
+        {props.label}
+        <span class={`text-[10px] transition-transform ${collapsed() ? "-rotate-90" : ""}`}>&#9660;</span>
+      </button>
+      <Show when={!collapsed()}>
+        <div class="mt-2">{props.children}</div>
+      </Show>
+    </section>
+  );
+};
+
+export default CollapsibleSection;

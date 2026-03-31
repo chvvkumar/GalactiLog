@@ -2,7 +2,7 @@ name: Auto-generate PR Description
 
 on:
   pull_request:
-    types: [opened]
+    types: [opened, synchronize]
 
 permissions:
   pull-requests: write
@@ -22,8 +22,10 @@ jobs:
       - name: Get PR commits
         id: commits
         run: |
-          COMMITS=$(git log --pretty=format:"- %s (%h)" ${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }} 2>/dev/null || echo "Unable to retrieve commits")
-          FILES_CHANGED=$(git diff --stat ${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }} -- . ':!package-lock.json' ':!*.lock' 2>/dev/null || echo "Unable to get file stats")
+          BASE_BRANCH="${{ github.event.pull_request.base.ref }}"
+          MERGE_BASE=$(git merge-base "origin/$BASE_BRANCH" HEAD)
+          COMMITS=$(git log --pretty=format:"- %s (%h)" "$MERGE_BASE"..HEAD 2>/dev/null || echo "Unable to retrieve commits")
+          FILES_CHANGED=$(git diff --stat "$MERGE_BASE"...HEAD -- . ':!package-lock.json' ':!*.lock' 2>/dev/null || echo "Unable to get file stats")
           {
             echo "COMMITS:"
             echo "$COMMITS"
@@ -37,10 +39,23 @@ jobs:
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
-          CONTEXT=$(cat /tmp/pr_context.txt)
+          python3 << 'PYEOF'
+          import json, subprocess, sys, os, re
 
-          # Build the prompt
-          PROMPT="You are writing a pull request title and description based on the commit messages and files changed below. Write with confidence and authority -- these changes are definitive, not speculative. Never use hedging language like 'seems to', 'appears to', 'might', or 'likely'. State what the changes do, not what they seem to do.
+          GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
+          GITHUB_OUTPUT = os.environ["GITHUB_OUTPUT"]
+
+          def fail(msg):
+              print(f"::warning::{msg}")
+              with open(GITHUB_OUTPUT, "a") as f:
+                  f.write("api_success=false\n")
+              sys.exit(0)
+
+          # Read context from file (written by previous step)
+          with open("/tmp/pr_context.txt") as f:
+              context = f.read()
+
+          prompt = f"""You are writing a pull request title and description based on the commit messages and files changed below. Write with confidence and authority -- these changes are definitive, not speculative. Never use hedging language like 'seems to', 'appears to', 'might', or 'likely'. State what the changes do, not what they seem to do.
 
           Do NOT use AI phraseology or filler words. Avoid words like: leverage, enhance, streamline, robust, seamless, comprehensive, cutting-edge, utilize, facilitate, empower, elevate, harness, spearhead, foster, bolster, pivotal, groundbreaking, synergy, paradigm, holistic, transformative. Write like a human developer -- plain, direct, technical language only.
 
@@ -59,70 +74,59 @@ jobs:
           (your markdown description here)
           ---BODY_END---
 
-          $CONTEXT"
+          {context}"""
 
-          # Escape the prompt for JSON
-          ESCAPED_PROMPT=$(echo "$PROMPT" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read()))')
+          # Build request JSON safely (no shell interpolation)
+          request_body = json.dumps({
+              "contents": [{"parts": [{"text": prompt}]}],
+              "generationConfig": {"temperature": 0.3, "maxOutputTokens": 2048}
+          })
 
-          # Call Gemini API
-          RESPONSE=$(curl -s -w "\n%{http_code}" \
-            -X POST "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=$GEMINI_API_KEY" \
-            -H "Content-Type: application/json" \
-            -d "{
-              \"contents\": [{
-                \"parts\": [{
-                  \"text\": $ESCAPED_PROMPT
-                }]
-              }],
-              \"generationConfig\": {
-                \"temperature\": 0.3,
-                \"maxOutputTokens\": 2048
-              }
-            }" 2>/dev/null)
+          with open("/tmp/gemini_request.json", "w") as f:
+              f.write(request_body)
 
-          HTTP_CODE=$(echo "$RESPONSE" | tail -1)
-          BODY=$(echo "$RESPONSE" | sed '$d')
+          # Call Gemini API with request body from file
+          result = subprocess.run(
+              ["curl", "-s", "-o", "/tmp/gemini_response.json", "-w", "%{http_code}",
+               "-X", "POST",
+               f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}",
+               "-H", "Content-Type: application/json",
+               "-d", f"@/tmp/gemini_request.json"],
+              capture_output=True, text=True
+          )
 
-          if [ "$HTTP_CODE" != "200" ]; then
-            echo "::warning::Gemini API returned HTTP $HTTP_CODE. Skipping PR description update."
-            echo "api_success=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
+          http_code = result.stdout.strip()
+          if http_code != "200":
+              fail(f"Gemini API returned HTTP {http_code}. Skipping PR description update.")
 
-          # Extract generated text to file to avoid shell glob expansion
-          echo "$BODY" | python3 -c '
-          import sys, json
+          # Parse response
           try:
-              data = json.load(sys.stdin)
+              with open("/tmp/gemini_response.json") as f:
+                  data = json.load(f)
               text = data["candidates"][0]["content"]["parts"][0]["text"]
-              with open("/tmp/gemini_raw.txt", "w") as f:
-                  f.write(text)
           except (KeyError, IndexError, json.JSONDecodeError) as e:
-              print(f"PARSE_ERROR: {e}", file=sys.stderr)
-              sys.exit(1)
-          ' 2>/tmp/gemini_parse_err.txt
+              fail(f"Failed to parse Gemini response: {e}")
 
-          if [ $? -ne 0 ]; then
-            echo "::warning::Failed to parse Gemini response: $(cat /tmp/gemini_parse_err.txt). Skipping PR description update."
-            echo "api_success=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
+          # Extract title and body using delimiters
+          title_match = re.search(r"---TITLE_START---\s*\n(.+?)\n\s*---TITLE_END---", text)
+          body_match = re.search(r"---BODY_START---\s*\n(.*?)\n\s*---BODY_END---", text, re.DOTALL)
 
-          # Extract title and body using delimiters from file
-          PR_TITLE=$(sed -n '/---TITLE_START---/,/---TITLE_END---/p' /tmp/gemini_raw.txt | grep -v -- '---TITLE_' | head -1 | xargs)
-          sed -n '/---BODY_START---/,/---BODY_END---/p' /tmp/gemini_raw.txt | grep -v -- '---BODY_' > /tmp/pr_body.txt
+          if not title_match or not body_match:
+              fail("Could not extract title or body from Gemini response.")
 
-          if [ -z "$PR_TITLE" ] || [ ! -s /tmp/pr_body.txt ]; then
-            echo "::warning::Could not extract title or body from Gemini response. Skipping PR description update."
-            echo "api_success=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
+          pr_title = title_match.group(1).strip()
+          pr_body = body_match.group(1).strip()
 
-          # Append footer
-          printf '\n---\n*This PR description was automatically generated.*\n' >> /tmp/pr_body.txt
+          pr_body += "\n\n---\n*This PR description was automatically generated.*\n"
 
-          echo "$PR_TITLE" > /tmp/pr_title.txt
-          echo "api_success=true" >> "$GITHUB_OUTPUT"
+          with open("/tmp/pr_title.txt", "w") as f:
+              f.write(pr_title)
+          with open("/tmp/pr_body.txt", "w") as f:
+              f.write(pr_body)
+
+          with open(GITHUB_OUTPUT, "a") as f:
+              f.write("api_success=true\n")
+          PYEOF
 
       - name: Update PR title and description
         if: steps.gemini.outputs.api_success == 'true'

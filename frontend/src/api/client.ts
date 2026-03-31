@@ -26,6 +26,13 @@ import type {
 
 const API_BASE = import.meta.env.VITE_API_URL || "/api";
 
+export class ApiError extends Error {
+  constructor(public status: number, message: string) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
 let refreshPromise: Promise<boolean> | null = null;
 
 async function doRefresh(): Promise<boolean> {
@@ -66,13 +73,15 @@ async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
   }
 
   if (!resp.ok) {
-    throw new Error(`API error: ${resp.status} ${resp.statusText}`);
+    throw new ApiError(resp.status, `API error: ${resp.status} ${resp.statusText}`);
   }
   return resp.json();
 }
 
-function buildTargetQuery(filters: ActiveFilters): string {
+function buildTargetQuery(filters: ActiveFilters, page?: number, pageSize?: number): string {
   const params = new URLSearchParams();
+  if (page != null) params.set("page", String(page));
+  if (pageSize != null) params.set("page_size", String(pageSize));
   if (filters.searchQuery) params.set("search", filters.searchQuery);
   if (filters.camera) params.set("camera", filters.camera);
   if (filters.telescope) params.set("telescope", filters.telescope);
@@ -134,8 +143,8 @@ export const api = {
   deleteUser: (id: string) =>
     fetchJson<void>(`/auth/users/${id}`, { method: "DELETE" }),
 
-  getTargets: (filters: ActiveFilters) =>
-    fetchJson<TargetAggregationResponse>(`/targets?${buildTargetQuery(filters)}`),
+  getTargets: (filters: ActiveFilters, page?: number, pageSize?: number) =>
+    fetchJson<TargetAggregationResponse>(`/targets?${buildTargetQuery(filters, page, pageSize)}`),
 
   getSessionDetail: (targetId: string, date: string) =>
     fetchJson<SessionDetail>(`/targets/${encodeURIComponent(decodeURIComponent(targetId))}/sessions/${date}`),

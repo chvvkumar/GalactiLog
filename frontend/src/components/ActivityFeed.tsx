@@ -48,7 +48,7 @@ const ActivityFeed: Component<{
   const progressPct = () => {
     const s = props.scanStatus;
     if (s.total === 0) return 0;
-    return Math.round(((s.completed + s.failed) / s.total) * 100);
+    return Math.min(100, Math.round(((s.completed + s.failed) / s.total) * 100));
   };
 
   const elapsed = () => {
@@ -194,8 +194,9 @@ const ActivityFeed: Component<{
                   {formatTime(entry.timestamp)}
                 </span>
                 <span class={
-                  entry.type.includes("stopped") || entry.type.includes("stalled") ? "text-theme-warning" :
                   entry.type.includes("failed") ? "text-theme-error" :
+                  entry.type.includes("stopped") || entry.type.includes("stalled") || entry.type.includes("warning") ? "text-theme-warning" :
+                  entry.type.startsWith("migration_") ? "text-theme-text-secondary" :
                   "text-theme-text-primary"
                 }>
                   {entry.message}

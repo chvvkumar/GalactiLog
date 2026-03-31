@@ -1,5 +1,6 @@
 import uuid
 
+import jwt
 from fastapi import Cookie, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,7 +18,7 @@ async def get_current_user(
 
     try:
         payload = decode_access_token(access_token)
-    except Exception:
+    except (jwt.InvalidTokenError, KeyError, ValueError):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
 
     user = await get_user_by_id(session, uuid.UUID(payload["sub"]))

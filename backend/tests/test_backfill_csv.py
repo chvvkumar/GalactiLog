@@ -5,9 +5,18 @@ requires a live DB. We intercept this via sys.modules stubbing before first impo
 """
 import sys
 import types
+from contextlib import asynccontextmanager
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
+
+
+def _mock_async_redis(mock_redis):
+    """Create an async context manager mock that yields the given mock_redis."""
+    @asynccontextmanager
+    async def _ctx():
+        yield mock_redis
+    return _ctx
 
 
 # ── Pre-import stubs ──────────────────────────────────────────────────────────
@@ -244,13 +253,12 @@ async def test_backfill_csv_endpoint_accepted():
     from httpx import AsyncClient, ASGITransport
     from app.main import app
 
-    with patch("app.api.scan.get_async_redis") as mock_redis_factory, \
+    with patch("app.api.scan.async_redis") as mock_redis_cm, \
          patch("app.api.scan.backfill_csv_metrics") as mock_task:
         mock_task.delay = MagicMock()
         mock_redis = AsyncMock()
         mock_redis.hgetall = AsyncMock(return_value={})
-        mock_redis.aclose = AsyncMock()
-        mock_redis_factory.return_value = mock_redis
+        mock_redis_cm.side_effect = _mock_async_redis(mock_redis)
 
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -268,7 +276,7 @@ async def test_backfill_csv_endpoint_already_running_scanning():
     from httpx import AsyncClient, ASGITransport
     from app.main import app
 
-    with patch("app.api.scan.get_async_redis") as mock_redis_factory, \
+    with patch("app.api.scan.async_redis") as mock_redis_cm, \
          patch("app.api.scan.backfill_csv_metrics") as mock_task:
         mock_task.delay = MagicMock()
         import time as _time
@@ -283,8 +291,7 @@ async def test_backfill_csv_endpoint_already_running_scanning():
         })
         # Return a recent timestamp so the stale-scan detection does not trigger
         mock_redis.get = AsyncMock(return_value=str(_time.time()))
-        mock_redis.aclose = AsyncMock()
-        mock_redis_factory.return_value = mock_redis
+        mock_redis_cm.side_effect = _mock_async_redis(mock_redis)
 
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -303,7 +310,7 @@ async def test_backfill_csv_endpoint_already_running_ingesting():
     from httpx import AsyncClient, ASGITransport
     from app.main import app
 
-    with patch("app.api.scan.get_async_redis") as mock_redis_factory, \
+    with patch("app.api.scan.async_redis") as mock_redis_cm, \
          patch("app.api.scan.backfill_csv_metrics") as mock_task:
         mock_task.delay = MagicMock()
         mock_redis = AsyncMock()
@@ -315,8 +322,7 @@ async def test_backfill_csv_endpoint_already_running_ingesting():
             "started_at": "1711000000.0",
             "completed_at": "",
         })
-        mock_redis.aclose = AsyncMock()
-        mock_redis_factory.return_value = mock_redis
+        mock_redis_cm.side_effect = _mock_async_redis(mock_redis)
 
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:

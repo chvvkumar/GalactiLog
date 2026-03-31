@@ -208,6 +208,7 @@ export default function TargetMetricsChart(props: Props) {
       options: {
         responsive: true,
         maintainAspectRatio: false,
+        animation: { duration: 400 },
         interaction: { mode: "index", intersect: false },
         plugins: {
           legend: { display: false },

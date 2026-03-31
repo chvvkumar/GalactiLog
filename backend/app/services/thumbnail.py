@@ -106,6 +106,37 @@ def _resize_array(data: np.ndarray, max_width: int) -> np.ndarray:
     return np.array(img)
 
 
+def _read_decimated(fits_path: Path, max_width: int) -> np.ndarray:
+    """Read FITS pixel data with decimation for thumbnail generation.
+
+    For large sensors (e.g., 6000x4000), reading every Nth row/column
+    cuts I/O by N^2 while producing more data than the final thumbnail needs.
+    The subsequent LANCZOS resize handles the remaining downscale cleanly.
+
+    Falls back to full read for small images or color (3D) data.
+    """
+    with fitsio.FITS(str(fits_path), "r") as fits:
+        hdu = fits[0]
+        info = hdu.get_info()
+        dims = info.get("dims", [])
+
+        # Color FITS [3, H, W] or unusual layouts: fall back to full read
+        if len(dims) != 2:
+            return hdu.read().astype(np.float32)
+
+        # Use the larger dimension for step calculation — fitsio dims order
+        # may vary (NAXIS1/NAXIS2), and we just need a proportional decimation.
+        max_dim = max(dims)
+        step = max(1, max_dim // (max_width * 2))
+
+        if step <= 1:
+            return hdu.read().astype(np.float32)
+
+        # Read every step-th row and column via numpy slicing on FITS data
+        data = hdu[::step, ::step].astype(np.float32)
+        return data
+
+
 def generate_thumbnail(
     fits_path: Path,
     output_path: Path,
@@ -113,10 +144,13 @@ def generate_thumbnail(
 ) -> Path:
     """Read a FITS file, resize raw data, apply MTF stretch, save JPEG.
 
-    Pipeline: read → flip → resize (raw linear) → MTF stretch → save.
+    Pipeline: read (decimated) → flip → resize (raw linear) → MTF stretch → save.
     Handles both mono (2D) and color (3D with shape [3, H, W]) data.
+
+    Uses decimated reads for large images to reduce I/O — for a 6000px wide
+    sensor targeting 800px thumbnails, this reads ~16x fewer pixels from disk.
     """
-    data = fitsio.read(str(fits_path), ext=0).astype(np.float32)
+    data = _read_decimated(fits_path, max_width)
 
     if data.ndim == 2:
         # Mono: normalize, flip, resize, stretch

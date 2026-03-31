@@ -137,6 +137,9 @@ class AggregateStats(BaseModel):
 class TargetAggregationResponse(BaseModel):
     targets: list[TargetAggregation]
     aggregates: AggregateStats
+    total_count: int
+    page: int
+    page_size: int
 
 
 class TargetDetailResponse(BaseModel):
