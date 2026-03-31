@@ -26,7 +26,19 @@ import type {
 
 const API_BASE = import.meta.env.VITE_API_URL || "/api";
 
-let isRefreshing = false;
+let refreshPromise: Promise<boolean> | null = null;
+
+async function doRefresh(): Promise<boolean> {
+  try {
+    const resp = await fetch(`${API_BASE}/auth/refresh`, {
+      method: "POST",
+      credentials: "same-origin",
+    });
+    return resp.ok;
+  } catch {
+    return false;
+  }
+}
 
 async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
   const resp = await fetch(`${API_BASE}${path}`, {
@@ -37,24 +49,16 @@ async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
 
   if (
     resp.status === 401 &&
-    !isRefreshing &&
     !path.startsWith("/auth/refresh") &&
     !path.startsWith("/auth/login")
   ) {
-    isRefreshing = true;
-    try {
-      const refreshResp = await fetch(`${API_BASE}/auth/refresh`, {
-        method: "POST",
-        credentials: "same-origin",
-      });
-      if (refreshResp.ok) {
-        isRefreshing = false;
-        return fetchJson<T>(path, init);
-      }
-    } catch {
-      // refresh failed
+    if (!refreshPromise) {
+      refreshPromise = doRefresh().finally(() => { refreshPromise = null; });
     }
-    isRefreshing = false;
+    const ok = await refreshPromise;
+    if (ok) {
+      return fetchJson<T>(path, init);
+    }
     if (window.location.pathname !== "/login") {
       window.location.href = "/login";
     }
@@ -107,16 +111,10 @@ export const api = {
     }),
 
   logout: () =>
-    fetch(`${API_BASE}/auth/logout`, {
-      method: "POST",
-      credentials: "same-origin",
-    }),
+    fetchJson<void>("/auth/logout", { method: "POST" }),
 
-  getMe: async (): Promise<AuthUser> => {
-    const resp = await fetch(`${API_BASE}/auth/me`, { credentials: "same-origin" });
-    if (!resp.ok) throw new Error("Not authenticated");
-    return resp.json();
-  },
+  getMe: () =>
+    fetchJson<AuthUser>("/auth/me"),
 
   getUsers: () =>
     fetchJson<import("../types").UserAccount[]>("/auth/users"),
@@ -250,7 +248,6 @@ export const api = {
   updateDisplay: (display: DisplaySettings) =>
     fetchJson<SettingsResponse>("/settings/display", {
       method: "PUT",
-      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(display),
     }),
 

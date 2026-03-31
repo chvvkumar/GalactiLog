@@ -345,8 +345,15 @@ export interface EquipmentComboMetrics {
   filter_breakdown: EquipmentFilterMetrics[];
 }
 
+export interface OverviewStats {
+  total_integration_seconds: number;
+  target_count: number;
+  total_frames: number;
+  disk_usage_bytes: number;
+}
+
 export interface StatsResponse {
-  overview: AggregateStats;
+  overview: OverviewStats;
   equipment: {
     cameras: EquipmentItem[];
     telescopes: EquipmentItem[];

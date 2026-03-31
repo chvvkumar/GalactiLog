@@ -392,7 +392,7 @@ async def get_autoscan(session: AsyncSession = Depends(get_session), user: User 
     general = row.general if row else {}
     return {
         "enabled": general.get("auto_scan_enabled", True),
-        "interval_minutes": general.get("auto_scan_interval", 60),
+        "interval_minutes": general.get("auto_scan_interval", 240),
     }
 
 

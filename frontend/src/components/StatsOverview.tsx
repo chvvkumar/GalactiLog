@@ -1,5 +1,5 @@
 import { Component } from "solid-js";
-import type { AggregateStats } from "../types";
+import type { OverviewStats } from "../types";
 
 function formatHours(s: number): string { return (s / 3600).toFixed(1) + "h"; }
 function formatBytes(b: number): string {
@@ -9,7 +9,7 @@ function formatBytes(b: number): string {
 }
 
 const StatsOverview: Component<{
-  overview: AggregateStats;
+  overview: OverviewStats;
   avgHfr: number | null;
   avgEccentricity: number | null;
   bestHfr: number | null;
