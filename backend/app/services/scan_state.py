@@ -31,6 +31,7 @@ class ScanStateSnapshot:
     completed_at: float | None
     csv_enriched: int = 0
     discovered: int = 0
+    removed: int = 0
 
     def to_dict(self) -> dict:
         return {
@@ -42,10 +43,11 @@ class ScanStateSnapshot:
             "completed_at": self.completed_at,
             "csv_enriched": self.csv_enriched,
             "discovered": self.discovered,
+            "removed": self.removed,
         }
 
 
-def _parse_snapshot(data: dict | None) -> ScanStateSnapshot:
+def parse_snapshot(data: dict | None) -> ScanStateSnapshot:
     if not data or "state" not in data:
         return ScanStateSnapshot(
             state="idle", total=0, completed=0, failed=0,
@@ -60,6 +62,7 @@ def _parse_snapshot(data: dict | None) -> ScanStateSnapshot:
         completed_at=float(data["completed_at"]) if data.get("completed_at") else None,
         csv_enriched=int(data.get("csv_enriched", 0)),
         discovered=int(data.get("discovered", 0)),
+        removed=int(data.get("removed", 0)),
     )
 
 
@@ -67,7 +70,7 @@ def _parse_snapshot(data: dict | None) -> ScanStateSnapshot:
 
 async def get_scan_state(r: aioredis.Redis) -> ScanStateSnapshot:
     data = await r.hgetall(SCAN_KEY)
-    snap = _parse_snapshot(data)
+    snap = parse_snapshot(data)
     # Detect stale ingestion: no progress for STALE_TIMEOUT seconds
     if snap.state in ("scanning", "ingesting"):
         last_progress = await r.get(SCAN_PROGRESS_KEY)
@@ -109,7 +112,7 @@ async def set_ingesting(r: aioredis.Redis, total: int) -> None:
 async def set_complete_if_done(r: aioredis.Redis) -> None:
     """Check if all tasks finished and transition to complete."""
     data = await r.hgetall(SCAN_KEY)
-    snap = _parse_snapshot(data)
+    snap = parse_snapshot(data)
     if snap.state == "ingesting" and snap.total > 0 and (snap.completed + snap.failed) >= snap.total:
         await r.hset(SCAN_KEY, mapping={
             "state": "complete",
@@ -170,20 +173,24 @@ def increment_failed_sync(r: sync_redis.Redis, file_path: str = "", error: str =
     _check_complete_sync(r)
 
 
-def _check_complete_sync(r: sync_redis.Redis) -> None:
+def check_complete_sync(r: sync_redis.Redis) -> None:
     data = r.hgetall(SCAN_KEY)
-    snap = _parse_snapshot(data)
+    snap = parse_snapshot(data)
     if snap.state == "ingesting" and snap.total > 0 and (snap.completed + snap.failed) >= snap.total:
         r.hset(SCAN_KEY, mapping={
             "state": "complete",
             "completed_at": time.time(),
         })
         r.expire(SCAN_KEY, EXPIRE_AFTER_COMPLETE)
+        msg = f"Scan complete: {snap.completed} ingested, {snap.failed} failed"
+        if snap.csv_enriched > 0:
+            msg += f", {snap.csv_enriched} CSV enriched"
+        if snap.removed > 0:
+            msg += f", {snap.removed} deleted files purged from catalog"
         append_activity_sync(r, {
             "type": "scan_complete",
-            "message": f"Scan complete: {snap.completed} ingested, {snap.failed} failed"
-                       + (f", {snap.csv_enriched} CSV enriched" if snap.csv_enriched > 0 else ""),
-            "details": {"completed": snap.completed, "failed": snap.failed, "csv_enriched": snap.csv_enriched, "total": snap.total},
+            "message": msg,
+            "details": {"completed": snap.completed, "failed": snap.failed, "csv_enriched": snap.csv_enriched, "total": snap.total, "removed": snap.removed},
             "timestamp": time.time(),
         })
 
@@ -202,11 +209,14 @@ def start_scanning_sync(r: sync_redis.Redis) -> None:
     r.delete(SCAN_FAILED_KEY)
 
 
-def set_ingesting_sync(r: sync_redis.Redis, total: int) -> None:
-    r.hset(SCAN_KEY, mapping={
+def set_ingesting_sync(r: sync_redis.Redis, total: int, removed: int = 0) -> None:
+    mapping: dict = {
         "state": "ingesting",
         "total": total,
-    })
+    }
+    if removed:
+        mapping["removed"] = removed
+    r.hset(SCAN_KEY, mapping=mapping)
 
 
 def increment_csv_enriched_sync(r: sync_redis.Redis) -> None:

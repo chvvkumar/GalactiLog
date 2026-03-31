@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import String, Float, Integer, ForeignKey, DateTime
 from sqlalchemy.dialects.postgresql import UUID
@@ -20,5 +20,5 @@ class MergeCandidate(Base):
     similarity_score: Mapped[float] = mapped_column(Float, nullable=False)
     method: Mapped[str] = mapped_column(String(20), nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
