@@ -549,9 +549,11 @@ async def list_targets_aggregated(
         else:
             object_name = (image.raw_headers or {}).get("OBJECT")
             if not object_name:
-                continue  # skip images with no object name at all
-            tid = f"obj:{object_name}"  # synthetic ID for unresolved objects
-            name = object_name
+                tid = "obj:__uncategorized__"
+                name = "Uncategorized"
+            else:
+                tid = f"obj:{object_name}"
+                name = object_name
 
         if tid not in targets_map:
             targets_map[tid] = {
