@@ -197,7 +197,7 @@ export default function TargetMetricsChart(props: Props) {
         return label === SESSION_GAP ? "" : label;
       };
       xScale.grid.color = (ctx: any) => gridColors[ctx.index] ?? "rgba(255,255,255,0.03)";
-      chartInstance.update();
+      chartInstance.update("none");
       return;
     }
 
@@ -208,6 +208,7 @@ export default function TargetMetricsChart(props: Props) {
       options: {
         responsive: true,
         maintainAspectRatio: false,
+        animation: { duration: 400 },
         interaction: { mode: "index", intersect: false },
         plugins: {
           legend: { display: false },
