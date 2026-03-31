@@ -35,11 +35,15 @@ const TargetRow: Component<{
         class="border-b border-theme-border cursor-pointer hover:bg-theme-hover transition-colors duration-150"
         onClick={() => navigate(`/targets/${encodeURIComponent(props.target.target_id)}?view=sessions`)}
       >
-        <td class="py-2.5 px-3 font-bold text-theme-text-primary hover:text-theme-accent transition-colors">
+        <td class={`py-2.5 px-3 font-bold hover:text-theme-accent transition-colors ${
+          props.target.target_id === "obj:__uncategorized__"
+            ? "text-theme-text-tertiary italic"
+            : "text-theme-text-primary"
+        }`}>
           {displayName()}
         </td>
         <td class="py-2.5 px-3 font-mono text-theme-text-secondary text-xs">
-          {props.target.primary_name}
+          {props.target.target_id === "obj:__uncategorized__" ? "" : props.target.primary_name}
         </td>
         <td class="py-2.5 px-3">
           <FilterBadges distribution={props.target.filter_distribution} compact />

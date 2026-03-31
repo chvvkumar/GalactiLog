@@ -40,10 +40,17 @@ const TargetTable: Component<{ targets: TargetAggregation[] }> = (props) => {
     }
   };
 
+  const UNCATEGORIZED_ID = "obj:__uncategorized__";
+
   const sortedTargets = createMemo(() => {
     const key = sortKey();
     const dir = sortDir();
     const sorted = [...props.targets].sort((a, b) => {
+      // Pin uncategorized to bottom for non-name sorts
+      if (key !== "name") {
+        if (a.target_id === UNCATEGORIZED_ID) return 1;
+        if (b.target_id === UNCATEGORIZED_ID) return -1;
+      }
       let cmp = 0;
       switch (key) {
         case "name":

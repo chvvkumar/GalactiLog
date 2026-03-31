@@ -281,9 +281,15 @@ const SessionAccordionCard: Component<{
                     <span class="font-bold text-metric-frames">{detail().frame_count}</span>
                   </span>
                   <span>
-                    <span class="text-theme-text-tertiary">Gain / Exp:</span>{" "}
+                    <span class="text-theme-text-tertiary">Gain / Offset:</span>{" "}
                     <span class="font-bold text-metric-gain">
-                      {detail().gain !== null ? detail().gain : "—"} / {detail().exposure_time !== null ? detail().exposure_time + "s" : "—"}
+                      {detail().gain !== null ? detail().gain : "—"} / {detail().offset !== null ? detail().offset : "—"}
+                    </span>
+                  </span>
+                  <span>
+                    <span class="text-theme-text-tertiary">Exp:</span>{" "}
+                    <span class="font-bold text-metric-gain">
+                      {detail().exposure_times.length > 0 ? detail().exposure_times.map(e => e + "s").join(", ") : "—"}
                     </span>
                   </span>
                   <span>
