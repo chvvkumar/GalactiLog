@@ -3,9 +3,12 @@ import { api, ApiError } from "../../api/client";
 import { showToast } from "../Toast";
 import { useAuth } from "../AuthProvider";
 import type { UserAccount } from "../../types";
+import { formatDate } from "../../utils/dateTime";
+import { useSettingsContext } from "../SettingsProvider";
 
 export const UsersTab: Component = () => {
   const { user: currentUser } = useAuth();
+  const settingsCtx = useSettingsContext();
   const [users, setUsers] = createSignal<UserAccount[]>([]);
   const [showCreate, setShowCreate] = createSignal(false);
   const [newUsername, setNewUsername] = createSignal("");
@@ -171,7 +174,7 @@ export const UsersTab: Component = () => {
                     </span>
                   </td>
                   <td class="px-4 py-2.5 text-theme-text-secondary text-xs">
-                    {new Date(u.created_at).toLocaleDateString()}
+                    {formatDate(u.created_at, settingsCtx.timezone())}
                   </td>
                   <td class="px-4 py-2.5 text-right">
                     <Show when={!isSelf(u)}>
