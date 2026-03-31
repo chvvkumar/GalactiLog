@@ -1,10 +1,19 @@
 import pytest
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from httpx import AsyncClient, ASGITransport
 
 from app.main import app
 from app.database import get_session
+
+
+def _mock_async_redis(mock_redis):
+    """Create an async context manager mock that yields the given mock_redis."""
+    @asynccontextmanager
+    async def _ctx():
+        yield mock_redis
+    return _ctx
 
 
 @pytest.mark.asyncio
@@ -24,7 +33,7 @@ async def test_trigger_scan_accepted():
     app.dependency_overrides[get_session] = override
 
     with patch("app.api.scan.run_scan") as mock_run_scan, \
-         patch("app.api.scan.get_async_redis") as mock_redis_factory:
+         patch("app.api.scan.async_redis") as mock_redis_cm:
         mock_run_scan.delay = MagicMock()
         # Mock Redis returning idle state
         mock_redis = AsyncMock()
@@ -32,8 +41,9 @@ async def test_trigger_scan_accepted():
         mock_redis.hset = AsyncMock()
         mock_redis.persist = AsyncMock()
         mock_redis.expire = AsyncMock()
-        mock_redis.aclose = AsyncMock()
-        mock_redis_factory.return_value = mock_redis
+        mock_redis.set = AsyncMock(return_value=True)  # lock acquired
+        mock_redis.delete = AsyncMock()
+        mock_redis_cm.side_effect = _mock_async_redis(mock_redis)
 
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -49,11 +59,10 @@ async def test_trigger_scan_accepted():
 
 @pytest.mark.asyncio
 async def test_scan_status_idle():
-    with patch("app.api.scan.get_async_redis") as mock_redis_factory:
+    with patch("app.api.scan.async_redis") as mock_redis_cm:
         mock_redis = AsyncMock()
         mock_redis.hgetall = AsyncMock(return_value={})
-        mock_redis.aclose = AsyncMock()
-        mock_redis_factory.return_value = mock_redis
+        mock_redis_cm.side_effect = _mock_async_redis(mock_redis)
 
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -69,7 +78,7 @@ async def test_scan_status_idle():
 
 @pytest.mark.asyncio
 async def test_scan_status_ingesting():
-    with patch("app.api.scan.get_async_redis") as mock_redis_factory:
+    with patch("app.api.scan.async_redis") as mock_redis_cm:
         mock_redis = AsyncMock()
         mock_redis.hgetall = AsyncMock(return_value={
             "state": "ingesting",
@@ -79,8 +88,7 @@ async def test_scan_status_ingesting():
             "started_at": "1711000000.0",
             "completed_at": "",
         })
-        mock_redis.aclose = AsyncMock()
-        mock_redis_factory.return_value = mock_redis
+        mock_redis_cm.side_effect = _mock_async_redis(mock_redis)
 
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -109,7 +117,7 @@ async def test_scan_rejects_when_already_running():
 
     app.dependency_overrides[get_session] = override
 
-    with patch("app.api.scan.get_async_redis") as mock_redis_factory:
+    with patch("app.api.scan.async_redis") as mock_redis_cm:
         mock_redis = AsyncMock()
         mock_redis.hgetall = AsyncMock(return_value={
             "state": "ingesting",
@@ -119,8 +127,9 @@ async def test_scan_rejects_when_already_running():
             "started_at": "1711000000.0",
             "completed_at": "",
         })
-        mock_redis.aclose = AsyncMock()
-        mock_redis_factory.return_value = mock_redis
+        mock_redis.set = AsyncMock(return_value=True)  # lock acquired
+        mock_redis.delete = AsyncMock()
+        mock_redis_cm.side_effect = _mock_async_redis(mock_redis)
 
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -135,11 +144,10 @@ async def test_scan_rejects_when_already_running():
 
 @pytest.mark.asyncio
 async def test_get_activity_empty():
-    with patch("app.api.scan.get_async_redis") as mock_redis_factory:
+    with patch("app.api.scan.async_redis") as mock_redis_cm:
         mock_redis = AsyncMock()
         mock_redis.lrange = AsyncMock(return_value=[])
-        mock_redis.aclose = AsyncMock()
-        mock_redis_factory.return_value = mock_redis
+        mock_redis_cm.side_effect = _mock_async_redis(mock_redis)
 
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -156,11 +164,10 @@ async def test_get_activity_with_entries():
         json.dumps({"type": "scan_complete", "message": "Scan complete: 10 ingested, 0 failed", "details": {}, "timestamp": 1711000000.0}),
         json.dumps({"type": "rebuild_complete", "message": "Quick Fix: 3 linked", "details": {}, "timestamp": 1710999000.0}),
     ]
-    with patch("app.api.scan.get_async_redis") as mock_redis_factory:
+    with patch("app.api.scan.async_redis") as mock_redis_cm:
         mock_redis = AsyncMock()
         mock_redis.lrange = AsyncMock(return_value=entries)
-        mock_redis.aclose = AsyncMock()
-        mock_redis_factory.return_value = mock_redis
+        mock_redis_cm.side_effect = _mock_async_redis(mock_redis)
 
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -174,11 +181,10 @@ async def test_get_activity_with_entries():
 
 @pytest.mark.asyncio
 async def test_clear_activity():
-    with patch("app.api.scan.get_async_redis") as mock_redis_factory:
+    with patch("app.api.scan.async_redis") as mock_redis_cm:
         mock_redis = AsyncMock()
         mock_redis.delete = AsyncMock()
-        mock_redis.aclose = AsyncMock()
-        mock_redis_factory.return_value = mock_redis
+        mock_redis_cm.side_effect = _mock_async_redis(mock_redis)
 
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:

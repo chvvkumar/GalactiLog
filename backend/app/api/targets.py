@@ -75,7 +75,8 @@ async def search_targets(
     user: User = Depends(get_current_user),
 ):
     """Search targets by name or alias with fuzzy trigram matching."""
-    pattern = f"%{q}%"
+    escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    pattern = f"%{escaped}%"
 
     # Tier 1: Exact substring matches — exclude soft-deleted
     aliases_str = func.array_to_string(Target.aliases, ' ')

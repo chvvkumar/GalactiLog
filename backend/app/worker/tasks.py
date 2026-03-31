@@ -1,4 +1,5 @@
 import logging
+import time
 from pathlib import Path
 
 import fitsio
@@ -35,6 +36,7 @@ Base.metadata.create_all(_sync_engine)
 from app.config import get_sync_redis
 from app.services.scan_state import (
     increment_completed_sync, increment_failed_sync, increment_csv_enriched_sync,
+    increment_skipped_calibration_sync,
     start_scanning_sync, set_ingesting_sync, set_idle_sync,
     set_rebuild_running_sync, set_rebuild_progress_sync, set_rebuild_complete_sync,
     set_discovered_sync, is_cancel_requested_sync, clear_cancel_sync, set_cancelled_sync,
@@ -90,12 +92,18 @@ def run_scan(self, include_calibration: bool = True) -> dict:
             "type": "scan_stopped",
             "message": f"Scan stopped by user ({len(new_files)} files discovered before stop)",
             "details": {"discovered": len(new_files)},
-            "timestamp": __import__('time').time(),
+            "timestamp": time.time(),
         })
         return {"status": "cancelled"}
 
     if changed_files:
         logger.info("Delta scan: %d changed files queued for re-ingest", len(changed_files))
+        append_activity_sync(_redis, {
+            "type": "delta_scan",
+            "message": f"Delta scan: {len(changed_files)} changed file{'s' if len(changed_files) != 1 else ''} detected and re-queued",
+            "details": {"changed_files": len(changed_files)},
+            "timestamp": time.time(),
+        })
 
     # Detect and remove orphaned DB records (files deleted from disk)
     orphaned_paths = known_paths - all_disk_paths
@@ -125,12 +133,24 @@ def run_scan(self, include_calibration: bool = True) -> dict:
                 session.commit()
         if removed:
             logger.info("Removed %d orphaned image records (files deleted from disk)", removed)
+            append_activity_sync(_redis, {
+                "type": "orphan_cleanup",
+                "message": f"Removed {removed} deleted file{'s' if removed != 1 else ''} from catalog",
+                "details": {"removed": removed},
+                "timestamp": time.time(),
+            })
     elif orphaned_paths:
         logger.warning(
             "Skipped orphan cleanup: %d of %d files missing (>50%%) — "
             "possible unmounted share or unreachable storage",
             len(orphaned_paths), len(known_paths),
         )
+        append_activity_sync(_redis, {
+            "type": "orphan_warning",
+            "message": f"Orphan cleanup skipped: {len(orphaned_paths)} of {len(known_paths)} files missing (>50%) — possible unmounted share",
+            "details": {"missing": len(orphaned_paths), "total_known": len(known_paths)},
+            "timestamp": time.time(),
+        })
 
     total_queued = len(new_files) + len(changed_files)
     if not total_queued:
@@ -143,7 +163,7 @@ def run_scan(self, include_calibration: bool = True) -> dict:
             "type": "scan_complete",
             "message": msg,
             "details": {"completed": 0, "failed": 0, "already_known": cataloged, "removed": removed},
-            "timestamp": __import__('time').time(),
+            "timestamp": time.time(),
         })
         return {"status": "complete", "new_files_queued": 0, "already_known": cataloged, "removed": removed}
 
@@ -167,8 +187,6 @@ def run_scan(self, include_calibration: bool = True) -> dict:
 @celery_app.task
 def auto_scan_tick():
     """Heartbeat task: check if an auto-scan is due and dispatch if so."""
-    import time
-
     # Read auto-scan config from DB (migrated from Redis)
     with Session(_sync_engine) as db_session:
         row = db_session.execute(
@@ -216,6 +234,13 @@ def _do_ingest(fits_path: str, include_calibration: bool = True) -> dict:
 
     path = Path(fits_path)
 
+    # Validate path is within the configured FITS data directory
+    fits_root = Path(settings.fits_data_path).resolve()
+    try:
+        path.resolve().relative_to(fits_root)
+    except ValueError:
+        raise ValueError(f"Path {fits_path} is outside configured FITS data directory")
+
     # Step 1: Extract metadata (dispatches by format)
     is_xisf = path.suffix.lower() == ".xisf"
     if is_xisf:
@@ -233,6 +258,7 @@ def _do_ingest(fits_path: str, include_calibration: bool = True) -> dict:
     # to avoid opening every file during the directory walk)
     if is_calibration and not include_calibration:
         increment_completed_sync(_redis)
+        increment_skipped_calibration_sync(_redis)
         return {"file": str(path), "status": "skipped_calibration"}
 
     # Step 2: Generate thumbnail (skip calibration frames)
@@ -264,69 +290,83 @@ def _do_ingest(fits_path: str, include_calibration: bool = True) -> dict:
         file_size = None
         file_mtime = None
 
-    with Session(_sync_engine) as session:
-        image = Image(
-            file_path=meta["file_path"],
-            file_name=meta["file_name"],
-            file_size=file_size,
-            file_mtime=file_mtime,
-            capture_date=meta.get("capture_date"),
-            thumbnail_path=str(thumb_path) if thumb_path else None,
-            resolved_target_id=target_id,
-            exposure_time=meta.get("exposure_time"),
-            filter_used=meta.get("filter_used"),
-            sensor_temp=meta.get("sensor_temp"),
-            camera_gain=meta.get("camera_gain"),
-            image_type=meta.get("image_type"),
-            telescope=meta.get("telescope"),
-            camera=meta.get("camera"),
-            median_hfr=meta.get("median_hfr"),
-            eccentricity=meta.get("eccentricity"),
-            raw_headers=meta.get("raw_headers", {}),
-            # CSV metrics (N.I.N.A. Session Metadata)
-            hfr_stdev=meta.get("hfr_stdev"),
-            fwhm=meta.get("fwhm"),
-            detected_stars=meta.get("detected_stars"),
-            guiding_rms_arcsec=meta.get("guiding_rms_arcsec"),
-            guiding_rms_ra_arcsec=meta.get("guiding_rms_ra_arcsec"),
-            guiding_rms_dec_arcsec=meta.get("guiding_rms_dec_arcsec"),
-            adu_stdev=meta.get("adu_stdev"),
-            adu_mean=meta.get("adu_mean"),
-            adu_median=meta.get("adu_median"),
-            adu_min=meta.get("adu_min"),
-            adu_max=meta.get("adu_max"),
-            focuser_position=meta.get("focuser_position"),
-            focuser_temp=meta.get("focuser_temp"),
-            rotator_position=meta.get("rotator_position"),
-            pier_side=meta.get("pier_side"),
-            airmass=meta.get("airmass"),
-            ambient_temp=meta.get("ambient_temp"),
-            dew_point=meta.get("dew_point"),
-            humidity=meta.get("humidity"),
-            pressure=meta.get("pressure"),
-            wind_speed=meta.get("wind_speed"),
-            wind_direction=meta.get("wind_direction"),
-            wind_gust=meta.get("wind_gust"),
-            cloud_cover=meta.get("cloud_cover"),
-            sky_quality=meta.get("sky_quality"),
-        )
-        session.add(image)
-        session.commit()
-        logger.info("Ingested: %s (target=%s)", path.name, target_id)
-        increment_completed_sync(_redis)
-        if meta.get("detected_stars") is not None:
-            increment_csv_enriched_sync(_redis)
-        return {"file": str(path), "status": "ok"}
+    try:
+        with Session(_sync_engine) as session:
+            image = Image(
+                file_path=meta["file_path"],
+                file_name=meta["file_name"],
+                file_size=file_size,
+                file_mtime=file_mtime,
+                capture_date=meta.get("capture_date"),
+                thumbnail_path=str(thumb_path) if thumb_path else None,
+                resolved_target_id=target_id,
+                exposure_time=meta.get("exposure_time"),
+                filter_used=meta.get("filter_used"),
+                sensor_temp=meta.get("sensor_temp"),
+                camera_gain=meta.get("camera_gain"),
+                image_type=meta.get("image_type"),
+                telescope=meta.get("telescope"),
+                camera=meta.get("camera"),
+                median_hfr=meta.get("median_hfr"),
+                eccentricity=meta.get("eccentricity"),
+                raw_headers=meta.get("raw_headers", {}),
+                # CSV metrics (N.I.N.A. Session Metadata)
+                hfr_stdev=meta.get("hfr_stdev"),
+                fwhm=meta.get("fwhm"),
+                detected_stars=meta.get("detected_stars"),
+                guiding_rms_arcsec=meta.get("guiding_rms_arcsec"),
+                guiding_rms_ra_arcsec=meta.get("guiding_rms_ra_arcsec"),
+                guiding_rms_dec_arcsec=meta.get("guiding_rms_dec_arcsec"),
+                adu_stdev=meta.get("adu_stdev"),
+                adu_mean=meta.get("adu_mean"),
+                adu_median=meta.get("adu_median"),
+                adu_min=meta.get("adu_min"),
+                adu_max=meta.get("adu_max"),
+                focuser_position=meta.get("focuser_position"),
+                focuser_temp=meta.get("focuser_temp"),
+                rotator_position=meta.get("rotator_position"),
+                pier_side=meta.get("pier_side"),
+                airmass=meta.get("airmass"),
+                ambient_temp=meta.get("ambient_temp"),
+                dew_point=meta.get("dew_point"),
+                humidity=meta.get("humidity"),
+                pressure=meta.get("pressure"),
+                wind_speed=meta.get("wind_speed"),
+                wind_direction=meta.get("wind_direction"),
+                wind_gust=meta.get("wind_gust"),
+                cloud_cover=meta.get("cloud_cover"),
+                sky_quality=meta.get("sky_quality"),
+            )
+            session.add(image)
+            session.commit()
+    except Exception:
+        # Clean up orphaned thumbnail if DB insert failed
+        if thumb_path and thumb_path.exists():
+            thumb_path.unlink(missing_ok=True)
+        raise
+
+    logger.info("Ingested: %s (target=%s)", path.name, target_id)
+    increment_completed_sync(_redis)
+    if meta.get("detected_stars") is not None:
+        increment_csv_enriched_sync(_redis)
+    return {"file": str(path), "status": "ok"}
 
 
 def _is_unrecoverable(exc: Exception) -> bool:
-    return isinstance(exc, (OSError, ValueError)) and (
-        "SIMPLE card" in str(exc)
-        or "not a valid FITS" in str(exc)
-        or "Not a valid XISF" in str(exc)
-        or "No Image element" in str(exc)
-        or "No such file" in str(exc)
-    )
+    # ValueError from our own path validation or from FITS/XISF parsing
+    if isinstance(exc, ValueError):
+        return True
+    # FileNotFoundError is always unrecoverable (file was deleted)
+    if isinstance(exc, FileNotFoundError):
+        return True
+    # PermissionError won't resolve on retry
+    if isinstance(exc, PermissionError):
+        return True
+    # Other OSError subtypes — check for known unrecoverable messages
+    if isinstance(exc, OSError):
+        msg = str(exc)
+        return any(s in msg for s in ("SIMPLE card", "not a valid FITS"))
+    return False
 
 
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=30)
@@ -561,8 +601,6 @@ def rebuild_targets(self) -> dict:
     5. Re-resolve each through SIMBAD (reusing _resolve_or_cache_target)
     6. Re-link images to new targets
     """
-    import time
-
     logger.info("rebuild_targets: starting full rebuild")
     set_rebuild_running_sync(_redis, "full", "Clearing existing targets...")
 
@@ -633,7 +671,7 @@ def rebuild_targets(self) -> dict:
         "type": "rebuild_complete",
         "message": f"Full Rebuild: {resolved} resolved, {failed} failed out of {total} names",
         "details": {"resolved": resolved, "failed": failed, "total": total},
-        "timestamp": __import__('time').time(),
+        "timestamp": time.time(),
     })
     logger.info("rebuild_targets: done — resolved=%d, failed=%d", resolved, failed)
     return {"status": "complete", **details}
@@ -799,7 +837,7 @@ def smart_rebuild_targets(self) -> dict:
         "type": "rebuild_complete",
         "message": f"Quick Fix: {stats['linked_unresolved']} linked, {stats['redirected_merged']} redirected, {stats['aliases_updated']} aliases updated",
         "details": stats,
-        "timestamp": __import__('time').time(),
+        "timestamp": time.time(),
     })
     logger.info("smart_rebuild: done — %s", stats)
     return {"status": "complete", **stats}

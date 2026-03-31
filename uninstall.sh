@@ -32,7 +32,7 @@ header "GalactiLog — Uninstall"
 echo -e "  This will ${RED}permanently delete${NC}:"
 echo ""
 echo "    • All Docker containers, networks, and volumes"
-echo "    • Docker image (astro-session-diary-app)"
+echo "    • Docker image (chvvkumar/galactilog)"
 echo "    • Database files (/docker/astro_cataloger/postgres)"
 echo "    • Thumbnail files (/docker/astro_cataloger/thumbnails)"
 echo "    • .env configuration file"
@@ -62,9 +62,9 @@ fi
 # ── Remove Docker image ─────────────────────────────────────────────────────
 header "Removing Docker Image"
 
-if docker image inspect astro-session-diary-app &>/dev/null; then
-    docker image rm astro-session-diary-app
-    success "Removed astro-session-diary-app image"
+if docker image inspect chvvkumar/galactilog &>/dev/null; then
+    docker image rm chvvkumar/galactilog
+    success "Removed chvvkumar/galactilog image"
 else
     info "Image not found, skipping"
 fi

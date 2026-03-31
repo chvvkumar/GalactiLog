@@ -230,7 +230,10 @@ export interface ScanStatus {
 }
 
 export interface ActivityEntry {
-  type: "scan_complete" | "scan_stopped" | "scan_stalled" | "rebuild_complete" | "rebuild_failed" | "regen_complete";
+  type: "scan_complete" | "scan_stopped" | "scan_stalled"
+    | "rebuild_complete" | "rebuild_failed" | "regen_complete"
+    | "delta_scan" | "orphan_cleanup" | "orphan_warning"
+    | "migration_applied" | "migration_initialized" | "migration_ok" | "migration_failed";
   message: string;
   details: Record<string, any>;
   timestamp: number;

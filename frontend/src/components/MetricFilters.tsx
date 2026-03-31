@@ -1,6 +1,7 @@
 import { Component, For, Show, createSignal, createEffect } from "solid-js";
 import { useDashboardFilters } from "./DashboardFilterProvider";
 import { useSettingsContext } from "./SettingsProvider";
+import { debounce } from "../utils/debounce";
 
 // Metric field definitions: key -> { label, step, isInt? }
 const METRIC_FIELDS: Record<string, { label: string; step: number; isInt?: boolean }> = {
@@ -43,20 +44,15 @@ const MetricRow: Component<MetricRowProps> = (props) => {
     props.initialMax != null ? String(props.initialMax) : ""
   );
 
-  let debounceTimer: ReturnType<typeof setTimeout>;
-
-  const apply = (min: string, max: string) => {
-    clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(() => {
-      const parseFn = props.isInt ? parseInt : parseFloat;
-      const minNum = min ? parseFn(min) : undefined;
-      const maxNum = max ? parseFn(max) : undefined;
-      props.onChange(
-        minNum != null && !isNaN(minNum) ? minNum : undefined,
-        maxNum != null && !isNaN(maxNum) ? maxNum : undefined
-      );
-    }, 500);
-  };
+  const apply = debounce((min: string, max: string) => {
+    const parseFn = props.isInt ? parseInt : parseFloat;
+    const minNum = min ? parseFn(min) : undefined;
+    const maxNum = max ? parseFn(max) : undefined;
+    props.onChange(
+      minNum != null && !isNaN(minNum) ? minNum : undefined,
+      maxNum != null && !isNaN(maxNum) ? maxNum : undefined
+    );
+  }, 500);
 
   return (
     <div class="space-y-1">

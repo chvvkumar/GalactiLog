@@ -1,5 +1,5 @@
 import { Component, For, Show, createSignal, onMount } from "solid-js";
-import { api } from "../../api/client";
+import { api, ApiError } from "../../api/client";
 import { showToast } from "../Toast";
 import { useAuth } from "../AuthProvider";
 import type { UserAccount } from "../../types";
@@ -34,8 +34,8 @@ export const UsersTab: Component = () => {
       setNewRole("viewer");
       setShowCreate(false);
       await refresh();
-    } catch (err: any) {
-      const msg = err?.message?.includes("409") ? "Username already exists" : "Failed to create user";
+    } catch (err) {
+      const msg = err instanceof ApiError && err.status === 409 ? "Username already exists" : "Failed to create user";
       showToast(msg, "error");
     } finally {
       setCreating(false);
@@ -46,8 +46,8 @@ export const UsersTab: Component = () => {
     try {
       await api.updateUser(u.id, { is_active: !u.is_active });
       await refresh();
-    } catch (err: any) {
-      const msg = err?.message?.includes("400") ? "Cannot deactivate yourself" : "Failed to update user";
+    } catch (err) {
+      const msg = err instanceof ApiError && err.status === 400 ? "Cannot deactivate yourself" : "Failed to update user";
       showToast(msg, "error");
     }
   };
@@ -57,8 +57,8 @@ export const UsersTab: Component = () => {
     try {
       await api.updateUser(u.id, { role: newRole });
       await refresh();
-    } catch (err: any) {
-      const msg = err?.message?.includes("400") ? "Cannot change your own role" : "Failed to update user";
+    } catch (err) {
+      const msg = err instanceof ApiError && err.status === 400 ? "Cannot change your own role" : "Failed to update user";
       showToast(msg, "error");
     }
   };
@@ -69,8 +69,8 @@ export const UsersTab: Component = () => {
       await api.deleteUser(u.id);
       showToast(`User "${u.username}" deleted`);
       await refresh();
-    } catch (err: any) {
-      const msg = err?.message?.includes("400") ? "Cannot delete yourself" : "Failed to delete user";
+    } catch (err) {
+      const msg = err instanceof ApiError && err.status === 400 ? "Cannot delete yourself" : "Failed to delete user";
       showToast(msg, "error");
     }
   };

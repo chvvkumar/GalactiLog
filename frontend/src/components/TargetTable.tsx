@@ -15,10 +15,11 @@ function getDisplayName(t: TargetAggregation): string {
 }
 
 const TargetTable: Component<{ targets: TargetAggregation[] }> = (props) => {
-  const stored = localStorage.getItem("dashboard_sort");
-  const initial: { key: SortKey; dir: SortDir } = stored
-    ? JSON.parse(stored)
-    : { key: "integration", dir: "desc" };
+  let initial: { key: SortKey; dir: SortDir } = { key: "integration", dir: "desc" };
+  try {
+    const stored = localStorage.getItem("dashboard_sort");
+    if (stored) initial = JSON.parse(stored);
+  } catch { /* ignore corrupt localStorage */ }
 
   const [sortKey, setSortKey] = createSignal<SortKey>(initial.key);
   const [sortDir, setSortDir] = createSignal<SortDir>(initial.dir);

@@ -1,12 +1,12 @@
 import { Component, createSignal, createEffect } from "solid-js";
 import { useDashboardFilters } from "./DashboardFilterProvider";
+import { debounce } from "../utils/debounce";
 
 const QualityFilters: Component = () => {
   const { filters, updateQualityFilters } = useDashboardFilters();
   const [hfrMin, setHfrMin] = createSignal<string>("");
   const [hfrMax, setHfrMax] = createSignal<string>("");
 
-  let debounceTimer: ReturnType<typeof setTimeout>;
   let initialized = false;
 
   // Sync from store on init only
@@ -19,17 +19,14 @@ const QualityFilters: Component = () => {
     }
   });
 
-  const applyFilters = () => {
-    clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(() => {
-      const min = hfrMin() ? parseFloat(hfrMin()) : undefined;
-      const max = hfrMax() ? parseFloat(hfrMax()) : undefined;
-      updateQualityFilters({
-        hfrMin: min && !isNaN(min) ? min : undefined,
-        hfrMax: max && !isNaN(max) ? max : undefined,
-      });
-    }, 500);
-  };
+  const applyFilters = debounce(() => {
+    const min = hfrMin() ? parseFloat(hfrMin()) : undefined;
+    const max = hfrMax() ? parseFloat(hfrMax()) : undefined;
+    updateQualityFilters({
+      hfrMin: min && !isNaN(min) ? min : undefined,
+      hfrMax: max && !isNaN(max) ? max : undefined,
+    });
+  }, 500);
 
   return (
     <div class="space-y-2">

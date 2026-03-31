@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import get_async_redis
+from app.config import async_redis
 from app.database import get_session
 from app.api.deps import get_current_user, require_admin
 from app.models.user import User
@@ -46,17 +46,22 @@ async def trigger_scan(
     row.general = {**(row.general or {}), "include_calibration": include_calibration}
     await session.commit()
 
-    r = get_async_redis()
-    try:
-        state = await get_scan_state(r)
-        if state.state in ("scanning", "ingesting"):
-            return {"status": "already_running", **state.to_dict()}
+    async with async_redis() as r:
+        # Use SET NX as a lock to prevent race between check and dispatch
+        acquired = await r.set("scan:lock", "1", nx=True, ex=10)
+        if not acquired:
+            return {"status": "already_running", "message": "Scan start in progress"}
 
-        run_scan.delay(include_calibration=include_calibration)
+        try:
+            state = await get_scan_state(r)
+            if state.state in ("scanning", "ingesting"):
+                return {"status": "already_running", **state.to_dict()}
 
-        return {"status": "accepted", "message": "Scan queued — check /scan/status for progress"}
-    finally:
-        await r.aclose()
+            run_scan.delay(include_calibration=include_calibration)
+
+            return {"status": "accepted", "message": "Scan queued — check /scan/status for progress"}
+        finally:
+            await r.delete("scan:lock")
 
 
 @router.post("/regenerate-thumbnails")
@@ -65,8 +70,7 @@ async def regenerate_thumbnails(
     user: User = Depends(require_admin),
 ):
     """Queue all existing images for thumbnail regeneration."""
-    r = get_async_redis()
-    try:
+    async with async_redis() as r:
         state = await get_scan_state(r)
         if state.state in ("scanning", "ingesting"):
             return {"status": "already_running", **state.to_dict()}
@@ -93,64 +97,49 @@ async def regenerate_thumbnails(
             "queued": len(rows),
             "message": "Regenerating all thumbnails with MTF stretch",
         }
-    finally:
-        await r.aclose()
 
 
 @router.get("/status")
 async def scan_status(user: User = Depends(get_current_user)):
     """Return current scan state from Redis."""
-    r = get_async_redis()
-    try:
+    async with async_redis() as r:
         state = await get_scan_state(r)
         result = state.to_dict()
         if state.failed > 0:
             result["failed_files"] = await get_failed_files(r)
         return result
-    finally:
-        await r.aclose()
 
 
 @router.post("/stop")
 async def stop_scan(user: User = Depends(require_admin)):
     """Request cancellation of the current scan."""
-    r = get_async_redis()
-    try:
+    async with async_redis() as r:
         state = await get_scan_state(r)
         if state.state not in ("scanning", "ingesting"):
             return {"status": "not_running", "state": state.state}
         await request_cancel(r)
         return {"status": "stopping", "message": "Cancel requested — scan will stop shortly"}
-    finally:
-        await r.aclose()
 
 
 @router.get("/activity")
 async def get_activity_log(user: User = Depends(get_current_user)):
     """Return persistent activity log (newest first)."""
-    r = get_async_redis()
-    try:
+    async with async_redis() as r:
         return await get_activity(r)
-    finally:
-        await r.aclose()
 
 
 @router.delete("/activity")
 async def clear_activity_log(user: User = Depends(require_admin)):
     """Clear the activity log."""
-    r = get_async_redis()
-    try:
+    async with async_redis() as r:
         await clear_activity(r)
         return {"status": "cleared"}
-    finally:
-        await r.aclose()
 
 
 @router.post("/reset")
 async def reset_scan_state(user: User = Depends(require_admin)):
     """Force-clear a stalled scan back to idle."""
-    r = get_async_redis()
-    try:
+    async with async_redis() as r:
         state = await get_scan_state(r)
         await reset_scan(r)
         return {
@@ -160,8 +149,6 @@ async def reset_scan_state(user: User = Depends(require_admin)):
             "failed": state.failed,
             "total": state.total,
         }
-    finally:
-        await r.aclose()
 
 
 @router.post("/backfill-targets")
@@ -184,6 +171,7 @@ async def backfill_targets(
               AND raw_headers->>'OBJECT' != ''
             GROUP BY raw_headers->>'OBJECT'
             ORDER BY cnt DESC
+            LIMIT 500
         """)
     )
     unresolved = result.all()
@@ -286,8 +274,7 @@ async def trigger_rebuild_targets(user: User = Depends(require_admin)):
     and re-resolves everything from scratch. Runs as a background Celery task.
     Uses persistent SIMBAD cache — fast on repeat runs.
     """
-    r = get_async_redis()
-    try:
+    async with async_redis() as r:
         state = await get_scan_state(r)
         if state.state in ("scanning", "ingesting"):
             raise HTTPException(
@@ -297,8 +284,6 @@ async def trigger_rebuild_targets(user: User = Depends(require_admin)):
 
         rebuild_targets.delay()
         return {"status": "accepted", "message": "Target rebuild queued as background task"}
-    finally:
-        await r.aclose()
 
 
 @router.post("/smart-rebuild-targets")
@@ -308,8 +293,7 @@ async def trigger_smart_rebuild(user: User = Depends(require_admin)):
     No SIMBAD network calls. Fixes orphaned images, missing aliases,
     inconsistent names, and stale merge candidates.
     """
-    r = get_async_redis()
-    try:
+    async with async_redis() as r:
         state = await get_scan_state(r)
         if state.state in ("scanning", "ingesting"):
             raise HTTPException(
@@ -319,33 +303,25 @@ async def trigger_smart_rebuild(user: User = Depends(require_admin)):
 
         smart_rebuild_targets.delay()
         return {"status": "accepted", "message": "Smart rebuild queued as background task"}
-    finally:
-        await r.aclose()
 
 
 @router.post("/backfill-csv")
 async def backfill_csv_metrics_endpoint(user: User = Depends(require_admin)):
     """Backfill Image rows with metrics from N.I.N.A. CSV files."""
-    r = get_async_redis()
-    try:
+    async with async_redis() as r:
         state = await get_scan_state(r)
         if state.state != "idle":
             return {"status": "already_running", "state": state.state}
         backfill_csv_metrics.delay()
         return {"status": "accepted"}
-    finally:
-        await r.aclose()
 
 
 @router.get("/rebuild-status")
 async def rebuild_status(user: User = Depends(get_current_user)):
     """Return current rebuild task state from Redis."""
-    r = get_async_redis()
-    try:
+    async with async_redis() as r:
         state = await get_rebuild_state(r)
         return state.to_dict()
-    finally:
-        await r.aclose()
 
 
 @router.get("/db-summary")
