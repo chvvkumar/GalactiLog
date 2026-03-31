@@ -2,7 +2,7 @@ name: Auto-generate PR Description
 
 on:
   pull_request:
-    types: [opened]
+    types: [opened, synchronize]
 
 permissions:
   pull-requests: write
@@ -22,8 +22,10 @@ jobs:
       - name: Get PR commits
         id: commits
         run: |
-          COMMITS=$(git log --pretty=format:"- %s (%h)" ${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }} 2>/dev/null || echo "Unable to retrieve commits")
-          FILES_CHANGED=$(git diff --stat ${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }} -- . ':!package-lock.json' ':!*.lock' 2>/dev/null || echo "Unable to get file stats")
+          BASE_BRANCH="${{ github.event.pull_request.base.ref }}"
+          MERGE_BASE=$(git merge-base "origin/$BASE_BRANCH" HEAD)
+          COMMITS=$(git log --pretty=format:"- %s (%h)" "$MERGE_BASE"..HEAD 2>/dev/null || echo "Unable to retrieve commits")
+          FILES_CHANGED=$(git diff --stat "$MERGE_BASE"...HEAD -- . ':!package-lock.json' ':!*.lock' 2>/dev/null || echo "Unable to get file stats")
           {
             echo "COMMITS:"
             echo "$COMMITS"
@@ -64,8 +66,8 @@ jobs:
           # Escape the prompt for JSON
           ESCAPED_PROMPT=$(echo "$PROMPT" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read()))')
 
-          # Call Gemini API
-          RESPONSE=$(curl -s -w "\n%{http_code}" \
+          # Call Gemini API - write response to file to avoid shell variable truncation
+          HTTP_CODE=$(curl -s -o /tmp/gemini_response.json -w "%{http_code}" \
             -X POST "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=$GEMINI_API_KEY" \
             -H "Content-Type: application/json" \
             -d "{
@@ -80,9 +82,6 @@ jobs:
               }
             }" 2>/dev/null)
 
-          HTTP_CODE=$(echo "$RESPONSE" | tail -1)
-          BODY=$(echo "$RESPONSE" | sed '$d')
-
           if [ "$HTTP_CODE" != "200" ]; then
             echo "::warning::Gemini API returned HTTP $HTTP_CODE. Skipping PR description update."
             echo "api_success=false" >> "$GITHUB_OUTPUT"
@@ -90,16 +89,17 @@ jobs:
           fi
 
           # Extract generated text to file to avoid shell glob expansion
-          echo "$BODY" | python3 -c '
-          import sys, json
+          python3 -c '
+          import json
           try:
-              data = json.load(sys.stdin)
+              with open("/tmp/gemini_response.json") as f:
+                  data = json.load(f)
               text = data["candidates"][0]["content"]["parts"][0]["text"]
               with open("/tmp/gemini_raw.txt", "w") as f:
                   f.write(text)
           except (KeyError, IndexError, json.JSONDecodeError) as e:
               print(f"PARSE_ERROR: {e}", file=sys.stderr)
-              sys.exit(1)
+              exit(1)
           ' 2>/tmp/gemini_parse_err.txt
 
           if [ $? -ne 0 ]; then
