@@ -17,6 +17,7 @@ from app.services.simbad import (
     _normalize_ws,
 )
 from app.services.thumbnail import generate_thumbnail
+from app.services.xisf_parser import extract_xisf_metadata, generate_xisf_thumbnail
 from app.worker.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
@@ -202,8 +203,9 @@ def ingest_file(self, fits_path: str) -> dict:
     logger.info("Ingesting: %s", path.name)
 
     try:
-        # Step 1: Extract metadata
-        meta = extract_metadata(path)
+        # Step 1: Extract metadata (dispatches by format)
+        is_xisf = path.suffix.lower() == ".xisf"
+        meta = extract_xisf_metadata(path) if is_xisf else extract_metadata(path)
 
         image_type = (meta.get("image_type") or "").upper()
         is_calibration = image_type in ("DARK", "FLAT", "BIAS", "DARKFLAT")
@@ -215,7 +217,10 @@ def ingest_file(self, fits_path: str) -> dict:
             path_hash = hashlib.md5(str(path).encode()).hexdigest()[:12]
             thumb_filename = f"{path.stem}_{path_hash}.jpg"
             thumb_path = Path(settings.thumbnails_path) / thumb_filename
-            generate_thumbnail(path, thumb_path, max_width=settings.thumbnail_max_width)
+            if is_xisf:
+                generate_xisf_thumbnail(path, thumb_path, max_width=settings.thumbnail_max_width)
+            else:
+                generate_thumbnail(path, thumb_path, max_width=settings.thumbnail_max_width)
 
         # Step 3: Resolve target (sync wrapper for async SIMBAD call)
         # Skip SIMBAD for calibration frames — they're not astronomical targets
@@ -290,6 +295,8 @@ def ingest_file(self, fits_path: str) -> dict:
         unrecoverable = isinstance(exc, (OSError, ValueError)) and (
             "SIMPLE card" in str(exc)
             or "not a valid FITS" in str(exc)
+            or "Not a valid XISF" in str(exc)
+            or "No Image element" in str(exc)
             or "No such file" in str(exc)
         )
         if unrecoverable or self.request.retries >= self.max_retries:
@@ -306,7 +313,10 @@ def regenerate_thumbnail(self, image_id: str, fits_path: str, thumb_path: str) -
     logger.info("Regenerating thumbnail: %s", path.name)
 
     try:
-        generate_thumbnail(path, output, max_width=settings.thumbnail_max_width)
+        if path.suffix.lower() == ".xisf":
+            generate_xisf_thumbnail(path, output, max_width=settings.thumbnail_max_width)
+        else:
+            generate_thumbnail(path, output, max_width=settings.thumbnail_max_width)
         increment_completed_sync(_redis)
         return {"file": str(path), "status": "ok"}
     except Exception as exc:

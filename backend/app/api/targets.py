@@ -236,7 +236,23 @@ async def get_target_detail(
     user: User = Depends(get_current_user),
 ):
     """Return target identity with cumulative stats and session overviews."""
-    if target_id.startswith("obj:"):
+    if target_id == "obj:__uncategorized__":
+        target_name = "Uncategorized"
+        target_obj = None
+        # Images with no resolved target AND no OBJECT header
+        query = (
+            select(Image)
+            .where(
+                Image.resolved_target_id.is_(None),
+                or_(
+                    ~Image.raw_headers.has_key("OBJECT"),
+                    Image.raw_headers["OBJECT"].astext == "",
+                    Image.raw_headers["OBJECT"].is_(None),
+                ),
+            )
+            .order_by(Image.capture_date)
+        )
+    elif target_id.startswith("obj:"):
         object_name = target_id[4:]
         target_name = object_name
         target_obj = None
@@ -549,9 +565,11 @@ async def list_targets_aggregated(
         else:
             object_name = (image.raw_headers or {}).get("OBJECT")
             if not object_name:
-                continue  # skip images with no object name at all
-            tid = f"obj:{object_name}"  # synthetic ID for unresolved objects
-            name = object_name
+                tid = "obj:__uncategorized__"
+                name = "Uncategorized"
+            else:
+                tid = f"obj:{object_name}"
+                name = object_name
 
         if tid not in targets_map:
             targets_map[tid] = {
@@ -918,7 +936,32 @@ async def get_session_detail(
     user: User = Depends(get_current_user),
 ):
     """Return detailed session data for a target on a specific date."""
-    if target_id.startswith("obj:"):
+    if target_id == "obj:__uncategorized__":
+        target_name = "Uncategorized"
+        target_obj = None
+        _no_object = or_(
+            ~Image.raw_headers.has_key("OBJECT"),
+            Image.raw_headers["OBJECT"].astext == "",
+            Image.raw_headers["OBJECT"].is_(None),
+        )
+        query = (
+            select(Image)
+            .where(
+                Image.resolved_target_id.is_(None),
+                _no_object,
+                Image.capture_date >= datetime.fromisoformat(date),
+                Image.capture_date < datetime.fromisoformat(date) + timedelta(days=1),
+            )
+            .order_by(Image.capture_date)
+        )
+        all_images_query = (
+            select(Image)
+            .where(
+                Image.resolved_target_id.is_(None),
+                _no_object,
+            )
+        )
+    elif target_id.startswith("obj:"):
         object_name = target_id[4:]
         target_name = object_name
         target_obj = None
@@ -1129,7 +1172,8 @@ async def get_session_detail(
         sensor_temp_min=min(temp_values) if temp_values else None,
         sensor_temp_max=max(temp_values) if temp_values else None,
         gain=ref_image.camera_gain,
-        exposure_time=ref_image.exposure_time,
+        offset=next((int(img.raw_headers.get("OFFSET", 0)) for img in images if img.raw_headers and img.raw_headers.get("OFFSET") is not None), None),
+        exposure_times=sorted(set(img.exposure_time for img in images if img.exposure_time is not None)),
         first_frame_time=images[0].capture_date.isoformat() if images[0].capture_date else None,
         last_frame_time=images[-1].capture_date.isoformat() if images[-1].capture_date else None,
         filter_details=filter_details,

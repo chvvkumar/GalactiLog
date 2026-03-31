@@ -138,10 +138,10 @@ export const api = {
     fetchJson<TargetAggregationResponse>(`/targets?${buildTargetQuery(filters)}`),
 
   getSessionDetail: (targetId: string, date: string) =>
-    fetchJson<SessionDetail>(`/targets/${encodeURIComponent(targetId)}/sessions/${date}`),
+    fetchJson<SessionDetail>(`/targets/${encodeURIComponent(decodeURIComponent(targetId))}/sessions/${date}`),
 
   getTargetDetail: (targetId: string) =>
-    fetchJson<TargetDetailResponse>(`/targets/${encodeURIComponent(targetId)}/detail`),
+    fetchJson<TargetDetailResponse>(`/targets/${encodeURIComponent(decodeURIComponent(targetId))}/detail`),
 
   getEquipment: () =>
     fetchJson<EquipmentList>("/targets/equipment"),

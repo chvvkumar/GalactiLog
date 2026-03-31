@@ -2,12 +2,12 @@ import pytest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from app.services.watcher import FitsEventHandler
+from app.services.watcher import ImageEventHandler
 
 
 def test_handler_detects_fits_file(tmp_path: Path):
     mock_callback = MagicMock()
-    handler = FitsEventHandler(callback=mock_callback)
+    handler = ImageEventHandler(callback=mock_callback)
 
     # Simulate a file creation event
     event = MagicMock()
@@ -20,7 +20,7 @@ def test_handler_detects_fits_file(tmp_path: Path):
 
 def test_handler_ignores_non_fits(tmp_path: Path):
     mock_callback = MagicMock()
-    handler = FitsEventHandler(callback=mock_callback)
+    handler = ImageEventHandler(callback=mock_callback)
 
     event = MagicMock()
     event.is_directory = False

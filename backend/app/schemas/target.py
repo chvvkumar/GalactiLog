@@ -180,7 +180,8 @@ class SessionDetailResponse(BaseModel):
     sensor_temp_min: float | None = None
     sensor_temp_max: float | None = None
     gain: int | None = None
-    exposure_time: float | None = None
+    offset: int | None = None
+    exposure_times: list[float] = []
     first_frame_time: str | None = None
     last_frame_time: str | None = None
     filter_details: list[FilterDetail] = []
