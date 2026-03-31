@@ -139,3 +139,11 @@ class TestExtractXisfMetadata:
         meta = extract_xisf_metadata(xisf_file)
 
         assert meta["median_hfr"] == 1.56
+
+
+from app.services.scanner import SUPPORTED_EXTENSIONS
+
+
+def test_xisf_in_supported_extensions():
+    assert ".xisf" in SUPPORTED_EXTENSIONS
+    assert ".XISF" in SUPPORTED_EXTENSIONS

@@ -7,7 +7,10 @@ import fitsio
 
 from app.services.csv_metadata import get_csv_metrics
 
-FITS_EXTENSIONS = {".fits", ".fit", ".fts", ".FITS", ".FIT", ".FTS"}
+SUPPORTED_EXTENSIONS = {".fits", ".fit", ".fts", ".FITS", ".FIT", ".FTS", ".xisf", ".XISF"}
+
+# Backwards-compatible alias
+FITS_EXTENSIONS = SUPPORTED_EXTENSIONS
 
 
 CALIBRATION_FRAME_TYPES = {"BIAS", "DARK", "FLAT", "DARKFLAT", "BIASFLAT"}
@@ -19,8 +22,13 @@ def _is_calibration_frame(path: Path) -> bool | None:
     Returns True for calibration, False for light/science, None if unreadable.
     """
     try:
-        header = fitsio.read_header(str(path), ext=0)
-        image_type = (header.get("IMAGETYP") or "").strip().upper()
+        if path.suffix.lower() == ".xisf":
+            from app.services.xisf_parser import extract_xisf_metadata
+            meta = extract_xisf_metadata(path)
+            image_type = (meta.get("image_type") or "").strip().upper()
+        else:
+            header = fitsio.read_header(str(path), ext=0)
+            image_type = (header.get("IMAGETYP") or "").strip().upper()
         return image_type in CALIBRATION_FRAME_TYPES
     except Exception:
         return None
@@ -34,10 +42,10 @@ def scan_directory(
     is_cancelled: "callable | None" = None,
     on_new_file: "callable | None" = None,
 ) -> tuple[list[Path], set[str]]:
-    """Walk a directory tree finding new FITS files and all FITS paths on disk.
+    """Walk a directory tree finding new image files (FITS and XISF) on disk.
 
-    Returns (new_files, all_disk_paths) where new_files are FITS files not in
-    known_paths and all_disk_paths is every FITS path found during the walk.
+    Returns (new_files, all_disk_paths) where new_files are image files not in
+    known_paths and all_disk_paths is every supported path found during the walk.
     If include_calibration is False, only LIGHT / science frames are in new_files.
 
     on_progress(discovered_count) is called periodically during discovery.
