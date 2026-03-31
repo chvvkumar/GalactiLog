@@ -92,7 +92,7 @@ export default function SessionMetricsChart(props: Props) {
     if (chartInstance) {
       chartInstance.data.labels = labels;
       chartInstance.data.datasets = datasets;
-      chartInstance.update("none");
+      chartInstance.update();
       return;
     }
 

@@ -197,7 +197,7 @@ export default function TargetMetricsChart(props: Props) {
         return label === SESSION_GAP ? "" : label;
       };
       xScale.grid.color = (ctx: any) => gridColors[ctx.index] ?? "rgba(255,255,255,0.03)";
-      chartInstance.update("none");
+      chartInstance.update();
       return;
     }
 
