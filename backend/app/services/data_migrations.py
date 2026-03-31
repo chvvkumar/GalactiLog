@@ -47,15 +47,16 @@ def _migrate_v1_fix_catalog_designations(session: Session) -> str:
         fits_names = [r[0] for r in fits_result.all() if r[0]]
 
         lookup_candidates = []
-        if target.catalog_id:
-            lookup_candidates.append(target.catalog_id)
+        cat_id = str(target.catalog_id) if target.catalog_id else ""
+        if cat_id:
+            lookup_candidates.append(cat_id)
             # Strip NAME prefix for cache lookup
-            if target.catalog_id.upper().startswith("NAME "):
-                lookup_candidates.append(target.catalog_id[5:].strip())
+            if cat_id.upper().startswith("NAME "):
+                lookup_candidates.append(cat_id[5:].strip())
         if target.primary_name:
-            lookup_candidates.append(target.primary_name)
+            lookup_candidates.append(str(target.primary_name))
         for fn in fits_names:
-            lookup_candidates.append(fn)
+            lookup_candidates.append(str(fn))
 
         cached = None
         for candidate in lookup_candidates:

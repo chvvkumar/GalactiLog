@@ -90,7 +90,11 @@ def extract_catalog_id(aliases: list[str], simbad_main_id: str) -> str:
             best_pri = pri
             best_name = n
 
-    return best_name if best_name is not None else _normalize_ws(simbad_main_id)
+    fallback = _normalize_ws(simbad_main_id)
+    # Strip SIMBAD "NAME " prefix from fallback — it's a common-name marker, not a catalog ID
+    if fallback.upper().startswith("NAME "):
+        fallback = fallback[5:].strip()
+    return best_name if best_name is not None else fallback
 
 
 def curate_aliases(raw_aliases: list[str], fits_names: list[str] | None = None) -> list[str]:
@@ -268,8 +272,8 @@ def curate_simbad_result(
     fits_names: list[str] | None = None,
 ) -> dict[str, Any]:
     """Apply curation to raw SIMBAD data: extract catalog_id, common_name, curate aliases."""
-    raw_aliases = raw.get("raw_aliases", [])
-    main_id = raw.get("main_id", "")
+    raw_aliases = [str(a) for a in raw.get("raw_aliases", []) if a is not None]
+    main_id = str(raw.get("main_id", ""))
 
     curated = curate_aliases(raw_aliases, fits_names=fits_names)
     catalog_id = extract_catalog_id(raw_aliases, main_id)
