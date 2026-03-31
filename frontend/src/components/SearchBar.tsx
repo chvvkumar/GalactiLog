@@ -1,6 +1,7 @@
 import { Component, createSignal, For, Show } from "solid-js";
 import { api } from "../api/client";
 import { useDashboardFilters } from "./DashboardFilterProvider";
+import { debounce } from "../utils/debounce";
 import type { TargetSearchResultFuzzy } from "../types";
 
 const SearchBar: Component = () => {
@@ -9,27 +10,26 @@ const SearchBar: Component = () => {
   const [suggestions, setSuggestions] = createSignal<TargetSearchResultFuzzy[]>([]);
   const [showSuggestions, setShowSuggestions] = createSignal(false);
 
-  let debounceTimer: ReturnType<typeof setTimeout>;
+  const fetchSuggestions = debounce(async (value: string) => {
+    try {
+      const results = await api.searchTargets(value);
+      setSuggestions(results);
+      setShowSuggestions(results.length > 0);
+    } catch {
+      setSuggestions([]);
+    }
+    updateFilter("searchQuery", value);
+  }, 300);
 
   const onInput = (value: string) => {
     setQuery(value);
-    clearTimeout(debounceTimer);
     if (value.length < 2) {
       setSuggestions([]);
       setShowSuggestions(false);
       updateFilter("searchQuery", value);
       return;
     }
-    debounceTimer = setTimeout(async () => {
-      try {
-        const results = await api.searchTargets(value);
-        setSuggestions(results);
-        setShowSuggestions(results.length > 0);
-      } catch {
-        setSuggestions([]);
-      }
-      updateFilter("searchQuery", value);
-    }, 300);
+    fetchSuggestions(value);
   };
 
   const selectTarget = (target: TargetSearchResultFuzzy) => {
