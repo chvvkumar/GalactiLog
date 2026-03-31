@@ -1,6 +1,7 @@
 import logging
 from pathlib import Path
 
+import fitsio
 from sqlalchemy import create_engine, select, text, update as sa_update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -9,7 +10,7 @@ from app.config import settings
 from app.models import Image, Target
 from app.models.user_settings import UserSettings, SETTINGS_ROW_ID
 from app.services.csv_metadata import parse_image_metadata_csv, parse_weather_csv
-from app.services.scanner import extract_metadata
+from app.services.scanner import extract_metadata, CALIBRATION_FRAME_TYPES
 from app.services.simbad import (
     resolve_target_name, normalize_object_name, resolve_target_name_cached,
     curate_simbad_result, get_cached_simbad, save_simbad_cache,
@@ -54,22 +55,33 @@ def run_scan(self, include_calibration: bool = True) -> dict:
     clear_cancel_sync(_redis)
     start_scanning_sync(_redis)
 
-    # Get known paths from DB
+    # Get known paths and file stats from DB for delta scanning
     with Session(_sync_engine) as session:
-        result = session.execute(select(Image.file_path))
-        known_paths = {row[0] for row in result.all()}
+        result = session.execute(
+            select(Image.file_path, Image.file_size, Image.file_mtime)
+        )
+        rows = result.all()
+        known_paths = {row[0] for row in rows}
+        known_file_stats = {row[0]: (row[1], row[2]) for row in rows}
 
     fits_root = Path(settings.fits_data_path)
 
     # Dispatch ingest tasks as files are discovered (parallel discovery + ingestion)
+    # Calibration filtering is deferred to the ingest phase to avoid opening
+    # every file during discovery (costly on NFS).
     def _queue_file(path: Path) -> None:
-        ingest_file.delay(str(path))
+        ingest_file.delay(str(path), include_calibration=include_calibration)
 
-    new_files, all_disk_paths = scan_directory(
-        fits_root, known_paths=known_paths, include_calibration=include_calibration,
+    def _queue_changed_file(path: Path) -> None:
+        """Re-ingest a known file whose size or mtime changed on disk."""
+        reingest_changed_file.delay(str(path), include_calibration=include_calibration)
+
+    new_files, changed_files, all_disk_paths = scan_directory(
+        fits_root, known_paths=known_paths, known_file_stats=known_file_stats,
         on_progress=lambda count: set_discovered_sync(_redis, count),
         is_cancelled=lambda: is_cancel_requested_sync(_redis),
         on_new_file=_queue_file,
+        on_changed_file=_queue_changed_file,
     )
 
     if is_cancel_requested_sync(_redis):
@@ -81,6 +93,9 @@ def run_scan(self, include_calibration: bool = True) -> dict:
             "timestamp": __import__('time').time(),
         })
         return {"status": "cancelled"}
+
+    if changed_files:
+        logger.info("Delta scan: %d changed files queued for re-ingest", len(changed_files))
 
     # Detect and remove orphaned DB records (files deleted from disk)
     orphaned_paths = known_paths - all_disk_paths
@@ -117,7 +132,8 @@ def run_scan(self, include_calibration: bool = True) -> dict:
             len(orphaned_paths), len(known_paths),
         )
 
-    if not new_files:
+    total_queued = len(new_files) + len(changed_files)
+    if not total_queued:
         set_idle_sync(_redis)
         cataloged = len(known_paths) - removed
         msg = f"Scan complete: no new files found ({cataloged} already cataloged)"
@@ -132,7 +148,7 @@ def run_scan(self, include_calibration: bool = True) -> dict:
         return {"status": "complete", "new_files_queued": 0, "already_known": cataloged, "removed": removed}
 
     # Transition to ingesting with final total — ingest tasks are already running
-    set_ingesting_sync(_redis, total=len(new_files), removed=removed)
+    set_ingesting_sync(_redis, total=total_queued, removed=removed)
     # Some tasks may have already completed during discovery, check now
     check_complete_sync(_redis)
 
@@ -142,6 +158,7 @@ def run_scan(self, include_calibration: bool = True) -> dict:
     return {
         "status": "ingesting",
         "new_files_queued": len(new_files),
+        "changed_files_queued": len(changed_files),
         "already_known": len(known_paths),
         "removed": removed,
     }
@@ -184,18 +201,139 @@ def auto_scan_tick():
     run_scan.delay(include_calibration=include_cal)
 
 
-@celery_app.task(bind=True, max_retries=3, default_retry_delay=30)
-def ingest_file(self, fits_path: str) -> dict:
-    """Full ingest pipeline for a single FITS file.
+def _do_ingest(fits_path: str, include_calibration: bool = True) -> dict:
+    """Core ingest logic for a single FITS/XISF file.
 
-    1. Extract metadata from FITS headers
+    Shared by ingest_file (new files) and reingest_changed_file (delta rescan).
+    Raises exceptions for the caller to handle retry/failure logic.
+
+    1. Extract metadata from headers
     2. Generate stretched JPEG thumbnail
     3. Resolve target name via SIMBAD (with local cache)
-    4. Insert/update database record
+    4. Insert database record
     """
+    import hashlib
+
     path = Path(fits_path)
 
-    # Skip if scan was cancelled
+    # Step 1: Extract metadata (dispatches by format)
+    is_xisf = path.suffix.lower() == ".xisf"
+    if is_xisf:
+        meta = extract_xisf_metadata(path)
+    else:
+        # Read header once — pixel data is read separately (decimated)
+        # only if a thumbnail is needed.
+        header = fitsio.read_header(str(path), ext=0)
+        meta = extract_metadata(path, header=header)
+
+    image_type = (meta.get("image_type") or "").upper()
+    is_calibration = image_type in CALIBRATION_FRAME_TYPES
+
+    # Skip calibration frames if not requested (deferred from discovery phase
+    # to avoid opening every file during the directory walk)
+    if is_calibration and not include_calibration:
+        increment_completed_sync(_redis)
+        return {"file": str(path), "status": "skipped_calibration"}
+
+    # Step 2: Generate thumbnail (skip calibration frames)
+    thumb_path = None
+    if not is_calibration:
+        path_hash = hashlib.md5(str(path).encode()).hexdigest()[:12]
+        thumb_filename = f"{path.stem}_{path_hash}.jpg"
+        thumb_path = Path(settings.thumbnails_path) / thumb_filename
+        if is_xisf:
+            generate_xisf_thumbnail(path, thumb_path, max_width=settings.thumbnail_max_width)
+        else:
+            generate_thumbnail(path, thumb_path, max_width=settings.thumbnail_max_width)
+
+    # Step 3: Resolve target (sync wrapper for async SIMBAD call)
+    # Skip SIMBAD for calibration frames — they're not astronomical targets
+    target_id = None
+    if not is_calibration:
+        object_name = meta.get("object_name")
+        if object_name:
+            target_id = _resolve_or_cache_target(object_name)
+
+    # Step 4: Insert into database
+    # Capture file stat for delta rescans (detect changed files without re-reading headers)
+    try:
+        stat = path.stat()
+        file_size = stat.st_size
+        file_mtime = stat.st_mtime
+    except OSError:
+        file_size = None
+        file_mtime = None
+
+    with Session(_sync_engine) as session:
+        image = Image(
+            file_path=meta["file_path"],
+            file_name=meta["file_name"],
+            file_size=file_size,
+            file_mtime=file_mtime,
+            capture_date=meta.get("capture_date"),
+            thumbnail_path=str(thumb_path) if thumb_path else None,
+            resolved_target_id=target_id,
+            exposure_time=meta.get("exposure_time"),
+            filter_used=meta.get("filter_used"),
+            sensor_temp=meta.get("sensor_temp"),
+            camera_gain=meta.get("camera_gain"),
+            image_type=meta.get("image_type"),
+            telescope=meta.get("telescope"),
+            camera=meta.get("camera"),
+            median_hfr=meta.get("median_hfr"),
+            eccentricity=meta.get("eccentricity"),
+            raw_headers=meta.get("raw_headers", {}),
+            # CSV metrics (N.I.N.A. Session Metadata)
+            hfr_stdev=meta.get("hfr_stdev"),
+            fwhm=meta.get("fwhm"),
+            detected_stars=meta.get("detected_stars"),
+            guiding_rms_arcsec=meta.get("guiding_rms_arcsec"),
+            guiding_rms_ra_arcsec=meta.get("guiding_rms_ra_arcsec"),
+            guiding_rms_dec_arcsec=meta.get("guiding_rms_dec_arcsec"),
+            adu_stdev=meta.get("adu_stdev"),
+            adu_mean=meta.get("adu_mean"),
+            adu_median=meta.get("adu_median"),
+            adu_min=meta.get("adu_min"),
+            adu_max=meta.get("adu_max"),
+            focuser_position=meta.get("focuser_position"),
+            focuser_temp=meta.get("focuser_temp"),
+            rotator_position=meta.get("rotator_position"),
+            pier_side=meta.get("pier_side"),
+            airmass=meta.get("airmass"),
+            ambient_temp=meta.get("ambient_temp"),
+            dew_point=meta.get("dew_point"),
+            humidity=meta.get("humidity"),
+            pressure=meta.get("pressure"),
+            wind_speed=meta.get("wind_speed"),
+            wind_direction=meta.get("wind_direction"),
+            wind_gust=meta.get("wind_gust"),
+            cloud_cover=meta.get("cloud_cover"),
+            sky_quality=meta.get("sky_quality"),
+        )
+        session.add(image)
+        session.commit()
+        logger.info("Ingested: %s (target=%s)", path.name, target_id)
+        increment_completed_sync(_redis)
+        if meta.get("detected_stars") is not None:
+            increment_csv_enriched_sync(_redis)
+        return {"file": str(path), "status": "ok"}
+
+
+def _is_unrecoverable(exc: Exception) -> bool:
+    return isinstance(exc, (OSError, ValueError)) and (
+        "SIMPLE card" in str(exc)
+        or "not a valid FITS" in str(exc)
+        or "Not a valid XISF" in str(exc)
+        or "No Image element" in str(exc)
+        or "No such file" in str(exc)
+    )
+
+
+@celery_app.task(bind=True, max_retries=3, default_retry_delay=30)
+def ingest_file(self, fits_path: str, include_calibration: bool = True) -> dict:
+    """Celery task: ingest a new FITS/XISF file."""
+    path = Path(fits_path)
+
     if is_cancel_requested_sync(_redis):
         increment_failed_sync(_redis, file_path=fits_path, error="Scan cancelled")
         return {"status": "cancelled", "file": fits_path}
@@ -203,105 +341,52 @@ def ingest_file(self, fits_path: str) -> dict:
     logger.info("Ingesting: %s", path.name)
 
     try:
-        # Step 1: Extract metadata (dispatches by format)
-        is_xisf = path.suffix.lower() == ".xisf"
-        meta = extract_xisf_metadata(path) if is_xisf else extract_metadata(path)
-
-        image_type = (meta.get("image_type") or "").upper()
-        is_calibration = image_type in ("DARK", "FLAT", "BIAS", "DARKFLAT")
-
-        # Step 2: Generate thumbnail (skip calibration frames)
-        thumb_path = None
-        if not is_calibration:
-            import hashlib
-            path_hash = hashlib.md5(str(path).encode()).hexdigest()[:12]
-            thumb_filename = f"{path.stem}_{path_hash}.jpg"
-            thumb_path = Path(settings.thumbnails_path) / thumb_filename
-            if is_xisf:
-                generate_xisf_thumbnail(path, thumb_path, max_width=settings.thumbnail_max_width)
-            else:
-                generate_thumbnail(path, thumb_path, max_width=settings.thumbnail_max_width)
-
-        # Step 3: Resolve target (sync wrapper for async SIMBAD call)
-        # Skip SIMBAD for calibration frames — they're not astronomical targets
-        target_id = None
-        if not is_calibration:
-            object_name = meta.get("object_name")
-            if object_name:
-                target_id = _resolve_or_cache_target(object_name)
-
-        # Step 4: Insert into database
-        with Session(_sync_engine) as session:
-            image = Image(
-                file_path=meta["file_path"],
-                file_name=meta["file_name"],
-                capture_date=meta.get("capture_date"),
-                thumbnail_path=str(thumb_path) if thumb_path else None,
-                resolved_target_id=target_id,
-                exposure_time=meta.get("exposure_time"),
-                filter_used=meta.get("filter_used"),
-                sensor_temp=meta.get("sensor_temp"),
-                camera_gain=meta.get("camera_gain"),
-                image_type=meta.get("image_type"),
-                telescope=meta.get("telescope"),
-                camera=meta.get("camera"),
-                median_hfr=meta.get("median_hfr"),
-                eccentricity=meta.get("eccentricity"),
-                raw_headers=meta.get("raw_headers", {}),
-                # CSV metrics (N.I.N.A. Session Metadata)
-                hfr_stdev=meta.get("hfr_stdev"),
-                fwhm=meta.get("fwhm"),
-                detected_stars=meta.get("detected_stars"),
-                guiding_rms_arcsec=meta.get("guiding_rms_arcsec"),
-                guiding_rms_ra_arcsec=meta.get("guiding_rms_ra_arcsec"),
-                guiding_rms_dec_arcsec=meta.get("guiding_rms_dec_arcsec"),
-                adu_stdev=meta.get("adu_stdev"),
-                adu_mean=meta.get("adu_mean"),
-                adu_median=meta.get("adu_median"),
-                adu_min=meta.get("adu_min"),
-                adu_max=meta.get("adu_max"),
-                focuser_position=meta.get("focuser_position"),
-                focuser_temp=meta.get("focuser_temp"),
-                rotator_position=meta.get("rotator_position"),
-                pier_side=meta.get("pier_side"),
-                airmass=meta.get("airmass"),
-                ambient_temp=meta.get("ambient_temp"),
-                dew_point=meta.get("dew_point"),
-                humidity=meta.get("humidity"),
-                pressure=meta.get("pressure"),
-                wind_speed=meta.get("wind_speed"),
-                wind_direction=meta.get("wind_direction"),
-                wind_gust=meta.get("wind_gust"),
-                cloud_cover=meta.get("cloud_cover"),
-                sky_quality=meta.get("sky_quality"),
-            )
-            session.add(image)
-            session.commit()
-            logger.info("Ingested: %s (target=%s)", path.name, target_id)
-            increment_completed_sync(_redis)
-            if meta.get("detected_stars") is not None:
-                increment_csv_enriched_sync(_redis)
-            return {"file": str(path), "status": "ok"}
+        return _do_ingest(fits_path, include_calibration=include_calibration)
 
     except IntegrityError:
-        # File already ingested (race between scan querying known_paths and ingest)
         logger.info("Already ingested (duplicate): %s", path.name)
         increment_completed_sync(_redis)
         return {"file": str(path), "status": "duplicate"}
 
     except Exception as exc:
         logger.error("Failed to ingest %s: %s", path, exc)
-        # Don't retry on unrecoverable errors (corrupt files, missing headers, etc.)
-        unrecoverable = isinstance(exc, (OSError, ValueError)) and (
-            "SIMPLE card" in str(exc)
-            or "not a valid FITS" in str(exc)
-            or "Not a valid XISF" in str(exc)
-            or "No Image element" in str(exc)
-            or "No such file" in str(exc)
-        )
-        if unrecoverable or self.request.retries >= self.max_retries:
+        if _is_unrecoverable(exc) or self.request.retries >= self.max_retries:
             increment_failed_sync(_redis, file_path=str(path), error=str(exc))
             return {"file": str(path), "status": "failed", "error": str(exc)}
+        raise self.retry(exc=exc)
+
+
+@celery_app.task(bind=True, max_retries=3, default_retry_delay=30)
+def reingest_changed_file(self, fits_path: str, include_calibration: bool = True) -> dict:
+    """Re-ingest a file that changed on disk (delta rescan).
+
+    Deletes the existing DB record + thumbnail, then runs the full ingest pipeline.
+    """
+    path = Path(fits_path)
+    logger.info("Re-ingesting changed file: %s", path.name)
+
+    try:
+        # Delete existing record
+        with Session(_sync_engine) as session:
+            existing = session.execute(
+                select(Image).where(Image.file_path == fits_path)
+            ).scalar_one_or_none()
+            if existing:
+                if existing.thumbnail_path:
+                    try:
+                        Path(existing.thumbnail_path).unlink(missing_ok=True)
+                    except OSError:
+                        pass
+                session.delete(existing)
+                session.commit()
+
+        return _do_ingest(fits_path, include_calibration=include_calibration)
+
+    except Exception as exc:
+        logger.error("Failed to re-ingest %s: %s", path, exc)
+        if _is_unrecoverable(exc) or self.request.retries >= self.max_retries:
+            increment_failed_sync(_redis, file_path=fits_path, error=str(exc))
+            return {"file": fits_path, "status": "failed", "error": str(exc)}
         raise self.retry(exc=exc)
 
 
