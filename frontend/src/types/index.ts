@@ -32,6 +32,9 @@ export interface AggregateStats {
 export interface TargetAggregationResponse {
   targets: TargetAggregation[];
   aggregates: AggregateStats;
+  total_count: number;
+  page: number;
+  page_size: number;
 }
 
 // === Session Detail ===
