@@ -21,13 +21,7 @@ export default function SessionMetricsChart(props: Props) {
 
   const filters = () => props.detail.filter_details.map((f) => f.filter_name);
 
-  const buildChart = () => {
-    if (!canvasRef) return;
-    if (chartInstance) {
-      chartInstance.destroy();
-      chartInstance = null;
-    }
-
+  const buildDatasets = () => {
     const enabledMetrics = graphSettings().enabled_metrics;
     const enabledFilters = graphSettings().enabled_filters;
     const frames = [...props.detail.frames].sort(
@@ -79,6 +73,27 @@ export default function SessionMetricsChart(props: Props) {
           borderDash: [4, 2],
         });
       }
+    }
+
+    return { labels, datasets };
+  };
+
+  const buildChart = () => {
+    if (!canvasRef) return;
+
+    const { labels, datasets } = buildDatasets();
+
+    if (labels.length === 0) {
+      if (chartInstance) { chartInstance.destroy(); chartInstance = null; }
+      return;
+    }
+
+    // Update existing chart in-place to avoid animation reset
+    if (chartInstance) {
+      chartInstance.data.labels = labels;
+      chartInstance.data.datasets = datasets;
+      chartInstance.update("none");
+      return;
     }
 
     chartInstance = new Chart(canvasRef, {

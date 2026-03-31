@@ -79,22 +79,49 @@ export default function TargetMetricsChart(props: Props) {
     return { labels, framesByIndex, sessionBoundaries };
   });
 
-  const buildChart = () => {
-    if (!canvasRef) return;
-    if (chartInstance) {
-      chartInstance.destroy();
-      chartInstance = null;
-    }
+  // Mutable state read by the session boundary plugin — updated before each chart draw
+  let currentBoundaries: number[] = [];
+  let currentSortedDates: string[] = [];
 
+  const sessionBoundaryPlugin = {
+    id: "sessionBoundary",
+    afterDraw(chart: Chart) {
+      if (currentBoundaries.length <= 1) return;
+      const ctx = chart.ctx;
+      const xScale = chart.scales["x"];
+      const yScale = chart.scales["left"] ?? chart.scales["right"];
+      if (!xScale || !yScale) return;
+
+      ctx.save();
+      for (let bi = 0; bi < currentBoundaries.length; bi++) {
+        const idx = currentBoundaries[bi];
+        const x = xScale.getPixelForValue(idx);
+
+        ctx.beginPath();
+        ctx.setLineDash([4, 4]);
+        ctx.strokeStyle = "rgba(255,255,255,0.25)";
+        ctx.lineWidth = 1;
+        ctx.moveTo(x, yScale.top);
+        ctx.lineTo(x, yScale.bottom);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        const dateLabel = currentSortedDates[bi] ?? "";
+        const tickFont = (xScale.options as any).ticks?.font as { size?: number } | undefined;
+        const fontSize = tickFont?.size ?? chartFontSize.tick();
+        ctx.fillStyle = "rgba(255,255,255,0.5)";
+        ctx.font = `${fontSize}px sans-serif`;
+        ctx.textAlign = "left";
+        ctx.fillText(dateLabel, x + 3, yScale.top + fontSize + 2);
+      }
+      ctx.restore();
+    },
+  };
+
+  const buildDatasets = () => {
     const enabledMetrics = graphSettings().enabled_metrics;
     const enabledFilters = graphSettings().enabled_filters;
     const { labels, framesByIndex, sessionBoundaries } = chartFrameData();
-
-    if (labels.length === 0) {
-      // Nothing to render
-      return;
-    }
-
     const datasets: any[] = [];
 
     for (const metricKey of enabledMetrics) {
@@ -113,7 +140,7 @@ export default function TargetMetricsChart(props: Props) {
           pointRadius: 0,
           pointHitRadius: 8,
           tension: 0.3,
-          spanGaps: false, // Don't span across session gaps
+          spanGaps: false,
           yAxisID: def.yAxisId,
         });
       }
@@ -139,49 +166,40 @@ export default function TargetMetricsChart(props: Props) {
       }
     }
 
-    // Build grid line colors — darker at session boundaries
+    return { labels, datasets, sessionBoundaries };
+  };
+
+  const buildChart = () => {
+    if (!canvasRef) return;
+
+    const { labels, datasets, sessionBoundaries } = buildDatasets();
+
+    if (labels.length === 0) {
+      if (chartInstance) { chartInstance.destroy(); chartInstance = null; }
+      return;
+    }
+
+    // Update closure state for the boundary plugin
+    currentBoundaries = sessionBoundaries;
+    currentSortedDates = [...props.selectedDates].sort();
+
     const gridColors = labels.map((_, i) =>
       sessionBoundaries.includes(i) ? "rgba(255,255,255,0.2)" : "rgba(255,255,255,0.03)"
     );
 
-    // Plugin to draw session boundary lines + labels when multiple sessions shown
-    const sortedDates = [...props.selectedDates].sort();
-    const sessionBoundaryPlugin = {
-      id: "sessionBoundary",
-      afterDraw(chart: Chart) {
-        if (sessionBoundaries.length <= 1) return;
-        const ctx = chart.ctx;
-        const xScale = chart.scales["x"];
-        const yScale = chart.scales["left"] ?? chart.scales["right"];
-        if (!xScale || !yScale) return;
-
-        ctx.save();
-        for (let bi = 0; bi < sessionBoundaries.length; bi++) {
-          const idx = sessionBoundaries[bi];
-          const x = xScale.getPixelForValue(idx);
-
-          // Vertical dashed line
-          ctx.beginPath();
-          ctx.setLineDash([4, 4]);
-          ctx.strokeStyle = "rgba(255,255,255,0.25)";
-          ctx.lineWidth = 1;
-          ctx.moveTo(x, yScale.top);
-          ctx.lineTo(x, yScale.bottom);
-          ctx.stroke();
-          ctx.setLineDash([]);
-
-          // Session date label at top — match tick font size
-          const dateLabel = sortedDates[bi]?.slice(5) ?? "";
-          const tickFont = xScale.options.ticks?.font as { size?: number } | undefined;
-          const fontSize = tickFont?.size ?? chartFontSize.tick();
-          ctx.fillStyle = "rgba(255,255,255,0.5)";
-          ctx.font = `${fontSize}px sans-serif`;
-          ctx.textAlign = "left";
-          ctx.fillText(dateLabel, x + 3, yScale.top + fontSize + 2);
-        }
-        ctx.restore();
-      },
-    };
+    // Update existing chart in-place to avoid animation reset
+    if (chartInstance) {
+      chartInstance.data.labels = labels;
+      chartInstance.data.datasets = datasets;
+      const xScale = chartInstance.options.scales!["x"] as any;
+      xScale.ticks.callback = (_: unknown, index: number) => {
+        const label = labels[index];
+        return label === SESSION_GAP ? "" : label;
+      };
+      xScale.grid.color = (ctx: any) => gridColors[ctx.index] ?? "rgba(255,255,255,0.03)";
+      chartInstance.update("none");
+      return;
+    }
 
     chartInstance = new Chart(canvasRef, {
       type: "line",
@@ -233,18 +251,12 @@ export default function TargetMetricsChart(props: Props) {
     });
   };
 
-  const allSessionsLoaded = createMemo(() =>
-    props.selectedDates.length > 0 &&
-    props.selectedDates.every((date) => !!props.sessionDetails[date])
-  );
-
   createEffect(() => {
     // Track all reactive dependencies
     chartFrameData();
     graphSettings();
-    const ready = allSessionsLoaded();
     if (pendingRAF !== null) cancelAnimationFrame(pendingRAF);
-    if (props.expanded && ready) {
+    if (props.expanded) {
       pendingRAF = requestAnimationFrame(() => {
         pendingRAF = null;
         buildChart();
