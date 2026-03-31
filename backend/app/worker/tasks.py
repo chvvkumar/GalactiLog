@@ -912,3 +912,63 @@ def backfill_csv_metrics(self):
 
     set_idle_sync(redis_conn)
     return {"updated": total_updated, "dirs": len(csv_dirs)}
+
+
+DATA_MIGRATION_LOCK = "data_migration:lock"
+DATA_MIGRATION_LOCK_TTL = 600  # 10 minutes
+
+
+@celery_app.task(bind=True)
+def run_data_migrations(self, from_version: int) -> dict:
+    """Run pending data migrations dispatched by startup version check."""
+    from app.services.data_migrations import (
+        DATA_VERSION, get_pending_migrations, set_data_version,
+    )
+
+    # Acquire lock to prevent duplicate runs on rapid restarts
+    if not _redis.set(DATA_MIGRATION_LOCK, "1", nx=True, ex=DATA_MIGRATION_LOCK_TTL):
+        logger.info("data_migrations: another migration is already running, skipping")
+        return {"status": "skipped"}
+
+    try:
+        pending = get_pending_migrations(from_version)
+        if not pending:
+            logger.info("data_migrations: no pending migrations (v%d is current)", from_version)
+            return {"status": "noop"}
+
+        logger.info("data_migrations: upgrading v%d -> v%d (%d migrations)",
+                    from_version, DATA_VERSION, len(pending))
+
+        results = []
+        with Session(_sync_engine) as session:
+            for ver, desc, func in pending:
+                logger.info("data_migrations: running v%d — %s", ver, desc)
+                try:
+                    summary = func(session)
+                    set_data_version(session, ver)
+                    session.commit()
+                    results.append(f"v{ver}: {summary}")
+                    logger.info("data_migrations: v%d complete — %s", ver, summary)
+                except Exception as e:
+                    session.rollback()
+                    error_msg = f"Data upgrade failed at v{ver} ({desc}): {e}"
+                    logger.exception("data_migrations: %s", error_msg)
+                    append_activity_sync(_redis, {
+                        "type": "data_upgrade_failed",
+                        "message": f"{error_msg}. Press Quick Fix to retry.",
+                        "details": {"version": ver, "error": str(e)},
+                        "timestamp": time.time(),
+                    })
+                    return {"status": "error", "version": ver, "error": str(e)}
+
+        summary_msg = "Data upgrade complete: " + "; ".join(results)
+        append_activity_sync(_redis, {
+            "type": "data_upgrade_complete",
+            "message": summary_msg,
+            "details": {"from_version": from_version, "to_version": DATA_VERSION},
+            "timestamp": time.time(),
+        })
+        logger.info("data_migrations: %s", summary_msg)
+        return {"status": "complete", "from": from_version, "to": DATA_VERSION}
+    finally:
+        _redis.delete(DATA_MIGRATION_LOCK)
