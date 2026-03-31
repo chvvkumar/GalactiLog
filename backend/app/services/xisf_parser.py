@@ -10,7 +10,7 @@ XISF Spec: https://pixinsight.com/doc/docs/XISF-1.0-spec/XISF-1.0-spec.html
 import re
 import struct
 import xml.etree.ElementTree as ET
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -74,7 +74,7 @@ def _parse_xisf_properties(image_elem: ET.Element) -> dict[str, str]:
     properties = {}
     for prop in image_elem.findall(f"{{{XISF_NS}}}Property"):
         prop_id = prop.get("id", "").strip()
-        value = prop.get("value", "")
+        value = prop.get("value")
         if value is None:
             value = prop.text or ""
         if prop_id:
@@ -99,11 +99,6 @@ def _parse_capture_date(date_str: str | None) -> datetime | None:
         return None
     try:
         return datetime.fromisoformat(date_str)
-    except ValueError:
-        pass
-    # Try with Z suffix replaced
-    try:
-        return datetime.fromisoformat(date_str.replace("Z", "+00:00"))
     except ValueError:
         return None
 

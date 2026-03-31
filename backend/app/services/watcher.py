@@ -8,7 +8,7 @@ from app.services.scanner import SUPPORTED_EXTENSIONS
 logger = logging.getLogger(__name__)
 
 
-class FitsEventHandler(FileSystemEventHandler):
+class ImageEventHandler(FileSystemEventHandler):
     """Watches for new FITS files and triggers a callback."""
 
     def __init__(self, callback):
@@ -30,7 +30,7 @@ def start_watcher(watch_path: str, callback) -> "Observer":
     """
     from watchdog.observers import Observer
 
-    handler = FitsEventHandler(callback=callback)
+    handler = ImageEventHandler(callback=callback)
     observer = Observer()
     observer.schedule(handler, watch_path, recursive=True)
     observer.start()

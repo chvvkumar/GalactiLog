@@ -60,7 +60,7 @@ def scan_directory(
     for path in root.rglob("*"):
         if is_cancelled and is_cancelled():
             break
-        if path.suffix in FITS_EXTENSIONS:
+        if path.suffix in SUPPORTED_EXTENSIONS:
             all_disk_paths.add(str(path))
             if str(path) not in known:
                 if not include_calibration:
