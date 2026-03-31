@@ -201,6 +201,10 @@ def generate_xisf_thumbnail(
     data = xobj.read_image(0).astype(np.float32)
 
     # xisf library returns channels-last [H, W, C] for color, [H, W] for mono
+    # Squeeze trailing single-channel dimension [H, W, 1] -> [H, W]
+    if data.ndim == 3 and (data.shape[2] == 1 or data.shape[0] == 1):
+        data = data.squeeze()
+
     if data.ndim == 2:
         data = _normalize_to_unit(data)
         resized = _resize_array(data, max_width)
