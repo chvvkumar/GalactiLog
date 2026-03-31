@@ -6,7 +6,7 @@ import type { DisplaySettings, MetricGroupSettings } from "../types";
 import { THEMES, TEXT_SIZES, type ThemeMeta } from "../themes";
 import { FILTER_STYLE_OPTIONS, getFilterBadgeStyle, type FilterBadgeStyle } from "../utils/filterStyles";
 
-const PAGE_SIZES = [25, 50, 100];
+const PAGE_SIZES = [10, 25, 50, 100, 250];
 
 const PREVIEW_FILTERS: { name: string; color: string }[] = [
   { name: "L", color: "#e0e0e0" },

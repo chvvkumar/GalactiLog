@@ -12,7 +12,7 @@ const INTERVALS = [
   { value: 1440, label: "24 hours" },
 ];
 
-const PAGE_SIZES = [25, 50, 100];
+const PAGE_SIZES = [10, 25, 50, 100, 250];
 
 export const GeneralTab: Component = () => {
   const { settings, saveGeneral } = useSettingsContext();
