@@ -1,6 +1,8 @@
 import { Component, Show, For, createSignal, createEffect } from "solid-js";
 import { api } from "../api/client";
 import type { ScanStatus, ActivityEntry, RebuildStatus } from "../types";
+import { useSettingsContext } from "./SettingsProvider";
+import { formatDateTime, timezoneLabel } from "../utils/dateTime";
 
 const ActivityFeed: Component<{
   scanStatus: ScanStatus;
@@ -10,6 +12,7 @@ const ActivityFeed: Component<{
   onResetAndRescan: () => void;
   onDismissStalled: () => void;
 }> = (props) => {
+  const settingsCtx = useSettingsContext();
   const [activity, setActivity] = createSignal<ActivityEntry[]>([]);
   const [prevState, setPrevState] = createSignal<string>("idle");
 
@@ -86,7 +89,7 @@ const ActivityFeed: Component<{
   };
 
   const formatTime = (ts: number) =>
-    new Date(ts * 1000).toLocaleString([], { timeZone: "UTC", hour: "2-digit", minute: "2-digit" }) + " UTC";
+    formatDateTime(new Date(ts * 1000), settingsCtx.timezone()) + " " + timezoneLabel(settingsCtx.timezone());
 
   return (
     <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-4 space-y-3">

@@ -2,6 +2,7 @@ import { createMemo, createEffect, onCleanup, Show } from "solid-js";
 import { Chart, LineController, CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Filler } from "chart.js";
 import type { SessionDetail, FrameRecord } from "../types";
 import { useSettingsContext } from "./SettingsProvider";
+import { formatTime } from "../utils/dateTime";
 import { METRIC_DEFINITIONS, getMetricColor, getMetricDef, chartFontSize } from "../utils/chartConfig";
 import MetricTogglePills from "./MetricTogglePills";
 import FilterTogglePills from "./FilterTogglePills";
@@ -19,7 +20,8 @@ interface Props {
 const SESSION_GAP = "\u200B";
 
 export default function TargetMetricsChart(props: Props) {
-  const { graphSettings, filterColorMap } = useSettingsContext();
+  const settingsCtx = useSettingsContext();
+  const { graphSettings, filterColorMap } = settingsCtx;
   let canvasRef: HTMLCanvasElement | undefined;
   let chartInstance: Chart | null = null;
   let pendingRAF: number | null = null;
@@ -70,7 +72,7 @@ export default function TargetMetricsChart(props: Props) {
 
       for (const frame of frames) {
         const d = new Date(frame.timestamp);
-        const timeStr = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", timeZone: "UTC" });
+        const timeStr = formatTime(d, settingsCtx.timezone());
         labels.push(sortedDates.length > 1 ? `${date.slice(5)} ${timeStr}` : timeStr);
         framesByIndex.push(frame);
       }
