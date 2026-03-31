@@ -62,6 +62,9 @@ def _migrate_v1_fix_catalog_designations(session: Session) -> str:
                 target.primary_name = new_primary
                 updated += 1
 
+    # Flush ORM changes so the raw SQL below sees updated catalog_id/common_name
+    session.flush()
+
     # Also rebuild any primary_names that are inconsistent
     result = session.execute(text("""
         UPDATE targets

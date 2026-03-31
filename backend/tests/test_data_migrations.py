@@ -1,6 +1,5 @@
 """Tests for the data migrations module."""
 import pytest
-from unittest.mock import MagicMock, patch
 
 from app.services.data_migrations import (
     DATA_VERSION,
