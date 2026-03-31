@@ -71,7 +71,7 @@ export interface ThemeMeta {
 export const THEMES: ThemeMeta[] = [
   {
     id: "default-dark",
-    name: "Default Dark",
+    name: "Dark",
     description: "Modern dark theme",
     tokens: {
       "bg-base": "#09090b",
@@ -80,7 +80,7 @@ export const THEMES: ThemeMeta[] = [
       "bg-hover": "#1f1f23",
       "bg-input": "#18181b",
       "border-default": "#27272a",
-      "border-emphasis": "#3f3f46",
+      "border-emphasis": "#333338",
       "text-primary": "#fafafa",
       "text-secondary": "#a1a1aa",
       "text-tertiary": "#71717a",
@@ -130,7 +130,7 @@ export const THEMES: ThemeMeta[] = [
       "bg-hover": "rgba(255, 255, 255, 0.05)",
       "bg-input": "rgba(15, 23, 42, 0.70)",
       "border-default": "rgba(255, 255, 255, 0.10)",
-      "border-emphasis": "rgba(255, 255, 255, 0.18)",
+      "border-emphasis": "rgba(255, 255, 255, 0.14)",
       "text-primary": "#f8fafc",
       "text-secondary": "#cbd5e1",
       "text-tertiary": "#94a3b8",
@@ -180,7 +180,7 @@ export const THEMES: ThemeMeta[] = [
       "bg-hover": "rgba(40, 22, 10, 0.45)",
       "bg-input": "rgba(22, 12, 6, 0.75)",
       "border-default": "rgba(251, 191, 36, 0.18)",
-      "border-emphasis": "rgba(251, 191, 36, 0.32)",
+      "border-emphasis": "rgba(251, 191, 36, 0.24)",
       "text-primary": "#f5f0e8",
       "text-secondary": "#bba882",
       "text-tertiary": "#8a7654",
@@ -224,7 +224,7 @@ export const THEMES: ThemeMeta[] = [
       "bg-hover": "#2a2a30",
       "bg-input": "#202025",
       "border-default": "#2c2c32",
-      "border-emphasis": "#3a3a42",
+      "border-emphasis": "#333338",
       "text-primary": "#e8e8ec",
       "text-secondary": "#9898a0",
       "text-tertiary": "#68687a",
@@ -268,7 +268,7 @@ export const THEMES: ThemeMeta[] = [
       "bg-hover": "#1e2840",
       "bg-input": "#151d30",
       "border-default": "#1f2937",
-      "border-emphasis": "#2d3a4e",
+      "border-emphasis": "#263040",
       "text-primary": "#eef2f7",
       "text-secondary": "#8c9ab5",
       "text-tertiary": "#5d6e8a",
@@ -312,7 +312,7 @@ export const THEMES: ThemeMeta[] = [
       "bg-hover": "#2a2520",
       "bg-input": "#1e1b16",
       "border-default": "#282420",
-      "border-emphasis": "#383228",
+      "border-emphasis": "#302c24",
       "text-primary": "#eae6e0",
       "text-secondary": "#a09888",
       "text-tertiary": "#706858",
@@ -356,7 +356,7 @@ export const THEMES: ThemeMeta[] = [
       "bg-hover": "#1e1e1e",
       "bg-input": "#161616",
       "border-default": "#1e1e1e",
-      "border-emphasis": "#2a2a2a",
+      "border-emphasis": "#252525",
       "text-primary": "#f0f0f0",
       "text-secondary": "#999999",
       "text-tertiary": "#666666",
@@ -391,7 +391,7 @@ export const THEMES: ThemeMeta[] = [
   },
 ];
 
-export const DEFAULT_THEME_ID = "default-dark";
+export const DEFAULT_THEME_ID = "deep-neutral";
 
 export interface TextSizePreset {
   id: string;
