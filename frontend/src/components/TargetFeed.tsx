@@ -1,15 +1,17 @@
 import { Component, Show, For, createEffect } from "solid-js";
 import { useDashboardFilters } from "./DashboardFilterProvider";
-import { showToast } from "./Toast";
+import { showToast, dismissToast } from "./Toast";
 import TargetTable from "./TargetTable";
 
 const TargetFeed: Component = () => {
   const { targetData, page, totalPages, totalCount, setPage, pageSize } = useDashboardFilters();
 
-  // Show loading as a toast instead of shifting the layout
+  // Show loading as a toast; dismiss 1s after data arrives
   createEffect(() => {
     if (targetData.loading) {
-      showToast("Loading targets...");
+      showToast("Loading targets...", "success", 10000);
+    } else {
+      dismissToast(1000);
     }
   });
 
