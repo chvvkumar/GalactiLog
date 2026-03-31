@@ -45,7 +45,7 @@ export const SettingsProvider: ParentComponent = (props) => {
     settings: store.settings,
     filterColorMap: () => getFilterColorMap(store.settings()),
     filterAliasMap: () => getFilterAliasMap(store.settings()),
-    filterBadgeStyle: () => (store.settings()?.general.filter_style as FilterBadgeStyle) || "solid",
+    filterBadgeStyle: () => (store.settings()?.general.filter_style as FilterBadgeStyle) || "text-only",
     saveGeneral: store.saveGeneral,
     saveFilters: store.saveFilters,
     saveEquipment: store.saveEquipment,

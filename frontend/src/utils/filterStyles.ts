@@ -12,11 +12,11 @@ export type FilterBadgeStyle =
   | "tint-border-bright";
 
 export const FILTER_STYLE_OPTIONS: { value: FilterBadgeStyle; label: string }[] = [
-  { value: "solid", label: "Solid (Default)" },
+  { value: "solid", label: "Solid" },
   { value: "muted", label: "Muted Backgrounds" },
   { value: "muted-bright", label: "Muted Backgrounds (Bright)" },
   { value: "outlined", label: "Outlined (Hollow)" },
-  { value: "text-only", label: "Colored Text Only" },
+  { value: "text-only", label: "Colored Text Only (Default)" },
   { value: "indicator-dots", label: "Indicator Dots" },
   { value: "underline", label: "Underline Accents" },
   { value: "tint-border", label: "Subtle Tint & Border" },

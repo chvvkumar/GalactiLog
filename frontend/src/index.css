@@ -2,22 +2,22 @@
 
 /*
   Theme tokens are set at runtime by applyTheme() in themes.ts.
-  These fallbacks match the "Default Dark" theme so the page
+  These fallbacks match the "Deep Neutral" theme so the page
   renders correctly before JS executes.
 */
 :root {
-  --color-bg-base: #09090b;
-  --color-bg-surface: #18181b;
-  --color-bg-elevated: #27272a;
-  --color-bg-hover: #1f1f23;
-  --color-bg-input: #18181b;
-  --color-border-default: #27272a;
-  --color-border-emphasis: #3f3f46;
-  --color-text-primary: #fafafa;
-  --color-text-secondary: #a1a1aa;
-  --color-text-tertiary: #71717a;
-  --color-accent: #818cf8;
-  --color-accent-hover: #a5b4fc;
+  --color-bg-base: #121212;
+  --color-bg-surface: #1a1a1a;
+  --color-bg-elevated: #242424;
+  --color-bg-hover: #1e1e1e;
+  --color-bg-input: #161616;
+  --color-border-default: #1e1e1e;
+  --color-border-emphasis: #252525;
+  --color-text-primary: #f0f0f0;
+  --color-text-secondary: #999999;
+  --color-text-tertiary: #666666;
+  --color-accent: #60a5fa;
+  --color-accent-hover: #93c5fd;
   --color-success: #4ade80;
   --color-warning: #fbbf24;
   --color-error: #f87171;
@@ -34,8 +34,8 @@
   --color-metric-time: #fca5a5;
   --color-metric-best: #4ade80;
   --color-metric-worst: #f87171;
-  --color-badge-bg: #27272a;
-  --color-badge-text: #d1d5db;
+  --color-badge-bg: #242424;
+  --color-badge-text: #d4d4d4;
   --color-filter-ha: #e05555;
   --color-filter-oiii: #4a9fe8;
   --color-filter-sii: #e8b84a;
