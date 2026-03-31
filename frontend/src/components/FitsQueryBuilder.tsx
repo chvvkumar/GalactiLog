@@ -41,8 +41,6 @@ const FitsQueryBuilder: Component = () => {
 
   return (
     <div class="space-y-2">
-      <label class="text-label font-medium uppercase tracking-wider text-theme-text-tertiary">FITS Header Query</label>
-
       {/* Existing rows */}
       <For each={filters().fitsQueries}>
         {(row, i) => (

@@ -437,6 +437,8 @@ async def list_targets_aggregated(
     humidity_max: float | None = Query(None),
     airmass_min: float | None = Query(None),
     airmass_max: float | None = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=250),
     user: User = Depends(get_current_user),
 ):
     """Return targets with aggregated session data, filtered by query params."""
@@ -470,7 +472,8 @@ async def list_targets_aggregated(
     if date_to:
         base_filter.append(Image.capture_date <= date_to)
     if search:
-        pattern = f"%{search}%"
+        escaped_search = search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        pattern = f"%{escaped_search}%"
         aliases_str = func.array_to_string(Target.aliases, ' ')
         searchable_text = func.concat(
             func.coalesce(Target.catalog_id, ''), ' ',
@@ -837,7 +840,8 @@ async def list_targets_aggregated(
 
     target_list.sort(key=lambda x: x.total_integration_seconds, reverse=True)
 
-    # Aggregates
+    # Aggregates (computed across ALL matching targets, not just the current page)
+    total_count = len(target_list)
     total_seconds = sum(t.total_integration_seconds for t in target_list)
     total_frames = sum(t.total_frames for t in target_list)
 
@@ -847,14 +851,24 @@ async def list_targets_aggregated(
 
     aggregates = AggregateStats(
         total_integration_seconds=total_seconds,
-        target_count=len(target_list),
+        target_count=total_count,
         total_frames=total_frames,
         disk_usage_bytes=0,
         oldest_date=oldest_date,
         newest_date=newest_date,
     )
 
-    return TargetAggregationResponse(targets=target_list, aggregates=aggregates)
+    # Paginate
+    start = (page - 1) * page_size
+    page_targets = target_list[start:start + page_size]
+
+    return TargetAggregationResponse(
+        targets=page_targets,
+        aggregates=aggregates,
+        total_count=total_count,
+        page=page,
+        page_size=page_size,
+    )
 
 
 # --- 4. Session detail (LAST — has path parameters) ---

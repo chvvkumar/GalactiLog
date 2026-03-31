@@ -8,10 +8,19 @@ interface ToastState {
 const [toast, setToast] = createSignal<ToastState | null>(null);
 let timeout: ReturnType<typeof setTimeout>;
 
-export function showToast(message: string, type: "success" | "error" = "success") {
+export function showToast(message: string, type: "success" | "error" = "success", duration = 3000) {
   clearTimeout(timeout);
   setToast({ message, type });
-  timeout = setTimeout(() => setToast(null), 3000);
+  timeout = setTimeout(() => setToast(null), duration);
+}
+
+export function dismissToast(delay = 0) {
+  clearTimeout(timeout);
+  if (delay > 0) {
+    timeout = setTimeout(() => setToast(null), delay);
+  } else {
+    setToast(null);
+  }
 }
 
 export const Toast: Component = () => {
