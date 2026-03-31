@@ -936,7 +936,32 @@ async def get_session_detail(
     user: User = Depends(get_current_user),
 ):
     """Return detailed session data for a target on a specific date."""
-    if target_id.startswith("obj:"):
+    if target_id == "obj:__uncategorized__":
+        target_name = "Uncategorized"
+        target_obj = None
+        _no_object = or_(
+            ~Image.raw_headers.has_key("OBJECT"),
+            Image.raw_headers["OBJECT"].astext == "",
+            Image.raw_headers["OBJECT"].is_(None),
+        )
+        query = (
+            select(Image)
+            .where(
+                Image.resolved_target_id.is_(None),
+                _no_object,
+                Image.capture_date >= datetime.fromisoformat(date),
+                Image.capture_date < datetime.fromisoformat(date) + timedelta(days=1),
+            )
+            .order_by(Image.capture_date)
+        )
+        all_images_query = (
+            select(Image)
+            .where(
+                Image.resolved_target_id.is_(None),
+                _no_object,
+            )
+        )
+    elif target_id.startswith("obj:"):
         object_name = target_id[4:]
         target_name = object_name
         target_obj = None
