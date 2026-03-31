@@ -36,5 +36,6 @@ COPY backend/entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 
 WORKDIR /app
+ENV GALACTILOG_CELERY_CONCURRENCY=4
 EXPOSE 80
 CMD ["/app/entrypoint.sh"]

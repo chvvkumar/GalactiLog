@@ -1,0 +1,7 @@
+# Development overrides — not used in production.
+# Docker Compose automatically merges this with docker-compose.yml.
+# To skip in prod: docker compose -f docker-compose.yml up
+services:
+  app:
+    volumes:
+      - ./backend:/app
