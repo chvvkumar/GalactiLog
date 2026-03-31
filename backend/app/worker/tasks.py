@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 # Celery uses sync — create a sync engine for the worker
 # Replace asyncpg with psycopg2 for sync operations
 _sync_url = settings.database_url.replace("+asyncpg", "+psycopg2")
-_sync_engine = create_engine(_sync_url)
+_sync_engine = create_engine(_sync_url, pool_pre_ping=True)
 
 # Ensure database tables exist when worker starts
 from app.models import Base
