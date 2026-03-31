@@ -48,7 +48,7 @@ const ActivityFeed: Component<{
   const progressPct = () => {
     const s = props.scanStatus;
     if (s.total === 0) return 0;
-    return Math.round(((s.completed + s.failed) / s.total) * 100);
+    return Math.min(100, Math.round(((s.completed + s.failed) / s.total) * 100));
   };
 
   const elapsed = () => {

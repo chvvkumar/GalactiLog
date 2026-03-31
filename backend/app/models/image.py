@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import String, Float, Integer, DateTime, ForeignKey, Index
+from sqlalchemy import String, Float, Integer, BigInteger, DateTime, ForeignKey, Index
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -72,6 +72,10 @@ class Image(Base):
     wind_gust: Mapped[float | None] = mapped_column(Float, nullable=True)
     cloud_cover: Mapped[float | None] = mapped_column(Float, nullable=True)
     sky_quality: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    # File system metadata for delta rescans (skip unchanged files)
+    file_size: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    file_mtime: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     # Complete raw FITS headers as JSONB
     raw_headers: Mapped[dict | None] = mapped_column(JSONB, nullable=True, default=dict)

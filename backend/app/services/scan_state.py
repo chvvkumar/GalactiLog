@@ -161,7 +161,7 @@ async def set_idle(r: aioredis.Redis) -> None:
 def increment_completed_sync(r: sync_redis.Redis) -> None:
     r.hincrby(SCAN_KEY, "completed", 1)
     r.set(SCAN_PROGRESS_KEY, str(time.time()))
-    _check_complete_sync(r)
+    check_complete_sync(r)
 
 
 def increment_failed_sync(r: sync_redis.Redis, file_path: str = "", error: str = "") -> None:
@@ -170,7 +170,7 @@ def increment_failed_sync(r: sync_redis.Redis, file_path: str = "", error: str =
     if file_path:
         import json
         r.rpush(SCAN_FAILED_KEY, json.dumps({"file": file_path, "error": error}))
-    _check_complete_sync(r)
+    check_complete_sync(r)
 
 
 def check_complete_sync(r: sync_redis.Redis) -> None:

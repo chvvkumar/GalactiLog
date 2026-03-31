@@ -1,3 +1,5 @@
+import logging
+import os
 import re
 from pathlib import Path
 from datetime import datetime
@@ -6,6 +8,8 @@ from typing import Any, Iterator
 import fitsio
 
 from app.services.csv_metadata import get_csv_metrics
+
+logger = logging.getLogger(__name__)
 
 SUPPORTED_EXTENSIONS = {".fits", ".fit", ".fts", ".FITS", ".FIT", ".FTS", ".xisf", ".XISF"}
 
@@ -16,66 +20,88 @@ FITS_EXTENSIONS = SUPPORTED_EXTENSIONS
 CALIBRATION_FRAME_TYPES = {"BIAS", "DARK", "FLAT", "DARKFLAT", "BIASFLAT"}
 
 
-def _is_calibration_frame(path: Path) -> bool | None:
-    """Quick-check the IMAGETYP header to decide if this is a calibration frame.
+def _walk_supported_files(root: Path) -> Iterator[Path]:
+    """Yield supported image files using os.scandir for better NFS performance.
 
-    Returns True for calibration, False for light/science, None if unreadable.
+    os.scandir batches readdir calls per directory and caches DirEntry.name,
+    avoiding the per-entry stat() overhead of Path.rglob on network filesystems.
     """
     try:
-        if path.suffix.lower() == ".xisf":
-            from app.services.xisf_parser import extract_xisf_metadata
-            meta = extract_xisf_metadata(path)
-            image_type = (meta.get("image_type") or "").strip().upper()
-        else:
-            header = fitsio.read_header(str(path), ext=0)
-            image_type = (header.get("IMAGETYP") or "").strip().upper()
-        return image_type in CALIBRATION_FRAME_TYPES
-    except Exception:
-        return None
+        with os.scandir(root) as entries:
+            for entry in entries:
+                try:
+                    if entry.is_dir(follow_symlinks=True):
+                        yield from _walk_supported_files(Path(entry.path))
+                    elif entry.is_file(follow_symlinks=True):
+                        # entry.name is already cached — no extra stat
+                        _, ext = os.path.splitext(entry.name)
+                        if ext in SUPPORTED_EXTENSIONS:
+                            yield Path(entry.path)
+                except OSError as exc:
+                    # Handle stale NFS handles, permission errors, etc.
+                    logger.warning("Skipping inaccessible entry %s: %s", entry.path, exc)
+    except OSError as exc:
+        logger.warning("Cannot read directory %s: %s", root, exc)
 
 
 def scan_directory(
     root: Path,
     known_paths: set[str] | None = None,
-    include_calibration: bool = True,
+    known_file_stats: dict[str, tuple[int | None, float | None]] | None = None,
     on_progress: "callable | None" = None,
     is_cancelled: "callable | None" = None,
     on_new_file: "callable | None" = None,
-) -> tuple[list[Path], set[str]]:
-    """Walk a directory tree finding new image files (FITS and XISF) on disk.
+    on_changed_file: "callable | None" = None,
+) -> tuple[list[Path], list[Path], set[str]]:
+    """Walk a directory tree finding new and changed image files.
 
-    Returns (new_files, all_disk_paths) where new_files are image files not in
-    known_paths and all_disk_paths is every supported path found during the walk.
-    If include_calibration is False, only LIGHT / science frames are in new_files.
+    Returns (new_files, changed_files, all_disk_paths) where:
+    - new_files: image files not in known_paths
+    - changed_files: known files whose size or mtime changed (delta rescan)
+    - all_disk_paths: every supported path found during the walk
 
-    on_progress(discovered_count) is called periodically during discovery.
-    is_cancelled() should return True to abort the scan early.
-    on_new_file(path) is called for each new file found, enabling parallel
-    ingestion during discovery.
+    Calibration filtering is NOT done here — it's deferred to the ingest phase
+    where the file header is already being read for metadata extraction, avoiding
+    a redundant file open per candidate (especially costly on NFS).
+
+    known_file_stats maps file_path -> (file_size, file_mtime) for delta detection.
+    on_changed_file(path) is called for each changed file, enabling parallel re-ingest.
     """
     known = known_paths or set()
+    file_stats = known_file_stats or {}
     new_files: list[Path] = []
+    changed_files: list[Path] = []
     all_disk_paths: set[str] = set()
     discovered = 0
-    for path in root.rglob("*"):
+    for path in _walk_supported_files(root):
         if is_cancelled and is_cancelled():
             break
-        if path.suffix in SUPPORTED_EXTENSIONS:
-            all_disk_paths.add(str(path))
-            if str(path) not in known:
-                if not include_calibration:
-                    is_cal = _is_calibration_frame(path)
-                    if is_cal is True:
-                        continue
-                new_files.append(path)
-                if on_new_file:
-                    on_new_file(path)
-            discovered += 1
-            if on_progress and discovered % 50 == 0:
-                on_progress(discovered)
+        path_str = str(path)
+        all_disk_paths.add(path_str)
+        if path_str not in known:
+            new_files.append(path)
+            if on_new_file:
+                on_new_file(path)
+        elif file_stats:
+            # Delta detection: check if known file was modified on disk
+            stored = file_stats.get(path_str)
+            if stored:
+                stored_size, stored_mtime = stored
+                try:
+                    stat = path.stat()
+                    if (stored_size is not None and stat.st_size != stored_size) or \
+                       (stored_mtime is not None and abs(stat.st_mtime - stored_mtime) > 1.0):
+                        changed_files.append(path)
+                        if on_changed_file:
+                            on_changed_file(path)
+                except OSError:
+                    pass
+        discovered += 1
+        if on_progress and discovered % 50 == 0:
+            on_progress(discovered)
     if on_progress:
         on_progress(discovered)
-    return new_files, all_disk_paths
+    return new_files, changed_files, all_disk_paths
 
 
 def _first_float(header, *keys) -> float | None:
@@ -101,9 +127,14 @@ def _parse_hfr_from_filename(filename: str) -> float | None:
     return None
 
 
-def extract_metadata(fits_path: Path) -> dict[str, Any]:
-    """Extract structured metadata and raw headers from a FITS file."""
-    header = fitsio.read_header(str(fits_path), ext=0)
+def extract_metadata(fits_path: Path, header=None) -> dict[str, Any]:
+    """Extract structured metadata and raw headers from a FITS file.
+
+    If header is provided, skip the file read (avoids redundant I/O when
+    the caller already read the header).
+    """
+    if header is None:
+        header = fitsio.read_header(str(fits_path), ext=0)
 
     raw_headers = {
         rec["name"]: _serialize_header_value(rec["value"])
