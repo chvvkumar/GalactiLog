@@ -70,13 +70,20 @@ def _get_client_ip(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
 
+MAX_LOGIN_FAILURES = 5
+LOGIN_FAILURE_WINDOW = 900       # 15 minutes
+LOCKOUT_DURATION = 1800          # 30 minutes
+
+
 async def _increment_login_failures(redis, username: str) -> None:
     key = f"auth:failures:{username}"
-    failures = await redis.incr(key)
-    if failures == 1:
-        await redis.expire(key, 900)
-    if failures >= 5:
-        await redis.setex(f"auth:lockout:{username}", 1800, "locked")
+    pipe = redis.pipeline()
+    pipe.incr(key)
+    pipe.expire(key, LOGIN_FAILURE_WINDOW)
+    results = await pipe.execute()
+    failures = results[0]
+    if failures >= MAX_LOGIN_FAILURES:
+        await redis.setex(f"auth:lockout:{username}", LOCKOUT_DURATION, "locked")
 
 
 # ---------------------------------------------------------------------------
