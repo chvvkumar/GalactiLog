@@ -408,6 +408,7 @@ export interface GeneralSettings {
   filter_style: string;
   theme: string;
   text_size: string;
+  timezone: string;
 }
 
 export interface FilterConfig {
