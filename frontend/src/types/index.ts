@@ -10,6 +10,7 @@ export interface SessionSummary {
 export interface TargetAggregation {
   target_id: string;
   primary_name: string;
+  catalog_id: string | null;
   aliases: string[];
   total_integration_seconds: number;
   total_frames: number;
@@ -236,7 +237,8 @@ export interface ActivityEntry {
   type: "scan_complete" | "scan_stopped" | "scan_stalled"
     | "rebuild_complete" | "rebuild_failed" | "regen_complete"
     | "delta_scan" | "orphan_cleanup" | "orphan_warning"
-    | "migration_applied" | "migration_initialized" | "migration_ok" | "migration_failed";
+    | "migration_applied" | "migration_initialized" | "migration_ok" | "migration_failed"
+    | "data_upgrade_started" | "data_upgrade_complete" | "data_upgrade_failed";
   message: string;
   details: Record<string, any>;
   timestamp: number;
