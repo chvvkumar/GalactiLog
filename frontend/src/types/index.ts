@@ -56,7 +56,8 @@ export interface SessionDetail {
   sensor_temp_min: number | null;
   sensor_temp_max: number | null;
   gain: number | null;
-  exposure_time: number | null;
+  offset: number | null;
+  exposure_times: number[];
   first_frame_time: string | null;
   last_frame_time: string | null;
   filter_details: FilterDetail[];
