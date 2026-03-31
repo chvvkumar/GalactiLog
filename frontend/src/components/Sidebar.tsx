@@ -1,5 +1,6 @@
 import { Component, Show } from "solid-js";
 import { useDashboardFilters } from "./DashboardFilterProvider";
+import CollapsibleSection from "./CollapsibleSection";
 import SearchBar from "./SearchBar";
 import ObjectTypeToggles from "./ObjectTypeToggles";
 import DateRangePicker from "./DateRangePicker";
@@ -53,13 +54,13 @@ const Sidebar: Component = () => {
         )}
       </Show>
       <section><SearchBar /></section>
-      <section><ObjectTypeToggles /></section>
-      <section><DateRangePicker /></section>
-      <section><FilterToggles /></section>
-      <section><HardwareSelects /></section>
-      <section><QualityFilters /></section>
-      <section><MetricFilters /></section>
-      <section><FitsQueryBuilder /></section>
+      <CollapsibleSection id="object-type" label="Object Type"><ObjectTypeToggles /></CollapsibleSection>
+      <CollapsibleSection id="date-range" label="Date Range"><DateRangePicker /></CollapsibleSection>
+      <CollapsibleSection id="filters" label="Filters"><FilterToggles /></CollapsibleSection>
+      <CollapsibleSection id="equipment" label="Equipment"><HardwareSelects /></CollapsibleSection>
+      <CollapsibleSection id="quality" label="Quality (HFR)"><QualityFilters /></CollapsibleSection>
+      <CollapsibleSection id="metrics" label="Metrics"><MetricFilters /></CollapsibleSection>
+      <CollapsibleSection id="fits-query" label="FITS Header Query"><FitsQueryBuilder /></CollapsibleSection>
       <button
         onClick={resetFilters}
         class="w-full py-2 text-xs text-theme-text-secondary hover:text-theme-text-primary bg-theme-elevated hover:bg-theme-border-em rounded-[var(--radius-sm)] transition-colors"

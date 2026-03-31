@@ -13,8 +13,7 @@ const DateRangePicker: Component = () => {
   };
 
   return (
-    <div class="space-y-2">
-      <label class="text-label font-medium uppercase tracking-wider text-theme-text-tertiary">Date Range</label>
+    <div>
       <div class="flex gap-2">
         <input
           type="date"

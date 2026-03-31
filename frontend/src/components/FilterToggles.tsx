@@ -66,8 +66,7 @@ const FilterToggles: Component = () => {
   };
 
   return (
-    <div class="space-y-2">
-      <label class="text-label font-medium uppercase tracking-wider text-theme-text-tertiary">Filters</label>
+    <div>
       <div class="space-y-1.5">
         <Show when={groupedFilters().length > 0}>
           <span class="text-caption text-theme-text-secondary">Grouped</span>
