@@ -101,6 +101,7 @@ def load_openngc_csv(session: Session) -> int:
                 "type": row.get("Type", "").strip() or None,
                 "ra": parse_ra_hms(row.get("RA")),
                 "dec": parse_dec_dms(row.get("Dec")),
+                "constellation": row.get("Const", "").strip() or None,
                 "major_axis": _parse_float(row.get("MajAx")),
                 "minor_axis": _parse_float(row.get("MinAx")),
                 "position_angle": _parse_float(row.get("PosAng")),
@@ -162,6 +163,7 @@ def enrich_target_from_openngc(session: Session, target: Target) -> bool:
 
     updated = False
     for target_field, ngc_field in [
+        ("constellation", "constellation"),
         ("size_major", "major_axis"),
         ("size_minor", "minor_axis"),
         ("position_angle", "position_angle"),

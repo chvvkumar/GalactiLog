@@ -134,8 +134,12 @@ const TargetDetailPage: Component = () => {
                     {detail().primary_name}
                   </h1>
                   <div class="text-xs text-theme-text-secondary mt-1 space-x-2">
-                    <Show when={detail().object_type}>
-                      <span>{detail().object_type}</span>
+                    <Show when={detail().object_category}>
+                      <span>{detail().object_category}</span>
+                      <span>·</span>
+                    </Show>
+                    <Show when={detail().constellation}>
+                      <span>{detail().constellation}</span>
                       <span>·</span>
                     </Show>
                     <Show when={detail().ra !== null}>
@@ -147,9 +151,6 @@ const TargetDetailPage: Component = () => {
                     <Show when={detail().size_major !== null}>
                       <span>·</span>
                       <span>{formatSize(detail().size_major, detail().size_minor)}</span>
-                      <Show when={detail().position_angle !== null}>
-                        <span>PA {detail().position_angle!.toFixed(0)}°</span>
-                      </Show>
                     </Show>
                     <Show when={detail().v_mag !== null}>
                       <span>·</span>

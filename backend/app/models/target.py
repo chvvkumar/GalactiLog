@@ -19,6 +19,7 @@ class Target(Base):
     ra: Mapped[float | None] = mapped_column(Float, nullable=True)
     dec: Mapped[float | None] = mapped_column(Float, nullable=True)
     object_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    constellation: Mapped[str | None] = mapped_column(String(5), nullable=True)
     size_major: Mapped[float | None] = mapped_column(Float, nullable=True)
     size_minor: Mapped[float | None] = mapped_column(Float, nullable=True)
     position_angle: Mapped[float | None] = mapped_column(Float, nullable=True)

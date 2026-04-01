@@ -11,6 +11,7 @@ class OpenNGCEntry(Base):
     type: Mapped[str | None] = mapped_column(String(10), nullable=True)
     ra: Mapped[float | None] = mapped_column(Float, nullable=True)
     dec: Mapped[float | None] = mapped_column(Float, nullable=True)
+    constellation: Mapped[str | None] = mapped_column(String(5), nullable=True)
     major_axis: Mapped[float | None] = mapped_column(Float, nullable=True)
     minor_axis: Mapped[float | None] = mapped_column(Float, nullable=True)
     position_angle: Mapped[float | None] = mapped_column(Float, nullable=True)

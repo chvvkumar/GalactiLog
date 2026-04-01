@@ -111,11 +111,12 @@ export interface TargetDetailResponse {
   primary_name: string;
   aliases: string[];
   object_type: string | null;
+  object_category: string | null;
+  constellation: string | null;
   ra: number | null;
   dec: number | null;
   size_major: number | null;
   size_minor: number | null;
-  position_angle: number | null;
   v_mag: number | null;
   surface_brightness: number | null;
   total_integration_seconds: number;

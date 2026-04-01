@@ -15,6 +15,7 @@ def upgrade() -> None:
         sa.Column("type", sa.String(10), nullable=True),
         sa.Column("ra", sa.Float, nullable=True),
         sa.Column("dec", sa.Float, nullable=True),
+        sa.Column("constellation", sa.String(5), nullable=True),
         sa.Column("major_axis", sa.Float, nullable=True),
         sa.Column("minor_axis", sa.Float, nullable=True),
         sa.Column("position_angle", sa.Float, nullable=True),
@@ -25,6 +26,7 @@ def upgrade() -> None:
         sa.Column("messier", sa.String(10), nullable=True),
     )
 
+    op.add_column("targets", sa.Column("constellation", sa.String(5), nullable=True))
     op.add_column("targets", sa.Column("size_major", sa.Float, nullable=True))
     op.add_column("targets", sa.Column("size_minor", sa.Float, nullable=True))
     op.add_column("targets", sa.Column("position_angle", sa.Float, nullable=True))
@@ -38,4 +40,5 @@ def downgrade() -> None:
     op.drop_column("targets", "position_angle")
     op.drop_column("targets", "size_minor")
     op.drop_column("targets", "size_major")
+    op.drop_column("targets", "constellation")
     op.drop_table("openngc_catalog")
