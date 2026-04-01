@@ -113,6 +113,11 @@ export interface TargetDetailResponse {
   object_type: string | null;
   ra: number | null;
   dec: number | null;
+  size_major: number | null;
+  size_minor: number | null;
+  position_angle: number | null;
+  v_mag: number | null;
+  surface_brightness: number | null;
   total_integration_seconds: number;
   total_frames: number;
   avg_hfr: number | null;
