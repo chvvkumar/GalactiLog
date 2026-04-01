@@ -33,17 +33,27 @@ jobs:
           git fetch --tags --force
 
           if [ "$BRANCH" = "dev" ]; then
-            # Find the latest rc tag
-            LATEST_RC=$(git tag -l | grep -E '^[0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+$' | sort -V | tail -n 1)
+            # Base rc version on next patch after latest stable release
+            LATEST_RELEASE=$(git tag -l | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1)
+
+            if [ -z "$LATEST_RELEASE" ]; then
+              RC_BASE="1.0.0"
+            else
+              MAJOR=$(echo "$LATEST_RELEASE" | cut -d. -f1)
+              MINOR=$(echo "$LATEST_RELEASE" | cut -d. -f2)
+              PATCH=$(echo "$LATEST_RELEASE" | cut -d. -f3)
+              RC_BASE="${MAJOR}.${MINOR}.$((PATCH + 1))"
+            fi
+
+            # Find the latest rc tag for this base version
+            LATEST_RC=$(git tag -l | grep -E "^${RC_BASE}-rc\.[0-9]+$" | sort -V | tail -n 1)
 
             if [ -z "$LATEST_RC" ]; then
-              NEXT_VERSION="1.0.0-rc.1"
+              NEXT_VERSION="${RC_BASE}-rc.1"
             else
-              # Extract base version and rc number
-              BASE=$(echo "$LATEST_RC" | sed 's/-rc\.[0-9]*//')
               RC_NUM=$(echo "$LATEST_RC" | grep -oP '(?<=-rc\.)\d+')
               NEXT_RC=$((RC_NUM + 1))
-              NEXT_VERSION="${BASE}-rc.${NEXT_RC}"
+              NEXT_VERSION="${RC_BASE}-rc.${NEXT_RC}"
             fi
 
             echo "version=${NEXT_VERSION}" >> "$GITHUB_OUTPUT"
@@ -274,4 +284,38 @@ jobs:
           for TAG in $OLD_TAGS; do
             echo "Deleting release and tag: $TAG"
             gh release delete "$TAG" --yes --cleanup-tag
+          done
+
+      - name: Clean up old Docker Hub dev images
+        if: github.ref == 'refs/heads/dev'
+        env:
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+        run: |
+          KEEP=2
+          REPO="chvvkumar/galactilog"
+
+          # Get Docker Hub token
+          TOKEN=$(curl -s -X POST "https://hub.docker.com/v2/users/login/" \
+            -H "Content-Type: application/json" \
+            -d "{\"username\":\"${DOCKER_USERNAME}\",\"password\":\"${DOCKER_PASSWORD}\"}" \
+            | python3 -c "import sys,json; print(json.load(sys.stdin)['token'])")
+
+          # List all rc tags from Docker Hub, keep newest KEEP, delete the rest
+          OLD_TAGS=$(curl -s "https://hub.docker.com/v2/repositories/${REPO}/tags/?page_size=100" \
+            -H "Authorization: Bearer ${TOKEN}" \
+            | python3 -c "
+          import sys, json, re
+          data = json.load(sys.stdin)
+          tags = [t['name'] for t in data['results']]
+          rc_tags = [t for t in tags if re.match(r'^\d+\.\d+\.\d+-rc\.\d+$', t)]
+          rc_tags.sort(key=lambda t: list(map(int, re.findall(r'\d+', t))), reverse=True)
+          for t in rc_tags[${KEEP}:]:
+              print(t)
+          ")
+
+          for TAG in $OLD_TAGS; do
+            echo "Deleting Docker Hub tag: $TAG"
+            curl -s -X DELETE "https://hub.docker.com/v2/repositories/${REPO}/tags/${TAG}/" \
+              -H "Authorization: Bearer ${TOKEN}"
           done
