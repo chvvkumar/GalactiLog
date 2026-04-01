@@ -18,6 +18,12 @@ function formatCoord(val: number | null, label: string): string {
   return `${label} ${val.toFixed(3)}°`;
 }
 
+function formatSize(major: number | null, minor: number | null): string {
+  if (major === null) return "";
+  if (minor === null) return `${major.toFixed(1)}'`;
+  return `${major.toFixed(1)}' \u00d7 ${minor.toFixed(1)}'`;
+}
+
 const TargetDetailPage: Component = () => {
   const params = useParams<{ targetId: string }>();
   const [searchParams] = useSearchParams();
@@ -137,6 +143,20 @@ const TargetDetailPage: Component = () => {
                     </Show>
                     <Show when={detail().dec !== null}>
                       <span>{formatCoord(detail().dec, "Dec")}</span>
+                    </Show>
+                    <Show when={detail().size_major !== null}>
+                      <span>·</span>
+                      <span>{formatSize(detail().size_major, detail().size_minor)}</span>
+                      <Show when={detail().position_angle !== null}>
+                        <span>PA {detail().position_angle!.toFixed(0)}°</span>
+                      </Show>
+                    </Show>
+                    <Show when={detail().v_mag !== null}>
+                      <span>·</span>
+                      <span>V {detail().v_mag!.toFixed(1)}</span>
+                    </Show>
+                    <Show when={detail().surface_brightness !== null}>
+                      <span>SB {detail().surface_brightness!.toFixed(1)}</span>
                     </Show>
                     <Show when={detail().aliases.length > 1}>
                       <span>· Aliases: {detail().aliases.slice(1).join(", ")}</span>
