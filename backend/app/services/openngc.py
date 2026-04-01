@@ -34,6 +34,14 @@ def normalize_ngc_name(name: str) -> str:
     return name.strip()
 
 
+def extract_openngc_common_name(common_names: str | None) -> str | None:
+    """Extract the first common name from OpenNGC's semicolon-separated field."""
+    if not common_names or not common_names.strip():
+        return None
+    first = common_names.split(";")[0].strip()
+    return first if first else None
+
+
 def parse_ra_hms(val: str | None) -> float | None:
     """Parse RA from HH:MM:SS.ss to decimal degrees."""
     if not val or not val.strip():
@@ -173,6 +181,16 @@ def enrich_target_from_openngc(session: Session, target: Target) -> bool:
         ngc_val = getattr(entry, ngc_field)
         if ngc_val is not None and getattr(target, target_field, None) is None:
             setattr(target, target_field, ngc_val)
+            updated = True
+
+    # Common name fallback: use OpenNGC common name if target has none
+    if target.common_name is None and entry.common_names:
+        ngc_common = extract_openngc_common_name(entry.common_names)
+        if ngc_common:
+            target.common_name = ngc_common
+            # Rebuild primary_name with the new common name
+            from app.services.simbad import build_primary_name
+            target.primary_name = build_primary_name(target.catalog_id, ngc_common)
             updated = True
 
     return updated

@@ -40,3 +40,11 @@ def test_normalize_ngc_name():
     assert normalize_ngc_name("IC0002") == "IC 2"
     assert normalize_ngc_name("NGC7000") == "NGC 7000"
     assert normalize_ngc_name("IC1396") == "IC 1396"
+
+
+def test_extract_openngc_common_name():
+    from app.services.openngc import extract_openngc_common_name
+    assert extract_openngc_common_name("North America Nebula") == "North America Nebula"
+    assert extract_openngc_common_name("Orion Nebula;Great Nebula") == "Orion Nebula"
+    assert extract_openngc_common_name("") is None
+    assert extract_openngc_common_name(None) is None
