@@ -15,12 +15,13 @@ from app.services.simbad import (
     curate_simbad_result, get_cached_simbad, normalize_object_name,
 )
 from app.services.openngc import load_openngc_csv, enrich_target_from_openngc
+from app.services.vizier import enrich_target_from_vizier, determine_vizier_catalog
 
 logger = logging.getLogger(__name__)
 
 # Current data version — bump this and add a migration function when
 # code changes affect how stored target data is derived.
-DATA_VERSION = 3
+DATA_VERSION = 4
 
 
 def _migrate_v1_fix_catalog_designations(session: Session) -> str:
@@ -131,12 +132,57 @@ def _migrate_v3_load_openngc(session: Session) -> str:
     return f"Loaded {loaded} OpenNGC entries, enriched {enriched}/{len(targets)} targets"
 
 
+def _migrate_v4_vizier_and_common_names(session: Session) -> str:
+    """Enrich un-enriched targets via VizieR and backfill OpenNGC common names."""
+    import time
+    from app.models import Target
+
+    targets = session.execute(
+        select(Target).where(Target.merged_into_id.is_(None))
+    ).scalars().all()
+
+    # Pass 1: Backfill OpenNGC common names for targets missing common_name
+    names_added = 0
+    for target in targets:
+        if target.common_name is None:
+            if enrich_target_from_openngc(session, target):
+                names_added += 1
+
+    session.flush()
+
+    # Pass 2: VizieR enrichment for targets still missing size_major
+    vizier_queried = 0
+    vizier_enriched = 0
+    for target in targets:
+        if target.size_major is not None:
+            continue
+        if not target.catalog_id:
+            continue
+        if determine_vizier_catalog(target.catalog_id) is None:
+            continue
+
+        if enrich_target_from_vizier(session, target):
+            vizier_enriched += 1
+        vizier_queried += 1
+        time.sleep(0.3)
+
+    session.flush()
+
+    parts = []
+    if names_added:
+        parts.append(f"{names_added} common names added from OpenNGC")
+    if vizier_queried:
+        parts.append(f"VizieR: {vizier_enriched}/{vizier_queried} targets enriched")
+    return "; ".join(parts) if parts else "No changes needed"
+
+
 # Registry: version number -> (description, migration function)
 # Version numbers must be sequential starting from 1.
 MIGRATIONS: dict[int, tuple[str, Callable[[Session], str]]] = {
     1: ("Fix catalog designations (strip NAME prefix, re-derive from cache)", _migrate_v1_fix_catalog_designations),
     2: ("Re-derive designations with improved cache lookup (fixes targets v1 missed)", _migrate_v1_fix_catalog_designations),
     3: ("Load OpenNGC catalog and enrich targets with size/magnitude", _migrate_v3_load_openngc),
+    4: ("VizieR enrichment and OpenNGC common name backfill", _migrate_v4_vizier_and_common_names),
 }
 
 
