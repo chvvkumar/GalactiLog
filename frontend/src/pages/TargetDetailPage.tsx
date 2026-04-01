@@ -150,7 +150,7 @@ const TargetDetailPage: Component = () => {
                     </Show>
                     <Show when={detail().size_major !== null}>
                       <span>·</span>
-                      <span>{formatSize(detail().size_major, detail().size_minor)}</span>
+                      <span>Size {formatSize(detail().size_major, detail().size_minor)}</span>
                     </Show>
                     <Show when={detail().v_mag !== null}>
                       <span>·</span>
