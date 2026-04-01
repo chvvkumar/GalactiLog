@@ -19,6 +19,11 @@ class Target(Base):
     ra: Mapped[float | None] = mapped_column(Float, nullable=True)
     dec: Mapped[float | None] = mapped_column(Float, nullable=True)
     object_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    size_major: Mapped[float | None] = mapped_column(Float, nullable=True)
+    size_minor: Mapped[float | None] = mapped_column(Float, nullable=True)
+    position_angle: Mapped[float | None] = mapped_column(Float, nullable=True)
+    v_mag: Mapped[float | None] = mapped_column(Float, nullable=True)
+    surface_brightness: Mapped[float | None] = mapped_column(Float, nullable=True)
     merged_into_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("targets.id"), nullable=True)
     merged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
