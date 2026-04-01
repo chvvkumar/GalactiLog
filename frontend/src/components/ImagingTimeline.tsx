@@ -65,8 +65,6 @@ const ImagingTimeline: Component<{ timeline: TimelineEntry[] }> = (props) => {
 
   // Touch pinch-to-zoom
   let lastTouchDist = 0;
-  let lastTouchCenter = 0;
-
   const getTouchDist = (touches: TouchList): number => {
     if (touches.length < 2) return 0;
     const dx = touches[1].clientX - touches[0].clientX;
@@ -83,7 +81,6 @@ const ImagingTimeline: Component<{ timeline: TimelineEntry[] }> = (props) => {
     if (e.touches.length === 2) {
       e.preventDefault();
       lastTouchDist = getTouchDist(e.touches);
-      lastTouchCenter = getTouchCenter(e.touches);
     }
   };
 
@@ -110,13 +107,11 @@ const ImagingTimeline: Component<{ timeline: TimelineEntry[] }> = (props) => {
       }
 
       lastTouchDist = dist;
-      lastTouchCenter = center;
     }
   };
 
   const handleTouchEnd = () => {
     lastTouchDist = 0;
-    lastTouchCenter = 0;
   };
 
   onMount(() => {

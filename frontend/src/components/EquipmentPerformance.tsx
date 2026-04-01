@@ -110,7 +110,7 @@ const ComboRow: Component<{ combo: EquipmentComboMetrics }> = (props) => {
       </tr>
       <Show when={expanded()}>
         <tr class="bg-theme-surface-alt">
-          <td colspan="8" class="p-0">
+          <td colspan="8" class="p-0 overflow-x-auto">
             <table class="w-full text-xs min-w-[500px]">
               <thead>
                 <tr class="border-b border-theme-border">
