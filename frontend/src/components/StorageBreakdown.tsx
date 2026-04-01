@@ -24,7 +24,7 @@ const StorageBreakdown: Component<{
         <div class="bg-theme-success h-4" style={{ width: `${pct(props.thumbnailBytes)}%` }} title="Thumbnails" />
         <div class="bg-theme-warning h-4" style={{ width: `${pct(props.databaseBytes)}%` }} title="Database" />
       </div>
-      <div class="grid grid-cols-3 gap-2 text-xs text-center">
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs text-center">
         <div><span class="inline-block w-2 h-2 bg-theme-info rounded-full mr-1" />FITS: {formatBytes(props.fitsBytes)}</div>
         <div><span class="inline-block w-2 h-2 bg-theme-success rounded-full mr-1" />Thumbs: {formatBytes(props.thumbnailBytes)}</div>
         <div><span class="inline-block w-2 h-2 bg-theme-warning rounded-full mr-1" />DB: {formatBytes(props.databaseBytes)}</div>

@@ -88,7 +88,7 @@ const TargetTable: Component<{ targets: TargetAggregation[] }> = (props) => {
   return (
     <table class="w-full text-sm border-collapse">
       <thead>
-        <tr class="sticky top-0 bg-theme-surface border-b border-theme-border-em z-10 text-theme-text-tertiary text-label uppercase tracking-wider">
+        <tr class="sticky top-0 bg-theme-surface border-b border-theme-border-em z-10 text-theme-text-tertiary text-label uppercase tracking-wider hidden md:table-row">
           <th class={headerClass("name")} onClick={() => toggleSort("name")}>
             Target Name{arrow("name")}
           </th>

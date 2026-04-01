@@ -15,6 +15,24 @@ const SkeletonRow: Component = () => (
   </tr>
 );
 
+const SkeletonCard: Component = () => (
+  <div class="border-b border-theme-border p-3 space-y-2">
+    <div class="flex justify-between">
+      <div class="h-4 w-40 bg-theme-elevated rounded animate-pulse" />
+      <div class="h-6 w-16 bg-theme-elevated rounded animate-pulse" />
+    </div>
+    <div class="h-3 w-24 bg-theme-elevated rounded animate-pulse" />
+    <div class="flex gap-2">
+      <div class="h-3 w-16 bg-theme-elevated rounded animate-pulse" />
+      <div class="h-3 w-20 bg-theme-elevated rounded animate-pulse" />
+    </div>
+    <div class="flex gap-1">
+      <div class="h-5 w-8 bg-theme-elevated rounded animate-pulse" />
+      <div class="h-5 w-8 bg-theme-elevated rounded animate-pulse" />
+    </div>
+  </div>
+);
+
 const TargetFeed: Component = () => {
   const { targetData, page, totalPages, totalCount, setPage, pageSize, setPageSize } = useDashboardFilters();
   const PAGE_SIZES = [10, 25, 50, 100, 250];
@@ -63,7 +81,8 @@ const TargetFeed: Component = () => {
 
       {/* Skeleton: shown on initial load (no data yet) */}
       <Show when={targetData.loading && !displayData()}>
-        <div class="overflow-x-auto">
+        {/* Desktop skeleton */}
+        <div class="overflow-x-auto hidden md:block">
           <table class="w-full text-sm">
             <thead><tr class="border-b border-theme-border text-left">
               <th class="p-3 text-xs text-theme-text-secondary">Target</th>
@@ -79,6 +98,10 @@ const TargetFeed: Component = () => {
             </tbody>
           </table>
         </div>
+        {/* Mobile skeleton */}
+        <div class="md:hidden">
+          <For each={Array(pageSize())}>{() => <SkeletonCard />}</For>
+        </div>
       </Show>
 
       <Show when={displayData()}>
@@ -87,7 +110,7 @@ const TargetFeed: Component = () => {
             when={data().targets.length > 0}
             fallback={<div class="text-center text-theme-text-secondary py-8">No targets match your filters</div>}
           >
-            <div class="flex items-center justify-between mb-2 px-1">
+            <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 mb-2 px-1">
               <div class="flex items-center gap-3">
                 <span class="text-xs text-theme-text-tertiary">
                   Showing {showingRange().start}-{showingRange().end} of {totalCount()} targets

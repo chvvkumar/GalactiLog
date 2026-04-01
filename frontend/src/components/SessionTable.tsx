@@ -15,8 +15,8 @@ const SessionTable: Component<{
   const ctx = useSettingsContext();
   const tzLabel = () => timezoneLabel(ctx.timezone());
   return (
-    <div class="border-t border-theme-border mt-2">
-      <table class="w-full text-xs">
+    <div class="border-t border-theme-border mt-2 overflow-x-auto">
+      <table class="w-full text-xs min-w-[400px]">
         <thead>
           <tr class="text-theme-text-secondary border-b border-theme-border">
             <th class="text-left py-1.5 px-2 font-normal">Date ({tzLabel()})</th>
