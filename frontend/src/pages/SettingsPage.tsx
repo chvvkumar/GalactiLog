@@ -32,11 +32,11 @@ export const SettingsPage: Component = () => {
       <h1 class="text-xl font-semibold tracking-tight text-theme-text-primary">Settings</h1>
 
       {/* Tab bar */}
-      <div class="flex gap-1">
+      <div class="flex flex-wrap gap-1">
         {tabs().map((tab) => (
           <button
             onClick={() => setSearchParams({ tab: tab.id })}
-            class={`px-4 py-2 text-sm transition-colors duration-150 ${
+            class={`px-3 sm:px-4 py-2 text-sm transition-colors duration-150 ${
               activeTab() === tab.id
                 ? "bg-theme-elevated text-theme-text-primary rounded-[var(--radius-sm)] font-medium"
                 : "text-theme-text-secondary hover:text-theme-text-primary hover:bg-theme-hover rounded-[var(--radius-sm)]"
