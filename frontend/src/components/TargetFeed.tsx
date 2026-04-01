@@ -3,11 +3,22 @@ import { useDashboardFilters } from "./DashboardFilterProvider";
 import { showToast, dismissToast } from "./Toast";
 import TargetTable from "./TargetTable";
 
+const SkeletonRow: Component = () => (
+  <tr class="border-b border-theme-border">
+    <td class="p-3"><div class="h-4 w-32 bg-theme-elevated rounded animate-pulse" /></td>
+    <td class="p-3"><div class="h-4 w-20 bg-theme-elevated rounded animate-pulse" /></td>
+    <td class="p-3"><div class="flex gap-1"><div class="h-5 w-8 bg-theme-elevated rounded animate-pulse" /><div class="h-5 w-8 bg-theme-elevated rounded animate-pulse" /></div></td>
+    <td class="p-3"><div class="h-4 w-16 bg-theme-elevated rounded animate-pulse" /></td>
+    <td class="p-3"><div class="h-4 w-24 bg-theme-elevated rounded animate-pulse" /></td>
+    <td class="p-3"><div class="h-4 w-20 bg-theme-elevated rounded animate-pulse" /></td>
+    <td class="p-3"><div class="h-4 w-6 bg-theme-elevated rounded animate-pulse" /></td>
+  </tr>
+);
+
 const TargetFeed: Component = () => {
   const { targetData, page, totalPages, totalCount, setPage, pageSize, setPageSize } = useDashboardFilters();
   const PAGE_SIZES = [10, 25, 50, 100, 250];
 
-  // Show loading toast; dismiss immediately when data arrives
   createEffect(() => {
     if (targetData.loading) {
       showToast("Loading targets...", "success", 10000);
@@ -40,7 +51,6 @@ const TargetFeed: Component = () => {
     return { start, end };
   };
 
-  // Use latest data, or keep showing previous data while loading
   const displayData = () => targetData() ?? targetData.latest;
 
   return (
@@ -50,6 +60,27 @@ const TargetFeed: Component = () => {
           Failed to load targets: {String(targetData.error)}
         </div>
       </Show>
+
+      {/* Skeleton: shown on initial load (no data yet) */}
+      <Show when={targetData.loading && !displayData()}>
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead><tr class="border-b border-theme-border text-left">
+              <th class="p-3 text-xs text-theme-text-secondary">Target</th>
+              <th class="p-3 text-xs text-theme-text-secondary">Designation</th>
+              <th class="p-3 text-xs text-theme-text-secondary">Palette</th>
+              <th class="p-3 text-xs text-theme-text-secondary">Integration</th>
+              <th class="p-3 text-xs text-theme-text-secondary">Equipment</th>
+              <th class="p-3 text-xs text-theme-text-secondary">Last Session</th>
+              <th class="p-3" />
+            </tr></thead>
+            <tbody>
+              <For each={Array(pageSize())}>{() => <SkeletonRow />}</For>
+            </tbody>
+          </table>
+        </div>
+      </Show>
+
       <Show when={displayData()}>
         {(data) => (
           <Show
