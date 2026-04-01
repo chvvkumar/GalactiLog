@@ -1,10 +1,14 @@
 """OpenNGC catalog service — load CSV, lookup, and enrich targets."""
+from __future__ import annotations
 
 import csv
 import logging
 import re
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app.models.target import Target
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -147,7 +151,7 @@ def lookup_openngc(session: Session, catalog_id: str | None) -> OpenNGCEntry | N
     return None
 
 
-def enrich_target_from_openngc(session: Session, target: Any) -> bool:
+def enrich_target_from_openngc(session: Session, target: Target) -> bool:
     """Look up OpenNGC data for a target and populate enrichment fields.
 
     Returns True if any fields were updated.
