@@ -266,6 +266,8 @@ export interface DbSummary {
   unresolved_images: number;
   cached_simbad: number;
   cached_negative: number;
+  cached_vizier: number;
+  cached_vizier_negative: number;
   pending_merges: number;
   csv_enriched: number;
 }

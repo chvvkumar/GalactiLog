@@ -31,10 +31,6 @@ logger = logging.getLogger(__name__)
 _sync_url = settings.database_url.replace("+asyncpg", "+psycopg2")
 _sync_engine = create_engine(_sync_url, pool_pre_ping=True)
 
-# Ensure database tables exist when worker starts
-from app.models import Base
-Base.metadata.create_all(_sync_engine)
-
 from app.config import get_sync_redis
 from app.services.scan_state import (
     increment_completed_sync, increment_failed_sync, increment_csv_enriched_sync,

@@ -21,11 +21,16 @@ const DatabaseOverview: Component<{ summary: DbSummary | null }> = (props) => {
           />
           <StatTile label="From CSV" value={props.summary!.csv_enriched} info />
         </div>
-        <Show when={props.summary!.cached_simbad > 0 || props.summary!.pending_merges > 0}>
+        <Show when={props.summary!.cached_simbad > 0 || props.summary!.cached_vizier > 0 || props.summary!.pending_merges > 0}>
           <div class="flex gap-4 mt-3 text-xs text-theme-text-secondary justify-center flex-wrap">
             <Show when={props.summary!.cached_simbad > 0}>
               <span title={`${props.summary!.cached_simbad} SIMBAD lookups cached locally. ${props.summary!.cached_negative} returned no match.`}>
                 {props.summary!.cached_simbad} SIMBAD cached ({props.summary!.cached_negative} negative)
+              </span>
+            </Show>
+            <Show when={props.summary!.cached_vizier > 0}>
+              <span title={`${props.summary!.cached_vizier} VizieR lookups cached locally. ${props.summary!.cached_vizier_negative} returned no data.`}>
+                {props.summary!.cached_vizier} VizieR cached ({props.summary!.cached_vizier_negative} negative)
               </span>
             </Show>
             <Show when={props.summary!.pending_merges > 0}>
