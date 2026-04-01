@@ -63,11 +63,73 @@ const ImagingTimeline: Component<{ timeline: TimelineEntry[] }> = (props) => {
     }
   };
 
+  // Touch pinch-to-zoom
+  let lastTouchDist = 0;
+  let lastTouchCenter = 0;
+
+  const getTouchDist = (touches: TouchList): number => {
+    if (touches.length < 2) return 0;
+    const dx = touches[1].clientX - touches[0].clientX;
+    const dy = touches[1].clientY - touches[0].clientY;
+    return Math.sqrt(dx * dx + dy * dy);
+  };
+
+  const getTouchCenter = (touches: TouchList): number => {
+    if (touches.length < 2) return touches[0].clientX;
+    return (touches[0].clientX + touches[1].clientX) / 2;
+  };
+
+  const handleTouchStart = (e: TouchEvent) => {
+    if (e.touches.length === 2) {
+      e.preventDefault();
+      lastTouchDist = getTouchDist(e.touches);
+      lastTouchCenter = getTouchCenter(e.touches);
+    }
+  };
+
+  const handleTouchMove = (e: TouchEvent) => {
+    if (e.touches.length === 2) {
+      e.preventDefault();
+      const dist = getTouchDist(e.touches);
+      const center = getTouchCenter(e.touches);
+
+      if (lastTouchDist > 0) {
+        const scale = dist / lastTouchDist;
+        const rect = containerRef.getBoundingClientRect();
+        const centerX = center - rect.left;
+        const scrollBefore = containerRef.scrollLeft;
+        const posInContent = scrollBefore + centerX;
+        const oldZoom = zoom();
+        const newZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, oldZoom * scale));
+        setZoom(newZoom);
+
+        requestAnimationFrame(() => {
+          const zoomScale = newZoom / oldZoom;
+          containerRef.scrollLeft = posInContent * zoomScale - centerX;
+        });
+      }
+
+      lastTouchDist = dist;
+      lastTouchCenter = center;
+    }
+  };
+
+  const handleTouchEnd = () => {
+    lastTouchDist = 0;
+    lastTouchCenter = 0;
+  };
+
   onMount(() => {
     containerRef.addEventListener("wheel", handleWheel, { passive: false });
+    containerRef.addEventListener("touchstart", handleTouchStart, { passive: false });
+    containerRef.addEventListener("touchmove", handleTouchMove, { passive: false });
+    containerRef.addEventListener("touchend", handleTouchEnd);
   });
   onCleanup(() => {
     containerRef?.removeEventListener("wheel", handleWheel);
+    containerRef?.removeEventListener("touchstart", handleTouchStart);
+    containerRef?.removeEventListener("touchmove", handleTouchMove);
+    containerRef?.removeEventListener("touchend", handleTouchEnd);
   });
 
   return (
@@ -75,7 +137,8 @@ const ImagingTimeline: Component<{ timeline: TimelineEntry[] }> = (props) => {
       <div class="flex items-center justify-between">
         <h3 class="text-white font-medium text-sm">Imaging Timeline</h3>
         <span class="text-caption text-theme-text-secondary select-none">
-          Ctrl+Scroll to zoom
+          <span class="hidden sm:inline">Ctrl+Scroll to zoom</span>
+          <span class="sm:hidden">Pinch to zoom</span>
         </span>
       </div>
       <div
