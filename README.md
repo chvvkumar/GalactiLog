@@ -231,6 +231,14 @@ For manual installation, custom paths, or building from source, see the [Install
 | Task Queue | Celery, Redis |
 | Infrastructure | Docker Compose, Nginx, Supervisor |
 
+## Acknowledgements
+
+This application uses the following astronomical databases and services:
+
+- **[SIMBAD](https://simbad.cds.unistra.fr/)** -- The SIMBAD database, operated at CDS, Strasbourg, France. ([Wenger et al., 2000, A&AS, 143, 9](https://ui.adsabs.harvard.edu/abs/2000A%26AS..143....9W))
+- **[VizieR](https://vizier.cds.unistra.fr/)** -- The VizieR catalogue access tool, CDS, Strasbourg, France (DOI: [10.26093/cds/vizier](https://doi.org/10.26093/cds/vizier)). ([Ochsenbein et al., 2000, A&AS, 143, 23](https://ui.adsabs.harvard.edu/abs/2000A%26AS..143...23O))
+- **[OpenNGC](https://github.com/mattiaverga/OpenNGC)** -- Database of NGC/IC objects by Mattia Verga, licensed under CC-BY-SA-4.0.
+
 ## License
 
 This project is for personal use.

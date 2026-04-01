@@ -1,4 +1,4 @@
-import { Component, onMount, onCleanup } from "solid-js";
+import { Component, onMount, onCleanup, createSignal } from "solid-js";
 import { useSearchParams } from "@solidjs/router";
 import Sidebar from "../components/Sidebar";
 import TargetFeed from "../components/TargetFeed";
@@ -6,10 +6,11 @@ import DashboardFilterProvider, { hasFilterParams, ALL_PARAM_KEYS } from "../com
 
 const SESSION_KEY = "dashboard_params";
 
+export const [sidebarOpen, setSidebarOpen] = createSignal(false);
+
 const DashboardPage: Component = () => {
   const [searchParams, setSearchParams] = useSearchParams();
 
-  // Restore saved params if URL has none
   onMount(() => {
     if (!hasFilterParams(searchParams)) {
       try {
@@ -22,7 +23,6 @@ const DashboardPage: Component = () => {
     }
   });
 
-  // Save current params on cleanup
   onCleanup(() => {
     const toSave: Record<string, string> = {};
     for (const key of ALL_PARAM_KEYS) {
@@ -41,7 +41,35 @@ const DashboardPage: Component = () => {
   return (
     <DashboardFilterProvider>
       <div class="flex" data-layout="sidebar-main">
-        <Sidebar />
+        {/* Desktop sidebar */}
+        <div class="hidden lg:block">
+          <Sidebar />
+        </div>
+
+        {/* Mobile drawer backdrop */}
+        <div
+          class={`fixed inset-0 bg-black/50 z-40 lg:hidden transition-opacity ${sidebarOpen() ? "opacity-100" : "opacity-0 pointer-events-none"}`}
+          onClick={() => setSidebarOpen(false)}
+        />
+
+        {/* Mobile drawer */}
+        <div class={`fixed top-0 left-0 h-full w-72 z-50 bg-theme-base transform transition-transform lg:hidden ${sidebarOpen() ? "translate-x-0" : "-translate-x-full"}`}>
+          <div class="flex items-center justify-between p-4 border-b border-theme-border">
+            <span class="text-sm font-medium text-theme-text-primary">Filters</span>
+            <button
+              onClick={() => setSidebarOpen(false)}
+              class="p-1 text-theme-text-secondary hover:text-theme-text-primary transition-colors"
+              aria-label="Close filters"
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                <line x1="6" y1="6" x2="18" y2="18" />
+                <line x1="6" y1="18" x2="18" y2="6" />
+              </svg>
+            </button>
+          </div>
+          <Sidebar />
+        </div>
+
         <main class="flex-1 min-h-[calc(100vh-57px)]">
           <TargetFeed />
         </main>

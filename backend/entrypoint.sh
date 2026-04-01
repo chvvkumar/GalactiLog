@@ -104,5 +104,54 @@ fi
 
 echo "Migrations complete."
 
+# Dispatch data migrations if needed (runs in Celery background after services start)
+DATA_RESULT=$(python -c "
+from sqlalchemy import create_engine, text
+from app.config import settings
+url = settings.database_url.replace('+asyncpg', '+psycopg2')
+eng = create_engine(url)
+with eng.connect() as c:
+    has_table = c.execute(text(
+        \"SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'app_metadata')\"
+    )).scalar()
+    if not has_table:
+        print('current')
+    else:
+        row = c.execute(text(
+            \"SELECT value FROM app_metadata WHERE key = 'data_version'\"
+        )).first()
+        current = int(row[0]) if row else 0
+        from app.services.data_migrations import DATA_VERSION
+        if current < DATA_VERSION:
+            print(f'{current}')
+        else:
+            print('current')
+eng.dispose()
+" 2>/dev/null || echo "current")
+
+if [ "$DATA_RESULT" != "current" ]; then
+    echo "Data version v${DATA_RESULT} is behind — scheduling background upgrade..."
+    python -c "
+import json, time
+import redis
+import os
+r = redis.from_url(os.environ.get('GALACTILOG_REDIS_URL', 'redis://redis:6379/0'))
+from app.services.data_migrations import DATA_VERSION
+entry = {
+    'type': 'data_upgrade_started',
+    'message': f'Data upgrade v${DATA_RESULT} -> v{DATA_VERSION} starting in background...',
+    'details': {'from_version': ${DATA_RESULT}, 'to_version': DATA_VERSION},
+    'timestamp': time.time(),
+}
+r.lpush('scan:activity', json.dumps(entry))
+r.ltrim('scan:activity', 0, 19)
+from app.worker.tasks import run_data_migrations
+run_data_migrations.apply_async(args=[${DATA_RESULT}])
+r.close()
+" 2>&1 || echo "Warning: could not dispatch data migration task"
+else
+    echo "Data version is current."
+fi
+
 echo "Starting services..."
 exec supervisord -c /etc/supervisor/conf.d/supervisord.conf

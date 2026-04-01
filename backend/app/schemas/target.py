@@ -147,8 +147,14 @@ class TargetDetailResponse(BaseModel):
     primary_name: str
     aliases: list[str] = []
     object_type: str | None = None
+    object_category: str | None = None
+    constellation: str | None = None
     ra: float | None = None
     dec: float | None = None
+    size_major: float | None = None
+    size_minor: float | None = None
+    v_mag: float | None = None
+    surface_brightness: float | None = None
     total_integration_seconds: float
     total_frames: int
     avg_hfr: float | None = None

@@ -10,6 +10,7 @@ export interface SessionSummary {
 export interface TargetAggregation {
   target_id: string;
   primary_name: string;
+  catalog_id: string | null;
   aliases: string[];
   total_integration_seconds: number;
   total_frames: number;
@@ -110,8 +111,14 @@ export interface TargetDetailResponse {
   primary_name: string;
   aliases: string[];
   object_type: string | null;
+  object_category: string | null;
+  constellation: string | null;
   ra: number | null;
   dec: number | null;
+  size_major: number | null;
+  size_minor: number | null;
+  v_mag: number | null;
+  surface_brightness: number | null;
   total_integration_seconds: number;
   total_frames: number;
   avg_hfr: number | null;
@@ -236,7 +243,8 @@ export interface ActivityEntry {
   type: "scan_complete" | "scan_stopped" | "scan_stalled"
     | "rebuild_complete" | "rebuild_failed" | "regen_complete"
     | "delta_scan" | "orphan_cleanup" | "orphan_warning"
-    | "migration_applied" | "migration_initialized" | "migration_ok" | "migration_failed";
+    | "migration_applied" | "migration_initialized" | "migration_ok" | "migration_failed"
+    | "data_upgrade_started" | "data_upgrade_complete" | "data_upgrade_failed";
   message: string;
   details: Record<string, any>;
   timestamp: number;
@@ -258,6 +266,8 @@ export interface DbSummary {
   unresolved_images: number;
   cached_simbad: number;
   cached_negative: number;
+  cached_vizier: number;
+  cached_vizier_negative: number;
   pending_merges: number;
   csv_enriched: number;
 }
@@ -408,6 +418,7 @@ export interface GeneralSettings {
   filter_style: string;
   theme: string;
   text_size: string;
+  timezone: string;
 }
 
 export interface FilterConfig {

@@ -6,5 +6,8 @@ from .merge_candidate import MergeCandidate
 from .simbad_cache import SimbadCache
 from .user import User, UserRole
 from .refresh_token import RefreshToken
+from .app_metadata import AppMetadata
+from .openngc import OpenNGCEntry
+from .vizier_cache import VizierCache
 
-__all__ = ["Base", "Target", "Image", "UserSettings", "SETTINGS_ROW_ID", "MergeCandidate", "SimbadCache", "User", "UserRole", "RefreshToken"]
+__all__ = ["Base", "Target", "Image", "UserSettings", "SETTINGS_ROW_ID", "MergeCandidate", "SimbadCache", "User", "UserRole", "RefreshToken", "AppMetadata", "OpenNGCEntry", "VizierCache"]

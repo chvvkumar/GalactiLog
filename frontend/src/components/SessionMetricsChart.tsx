@@ -2,6 +2,7 @@ import { createMemo, createSignal, createEffect, onCleanup, Show } from "solid-j
 import { Chart, LineController, CategoryScale, LinearScale, PointElement, LineElement, Tooltip } from "chart.js";
 import type { SessionDetail, FrameRecord } from "../types";
 import { useSettingsContext } from "./SettingsProvider";
+import { formatTime } from "../utils/dateTime";
 import { METRIC_DEFINITIONS, getMetricColor, getMetricDef, chartFontSize } from "../utils/chartConfig";
 import MetricTogglePills from "./MetricTogglePills";
 import FilterTogglePills from "./FilterTogglePills";
@@ -13,7 +14,8 @@ interface Props {
 }
 
 export default function SessionMetricsChart(props: Props) {
-  const { graphSettings, saveGraphSettings } = useSettingsContext();
+  const settingsCtx = useSettingsContext();
+  const { graphSettings, saveGraphSettings } = settingsCtx;
   const [expanded, setExpanded] = createSignal(graphSettings().session_chart_expanded);
   let canvasRef: HTMLCanvasElement | undefined;
   let chartInstance: Chart | null = null;
@@ -29,7 +31,7 @@ export default function SessionMetricsChart(props: Props) {
     );
     const labels = frames.map((f) => {
       const d = new Date(f.timestamp);
-      return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", timeZone: "UTC" });
+      return formatTime(d, settingsCtx.timezone());
     });
 
     const datasets: any[] = [];

@@ -5,6 +5,7 @@ import { showToast } from "./Toast";
 import type { DisplaySettings, MetricGroupSettings } from "../types";
 import { THEMES, TEXT_SIZES, type ThemeMeta } from "../themes";
 import { FILTER_STYLE_OPTIONS, getFilterBadgeStyle, type FilterBadgeStyle } from "../utils/filterStyles";
+import { timezoneLabel } from "../utils/dateTime";
 
 const PREVIEW_FILTERS: { name: string; color: string }[] = [
   { name: "L", color: "#e0e0e0" },
@@ -14,6 +15,28 @@ const PREVIEW_FILTERS: { name: string; color: string }[] = [
   { name: "Sii", color: "#d4a43a" },
   { name: "H", color: "#c44040" },
   { name: "O", color: "#3a8fd4" },
+];
+
+const TIMEZONE_OPTIONS: { value: string; label: string }[] = [
+  { value: "UTC", label: "UTC" },
+  { value: "America/New_York", label: "Eastern Time (US)" },
+  { value: "America/Chicago", label: "Central Time (US)" },
+  { value: "America/Denver", label: "Mountain Time (US)" },
+  { value: "America/Los_Angeles", label: "Pacific Time (US)" },
+  { value: "America/Anchorage", label: "Alaska" },
+  { value: "Pacific/Honolulu", label: "Hawaii" },
+  { value: "America/Toronto", label: "Eastern Time (Canada)" },
+  { value: "America/Vancouver", label: "Pacific Time (Canada)" },
+  { value: "Europe/London", label: "London" },
+  { value: "Europe/Paris", label: "Central Europe" },
+  { value: "Europe/Helsinki", label: "Eastern Europe" },
+  { value: "Asia/Kolkata", label: "India" },
+  { value: "Asia/Tokyo", label: "Japan" },
+  { value: "Asia/Shanghai", label: "China" },
+  { value: "Asia/Dubai", label: "Gulf" },
+  { value: "Australia/Sydney", label: "Sydney" },
+  { value: "Australia/Perth", label: "Perth" },
+  { value: "Pacific/Auckland", label: "New Zealand" },
 ];
 
 const GROUP_META: { key: keyof DisplaySettings; label: string; fieldLabels: Record<string, string> }[] = [
@@ -54,6 +77,21 @@ export default function DisplayTab() {
     const size = ctx.settings()?.general.text_size;
     if (size) setSelectedTextSize(size);
   });
+
+  const [selectedTimezone, setSelectedTimezone] = createSignal<string>("UTC");
+
+  createEffect(() => {
+    const tz = ctx.settings()?.general.timezone;
+    if (tz) setSelectedTimezone(tz);
+  });
+
+  const handleTimezoneChange = async (tz: string) => {
+    setSelectedTimezone(tz);
+    const current = ctx.settings()?.general;
+    if (current) {
+      await ctx.saveGeneral({ ...current, timezone: tz });
+    }
+  };
 
   const toggleCollapsed = (key: string) => setCollapsed((prev) => ({ ...prev, [key]: !prev[key] }));
 
@@ -209,6 +247,22 @@ export default function DisplayTab() {
                 }}
               </For>
             </div>
+          </div>
+        </div>
+
+        <div class="flex items-center justify-between">
+          <span class="text-sm text-theme-text-secondary">Timezone</span>
+          <div class="flex items-center gap-2">
+            <select
+              value={selectedTimezone()}
+              onChange={(e) => handleTimezoneChange(e.currentTarget.value)}
+              class="px-3 py-1.5 bg-theme-input border border-theme-border rounded-[var(--radius-sm)] text-sm text-theme-text-primary focus:ring-1 focus:ring-theme-accent focus:border-theme-accent outline-none"
+            >
+              <For each={TIMEZONE_OPTIONS}>
+                {(opt) => <option value={opt.value}>{opt.label}</option>}
+              </For>
+            </select>
+            <span class="text-xs text-theme-text-tertiary">{timezoneLabel(selectedTimezone())}</span>
           </div>
         </div>
 

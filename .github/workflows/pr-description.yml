@@ -79,7 +79,7 @@ jobs:
           # Build request JSON safely (no shell interpolation)
           request_body = json.dumps({
               "contents": [{"parts": [{"text": prompt}]}],
-              "generationConfig": {"temperature": 0.3, "maxOutputTokens": 2048}
+              "generationConfig": {"temperature": 0.3, "maxOutputTokens": 4096}
           })
 
           with open("/tmp/gemini_request.json", "w") as f:
@@ -107,12 +107,14 @@ jobs:
           except (KeyError, IndexError, json.JSONDecodeError) as e:
               fail(f"Failed to parse Gemini response: {e}")
 
-          # Extract title and body using delimiters
-          title_match = re.search(r"---TITLE_START---\s*\n(.+?)\n\s*---TITLE_END---", text)
-          body_match = re.search(r"---BODY_START---\s*\n(.*?)\n\s*---BODY_END---", text, re.DOTALL)
+          # Extract title and body using delimiters (flexible whitespace matching)
+          title_match = re.search(r"---\s*TITLE_START\s*---\s*\n(.+?)\n\s*---\s*TITLE_END\s*---", text)
+          body_match = re.search(r"---\s*BODY_START\s*---\s*\n(.*?)\n\s*---\s*BODY_END\s*---", text, re.DOTALL)
 
           if not title_match or not body_match:
-              fail("Could not extract title or body from Gemini response.")
+              # Log truncated response for debugging
+              preview = text[:500] if len(text) > 500 else text
+              fail(f"Could not extract title or body from Gemini response. Response preview: {preview}")
 
           pr_title = title_match.group(1).strip()
           pr_body = body_match.group(1).strip()

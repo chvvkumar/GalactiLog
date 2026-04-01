@@ -10,6 +10,7 @@ class GeneralSettings(BaseModel):
     filter_style: str = "text-only"
     theme: str = "deep-neutral"
     text_size: str = "medium"
+    timezone: str = "UTC"
 
 
 class FilterConfig(BaseModel):

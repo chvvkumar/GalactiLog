@@ -7,6 +7,7 @@ import FilterBadges from "../components/FilterBadges";
 import TargetMetricsChart, { MetricsTrendButton } from "../components/TargetMetricsChart";
 import { useSettingsContext } from "../components/SettingsProvider";
 import { isFieldVisible } from "../utils/displaySettings";
+import { timezoneLabel } from "../utils/dateTime";
 
 function formatHours(seconds: number): string {
   return (seconds / 3600).toFixed(1) + "h";
@@ -17,10 +18,17 @@ function formatCoord(val: number | null, label: string): string {
   return `${label} ${val.toFixed(3)}°`;
 }
 
+function formatSize(major: number | null, minor: number | null): string {
+  if (major === null) return "";
+  if (minor === null) return `${major.toFixed(1)}'`;
+  return `${major.toFixed(1)}' \u00d7 ${minor.toFixed(1)}'`;
+}
+
 const TargetDetailPage: Component = () => {
   const params = useParams<{ targetId: string }>();
   const [searchParams] = useSearchParams();
-  const { displaySettings, graphSettings, saveGraphSettings } = useSettingsContext();
+  const { displaySettings, graphSettings, saveGraphSettings, timezone } = useSettingsContext();
+  const tzLabel = () => timezoneLabel(timezone());
   const visible = (group: Parameters<typeof isFieldVisible>[1], field: string) =>
     isFieldVisible(displaySettings(), group, field);
 
@@ -126,8 +134,12 @@ const TargetDetailPage: Component = () => {
                     {detail().primary_name}
                   </h1>
                   <div class="text-xs text-theme-text-secondary mt-1 space-x-2">
-                    <Show when={detail().object_type}>
-                      <span>{detail().object_type}</span>
+                    <Show when={detail().object_category}>
+                      <span>{detail().object_category}</span>
+                      <span>·</span>
+                    </Show>
+                    <Show when={detail().constellation}>
+                      <span>{detail().constellation}</span>
                       <span>·</span>
                     </Show>
                     <Show when={detail().ra !== null}>
@@ -135,6 +147,18 @@ const TargetDetailPage: Component = () => {
                     </Show>
                     <Show when={detail().dec !== null}>
                       <span>{formatCoord(detail().dec, "Dec")}</span>
+                    </Show>
+                    <Show when={detail().size_major !== null}>
+                      <span>·</span>
+                      <span>Size {formatSize(detail().size_major, detail().size_minor)}</span>
+                    </Show>
+                    <Show when={detail().v_mag !== null}>
+                      <span>·</span>
+                      <span>Visual Mag. {detail().v_mag!.toFixed(1)}</span>
+                    </Show>
+                    <Show when={detail().surface_brightness !== null}>
+                      <span>·</span>
+                      <span>SB {detail().surface_brightness!.toFixed(1)}</span>
                     </Show>
                     <Show when={detail().aliases.length > 1}>
                       <span>· Aliases: {detail().aliases.slice(1).join(", ")}</span>
@@ -144,7 +168,7 @@ const TargetDetailPage: Component = () => {
                 <div class="text-right text-xs text-theme-text-secondary">
                   <div>{detail().session_count} sessions</div>
                   <div class="mt-0.5">
-                    {detail().first_session_date} → {detail().last_session_date} (UTC)
+                    {detail().first_session_date} → {detail().last_session_date} ({tzLabel()})
                   </div>
                 </div>
               </div>
@@ -245,7 +269,7 @@ const TargetDetailPage: Component = () => {
                         />
                       </th>
                     </Show>
-                    <th class="py-2 px-4 text-left font-medium">Date (UTC)</th>
+                    <th class="py-2 px-4 text-left font-medium">Date ({tzLabel()})</th>
                     <th class="py-2 px-2 text-right font-medium"></th>
                     <th class="py-2 px-2 text-right font-medium">Frames</th>
                     <Show when={visible("quality", "hfr")}>
