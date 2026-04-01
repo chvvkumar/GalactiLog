@@ -18,6 +18,7 @@ from app.services.simbad import (
     curate_aliases, extract_catalog_id, extract_common_name, build_primary_name,
     _normalize_ws,
 )
+from app.services.openngc import enrich_target_from_openngc
 from app.services.thumbnail import generate_thumbnail
 from app.services.xisf_parser import extract_xisf_metadata, generate_xisf_thumbnail
 from app.worker.celery_app import celery_app
@@ -580,6 +581,8 @@ def _resolve_or_cache_target(object_name: str) -> str | None:
         )
         try:
             session.add(target)
+            session.flush()
+            enrich_target_from_openngc(session, target)
             session.commit()
             return str(target.id)
         except IntegrityError:
