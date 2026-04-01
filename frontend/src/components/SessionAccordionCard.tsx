@@ -129,10 +129,12 @@ const SessionAccordionCard: Component<{
           </td>
         </Show>
         <td class="py-3 px-4">
-          <span class="font-bold text-theme-text-primary text-sm">{props.session.session_date}</span>
-          <span class="text-theme-text-secondary ml-3">
-            {props.session.camera ?? ""} · {props.session.telescope ?? ""}
-          </span>
+          <div class="flex flex-col sm:flex-row sm:items-center gap-0.5 sm:gap-0">
+            <span class="font-bold text-theme-text-primary text-sm">{props.session.session_date}</span>
+            <span class="text-theme-text-secondary sm:ml-3 text-xs sm:text-sm">
+              {props.session.camera ?? ""} · {props.session.telescope ?? ""}
+            </span>
+          </div>
         </td>
         <td class="py-3 px-2 text-right text-metric-integration tabular-nums whitespace-nowrap">{formatHours(props.session.integration_seconds)}</td>
         <td class="py-3 px-2 text-right text-metric-frames tabular-nums whitespace-nowrap">{props.session.frame_count} fr</td>
@@ -181,8 +183,8 @@ const SessionAccordionCard: Component<{
             {(detail) => (
               <div class="space-y-5 pt-4">
                 {/* Unified session overview table */}
-                <div class="grid gap-4" style={{ "grid-template-columns": "1fr 200px" }}>
-                  <div class="bg-theme-base rounded-[var(--radius-md)] overflow-hidden">
+                <div class="grid gap-4 grid-cols-1 md:grid-cols-[1fr_200px]">
+                  <div class="bg-theme-base rounded-[var(--radius-md)] overflow-x-auto">
                     <table class="w-full text-xs table-fixed" style={{ "border-collapse": "collapse" }}>
                       <colgroup>
                         <col style={{ width: "100px" }} />
@@ -265,7 +267,7 @@ const SessionAccordionCard: Component<{
                       </tbody>
                     </table>
                   </div>
-                  <div class="relative" style={{ "grid-row": "1", "grid-column": "2" }}>
+                  <div class="relative h-[150px] md:h-auto">
                     <div class="absolute inset-0 overflow-hidden">
                       <ReferenceThumbnail url={detail().thumbnail_url} fill />
                     </div>

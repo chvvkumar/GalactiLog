@@ -110,8 +110,8 @@ const ComboRow: Component<{ combo: EquipmentComboMetrics }> = (props) => {
       </tr>
       <Show when={expanded()}>
         <tr class="bg-theme-surface-alt">
-          <td colspan="8" class="p-0">
-            <table class="w-full text-xs">
+          <td colspan="8" class="p-0 overflow-x-auto">
+            <table class="w-full text-xs min-w-[500px]">
               <thead>
                 <tr class="border-b border-theme-border">
                   <th class="text-left text-theme-text-secondary font-normal py-1 pl-8 pr-2 text-[0.65rem] uppercase tracking-wide">Filter</th>
@@ -144,7 +144,8 @@ const EquipmentPerformance: Component<{ combos: EquipmentComboMetrics[] }> = (pr
         when={props.combos.length > 0}
         fallback={<p class="text-theme-text-secondary text-xs">No equipment data available</p>}
       >
-        <table class="w-full text-xs">
+        <div class="overflow-x-auto">
+        <table class="w-full text-xs min-w-[600px]">
           <thead>
             <tr class="border-b border-theme-border">
               <th class="text-left text-theme-text-secondary font-normal py-1 px-2 text-[0.65rem] uppercase tracking-wide">Equipment</th>
@@ -163,6 +164,7 @@ const EquipmentPerformance: Component<{ combos: EquipmentComboMetrics[] }> = (pr
             </For>
           </tbody>
         </table>
+        </div>
       </Show>
     </div>
   );
