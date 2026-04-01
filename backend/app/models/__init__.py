@@ -7,5 +7,6 @@ from .simbad_cache import SimbadCache
 from .user import User, UserRole
 from .refresh_token import RefreshToken
 from .app_metadata import AppMetadata
+from .openngc import OpenNGCEntry
 
-__all__ = ["Base", "Target", "Image", "UserSettings", "SETTINGS_ROW_ID", "MergeCandidate", "SimbadCache", "User", "UserRole", "RefreshToken", "AppMetadata"]
+__all__ = ["Base", "Target", "Image", "UserSettings", "SETTINGS_ROW_ID", "MergeCandidate", "SimbadCache", "User", "UserRole", "RefreshToken", "AppMetadata", "OpenNGCEntry"]
