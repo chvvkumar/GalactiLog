@@ -445,121 +445,6 @@ async def list_targets_aggregated(
     """Return targets with aggregated session data, filtered by query params."""
     filter_map, cam_map, tel_map = await load_alias_maps(session)
 
-    # Base query: only LIGHT frames that have a known object name
-    base_filter = [Image.image_type == "LIGHT"]
-
-    # Exclude soft-deleted (merged) targets
-    base_filter.append(
-        or_(
-            Image.resolved_target_id.is_(None),
-            Target.merged_into_id.is_(None),
-        )
-    )
-
-    if camera:
-        cam_variants = expand_canonical(camera, cam_map)
-        base_filter.append(Image.camera.in_(cam_variants))
-    if telescope:
-        tel_variants = expand_canonical(telescope, tel_map)
-        base_filter.append(Image.telescope.in_(tel_variants))
-    if filters:
-        filter_list = [f.strip() for f in filters.split(",")]
-        all_filter_variants = []
-        for f in filter_list:
-            all_filter_variants.extend(expand_canonical(f, filter_map))
-        base_filter.append(Image.filter_used.in_(all_filter_variants))
-    if date_from:
-        base_filter.append(Image.capture_date >= date_from)
-    if date_to:
-        base_filter.append(Image.capture_date <= date_to)
-    if search:
-        escaped_search = search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-        pattern = f"%{escaped_search}%"
-        aliases_str = func.array_to_string(Target.aliases, ' ')
-        searchable_text = func.concat(
-            func.coalesce(Target.catalog_id, ''), ' ',
-            func.coalesce(Target.common_name, ''), ' ',
-            aliases_str,
-        )
-        # Search in target name, aliases, OR OBJECT header for unresolved images
-        base_filter.append(
-            or_(
-                Target.primary_name.ilike(pattern),
-                Target.catalog_id.ilike(pattern),
-                Target.common_name.ilike(pattern),
-                aliases_str.ilike(pattern),
-                func.similarity(searchable_text, search) > 0.3,
-                Image.raw_headers["OBJECT"].astext.ilike(pattern),
-            )
-        )
-
-    if object_type:
-        type_list = [t.strip() for t in object_type.split(",")]
-        has_unresolved = "Unresolved" in type_list
-        categories = [t for t in type_list if t != "Unresolved"]
-
-        if categories:
-            # Reverse-map human categories to SIMBAD primary codes
-            matching_codes = set()
-            for code, category in _SIMBAD_CATEGORY_MAP.items():
-                if category in categories:
-                    matching_codes.add(code)
-
-            # Build SQL: match targets whose primary code (before first comma) is in the set
-            # Use a startswith check for each matching code
-            type_conditions = [
-                Target.object_type.like(f"{code},%") | (Target.object_type == code)
-                for code in matching_codes
-            ]
-            # Also match "Other" category — types not in the map
-            if "Other" in categories:
-                mapped_prefixes = list(_SIMBAD_CATEGORY_MAP.keys())
-                other_conditions = [
-                    ~Target.object_type.like(f"{code},%") & (Target.object_type != code)
-                    for code in mapped_prefixes
-                ]
-                type_conditions.append(and_(*other_conditions))
-
-            if has_unresolved:
-                type_conditions.append(Image.resolved_target_id.is_(None))
-            base_filter.append(or_(*type_conditions))
-        elif has_unresolved:
-            base_filter.append(Image.resolved_target_id.is_(None))
-
-    # FITS header queries (AND logic between rows)
-    if fits_key and fits_op and fits_val:
-        for key, op_str, val in zip(fits_key, fits_op, fits_val):
-            if not re.match(r'^[A-Za-z0-9_-]{1,20}$', key):
-                continue
-            json_field = Image.raw_headers[key].astext
-            if op_str == "eq":
-                base_filter.append(json_field == val)
-            elif op_str == "neq":
-                base_filter.append(json_field != val)
-            elif op_str == "gt":
-                try:
-                    base_filter.append(cast(json_field, Float) > float(val))
-                except ValueError:
-                    continue
-            elif op_str == "lt":
-                try:
-                    base_filter.append(cast(json_field, Float) < float(val))
-                except ValueError:
-                    continue
-            elif op_str == "gte":
-                try:
-                    base_filter.append(cast(json_field, Float) >= float(val))
-                except ValueError:
-                    continue
-            elif op_str == "lte":
-                try:
-                    base_filter.append(cast(json_field, Float) <= float(val))
-                except ValueError:
-                    continue
-            elif op_str == "contains":
-                escaped_val = val.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-                base_filter.append(json_field.ilike(f"%{escaped_val}%"))
-
     # ---------------------------------------------------------------
     # Phases 1-3: Raw SQL for grouped + aggregates + pagination
     # ---------------------------------------------------------------
@@ -769,10 +654,8 @@ async def list_targets_aggregated(
         }
 
     # ---------------------------------------------------------------
-    # Phase 4: Detail queries for the current page's targets only
+    # Phase 4: Detail query for current page's targets (raw SQL)
     # ---------------------------------------------------------------
-    # Build a WHERE clause to match only the current page's images
-    page_key_conditions = []
     page_uuids = []
     page_obj_names = []
     has_uncategorized = False
@@ -783,51 +666,30 @@ async def list_targets_aggregated(
             page_obj_names.append(tk[4:])
         else:
             try:
-                page_uuids.append(uuid.UUID(tk))
+                page_uuids.append(str(uuid.UUID(tk)))
             except ValueError:
                 pass
 
+    key_conds = []
     if page_uuids:
-        page_key_conditions.append(Image.resolved_target_id.in_(page_uuids))
+        key_conds.append("i.resolved_target_id = ANY(CAST(:page_uuids AS uuid[]))")
+        params["page_uuids"] = page_uuids
     if page_obj_names:
-        page_key_conditions.append(
-            and_(
-                Image.resolved_target_id.is_(None),
-                Image.raw_headers["OBJECT"].astext.in_(page_obj_names),
-            )
-        )
+        key_conds.append("(i.resolved_target_id IS NULL AND i.raw_headers->>'OBJECT' = ANY(:page_obj_names))")
+        params["page_obj_names"] = page_obj_names
     if has_uncategorized:
-        page_key_conditions.append(
-            and_(
-                Image.resolved_target_id.is_(None),
-                or_(
-                    ~Image.raw_headers.has_key("OBJECT"),
-                    Image.raw_headers["OBJECT"].astext == "",
-                    Image.raw_headers["OBJECT"].is_(None),
-                ),
-            )
-        )
+        key_conds.append("(i.resolved_target_id IS NULL AND (NOT i.raw_headers ? 'OBJECT' OR i.raw_headers->>'OBJECT' = '' OR i.raw_headers->>'OBJECT' IS NULL))")
 
-    # Fetch detail images for just this page's targets (select only needed columns)
-    detail_query = (
-        select(
-            cast(Image.resolved_target_id, sa.String).label("target_uuid"),
-            Image.raw_headers["OBJECT"].astext.label("fits_object"),
-            Image.exposure_time,
-            Image.filter_used,
-            Image.camera,
-            Image.telescope,
-            Image.capture_date,
-        )
-        .outerjoin(Target, Image.resolved_target_id == Target.id)
-        .where(
-            Image.image_type == "LIGHT",
-            or_(*page_key_conditions) if page_key_conditions else sa.literal(False),
-        )
-    )
-    detail_query = detail_query.where(*base_filter)
+    key_filter = f"({' OR '.join(key_conds)})" if key_conds else "FALSE"
 
-    detail_result = await session.execute(detail_query)
+    detail_sql = text(f"""
+        SELECT CAST(i.resolved_target_id AS VARCHAR) AS target_uuid,
+               i.raw_headers->>'OBJECT' AS fits_object,
+               i.exposure_time, i.filter_used, i.camera, i.telescope, i.capture_date
+        FROM images i LEFT JOIN targets t ON i.resolved_target_id = t.id
+        WHERE {where_sql} AND {key_filter}
+    """)
+    detail_result = await session.execute(detail_sql, params)
     detail_rows = detail_result.all()
 
     # Build per-target detail maps
