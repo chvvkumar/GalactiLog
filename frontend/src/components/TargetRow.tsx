@@ -31,8 +31,9 @@ const TargetRow: Component<{
 
   return (
     <>
+      {/* Desktop table row -- hidden below md */}
       <tr
-        class="border-b border-theme-border cursor-pointer hover:bg-theme-hover transition-colors duration-150"
+        class="border-b border-theme-border cursor-pointer hover:bg-theme-hover transition-colors duration-150 hidden md:table-row"
         onClick={() => navigate(`/targets/${encodeURIComponent(props.target.target_id)}?view=sessions`)}
       >
         <td class={`py-2.5 px-3 font-bold hover:text-theme-accent transition-colors ${
@@ -69,6 +70,50 @@ const TargetRow: Component<{
           </td>
         </Show>
       </tr>
+
+      {/* Mobile card -- shown below md */}
+      <tr
+        class="md:hidden border-b border-theme-border cursor-pointer hover:bg-theme-hover transition-colors duration-150"
+        onClick={() => navigate(`/targets/${encodeURIComponent(props.target.target_id)}?view=sessions`)}
+      >
+        <td colspan="7" class="p-3">
+          <div class="space-y-1.5">
+            <div class="flex items-start justify-between gap-2">
+              <span class={`font-bold text-sm hover:text-theme-accent transition-colors ${
+                props.target.target_id === "obj:__uncategorized__"
+                  ? "text-theme-text-tertiary italic"
+                  : "text-theme-text-primary"
+              }`}>
+                {displayName()}
+              </span>
+              <button
+                class="px-2 py-0.5 border border-theme-border-em rounded text-label text-theme-text-secondary hover:text-theme-text-primary hover:border-theme-accent transition-colors flex-shrink-0"
+                onClick={(e) => { e.stopPropagation(); toggleExpanded(props.target.target_id); }}
+              >
+                {isOpen() ? "Collapse" : "Expand"}
+              </button>
+            </div>
+            <Show when={props.target.target_id !== "obj:__uncategorized__"}>
+              <div class="font-mono text-theme-text-secondary text-xs">{props.target.primary_name}</div>
+            </Show>
+            <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+              <span class="text-theme-text-primary">{formatIntegration(props.target.total_integration_seconds)}</span>
+              <span class="text-theme-accent">{lastSession()}</span>
+            </div>
+            <FilterBadges distribution={props.target.filter_distribution} compact />
+            <Show when={props.target.equipment.length > 0}>
+              <div class="text-theme-accent text-xs">{props.target.equipment.join(" \u00b7 ")}</div>
+            </Show>
+            <Show when={props.target.matched_sessions != null}>
+              <div class="text-xs text-theme-warning">
+                {props.target.matched_sessions} of {props.target.total_sessions} sessions
+              </div>
+            </Show>
+          </div>
+        </td>
+      </tr>
+
+      {/* Expanded session table (both layouts) */}
       <Show when={isOpen()}>
         <tr class="bg-theme-surface">
           <td colspan="7" class="px-3 py-2">
