@@ -127,13 +127,13 @@ const TargetDetailPage: Component = () => {
         {(detail) => (
           <>
             {/* Target Hero */}
-            <div class="px-6 py-5 border-b border-theme-border">
-              <div class="flex justify-between items-start">
+            <div class="px-4 sm:px-6 py-4 sm:py-5 border-b border-theme-border">
+              <div class="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-2">
                 <div>
                   <h1 class="text-2xl font-semibold tracking-tight text-theme-text-primary">
                     {detail().primary_name}
                   </h1>
-                  <div class="text-xs text-theme-text-secondary mt-1 space-x-2">
+                  <div class="text-xs text-theme-text-secondary mt-1 flex flex-wrap gap-x-2 gap-y-0.5">
                     <Show when={detail().object_category}>
                       <span>{detail().object_category}</span>
                       <span>·</span>
@@ -165,7 +165,7 @@ const TargetDetailPage: Component = () => {
                     </Show>
                   </div>
                 </div>
-                <div class="text-right text-xs text-theme-text-secondary">
+                <div class="text-left sm:text-right text-xs text-theme-text-secondary">
                   <div>{detail().session_count} sessions</div>
                   <div class="mt-0.5">
                     {detail().first_session_date} → {detail().last_session_date} ({tzLabel()})
@@ -175,16 +175,16 @@ const TargetDetailPage: Component = () => {
 
               {/* Cumulative stats bar */}
               <div class="flex flex-wrap gap-3 mt-4 items-center">
-                <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-3 text-center min-w-[100px]">
+                <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-3 text-center min-w-[80px] sm:min-w-[100px]">
                   <div class="text-lg font-semibold text-metric-integration">{formatHours(detail().total_integration_seconds)}</div>
                   <div class="text-caption text-theme-text-secondary">Total Integration</div>
                 </div>
-                <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-3 text-center min-w-[100px]">
+                <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-3 text-center min-w-[80px] sm:min-w-[100px]">
                   <div class="text-lg font-semibold text-metric-frames">{detail().total_frames.toLocaleString()}</div>
                   <div class="text-caption text-theme-text-secondary">Total Frames</div>
                 </div>
                 <Show when={visible("quality", "hfr")}>
-                  <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-3 text-center min-w-[100px]">
+                  <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-3 text-center min-w-[80px] sm:min-w-[100px]">
                     <div class="text-lg font-semibold text-metric-hfr">
                       {detail().avg_hfr?.toFixed(2) ?? "—"}
                     </div>
@@ -192,7 +192,7 @@ const TargetDetailPage: Component = () => {
                   </div>
                 </Show>
                 <Show when={visible("quality", "eccentricity")}>
-                  <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-3 text-center min-w-[100px]">
+                  <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-3 text-center min-w-[80px] sm:min-w-[100px]">
                     <div class="text-lg font-semibold text-metric-eccentricity">
                       {detail().avg_eccentricity?.toFixed(2) ?? "—"}
                     </div>
@@ -200,7 +200,7 @@ const TargetDetailPage: Component = () => {
                   </div>
                 </Show>
                 <Show when={visible("quality", "fwhm")}>
-                  <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-3 text-center min-w-[100px]">
+                  <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-3 text-center min-w-[80px] sm:min-w-[100px]">
                     <div class="text-lg font-semibold text-theme-info">
                       {detail().avg_fwhm?.toFixed(2) ?? "—"}
                     </div>
@@ -208,7 +208,7 @@ const TargetDetailPage: Component = () => {
                   </div>
                 </Show>
                 <Show when={visible("quality", "detected_stars")}>
-                  <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-3 text-center min-w-[100px]">
+                  <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-3 text-center min-w-[80px] sm:min-w-[100px]">
                     <div class="text-lg font-semibold text-metric-stars">
                       {detail().avg_detected_stars?.toFixed(0) ?? "—"}
                     </div>
@@ -216,14 +216,14 @@ const TargetDetailPage: Component = () => {
                   </div>
                 </Show>
                 <Show when={visible("guiding", "rms_total")}>
-                  <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-3 text-center min-w-[100px]">
+                  <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-3 text-center min-w-[80px] sm:min-w-[100px]">
                     <div class="text-lg font-semibold text-metric-guiding">
                       {detail().avg_guiding_rms_arcsec !== null ? `${detail().avg_guiding_rms_arcsec?.toFixed(2)}"` : "—"}
                     </div>
                     <div class="text-caption text-theme-text-secondary">Avg Guide RMS</div>
                   </div>
                 </Show>
-                <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-3 text-center flex flex-col items-center justify-center min-w-[100px]">
+                <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-3 text-center flex flex-col items-center justify-center min-w-[80px] sm:min-w-[100px]">
                   <div class="mb-1">
                     <FilterBadges distribution={Object.fromEntries(detail().filters_used.map(f => [f, 0]))} compact />
                   </div>
@@ -244,8 +244,8 @@ const TargetDetailPage: Component = () => {
             </Show>
 
             {/* Session Table */}
-            <div class="px-6 py-4">
-              <table class="w-full border-collapse">
+            <div class="px-4 sm:px-6 py-4 overflow-x-auto">
+              <table class="w-full border-collapse min-w-[600px]">
                 <thead>
                   <tr class="text-caption text-theme-text-tertiary uppercase tracking-wider border-b border-theme-border-em">
                     <Show when={targetChartExpanded()}>
