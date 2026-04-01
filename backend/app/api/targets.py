@@ -471,10 +471,10 @@ async def list_targets_aggregated(
         params["filter_variants"] = all_filter_variants
     if date_from:
         where_parts.append("i.capture_date >= :date_from")
-        params["date_from"] = date_from
+        params["date_from"] = datetime.strptime(date_from, "%Y-%m-%d").date()
     if date_to:
         where_parts.append("i.capture_date <= :date_to")
-        params["date_to"] = date_to
+        params["date_to"] = datetime.strptime(date_to, "%Y-%m-%d").date() + timedelta(days=1)
     if search:
         escaped_search = search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         pattern = f"%{escaped_search}%"
