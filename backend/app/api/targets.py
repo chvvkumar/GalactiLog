@@ -569,11 +569,18 @@ async def list_targets_aggregated(
         func.concat(sa.literal("obj:"), func.coalesce(Image.raw_headers["OBJECT"].astext, "__uncategorized__")),
     )
 
+    # Build a display name expression that only uses aggregated/grouped columns
+    display_name = func.coalesce(
+        func.min(Target.primary_name),
+        func.min(Image.raw_headers["OBJECT"].astext),
+        sa.literal("Uncategorized"),
+    )
+
     # Build the grouped query with aggregates
     grouped = (
         select(
             group_key.label("target_key"),
-            func.coalesce(Target.primary_name, Image.raw_headers["OBJECT"].astext, sa.literal("Uncategorized")).label("primary_name"),
+            display_name.label("primary_name"),
             func.sum(func.coalesce(Image.exposure_time, 0)).label("total_integration"),
             func.count(Image.id).label("total_frames"),
             func.count(func.distinct(cast(Image.capture_date, Date))).label("session_count"),
@@ -590,7 +597,7 @@ async def list_targets_aggregated(
         )
         .outerjoin(Target, Image.resolved_target_id == Target.id)
         .where(*base_filter)
-        .group_by(group_key, Target.primary_name, Image.raw_headers["OBJECT"].astext)
+        .group_by(group_key)
     )
 
     # HAVING clauses for metric range filters (use AVG instead of MEDIAN)
