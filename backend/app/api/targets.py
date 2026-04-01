@@ -5,6 +5,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+import sqlalchemy as sa
 from sqlalchemy import select, or_, and_, func, cast, Float, Date, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -444,426 +445,340 @@ async def list_targets_aggregated(
     """Return targets with aggregated session data, filtered by query params."""
     filter_map, cam_map, tel_map = await load_alias_maps(session)
 
-    # Base query: only LIGHT frames that have a known object name
-    base_filter = [Image.image_type == "LIGHT"]
-
-    # Exclude soft-deleted (merged) targets
-    base_filter.append(
-        or_(
-            Image.resolved_target_id.is_(None),
-            Target.merged_into_id.is_(None),
-        )
-    )
+    # ---------------------------------------------------------------
+    # Phases 1-3: Raw SQL for grouped + aggregates + pagination
+    # ---------------------------------------------------------------
+    where_parts: list[str] = [
+        "i.image_type = 'LIGHT'",
+        "(i.resolved_target_id IS NULL OR t.merged_into_id IS NULL)",
+    ]
+    params: dict = {}
 
     if camera:
         cam_variants = expand_canonical(camera, cam_map)
-        base_filter.append(Image.camera.in_(cam_variants))
+        where_parts.append("i.camera = ANY(:cam_variants)")
+        params["cam_variants"] = cam_variants
     if telescope:
         tel_variants = expand_canonical(telescope, tel_map)
-        base_filter.append(Image.telescope.in_(tel_variants))
+        where_parts.append("i.telescope = ANY(:tel_variants)")
+        params["tel_variants"] = tel_variants
     if filters:
         filter_list = [f.strip() for f in filters.split(",")]
-        all_filter_variants = []
+        all_filter_variants: list[str] = []
         for f in filter_list:
             all_filter_variants.extend(expand_canonical(f, filter_map))
-        base_filter.append(Image.filter_used.in_(all_filter_variants))
+        where_parts.append("i.filter_used = ANY(:filter_variants)")
+        params["filter_variants"] = all_filter_variants
     if date_from:
-        base_filter.append(Image.capture_date >= date_from)
+        where_parts.append("i.capture_date >= :date_from")
+        params["date_from"] = datetime.strptime(date_from, "%Y-%m-%d").date()
     if date_to:
-        base_filter.append(Image.capture_date <= date_to)
+        where_parts.append("i.capture_date <= :date_to")
+        params["date_to"] = datetime.strptime(date_to, "%Y-%m-%d").date() + timedelta(days=1)
     if search:
         escaped_search = search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         pattern = f"%{escaped_search}%"
-        aliases_str = func.array_to_string(Target.aliases, ' ')
-        searchable_text = func.concat(
-            func.coalesce(Target.catalog_id, ''), ' ',
-            func.coalesce(Target.common_name, ''), ' ',
-            aliases_str,
-        )
-        # Search in target name, aliases, OR OBJECT header for unresolved images
-        base_filter.append(
-            or_(
-                Target.primary_name.ilike(pattern),
-                Target.catalog_id.ilike(pattern),
-                Target.common_name.ilike(pattern),
-                aliases_str.ilike(pattern),
-                func.similarity(searchable_text, search) > 0.3,
-                Image.raw_headers["OBJECT"].astext.ilike(pattern),
-            )
-        )
+        where_parts.append("""(
+            t.primary_name ILIKE :search_pat
+            OR t.catalog_id ILIKE :search_pat
+            OR t.common_name ILIKE :search_pat
+            OR array_to_string(t.aliases, ' ') ILIKE :search_pat
+            OR similarity(concat(coalesce(t.catalog_id,''),' ',coalesce(t.common_name,''),' ',array_to_string(t.aliases,' ')), :search_raw) > 0.3
+            OR i.raw_headers->>'OBJECT' ILIKE :search_pat
+        )""")
+        params["search_pat"] = pattern
+        params["search_raw"] = search
 
     if object_type:
-        type_list = [t.strip() for t in object_type.split(",")]
+        type_list = [tp.strip() for tp in object_type.split(",")]
         has_unresolved = "Unresolved" in type_list
-        categories = [t for t in type_list if t != "Unresolved"]
+        categories = [tp for tp in type_list if tp != "Unresolved"]
 
         if categories:
-            # Reverse-map human categories to SIMBAD primary codes
-            matching_codes = set()
-            for code, category in _SIMBAD_CATEGORY_MAP.items():
-                if category in categories:
+            matching_codes: set[str] = set()
+            for code, cat in _SIMBAD_CATEGORY_MAP.items():
+                if cat in categories:
                     matching_codes.add(code)
 
-            # Build SQL: match targets whose primary code (before first comma) is in the set
-            # Use a startswith check for each matching code
-            type_conditions = [
-                Target.object_type.like(f"{code},%") | (Target.object_type == code)
-                for code in matching_codes
-            ]
-            # Also match "Other" category — types not in the map
+            type_conds: list[str] = []
+            for idx, code in enumerate(matching_codes):
+                pname = f"simbad_{idx}"
+                type_conds.append(f"(t.object_type LIKE :{pname}_like OR t.object_type = :{pname}_eq)")
+                params[f"{pname}_like"] = f"{code},%"
+                params[f"{pname}_eq"] = code
+
             if "Other" in categories:
-                mapped_prefixes = list(_SIMBAD_CATEGORY_MAP.keys())
-                other_conditions = [
-                    ~Target.object_type.like(f"{code},%") & (Target.object_type != code)
-                    for code in mapped_prefixes
-                ]
-                type_conditions.append(and_(*other_conditions))
+                mapped = list(_SIMBAD_CATEGORY_MAP.keys())
+                oparts: list[str] = []
+                for idx2, code in enumerate(mapped):
+                    pn = f"other_{idx2}"
+                    oparts.append(f"(t.object_type NOT LIKE :{pn}_like AND t.object_type != :{pn}_eq)")
+                    params[f"{pn}_like"] = f"{code},%"
+                    params[f"{pn}_eq"] = code
+                type_conds.append(f"({' AND '.join(oparts)})")
 
             if has_unresolved:
-                type_conditions.append(Image.resolved_target_id.is_(None))
-            base_filter.append(or_(*type_conditions))
+                type_conds.append("i.resolved_target_id IS NULL")
+            where_parts.append(f"({' OR '.join(type_conds)})")
         elif has_unresolved:
-            base_filter.append(Image.resolved_target_id.is_(None))
+            where_parts.append("i.resolved_target_id IS NULL")
 
-    # FITS header queries (AND logic between rows)
     if fits_key and fits_op and fits_val:
-        for key, op_str, val in zip(fits_key, fits_op, fits_val):
+        for idx, (key, op_str, val) in enumerate(zip(fits_key, fits_op, fits_val)):
             if not re.match(r'^[A-Za-z0-9_-]{1,20}$', key):
                 continue
-            json_field = Image.raw_headers[key].astext
+            pn = f"fits_{idx}"
+            field = f"i.raw_headers->>'{key}'"
             if op_str == "eq":
-                base_filter.append(json_field == val)
+                where_parts.append(f"{field} = :{pn}")
+                params[pn] = val
             elif op_str == "neq":
-                base_filter.append(json_field != val)
-            elif op_str == "gt":
-                base_filter.append(cast(json_field, Float) > float(val))
-            elif op_str == "lt":
-                base_filter.append(cast(json_field, Float) < float(val))
-            elif op_str == "gte":
-                base_filter.append(cast(json_field, Float) >= float(val))
-            elif op_str == "lte":
-                base_filter.append(cast(json_field, Float) <= float(val))
+                where_parts.append(f"{field} != :{pn}")
+                params[pn] = val
+            elif op_str in ("gt", "lt", "gte", "lte"):
+                try:
+                    float(val)
+                except ValueError:
+                    continue
+                op_map = {"gt": ">", "lt": "<", "gte": ">=", "lte": "<="}
+                where_parts.append(f"CAST({field} AS FLOAT) {op_map[op_str]} :{pn}")
+                params[pn] = float(val)
             elif op_str == "contains":
-                base_filter.append(json_field.ilike(f"%{val}%"))
+                esc = val.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+                where_parts.append(f"{field} ILIKE :{pn}")
+                params[pn] = f"%{esc}%"
 
-    # Query images with optional target join
-    query = (
-        select(Image, Target)
-        .outerjoin(Target, Image.resolved_target_id == Target.id)
-        .where(*base_filter)
-        .order_by(Image.capture_date.desc())
+    where_sql = " AND ".join(where_parts)
+
+    # HAVING clauses for metric range filters
+    having_parts: list[str] = []
+    metric_cols = {
+        "hfr": "median_hfr", "fwhm": "fwhm", "eccentricity": "eccentricity",
+        "stars": "CAST(detected_stars AS FLOAT)", "guiding_rms": "guiding_rms_arcsec",
+        "adu_mean": "adu_mean", "focuser_temp": "focuser_temp",
+        "ambient_temp": "ambient_temp", "humidity": "humidity", "airmass": "airmass",
+    }
+    metric_ranges = {
+        "hfr": (hfr_min, hfr_max), "fwhm": (fwhm_min, fwhm_max),
+        "eccentricity": (eccentricity_min, eccentricity_max),
+        "stars": (stars_min, stars_max), "guiding_rms": (guiding_rms_min, guiding_rms_max),
+        "adu_mean": (adu_mean_min, adu_mean_max), "focuser_temp": (focuser_temp_min, focuser_temp_max),
+        "ambient_temp": (ambient_temp_min, ambient_temp_max),
+        "humidity": (humidity_min, humidity_max), "airmass": (airmass_min, airmass_max),
+    }
+    for mname, (m_min, m_max) in metric_ranges.items():
+        col = metric_cols[mname]
+        if m_min is not None:
+            having_parts.append(f"avg(i.{col}) >= :{mname}_min")
+            params[f"{mname}_min"] = m_min
+        if m_max is not None:
+            having_parts.append(f"avg(i.{col}) <= :{mname}_max")
+            params[f"{mname}_max"] = m_max
+
+    has_metric_filters = bool(having_parts)
+    having_sql = f"HAVING {' AND '.join(having_parts)}" if having_parts else ""
+
+    gk = "coalesce(CAST(i.resolved_target_id AS VARCHAR), concat('obj:', coalesce(i.raw_headers->>'OBJECT', '__uncategorized__')))"
+
+    combined_sql = text(f"""
+    WITH grouped AS (
+        SELECT {gk} AS target_key,
+               coalesce(min(t.primary_name), min(i.raw_headers->>'OBJECT'), 'Uncategorized') AS primary_name,
+               sum(coalesce(i.exposure_time, 0)) AS total_integration,
+               count(i.id) AS total_frames,
+               count(distinct CAST(i.capture_date AS DATE)) AS session_count
+        FROM images i LEFT JOIN targets t ON i.resolved_target_id = t.id
+        WHERE {where_sql}
+        GROUP BY {gk}
+        {having_sql}
+    ),
+    agg AS (
+        SELECT count(*) AS target_count, sum(total_integration) AS total_integration,
+               sum(total_frames) AS total_frames FROM grouped
+    ),
+    date_range AS (
+        SELECT min(CAST(i.capture_date AS DATE)) AS oldest,
+               max(CAST(i.capture_date AS DATE)) AS newest
+        FROM images i LEFT JOIN targets t ON i.resolved_target_id = t.id
+        WHERE {where_sql}
+    ),
+    page AS (
+        SELECT * FROM grouped ORDER BY total_integration DESC
+        LIMIT :page_size OFFSET :page_offset
     )
-    result = await session.execute(query)
-    rows = result.all()
+    SELECT (SELECT target_count FROM agg) AS agg_target_count,
+           (SELECT total_integration FROM agg) AS agg_total_integration,
+           (SELECT total_frames FROM agg) AS agg_total_frames,
+           (SELECT oldest FROM date_range) AS agg_oldest,
+           (SELECT newest FROM date_range) AS agg_newest,
+           p.target_key, p.primary_name, p.total_integration, p.total_frames, p.session_count
+    FROM page p
+    """)
+    params["page_size"] = page_size
+    params["page_offset"] = (page - 1) * page_size
 
-    # Build target aggregations in Python
-    # Group by resolved target ID, or by OBJECT header name for unresolved images
-    targets_map: dict[str, dict] = {}
-    sessions_map: dict[str, dict[str, dict]] = defaultdict(dict)
+    combined_result = await session.execute(combined_sql, params)
+    combined_rows = combined_result.all()
 
-    for image, target in rows:
-        # Determine grouping key: resolved target or OBJECT header
-        if target:
-            tid = str(target.id)
-            name = target.primary_name
+    if not combined_rows:
+        return TargetAggregationResponse(
+            targets=[],
+            aggregates=AggregateStats(
+                total_integration_seconds=0, target_count=0, total_frames=0, disk_usage_bytes=0,
+            ),
+            total_count=0, page=page, page_size=page_size,
+        )
+
+    first = combined_rows[0]
+    total_count = first.agg_target_count or 0
+    aggregates = AggregateStats(
+        total_integration_seconds=float(first.agg_total_integration or 0),
+        target_count=total_count,
+        total_frames=int(first.agg_total_frames or 0),
+        disk_usage_bytes=0,
+        oldest_date=str(first.agg_oldest) if first.agg_oldest else None,
+        newest_date=str(first.agg_newest) if first.agg_newest else None,
+    )
+
+    page_keys: list[str] = []
+    page_basics: dict[str, dict] = {}
+    for row in combined_rows:
+        tk = row.target_key
+        page_keys.append(tk)
+        page_basics[tk] = {
+            "target_key": tk,
+            "primary_name": row.primary_name,
+            "total_integration": float(row.total_integration),
+            "total_frames": int(row.total_frames),
+            "session_count": int(row.session_count),
+        }
+
+    # ---------------------------------------------------------------
+    # Phase 4: Detail query for current page's targets (raw SQL)
+    # ---------------------------------------------------------------
+    page_uuids = []
+    page_obj_names = []
+    has_uncategorized = False
+    for tk in page_keys:
+        if tk == "obj:__uncategorized__":
+            has_uncategorized = True
+        elif tk.startswith("obj:"):
+            page_obj_names.append(tk[4:])
         else:
-            object_name = (image.raw_headers or {}).get("OBJECT")
-            if not object_name:
-                tid = "obj:__uncategorized__"
-                name = "Uncategorized"
+            try:
+                page_uuids.append(str(uuid.UUID(tk)))
+            except ValueError:
+                pass
+
+    key_conds = []
+    if page_uuids:
+        key_conds.append("i.resolved_target_id = ANY(CAST(:page_uuids AS uuid[]))")
+        params["page_uuids"] = page_uuids
+    if page_obj_names:
+        key_conds.append("(i.resolved_target_id IS NULL AND i.raw_headers->>'OBJECT' = ANY(:page_obj_names))")
+        params["page_obj_names"] = page_obj_names
+    if has_uncategorized:
+        key_conds.append("(i.resolved_target_id IS NULL AND (NOT i.raw_headers ? 'OBJECT' OR i.raw_headers->>'OBJECT' = '' OR i.raw_headers->>'OBJECT' IS NULL))")
+
+    key_filter = f"({' OR '.join(key_conds)})" if key_conds else "FALSE"
+
+    detail_sql = text(f"""
+        SELECT CAST(i.resolved_target_id AS VARCHAR) AS target_uuid,
+               i.raw_headers->>'OBJECT' AS fits_object,
+               i.exposure_time, i.filter_used, i.camera, i.telescope, i.capture_date
+        FROM images i LEFT JOIN targets t ON i.resolved_target_id = t.id
+        WHERE {where_sql} AND {key_filter}
+    """)
+    detail_result = await session.execute(detail_sql, params)
+    detail_rows = detail_result.all()
+
+    # Build per-target detail maps
+    filter_dist: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
+    equipment_map: dict[str, set] = defaultdict(set)
+    sessions_detail: dict[str, dict[str, dict]] = defaultdict(dict)
+    aliases_map: dict[str, set] = defaultdict(set)
+
+    for row in detail_rows:
+        if row.target_uuid:
+            tk = row.target_uuid
+        else:
+            obj_name = row.fits_object
+            if not obj_name:
+                tk = "obj:__uncategorized__"
             else:
-                tid = f"obj:{object_name}"
-                name = object_name
+                tk = f"obj:{obj_name}"
 
-        if tid not in targets_map:
-            targets_map[tid] = {
-                "target_id": tid,
-                "primary_name": name,
-                "aliases_set": set(),
-                "total_integration_seconds": 0,
-                "total_frames": 0,
-                "filter_distribution": defaultdict(float),
-                "equipment_set": set(),
-            }
-        # Collect distinct FITS OBJECT names as human-readable aliases
-        fits_object = (image.raw_headers or {}).get("OBJECT")
-        if fits_object:
-            targets_map[tid]["aliases_set"].add(fits_object)
-        t = targets_map[tid]
-        exp = image.exposure_time or 0
-        t["total_integration_seconds"] += exp
-        t["total_frames"] += 1
-        f = normalize_filter(image.filter_used, filter_map)
-        cam = normalize_equipment(image.camera, cam_map)
-        tel = normalize_equipment(image.telescope, tel_map)
+        if tk not in page_basics:
+            continue
+
+        exp = row.exposure_time or 0
+        f = normalize_filter(row.filter_used, filter_map)
+        cam = normalize_equipment(row.camera, cam_map)
+        tel = normalize_equipment(row.telescope, tel_map)
+
         if f:
-            t["filter_distribution"][f] += exp
+            filter_dist[tk][f] += exp
         if cam:
-            t["equipment_set"].add(cam)
+            equipment_map[tk].add(cam)
         if tel:
-            t["equipment_set"].add(tel)
+            equipment_map[tk].add(tel)
 
-        # Session grouping
-        date_key = image.capture_date.strftime("%Y-%m-%d") if image.capture_date else "unknown"
-        if date_key not in sessions_map[tid]:
-            sessions_map[tid][date_key] = {
+        if row.fits_object:
+            aliases_map[tk].add(row.fits_object)
+
+        date_key = row.capture_date.strftime("%Y-%m-%d") if row.capture_date else "unknown"
+        if date_key not in sessions_detail[tk]:
+            sessions_detail[tk][date_key] = {
                 "session_date": date_key,
                 "integration_seconds": 0,
                 "frame_count": 0,
                 "filters_set": set(),
-                "hfr_values": [],
-                "fwhm_values": [],
-                "eccentricity_values": [],
-                "stars_values": [],
-                "guiding_rms_values": [],
-                "adu_mean_values": [],
-                "focuser_temp_values": [],
-                "ambient_temp_values": [],
-                "humidity_values": [],
-                "airmass_values": [],
             }
-        s = sessions_map[tid][date_key]
+        s = sessions_detail[tk][date_key]
         s["integration_seconds"] += exp
         s["frame_count"] += 1
         if f:
             s["filters_set"].add(f)
-        if image.median_hfr is not None:
-            s["hfr_values"].append(image.median_hfr)
-        if image.fwhm is not None:
-            s["fwhm_values"].append(image.fwhm)
-        if image.eccentricity is not None:
-            s["eccentricity_values"].append(image.eccentricity)
-        if image.detected_stars is not None:
-            s["stars_values"].append(image.detected_stars)
-        if image.guiding_rms_arcsec is not None:
-            s["guiding_rms_values"].append(image.guiding_rms_arcsec)
-        if image.adu_mean is not None:
-            s["adu_mean_values"].append(image.adu_mean)
-        if image.focuser_temp is not None:
-            s["focuser_temp_values"].append(image.focuser_temp)
-        if image.ambient_temp is not None:
-            s["ambient_temp_values"].append(image.ambient_temp)
-        if image.humidity is not None:
-            s["humidity_values"].append(image.humidity)
-        if image.airmass is not None:
-            s["airmass_values"].append(image.airmass)
 
-    # Assemble response
+    # ---------------------------------------------------------------
+    # Phase 5: Assemble the response
+    # ---------------------------------------------------------------
     target_list = []
-    for tid, t in targets_map.items():
-        all_sessions = sorted(sessions_map[tid].values(), key=lambda x: x["session_date"], reverse=True)
-        total_session_count = len(all_sessions)
+    for tk in page_keys:
+        basics = page_basics[tk]
+        sessions_list = sorted(
+            sessions_detail.get(tk, {}).values(),
+            key=lambda x: x["session_date"],
+            reverse=True,
+        )
+        total_session_count = basics["session_count"]
+        matched_session_count = len(sessions_list) if has_metric_filters else None
 
-        if hfr_min is not None or hfr_max is not None:
-            filtered_sessions = []
-            for s in all_sessions:
-                if not s["hfr_values"]:
-                    continue  # skip sessions with no HFR data
-                median_hfr = statistics.median(s["hfr_values"])
-                if hfr_min is not None and median_hfr < hfr_min:
-                    continue
-                if hfr_max is not None and median_hfr > hfr_max:
-                    continue
-                filtered_sessions.append(s)
-            if not filtered_sessions:
-                continue  # skip target entirely
-            build_sessions = filtered_sessions
-            matched_session_count = len(filtered_sessions)
-        else:
-            build_sessions = all_sessions
-            matched_session_count = None
-
-        if fwhm_min is not None or fwhm_max is not None:
-            filtered_sessions = []
-            for s in build_sessions:
-                if not s["fwhm_values"]:
-                    continue
-                median_fwhm = statistics.median(s["fwhm_values"])
-                if fwhm_min is not None and median_fwhm < fwhm_min:
-                    continue
-                if fwhm_max is not None and median_fwhm > fwhm_max:
-                    continue
-                filtered_sessions.append(s)
-            if not filtered_sessions:
-                continue
-            build_sessions = filtered_sessions
-            matched_session_count = len(filtered_sessions)
-
-        if eccentricity_min is not None or eccentricity_max is not None:
-            filtered_sessions = []
-            for s in build_sessions:
-                if not s["eccentricity_values"]:
-                    continue
-                median_ecc = statistics.median(s["eccentricity_values"])
-                if eccentricity_min is not None and median_ecc < eccentricity_min:
-                    continue
-                if eccentricity_max is not None and median_ecc > eccentricity_max:
-                    continue
-                filtered_sessions.append(s)
-            if not filtered_sessions:
-                continue
-            build_sessions = filtered_sessions
-            matched_session_count = len(filtered_sessions)
-
-        if stars_min is not None or stars_max is not None:
-            filtered_sessions = []
-            for s in build_sessions:
-                if not s["stars_values"]:
-                    continue
-                median_stars = statistics.median(s["stars_values"])
-                if stars_min is not None and median_stars < stars_min:
-                    continue
-                if stars_max is not None and median_stars > stars_max:
-                    continue
-                filtered_sessions.append(s)
-            if not filtered_sessions:
-                continue
-            build_sessions = filtered_sessions
-            matched_session_count = len(filtered_sessions)
-
-        if guiding_rms_min is not None or guiding_rms_max is not None:
-            filtered_sessions = []
-            for s in build_sessions:
-                if not s["guiding_rms_values"]:
-                    continue
-                median_rms = statistics.median(s["guiding_rms_values"])
-                if guiding_rms_min is not None and median_rms < guiding_rms_min:
-                    continue
-                if guiding_rms_max is not None and median_rms > guiding_rms_max:
-                    continue
-                filtered_sessions.append(s)
-            if not filtered_sessions:
-                continue
-            build_sessions = filtered_sessions
-            matched_session_count = len(filtered_sessions)
-
-        if adu_mean_min is not None or adu_mean_max is not None:
-            filtered_sessions = []
-            for s in build_sessions:
-                if not s["adu_mean_values"]:
-                    continue
-                median_adu = statistics.median(s["adu_mean_values"])
-                if adu_mean_min is not None and median_adu < adu_mean_min:
-                    continue
-                if adu_mean_max is not None and median_adu > adu_mean_max:
-                    continue
-                filtered_sessions.append(s)
-            if not filtered_sessions:
-                continue
-            build_sessions = filtered_sessions
-            matched_session_count = len(filtered_sessions)
-
-        if focuser_temp_min is not None or focuser_temp_max is not None:
-            filtered_sessions = []
-            for s in build_sessions:
-                if not s["focuser_temp_values"]:
-                    continue
-                median_ft = statistics.median(s["focuser_temp_values"])
-                if focuser_temp_min is not None and median_ft < focuser_temp_min:
-                    continue
-                if focuser_temp_max is not None and median_ft > focuser_temp_max:
-                    continue
-                filtered_sessions.append(s)
-            if not filtered_sessions:
-                continue
-            build_sessions = filtered_sessions
-            matched_session_count = len(filtered_sessions)
-
-        if ambient_temp_min is not None or ambient_temp_max is not None:
-            filtered_sessions = []
-            for s in build_sessions:
-                if not s["ambient_temp_values"]:
-                    continue
-                median_at = statistics.median(s["ambient_temp_values"])
-                if ambient_temp_min is not None and median_at < ambient_temp_min:
-                    continue
-                if ambient_temp_max is not None and median_at > ambient_temp_max:
-                    continue
-                filtered_sessions.append(s)
-            if not filtered_sessions:
-                continue
-            build_sessions = filtered_sessions
-            matched_session_count = len(filtered_sessions)
-
-        if humidity_min is not None or humidity_max is not None:
-            filtered_sessions = []
-            for s in build_sessions:
-                if not s["humidity_values"]:
-                    continue
-                median_hum = statistics.median(s["humidity_values"])
-                if humidity_min is not None and median_hum < humidity_min:
-                    continue
-                if humidity_max is not None and median_hum > humidity_max:
-                    continue
-                filtered_sessions.append(s)
-            if not filtered_sessions:
-                continue
-            build_sessions = filtered_sessions
-            matched_session_count = len(filtered_sessions)
-
-        if airmass_min is not None or airmass_max is not None:
-            filtered_sessions = []
-            for s in build_sessions:
-                if not s["airmass_values"]:
-                    continue
-                median_am = statistics.median(s["airmass_values"])
-                if airmass_min is not None and median_am < airmass_min:
-                    continue
-                if airmass_max is not None and median_am > airmass_max:
-                    continue
-                filtered_sessions.append(s)
-            if not filtered_sessions:
-                continue
-            build_sessions = filtered_sessions
-            matched_session_count = len(filtered_sessions)
-
-        sessions = []
-        for s in build_sessions:
-            sessions.append(SessionSummary(
+        sessions = [
+            SessionSummary(
                 session_date=s["session_date"],
                 integration_seconds=s["integration_seconds"],
                 frame_count=s["frame_count"],
                 filters_used=sorted(s["filters_set"]),
-            ))
+            )
+            for s in sessions_list
+        ]
+
         target_list.append(TargetAggregation(
-            target_id=t["target_id"],
-            primary_name=t["primary_name"],
-            aliases=sorted(t["aliases_set"]),
-            total_integration_seconds=t["total_integration_seconds"],
-            total_frames=t["total_frames"],
-            filter_distribution=dict(t["filter_distribution"]),
-            equipment=sorted(t["equipment_set"]),
+            target_id=basics["target_key"],
+            primary_name=basics["primary_name"],
+            aliases=sorted(aliases_map.get(tk, set())),
+            total_integration_seconds=basics["total_integration"],
+            total_frames=basics["total_frames"],
+            filter_distribution=dict(filter_dist.get(tk, {})),
+            equipment=sorted(equipment_map.get(tk, set())),
             sessions=sessions,
             matched_sessions=matched_session_count,
             total_sessions=total_session_count if matched_session_count is not None else None,
         ))
 
-    target_list.sort(key=lambda x: x.total_integration_seconds, reverse=True)
-
-    # Aggregates (computed across ALL matching targets, not just the current page)
-    total_count = len(target_list)
-    total_seconds = sum(t.total_integration_seconds for t in target_list)
-    total_frames = sum(t.total_frames for t in target_list)
-
-    all_dates = [s.session_date for t in target_list for s in t.sessions]
-    oldest_date = min(all_dates) if all_dates else None
-    newest_date = max(all_dates) if all_dates else None
-
-    aggregates = AggregateStats(
-        total_integration_seconds=total_seconds,
-        target_count=total_count,
-        total_frames=total_frames,
-        disk_usage_bytes=0,
-        oldest_date=oldest_date,
-        newest_date=newest_date,
-    )
-
-    # Paginate
-    start = (page - 1) * page_size
-    page_targets = target_list[start:start + page_size]
-
     return TargetAggregationResponse(
-        targets=page_targets,
+        targets=target_list,
         aggregates=aggregates,
         total_count=total_count,
         page=page,

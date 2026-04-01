@@ -35,7 +35,7 @@ const StatisticsPage: Component = () => {
 
             <EquipmentPerformance combos={data().equipment_performance} />
 
-            <div class="grid grid-cols-3 gap-4 [&>*]:border [&>*]:border-theme-border [&>*]:rounded-[var(--radius-md)] [&>*]:shadow-[var(--shadow-sm)]">
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 [&>*]:border [&>*]:border-theme-border [&>*]:rounded-[var(--radius-md)] [&>*]:shadow-[var(--shadow-sm)]">
               <FilterUsageChart usage={data().filter_usage} />
               <EquipmentInventory cameras={data().equipment.cameras} telescopes={data().equipment.telescopes} />
               <TopTargets targets={data().top_targets} />
@@ -43,7 +43,7 @@ const StatisticsPage: Component = () => {
 
             <ImagingTimeline timeline={data().timeline} />
 
-            <div class="grid grid-cols-2 gap-4 [&>*]:border [&>*]:border-theme-border [&>*]:rounded-[var(--radius-md)] [&>*]:shadow-[var(--shadow-sm)]">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 [&>*]:border [&>*]:border-theme-border [&>*]:rounded-[var(--radius-md)] [&>*]:shadow-[var(--shadow-sm)]">
               <StorageBreakdown
                 fitsBytes={data().storage.fits_bytes}
                 thumbnailBytes={data().storage.thumbnail_bytes}

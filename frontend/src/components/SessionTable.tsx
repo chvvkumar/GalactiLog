@@ -1,6 +1,8 @@
 import { Component, For } from "solid-js";
 import type { SessionSummary } from "../types";
 import FilterBadges from "./FilterBadges";
+import { useSettingsContext } from "./SettingsProvider";
+import { timezoneLabel } from "../utils/dateTime";
 
 function formatHours(seconds: number): string {
   return (seconds / 3600).toFixed(1) + "h";
@@ -10,12 +12,14 @@ const SessionTable: Component<{
   sessions: SessionSummary[];
   onDeepDive: (date: string) => void;
 }> = (props) => {
+  const ctx = useSettingsContext();
+  const tzLabel = () => timezoneLabel(ctx.timezone());
   return (
     <div class="border-t border-theme-border mt-2">
       <table class="w-full text-xs">
         <thead>
           <tr class="text-theme-text-secondary border-b border-theme-border">
-            <th class="text-left py-1.5 px-2 font-normal">Date (UTC)</th>
+            <th class="text-left py-1.5 px-2 font-normal">Date ({tzLabel()})</th>
             <th class="text-right py-1.5 px-2 font-normal">Frames</th>
             <th class="text-right py-1.5 px-2 font-normal">Integration</th>
             <th class="text-left py-1.5 px-2 font-normal">Filters</th>

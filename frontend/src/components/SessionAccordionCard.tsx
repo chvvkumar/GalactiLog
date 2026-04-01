@@ -6,6 +6,7 @@ import FilterBadges from "./FilterBadges";
 import SessionMetricsChart from "./SessionMetricsChart";
 import { useSettingsContext } from "./SettingsProvider";
 import { isFieldVisible } from "../utils/displaySettings";
+import { formatTime as formatTimeUtil, timezoneLabel } from "../utils/dateTime";
 
 function formatHours(seconds: number): string {
   return (seconds / 3600).toFixed(1) + "h";
@@ -44,7 +45,8 @@ const SessionAccordionCard: Component<{
   onCheckChange?: () => void;
 }> = (props) => {
   let cardRef: HTMLDivElement | undefined;
-  const { displaySettings } = useSettingsContext();
+  const settingsCtx = useSettingsContext();
+  const { displaySettings } = settingsCtx;
   const visible = (group: Parameters<typeof isFieldVisible>[1], field: string) =>
     isFieldVisible(displaySettings(), group, field);
   const [showFrames, setShowFrames] = createSignal(false);
@@ -295,7 +297,7 @@ const SessionAccordionCard: Component<{
                   <span>
                     <span class="text-theme-text-tertiary">Time:</span>{" "}
                     <span class="font-bold text-metric-time">
-                      {detail().first_frame_time ? `${formatTime(detail().first_frame_time!)} → ${detail().last_frame_time ? formatTime(detail().last_frame_time!) : ""}` : "—"}
+                      {detail().first_frame_time ? `${formatTimeUtil(detail().first_frame_time!, settingsCtx.timezone())} → ${detail().last_frame_time ? formatTimeUtil(detail().last_frame_time!, settingsCtx.timezone()) : ""}` : "—"}
                     </span>
                   </span>
                 </div>
@@ -348,7 +350,7 @@ const SessionAccordionCard: Component<{
                       <table class="w-full text-label">
                         <thead class="sticky top-0 bg-theme-base">
                           <tr class="text-theme-text-secondary border-b border-theme-border">
-                            <SortHeader label="Time (UTC)" column="timestamp" current={sortColumn()} asc={sortAsc()} onSort={toggleSort} />
+                            <SortHeader label={`Time (${timezoneLabel(settingsCtx.timezone())})`} column="timestamp" current={sortColumn()} asc={sortAsc()} onSort={toggleSort} />
                             <SortHeader label="Filter" column="filter_used" current={sortColumn()} asc={sortAsc()} onSort={toggleSort} align="center" />
                             <SortHeader label="Exp" column="exposure_time" current={sortColumn()} asc={sortAsc()} onSort={toggleSort} align="right" />
                             <Show when={visible("quality", "hfr")}>
@@ -438,7 +440,7 @@ const SessionAccordionCard: Component<{
                           <For each={sortedFrames()}>
                             {(frame) => (
                               <tr class={`border-b border-theme-border/30 hover:bg-theme-hover transition-colors duration-100 ${isOutlier(frame) ? "bg-theme-error/20" : ""}`}>
-                                <td class="py-1 px-2 text-theme-text-primary">{formatTime(frame.timestamp)}</td>
+                                <td class="py-1 px-2 text-theme-text-primary">{formatTimeUtil(frame.timestamp, settingsCtx.timezone())}</td>
                                 <td class="py-1 px-2 text-theme-text-primary text-center">{frame.filter_used ?? "—"}</td>
                                 <td class="py-1 px-2 text-theme-text-primary text-right tabular-nums">{frame.exposure_time ?? "—"}s</td>
                                 <Show when={visible("quality", "hfr")}>
@@ -579,14 +581,5 @@ const SortHeader: Component<{
     {props.current === props.column ? (props.asc ? " ↑" : " ↓") : ""}
   </th>
 );
-
-function formatTime(iso: string): string {
-  try {
-    const d = new Date(iso);
-    return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", timeZone: "UTC" });
-  } catch {
-    return iso;
-  }
-}
 
 export default SessionAccordionCard;

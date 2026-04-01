@@ -21,14 +21,6 @@ async def lifespan(app: FastAPI):
     if not os.environ.get("GALACTILOG_JWT_SECRET"):
         logger.warning("GALACTILOG_JWT_SECRET is not set — using auto-generated secret. Sessions will not survive restarts. Set GALACTILOG_JWT_SECRET in .env for persistence.")
 
-    # Ensure database tables exist on startup
-    from app.database import engine
-    from app.models import Base
-
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    logger.info("Database tables verified/created")
-
     # Auto-create accounts from env vars if they don't already exist
     if settings.admin_password or settings.viewer_password:
         from app.database import async_session

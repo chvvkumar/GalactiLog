@@ -1,7 +1,7 @@
 """Tests for the backfill_csv_metrics Celery task and /scan/backfill-csv endpoint.
 
-NOTE: app.worker.tasks runs Base.metadata.create_all() at module-level import, which
-requires a live DB. We intercept this via sys.modules stubbing before first import.
+NOTE: app.worker.tasks creates a sync DB engine at module-level import.
+We intercept this via sys.modules stubbing before first import.
 """
 import sys
 import types
@@ -30,7 +30,7 @@ if "fitsio" not in sys.modules:
 
 
 def _bootstrap_tasks_module():
-    """Import app.worker.tasks with DB create_all mocked out."""
+    """Import app.worker.tasks with DB engine mocked out."""
     # If already imported (e.g. by another test file), just return it
     if "app.worker.tasks" in sys.modules:
         return sys.modules["app.worker.tasks"]

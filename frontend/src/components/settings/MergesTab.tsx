@@ -3,9 +3,12 @@ import { api } from "../../api/client";
 import { showToast } from "../Toast";
 import { useAuth } from "../AuthProvider";
 import type { MergeCandidateResponse, MergedTargetResponse } from "../../types";
+import { formatDate } from "../../utils/dateTime";
+import { useSettingsContext } from "../SettingsProvider";
 
 export const MergesTab: Component = () => {
   const { isAdmin } = useAuth();
+  const settingsCtx = useSettingsContext();
   const [candidates, setCandidates] = createSignal<MergeCandidateResponse[]>([]);
   const [merged, setMerged] = createSignal<MergedTargetResponse[]>([]);
   const [detecting, setDetecting] = createSignal(false);
@@ -161,7 +164,7 @@ export const MergesTab: Component = () => {
                       <span class="text-theme-text-secondary text-xs mx-2">&larr; merged into &rarr;</span>
                       <span class="text-theme-text-primary text-sm font-medium">{m.merged_into_name}</span>
                       <div class="text-xs text-theme-text-secondary mt-0.5">
-                        {m.image_count} images {" \u00b7 "} {new Date(m.merged_at).toLocaleDateString([], { timeZone: "UTC" })}
+                        {m.image_count} images {" \u00b7 "} {formatDate(m.merged_at, settingsCtx.timezone())}
                       </div>
                     </div>
                     <Show when={isAdmin()}>

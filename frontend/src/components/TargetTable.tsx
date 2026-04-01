@@ -1,6 +1,8 @@
 import { Component, For, createMemo, createSignal } from "solid-js";
 import type { TargetAggregation } from "../types";
 import TargetRow from "./TargetRow";
+import { useSettingsContext } from "./SettingsProvider";
+import { timezoneLabel } from "../utils/dateTime";
 
 type SortKey = "name" | "integration" | "lastSession" | "equipment";
 type SortDir = "asc" | "desc";
@@ -15,6 +17,8 @@ function getDisplayName(t: TargetAggregation): string {
 }
 
 const TargetTable: Component<{ targets: TargetAggregation[] }> = (props) => {
+  const ctx = useSettingsContext();
+  const tzLabel = () => timezoneLabel(ctx.timezone());
   let initial: { key: SortKey; dir: SortDir } = { key: "integration", dir: "desc" };
   try {
     const stored = localStorage.getItem("dashboard_sort");
@@ -97,7 +101,7 @@ const TargetTable: Component<{ targets: TargetAggregation[] }> = (props) => {
             Equipment Profile{arrow("equipment")}
           </th>
           <th class={headerClass("lastSession")} onClick={() => toggleSort("lastSession")}>
-            Last Session (UTC){arrow("lastSession")}
+            Last Session ({tzLabel()}){arrow("lastSession")}
           </th>
           <th class={plainHeaderClass}></th>
         </tr>

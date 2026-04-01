@@ -339,7 +339,9 @@ async def db_summary(session: AsyncSession = Depends(get_session), user: User = 
             (SELECT COUNT(*) FROM simbad_cache) AS cached_simbad,
             (SELECT COUNT(*) FROM simbad_cache WHERE main_id IS NULL) AS cached_negative,
             (SELECT COUNT(*) FROM merge_candidates WHERE status = 'pending') AS pending_merges,
-            (SELECT COUNT(*) FROM images WHERE detected_stars IS NOT NULL) AS csv_enriched
+            (SELECT COUNT(*) FROM images WHERE detected_stars IS NOT NULL) AS csv_enriched,
+            (SELECT COUNT(*) FROM vizier_cache) AS cached_vizier,
+            (SELECT COUNT(*) FROM vizier_cache WHERE size_major IS NULL AND size_minor IS NULL) AS cached_vizier_negative
     """))
     row = result.one()
     return {
@@ -351,6 +353,8 @@ async def db_summary(session: AsyncSession = Depends(get_session), user: User = 
         "cached_negative": row[5],
         "pending_merges": row[6],
         "csv_enriched": row[7],
+        "cached_vizier": row[8],
+        "cached_vizier_negative": row[9],
     }
 
 

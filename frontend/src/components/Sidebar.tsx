@@ -34,7 +34,7 @@ const Sidebar: Component = () => {
   };
 
   return (
-    <aside class="w-72 min-h-[calc(100vh-57px)] border-r border-theme-border-em p-4 space-y-6 overflow-y-auto">
+    <aside class="w-72 min-h-0 max-h-[calc(100vh-57px)] border-r border-theme-border-em p-4 space-y-6 overflow-y-auto">
       <Show when={targetData()}>
         {(data) => (
           <section class="flex flex-wrap gap-x-4 gap-y-1 text-sm">
