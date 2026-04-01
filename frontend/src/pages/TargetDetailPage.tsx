@@ -153,7 +153,7 @@ const TargetDetailPage: Component = () => {
                     </Show>
                     <Show when={detail().v_mag !== null}>
                       <span>·</span>
-                      <span>V {detail().v_mag!.toFixed(1)}</span>
+                      <span>Visual Mag. {detail().v_mag!.toFixed(1)}</span>
                     </Show>
                     <Show when={detail().surface_brightness !== null}>
                       <span>·</span>
