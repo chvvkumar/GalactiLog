@@ -7,12 +7,12 @@ const TargetFeed: Component = () => {
   const { targetData, page, totalPages, totalCount, setPage, pageSize, setPageSize } = useDashboardFilters();
   const PAGE_SIZES = [10, 25, 50, 100, 250];
 
-  // Show loading as a toast; dismiss 1s after data arrives
+  // Show loading toast; dismiss immediately when data arrives
   createEffect(() => {
     if (targetData.loading) {
       showToast("Loading targets...", "success", 10000);
     } else {
-      dismissToast(1000);
+      dismissToast();
     }
   });
 
