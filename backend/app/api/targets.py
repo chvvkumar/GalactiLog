@@ -537,15 +537,28 @@ async def list_targets_aggregated(
             elif op_str == "neq":
                 base_filter.append(json_field != val)
             elif op_str == "gt":
-                base_filter.append(cast(json_field, Float) > float(val))
+                try:
+                    base_filter.append(cast(json_field, Float) > float(val))
+                except ValueError:
+                    continue
             elif op_str == "lt":
-                base_filter.append(cast(json_field, Float) < float(val))
+                try:
+                    base_filter.append(cast(json_field, Float) < float(val))
+                except ValueError:
+                    continue
             elif op_str == "gte":
-                base_filter.append(cast(json_field, Float) >= float(val))
+                try:
+                    base_filter.append(cast(json_field, Float) >= float(val))
+                except ValueError:
+                    continue
             elif op_str == "lte":
-                base_filter.append(cast(json_field, Float) <= float(val))
+                try:
+                    base_filter.append(cast(json_field, Float) <= float(val))
+                except ValueError:
+                    continue
             elif op_str == "contains":
-                base_filter.append(json_field.ilike(f"%{val}%"))
+                escaped_val = val.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+                base_filter.append(json_field.ilike(f"%{escaped_val}%"))
 
     # ---------------------------------------------------------------
     # Phase 1: SQL GROUP BY to get paginated target keys with totals
