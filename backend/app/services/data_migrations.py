@@ -14,12 +14,13 @@ from app.models.app_metadata import AppMetadata
 from app.services.simbad import (
     curate_simbad_result, get_cached_simbad, normalize_object_name,
 )
+from app.services.openngc import load_openngc_csv, enrich_target_from_openngc
 
 logger = logging.getLogger(__name__)
 
 # Current data version — bump this and add a migration function when
 # code changes affect how stored target data is derived.
-DATA_VERSION = 2
+DATA_VERSION = 3
 
 
 def _migrate_v1_fix_catalog_designations(session: Session) -> str:
@@ -111,11 +112,31 @@ def _migrate_v1_fix_catalog_designations(session: Session) -> str:
     return "; ".join(parts) if parts else "No changes needed"
 
 
+def _migrate_v3_load_openngc(session: Session) -> str:
+    """Load OpenNGC catalog and enrich existing targets with size/magnitude data."""
+    from app.models import Target
+
+    loaded = load_openngc_csv(session)
+
+    targets = session.execute(
+        select(Target).where(Target.merged_into_id.is_(None))
+    ).scalars().all()
+
+    enriched = 0
+    for target in targets:
+        if enrich_target_from_openngc(session, target):
+            enriched += 1
+
+    session.flush()
+    return f"Loaded {loaded} OpenNGC entries, enriched {enriched}/{len(targets)} targets"
+
+
 # Registry: version number -> (description, migration function)
 # Version numbers must be sequential starting from 1.
 MIGRATIONS: dict[int, tuple[str, Callable[[Session], str]]] = {
     1: ("Fix catalog designations (strip NAME prefix, re-derive from cache)", _migrate_v1_fix_catalog_designations),
     2: ("Re-derive designations with improved cache lookup (fixes targets v1 missed)", _migrate_v1_fix_catalog_designations),
+    3: ("Load OpenNGC catalog and enrich targets with size/magnitude", _migrate_v3_load_openngc),
 }
 
 
