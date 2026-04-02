@@ -48,12 +48,13 @@ async def lifespan(app: FastAPI):
                 logger.info("%s user '%s' created from environment variables", role.value.capitalize(), username)
             await session.commit()
 
-    # Pre-warm astropy coordinate transforms (first call downloads IERS data
-    # and builds frames, which takes several seconds and would block /stats)
+    # Pre-warm astropy coordinate transforms in a thread so we don't block
+    # the event loop (first call downloads IERS data and builds frames)
+    import asyncio
     try:
         from datetime import date
         from app.services.astro_night import dark_hours_for_night
-        dark_hours_for_night(date(2025, 1, 1), 33.0, -117.0)
+        await asyncio.to_thread(dark_hours_for_night, date(2025, 1, 1), 33.0, -117.0)
         logger.info("Astropy coordinate transforms warmed up")
     except Exception as e:
         logger.warning("Astropy warmup failed (efficiency metrics may be slow on first request): %s", e)

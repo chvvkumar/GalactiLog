@@ -398,48 +398,54 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
         IngestEntry(date=str(r[0]), files_added=r[1]) for r in ingest_result.all()
     ]
 
-    # --- Efficiency computation (CPU-bound, done after all DB work) ---
+    # --- Efficiency computation (CPU-bound, run in thread to avoid blocking event loop) ---
+    import asyncio
     from datetime import date as date_type
 
-    timeline_monthly: list[TimelineDetailEntry] = []
-    for entry in timeline:
-        eff = None
-        if site_coords:
-            year, month = map(int, entry.month.split("-"))
-            dark_h = dark_hours_for_month(year, month, site_coords.latitude, site_coords.longitude)
-            if dark_h > 0:
-                eff = round((entry.integration_seconds / 3600) / dark_h * 100, 1)
-        timeline_monthly.append(TimelineDetailEntry(
-            period=entry.month,
-            integration_seconds=entry.integration_seconds,
-            efficiency_pct=eff,
-        ))
+    def _compute_efficiency():
+        tl_monthly: list[TimelineDetailEntry] = []
+        for entry in timeline:
+            eff = None
+            if site_coords:
+                year, month = map(int, entry.month.split("-"))
+                dark_h = dark_hours_for_month(year, month, site_coords.latitude, site_coords.longitude)
+                if dark_h > 0:
+                    eff = round((entry.integration_seconds / 3600) / dark_h * 100, 1)
+            tl_monthly.append(TimelineDetailEntry(
+                period=entry.month,
+                integration_seconds=entry.integration_seconds,
+                efficiency_pct=eff,
+            ))
 
-    timeline_weekly: list[TimelineDetailEntry] = []
-    for period, secs in weekly_raw:
-        eff = None
-        if site_coords:
-            parts = period.split("-W")
-            year, week = int(parts[0]), int(parts[1])
-            dark_h = dark_hours_for_week(year, week, site_coords.latitude, site_coords.longitude)
-            if dark_h > 0:
-                eff = round((secs / 3600) / dark_h * 100, 1)
-        timeline_weekly.append(TimelineDetailEntry(
-            period=period, integration_seconds=secs, efficiency_pct=eff,
-        ))
+        tl_weekly: list[TimelineDetailEntry] = []
+        for period, secs in weekly_raw:
+            eff = None
+            if site_coords:
+                parts = period.split("-W")
+                year, week = int(parts[0]), int(parts[1])
+                dark_h = dark_hours_for_week(year, week, site_coords.latitude, site_coords.longitude)
+                if dark_h > 0:
+                    eff = round((secs / 3600) / dark_h * 100, 1)
+            tl_weekly.append(TimelineDetailEntry(
+                period=period, integration_seconds=secs, efficiency_pct=eff,
+            ))
 
-    timeline_daily: list[TimelineDetailEntry] = []
-    for period, secs in daily_raw:
-        eff = None
-        if site_coords:
-            parts = period.split("-")
-            d = date_type(int(parts[0]), int(parts[1]), int(parts[2]))
-            dark_h = dark_hours_for_night(d, site_coords.latitude, site_coords.longitude)
-            if dark_h > 0:
-                eff = round((secs / 3600) / dark_h * 100, 1)
-        timeline_daily.append(TimelineDetailEntry(
-            period=period, integration_seconds=secs, efficiency_pct=eff,
-        ))
+        tl_daily: list[TimelineDetailEntry] = []
+        for period, secs in daily_raw:
+            eff = None
+            if site_coords:
+                parts = period.split("-")
+                d = date_type(int(parts[0]), int(parts[1]), int(parts[2]))
+                dark_h = dark_hours_for_night(d, site_coords.latitude, site_coords.longitude)
+                if dark_h > 0:
+                    eff = round((secs / 3600) / dark_h * 100, 1)
+            tl_daily.append(TimelineDetailEntry(
+                period=period, integration_seconds=secs, efficiency_pct=eff,
+            ))
+
+        return tl_monthly, tl_weekly, tl_daily
+
+    timeline_monthly, timeline_weekly, timeline_daily = await asyncio.to_thread(_compute_efficiency)
 
     return StatsResponse(
         overview=overview,
