@@ -335,14 +335,64 @@ COMMON_NAME_MAP: dict[str, str] = {
     "rho oph": "rho Oph",
     "cave nebula": "Sh2-155",
     "jellyfish nebula": "IC 443",
+    "caldwell 1": "NGC 188",
+    "caldwell 2": "NGC 40",
+    "caldwell 3": "NGC 4236",
     "caldwell 4": "NGC 7023",
+    "caldwell 5": "IC 342",
+    "caldwell 6": "NGC 6543",
+    "caldwell 7": "NGC 2403",
+    "caldwell 8": "NGC 559",
+    "caldwell 9": "Sh2-155",
+    "caldwell 10": "NGC 663",
+    "caldwell 11": "NGC 7635",
+    "caldwell 12": "NGC 6946",
+    "caldwell 13": "NGC 457",
+    "caldwell 14": "NGC 869",
+    "caldwell 15": "NGC 6826",
+    "caldwell 16": "NGC 7243",
+    "caldwell 17": "NGC 147",
+    "caldwell 18": "NGC 185",
+    "caldwell 19": "IC 5146",
+    "caldwell 20": "NGC 7000",
+    "caldwell 21": "NGC 4449",
+    "caldwell 22": "NGC 7662",
+    "caldwell 23": "NGC 891",
+    "caldwell 24": "NGC 1275",
+    "caldwell 25": "NGC 2419",
+    "caldwell 26": "NGC 4244",
+    "caldwell 27": "NGC 6888",
+    "caldwell 28": "NGC 752",
+    "caldwell 29": "NGC 5005",
+    "caldwell 30": "NGC 7331",
+    "caldwell 31": "IC 405",
+    "caldwell 32": "NGC 4631",
+    "caldwell 33": "NGC 6992",
+    "caldwell 34": "NGC 6960",
+    "caldwell 35": "NGC 4889",
+    "caldwell 36": "NGC 4559",
+    "caldwell 37": "NGC 6885",
     "caldwell 38": "NGC 4565",
+    "caldwell 39": "NGC 2392",
+    "caldwell 40": "NGC 3626",
+    "caldwell 41": "Melotte 25",
+    "caldwell 42": "NGC 7006",
+    "caldwell 43": "NGC 7814",
+    "caldwell 44": "NGC 7479",
+    "caldwell 45": "NGC 5248",
+    "caldwell 46": "NGC 2261",
+    "caldwell 47": "NGC 6934",
+    "caldwell 48": "NGC 2775",
+    "caldwell 49": "NGC 2237",
+    "caldwell 50": "NGC 2244",
     "triangulum pinwheel": "M 33",
     "andromeda galaxy": "M 31",
     "seagull nebula": "IC 2177",
     "seagull's wings": "IC 2177",
     "spider nebula": "IC 417",
     "casper the friendly ghost nebula": "Sh2-136",
+    "hickson 44": "HCG 44",
+    "ou 4": "PN Ou 4",
 }
 
 # Strip "Panel N" suffix to get the base object name
@@ -351,7 +401,6 @@ _PANEL_RE = re.compile(r"\s+Panel\s+\d+$", re.IGNORECASE)
 
 _SH2_RE = re.compile(r"^Sh2[\s\-_]+(\d+)$", re.IGNORECASE)
 _LBN_RE = re.compile(r"^LBN[\s\-_]+(\d+)$", re.IGNORECASE)
-_CALDWELL_RE = re.compile(r"^Caldwell\s+(\d+)$", re.IGNORECASE)
 
 
 def _get_simbad_id(object_name: str) -> str:
@@ -363,10 +412,14 @@ def _get_simbad_id(object_name: str) -> str:
     if key in COMMON_NAME_MAP:
         return COMMON_NAME_MAP[key]
 
-    # Caldwell catalog: "Caldwell 7" -> "C 7" (SIMBAD format)
-    m = _CALDWELL_RE.match(base)
-    if m:
-        return f"C {m.group(1)}"
+    # Strip descriptive suffix after " - " (e.g. "SH2-224 - Rice Hat Nebula" -> "SH2-224")
+    if " - " in base:
+        base_part = base.split(" - ", 1)[0].strip()
+        base_key = base_part.lower()
+        if base_key in COMMON_NAME_MAP:
+            return COMMON_NAME_MAP[base_key]
+        # Re-run catalog matchers on the stripped base
+        base = base_part
 
     # Sharpless catalog: "Sh2 174" -> "SH 2-174"
     m = _SH2_RE.match(base)
