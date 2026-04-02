@@ -1,7 +1,8 @@
 import { Component, Show, createSignal, createResource } from "solid-js";
 import { api } from "../api/client";
+import { useStats } from "../store/stats";
 import CorrelationChart from "../components/analysis/CorrelationChart";
-import type { CorrelationResponse, EquipmentList } from "../types";
+import type { CorrelationResponse } from "../types";
 
 const PREBUILT_CHARTS = [
   { x: "humidity", y: "hfr", title: "HFR vs Humidity — When is it too humid to image?" },
@@ -36,7 +37,7 @@ const Y_OPTIONS = [
 ];
 
 const AnalysisPage: Component = () => {
-  const [equipment] = createResource(() => api.getEquipment());
+  const { stats } = useStats();
   const [telescope, setTelescope] = createSignal<string | undefined>(undefined);
   const [camera, setCamera] = createSignal<string | undefined>(undefined);
   const [granularity, setGranularity] = createSignal<"frame" | "session">("frame");
@@ -69,17 +70,15 @@ const AnalysisPage: Component = () => {
     fetchChart(customX(), customY())
   );
 
-  // Build equipment combo list
+  // Use actual observed equipment combos from stats (same as Statistics page)
   const combos = () => {
-    const eq = equipment();
-    if (!eq) return [];
-    const result: { telescope: string; camera: string; label: string }[] = [];
-    for (const t of eq.telescopes) {
-      for (const c of eq.cameras) {
-        result.push({ telescope: t.name, camera: c.name, label: `${t.name} + ${c.name}` });
-      }
-    }
-    return result;
+    const s = stats();
+    if (!s) return [];
+    return s.equipment_performance.map((c) => ({
+      telescope: c.telescope,
+      camera: c.camera,
+      label: `${c.telescope} + ${c.camera}`,
+    }));
   };
 
   const selectClass = "text-xs bg-theme-elevated border border-theme-border rounded px-2 py-1 text-theme-text-primary";

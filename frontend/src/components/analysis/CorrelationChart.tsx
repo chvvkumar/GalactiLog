@@ -34,6 +34,64 @@ const METRIC_LABELS: Record<string, string> = {
   adu_stdev: "ADU StDev",
 };
 
+const METRIC_SHORT: Record<string, string> = {
+  humidity: "humidity",
+  wind_speed: "wind",
+  ambient_temp: "temperature",
+  dew_point: "dew point",
+  pressure: "pressure",
+  cloud_cover: "cloud cover",
+  sky_quality: "sky quality",
+  focuser_temp: "focuser temp",
+  airmass: "airmass",
+  sensor_temp: "sensor temp",
+  hfr: "HFR",
+  fwhm: "FWHM",
+  eccentricity: "eccentricity",
+  guiding_rms: "guiding RMS",
+  guiding_rms_ra: "RA guiding",
+  guiding_rms_dec: "DEC guiding",
+  detected_stars: "star count",
+  adu_mean: "ADU mean",
+  adu_median: "ADU median",
+  adu_stdev: "ADU noise",
+};
+
+function describeCorrelation(data: CorrelationResponse): string {
+  const { trend, x_metric, y_metric, points } = data;
+  if (!trend || points.length < 3) return `Not enough data to determine a pattern (${points.length} points).`;
+
+  const xName = METRIC_SHORT[x_metric] || x_metric;
+  const yName = METRIC_SHORT[y_metric] || y_metric;
+  const r2 = trend.r_squared;
+  const rising = trend.slope > 0;
+
+  // Strength description
+  let strength: string;
+  let verdict: string;
+  if (r2 < 0.05) {
+    strength = "No meaningful correlation";
+    verdict = `${xName} does not appear to affect your ${yName}.`;
+  } else if (r2 < 0.15) {
+    strength = "Weak correlation";
+    verdict = rising
+      ? `${yName} tends to increase slightly with higher ${xName}, but the effect is minor.`
+      : `${yName} tends to decrease slightly with higher ${xName}, but the effect is minor.`;
+  } else if (r2 < 0.4) {
+    strength = "Moderate correlation";
+    verdict = rising
+      ? `Higher ${xName} is associated with worse ${yName}. Consider this a factor in your imaging conditions.`
+      : `Higher ${xName} is associated with better ${yName}. This is a meaningful pattern in your data.`;
+  } else {
+    strength = "Strong correlation";
+    verdict = rising
+      ? `${xName} has a strong negative impact on your ${yName}. This is a key factor at your site.`
+      : `${xName} strongly improves your ${yName}. This is a key factor at your site.`;
+  }
+
+  return `${strength} (R²=${r2.toFixed(2)}). ${verdict}`;
+}
+
 interface Props {
   data: CorrelationResponse | undefined;
   loading: boolean;
@@ -134,9 +192,10 @@ const CorrelationChart: Component<Props> = (props) => {
         )}
         <canvas ref={canvasRef} />
       </div>
-      {props.data?.trend && (
-        <div class="text-xs text-theme-text-secondary mt-1">
-          R&sup2; = {props.data.trend.r_squared.toFixed(3)} &middot; {props.data.points.length} points
+      {props.data && props.data.points.length > 0 && (
+        <div class="text-xs text-theme-text-secondary mt-2 leading-relaxed">
+          {describeCorrelation(props.data)}
+          <span class="opacity-60"> ({props.data.points.length} points)</span>
         </div>
       )}
     </div>
