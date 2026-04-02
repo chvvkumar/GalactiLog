@@ -624,11 +624,21 @@ export interface MosaicDetailResponse {
   panels: PanelStats[];
 }
 
+export interface SuggestionPanelSession {
+  panel_label: string;
+  object_name: string;
+  date: string;
+  frames: number;
+  integration_seconds: number;
+  filter_used: string | null;
+}
+
 export interface MosaicSuggestionResponse {
   id: string;
   suggested_name: string;
   target_ids: string[];
   panel_labels: string[];
   target_names: Record<string, string>;
+  sessions: SuggestionPanelSession[];
   status: string;
 }

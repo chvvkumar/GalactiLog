@@ -57,10 +57,20 @@ class MosaicDetailResponse(BaseModel):
     panels: list[PanelStats]
 
 
+class SuggestionPanelSession(BaseModel):
+    panel_label: str
+    object_name: str
+    date: str
+    frames: int
+    integration_seconds: float
+    filter_used: str | None = None
+
+
 class MosaicSuggestionResponse(BaseModel):
     id: str
     suggested_name: str
     target_ids: list[str]
     panel_labels: list[str]
     target_names: dict[str, str]
+    sessions: list[SuggestionPanelSession]
     status: str

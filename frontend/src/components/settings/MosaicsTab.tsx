@@ -305,6 +305,8 @@ export const MosaicsTab: Component = () => {
             <For each={suggestions()}>
               {(s) => {
                 const uniqueTargets = () => [...new Set(s.target_ids)];
+                const totalFrames = () => s.sessions.reduce((a, r) => a + r.frames, 0);
+                const totalInt = () => s.sessions.reduce((a, r) => a + r.integration_seconds, 0);
                 return (
                   <div class="border border-theme-border rounded-[var(--radius-sm)] overflow-hidden">
                     <button
@@ -316,7 +318,11 @@ export const MosaicsTab: Component = () => {
                           {s.suggested_name}
                         </span>
                         <div class="text-xs text-theme-text-secondary mt-0.5">
-                          {s.panel_labels.length} panels: {s.panel_labels.join(", ")}
+                          {s.panel_labels.length} panels
+                          {" \u00b7 "}
+                          {totalFrames()} frames
+                          {" \u00b7 "}
+                          {formatHours(totalInt())}
                         </div>
                       </div>
                       <span class="text-theme-text-secondary text-xs ml-2">
@@ -325,33 +331,53 @@ export const MosaicsTab: Component = () => {
                     </button>
 
                     <Show when={expandedSuggestion() === s.id}>
-                      <div class="p-3 border-t border-theme-border space-y-3">
-                        {/* Target details */}
-                        <div class="space-y-1.5">
-                          <div class="text-xs text-theme-text-secondary font-medium uppercase tracking-wide">Targets</div>
+                      <div class="border-t border-theme-border">
+                        {/* Target link */}
+                        <div class="px-3 pt-3 pb-1">
                           <For each={uniqueTargets()}>
-                            {(tid) => {
-                              const panelsForTarget = () =>
-                                s.panel_labels.filter((_, i) => s.target_ids[i] === tid);
-                              return (
-                                <div class="flex items-center gap-2 p-2 bg-theme-base/30 border border-theme-border/50 rounded-[var(--radius-sm)]">
-                                  <a
-                                    href={`/targets/${tid}`}
-                                    class="text-sm text-theme-accent hover:underline flex-1"
-                                  >
-                                    {s.target_names[tid] || tid}
-                                  </a>
-                                  <span class="text-xs text-theme-text-secondary">
-                                    {panelsForTarget().join(", ")}
-                                  </span>
-                                </div>
-                              );
-                            }}
+                            {(tid) => (
+                              <a
+                                href={`/targets/${tid}`}
+                                class="text-xs text-theme-accent hover:underline"
+                              >
+                                {s.target_names[tid] || tid}
+                              </a>
+                            )}
                           </For>
                         </div>
 
+                        {/* Session table */}
+                        <Show when={s.sessions.length > 0}>
+                          <table class="w-full text-xs">
+                            <thead>
+                              <tr class="text-theme-text-secondary border-b border-theme-border/50">
+                                <th class="text-left px-3 py-1.5 font-medium">Panel</th>
+                                <th class="text-left px-3 py-1.5 font-medium">OBJECT</th>
+                                <th class="text-left px-3 py-1.5 font-medium">Date</th>
+                                <th class="text-left px-3 py-1.5 font-medium">Filter</th>
+                                <th class="text-right px-3 py-1.5 font-medium">Frames</th>
+                                <th class="text-right px-3 py-1.5 font-medium">Integration</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              <For each={s.sessions}>
+                                {(sess) => (
+                                  <tr class="border-b border-theme-border/30 hover:bg-theme-base/30">
+                                    <td class="px-3 py-1.5 text-theme-text-primary">{sess.panel_label}</td>
+                                    <td class="px-3 py-1.5 text-theme-text-secondary">{sess.object_name}</td>
+                                    <td class="px-3 py-1.5 text-theme-text-secondary">{sess.date}</td>
+                                    <td class="px-3 py-1.5 text-theme-text-secondary">{sess.filter_used || "\u2014"}</td>
+                                    <td class="px-3 py-1.5 text-theme-text-secondary text-right">{sess.frames}</td>
+                                    <td class="px-3 py-1.5 text-theme-text-secondary text-right">{formatHours(sess.integration_seconds)}</td>
+                                  </tr>
+                                )}
+                              </For>
+                            </tbody>
+                          </table>
+                        </Show>
+
                         <Show when={isAdmin()}>
-                          <div class="flex gap-2 pt-1">
+                          <div class="flex gap-2 px-3 py-2">
                             <button
                               onClick={() => handleAccept(s)}
                               class="px-2.5 py-1 text-xs border border-theme-accent/50 text-theme-accent rounded-[var(--radius-sm)] hover:bg-theme-accent/10 transition-colors"

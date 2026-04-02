@@ -131,6 +131,8 @@ async def get_suggestions(
     session: AsyncSession = Depends(get_session),
     user: User = Depends(get_current_user),
 ):
+    from app.schemas.mosaic import SuggestionPanelSession
+
     q = select(MosaicSuggestion).where(MosaicSuggestion.status == "pending")
     rows = (await session.execute(q)).scalars().all()
 
@@ -142,17 +144,50 @@ async def get_suggestions(
         for tid, tname in (await session.execute(tq)).all():
             name_map[str(tid)] = tname
 
-    return [
-        MosaicSuggestionResponse(
+    # Fetch per-panel session summaries for all suggestions in one query.
+    # Build OBJECT patterns from base name + panel number.
+    results = []
+    for r in rows:
+        sessions: list[SuggestionPanelSession] = []
+        for label in r.panel_labels:
+            num = label.split()[-1] if label.startswith("Panel ") else label
+            obj_pattern = f"%{r.suggested_name}%{num}%"
+            sq = (
+                select(
+                    Image.raw_headers["OBJECT"].astext.label("obj"),
+                    cast(Image.capture_date, Date).label("night"),
+                    Image.filter_used,
+                    func.count(Image.id).label("frames"),
+                    func.sum(Image.exposure_time).label("integration"),
+                )
+                .where(
+                    Image.image_type == "LIGHT",
+                    Image.raw_headers["OBJECT"].astext.ilike(obj_pattern),
+                )
+                .group_by("obj", "night", Image.filter_used)
+                .order_by("obj", "night")
+            )
+            for row in (await session.execute(sq)).all():
+                sessions.append(SuggestionPanelSession(
+                    panel_label=label,
+                    object_name=row.obj,
+                    date=str(row.night) if row.night else "",
+                    frames=row.frames,
+                    integration_seconds=row.integration or 0,
+                    filter_used=row.filter_used,
+                ))
+
+        results.append(MosaicSuggestionResponse(
             id=str(r.id),
             suggested_name=r.suggested_name,
             target_ids=[str(t) for t in r.target_ids],
             panel_labels=r.panel_labels,
             target_names={str(t): name_map.get(str(t), "Unknown") for t in set(r.target_ids)},
+            sessions=sessions,
             status=r.status,
-        )
-        for r in rows
-    ]
+        ))
+
+    return results
 
 
 @router.post("/suggestions/{suggestion_id}/accept", response_model=MosaicSummary)
