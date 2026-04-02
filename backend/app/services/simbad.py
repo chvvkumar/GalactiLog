@@ -448,38 +448,45 @@ def resolve_target_name_cached(
     import asyncio
 
     normalized = normalize_object_name(object_name)
+    mapped = _get_simbad_id(object_name)
+    mapped_norm = normalize_object_name(mapped) if mapped != object_name else None
 
-    # Check cache
+    # Check cache for original name
     cached = get_cached_simbad(normalized, db_session)
-    if cached is not None:
-        if cached.get("_negative"):
-            return None
+    if cached is not None and not cached.get("_negative"):
         return curate_simbad_result(cached)
 
-    # Also try with common name mapping
-    mapped = _get_simbad_id(object_name)
-    if mapped != object_name:
-        mapped_norm = normalize_object_name(mapped)
+    # Check cache for mapped name (even if original was a negative cache hit)
+    if mapped_norm:
         cached = get_cached_simbad(mapped_norm, db_session)
         if cached is not None:
             if cached.get("_negative"):
                 return None
             return curate_simbad_result(cached)
 
+    # Original was a confirmed negative and no mapped name exists — done
+    orig_cached = get_cached_simbad(normalized, db_session)
+    if orig_cached is not None and orig_cached.get("_negative") and not mapped_norm:
+        return None
+
     if skip_simbad:
         return None
 
-    # Query SIMBAD and cache
-    loop = asyncio.new_event_loop()
-    try:
-        raw = loop.run_until_complete(_query_simbad_raw(object_name))
-    finally:
-        loop.close()
-
-    if raw is None and mapped != object_name:
+    # Query SIMBAD — try mapped name first (more likely to resolve), fall back to original
+    raw = None
+    if mapped_norm:
         loop = asyncio.new_event_loop()
         try:
             raw = loop.run_until_complete(_query_simbad_raw(mapped))
+        finally:
+            loop.close()
+        if raw:
+            save_simbad_cache(mapped_norm, raw, db_session)
+
+    if raw is None:
+        loop = asyncio.new_event_loop()
+        try:
+            raw = loop.run_until_complete(_query_simbad_raw(object_name))
         finally:
             loop.close()
 
