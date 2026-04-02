@@ -311,6 +311,57 @@ export default function DisplayTab() {
         </Show>
       </div>
 
+      {/* AstroBin Integration */}
+      <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-4 space-y-3">
+        <h3 class="text-theme-text-primary font-medium">AstroBin Integration</h3>
+        <p class="text-xs text-theme-text-secondary">
+          Map your filters to AstroBin equipment database IDs for CSV import.
+          Find IDs in the URL when viewing a filter on AstroBin (e.g., astrobin.com/equipment/filter/1234).
+        </p>
+        {/* Filter ID mapping table */}
+        <div class="space-y-2">
+          <For each={Object.keys(ctx.settings()?.filters || {})}>
+            {(filterName) => (
+              <div class="flex items-center gap-3">
+                <span class="text-xs text-theme-text-primary w-24">{filterName}</span>
+                <input
+                  type="number"
+                  class="text-xs bg-theme-elevated border border-theme-border rounded px-2 py-1 w-32 text-theme-text-primary"
+                  placeholder="AstroBin ID"
+                  value={ctx.settings()?.general.astrobin_filter_ids?.[filterName] ?? ""}
+                  onChange={(e) => {
+                    const val = e.currentTarget.value ? Number(e.currentTarget.value) : undefined;
+                    const current = ctx.settings()?.general;
+                    if (!current) return;
+                    const ids = { ...current.astrobin_filter_ids };
+                    if (val) ids[filterName] = val;
+                    else delete ids[filterName];
+                    ctx.saveGeneral({ ...current, astrobin_filter_ids: ids });
+                  }}
+                />
+              </div>
+            )}
+          </For>
+        </div>
+        <div class="flex items-center gap-3">
+          <span class="text-xs text-theme-text-primary w-24">Bortle Class</span>
+          <input
+            type="number"
+            min="1"
+            max="9"
+            class="text-xs bg-theme-elevated border border-theme-border rounded px-2 py-1 w-20 text-theme-text-primary"
+            placeholder="1-9"
+            value={ctx.settings()?.general.astrobin_bortle ?? ""}
+            onChange={(e) => {
+              const val = e.currentTarget.value ? Number(e.currentTarget.value) : undefined;
+              const current = ctx.settings()?.general;
+              if (!current) return;
+              ctx.saveGeneral({ ...current, astrobin_bortle: val });
+            }}
+          />
+        </div>
+      </div>
+
       <Show when={local() && isAdmin()}>
         <div class="flex justify-end">
           <button type="button" class="px-3 py-1.5 text-sm rounded-[var(--radius-sm)] bg-theme-accent hover:bg-theme-accent-hover text-white disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-150" disabled={saving()} onClick={handleSave}>

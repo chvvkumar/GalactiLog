@@ -446,6 +446,8 @@ export interface GeneralSettings {
   theme: string;
   text_size: string;
   timezone: string;
+  astrobin_filter_ids?: Record<string, number>;
+  astrobin_bortle?: number | null;
 }
 
 export interface FilterConfig {
@@ -545,4 +547,42 @@ export interface CorrelationResponse {
   x_metric: string;
   y_metric: string;
   granularity: string;
+}
+
+// === AstroBin Export ===
+
+export interface ExportFilterRow {
+  date: string;
+  filter_name: string;
+  astrobin_filter_id: number | null;
+  frames: number;
+  exposure: number;
+  total_seconds: number;
+  gain: number | null;
+  sensor_temp: number | null;
+  fwhm: number | null;
+  sky_quality: number | null;
+  ambient_temp: number | null;
+}
+
+export interface ExportEquipment {
+  telescope: string | null;
+  camera: string | null;
+}
+
+export interface ExportCalibration {
+  darks: number;
+  flats: number;
+  bias: number;
+}
+
+export interface ExportResponse {
+  target_name: string;
+  catalog_id: string | null;
+  equipment: ExportEquipment[];
+  dates: string[];
+  rows: ExportFilterRow[];
+  calibration: ExportCalibration;
+  total_integration_seconds: number;
+  bortle: number | null;
 }

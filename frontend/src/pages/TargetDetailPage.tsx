@@ -5,6 +5,7 @@ import type { TargetDetailResponse, SessionDetail } from "../types";
 import SessionAccordionCard from "../components/SessionAccordionCard";
 import FilterBadges from "../components/FilterBadges";
 import TargetMetricsChart, { MetricsTrendButton } from "../components/TargetMetricsChart";
+import ExportModal from "../components/ExportModal";
 import { useSettingsContext } from "../components/SettingsProvider";
 import { isFieldVisible } from "../utils/displaySettings";
 import { timezoneLabel } from "../utils/dateTime";
@@ -37,6 +38,7 @@ const TargetDetailPage: Component = () => {
     (id) => api.getTargetDetail(id),
   );
 
+  const [showExport, setShowExport] = createSignal(false);
   const [expandedSessions, setExpandedSessions] = createSignal<Set<string>>(new Set());
   const [sessionCache, setSessionCache] = createSignal<Record<string, SessionDetail>>({});
   const [targetChartExpanded, setTargetChartExpanded] = createSignal(graphSettings().target_chart_expanded);
@@ -145,6 +147,15 @@ const TargetDetailPage: Component = () => {
         <div class="p-8 text-theme-error">Failed to load target detail</div>
       </Show>
 
+      <Show when={showExport() && targetDetail()}>
+        <ExportModal
+          targetId={params.targetId}
+          targetName={targetDetail()!.primary_name}
+          sessions={targetDetail()!.sessions}
+          onClose={() => setShowExport(false)}
+        />
+      </Show>
+
       <Show when={targetDetail()}>
         {(detail) => (
           <>
@@ -187,10 +198,18 @@ const TargetDetailPage: Component = () => {
                     </Show>
                   </div>
                 </div>
-                <div class="text-left sm:text-right text-xs text-theme-text-secondary">
-                  <div>{detail().session_count} sessions</div>
-                  <div class="mt-0.5">
-                    {detail().first_session_date} → {detail().last_session_date} ({tzLabel()})
+                <div class="flex items-start gap-2">
+                  <button
+                    class="text-xs px-2.5 py-1 bg-theme-elevated border border-theme-border rounded hover:bg-theme-surface transition-colors text-theme-text-primary"
+                    onClick={() => setShowExport(true)}
+                  >
+                    Export
+                  </button>
+                  <div class="text-left sm:text-right text-xs text-theme-text-secondary">
+                    <div>{detail().session_count} sessions</div>
+                    <div class="mt-0.5">
+                      {detail().first_session_date} → {detail().last_session_date} ({tzLabel()})
+                    </div>
                   </div>
                 </div>
               </div>

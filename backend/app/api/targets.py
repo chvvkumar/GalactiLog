@@ -21,6 +21,7 @@ from app.schemas.target import (
     TargetDetailResponse, SessionOverview, FilterDetail, FilterMedian, SessionInsight, FrameRecord,
     TargetSearchResultFuzzy, ObjectTypeCount, NotesUpdate,
 )
+from app.schemas.export import ExportResponse, ExportFilterRow, ExportEquipment, ExportCalibration
 
 router = APIRouter(prefix="/targets", tags=["targets"])
 
@@ -230,7 +231,127 @@ async def get_object_types(
     )
 
 
-# --- 2d. Target detail (before path-parameter routes) ---
+# --- 2d. Export (before path-parameter routes) ---
+
+@router.get("/{target_id}/export", response_model=ExportResponse)
+async def export_target(
+    target_id: uuid.UUID,
+    sessions: str | None = Query(None, description="Comma-separated dates to include"),
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    target = await session.get(Target, target_id)
+    if not target:
+        raise HTTPException(404, "Target not found")
+
+    # Get settings for AstroBin filter IDs and bortle
+    from app.models import UserSettings, SETTINGS_ROW_ID
+    settings_row = await session.get(UserSettings, SETTINGS_ROW_ID)
+    general = settings_row.general if settings_row else {}
+    astrobin_filter_ids = general.get("astrobin_filter_ids", {})
+    bortle = general.get("astrobin_bortle")
+
+    # Fetch LIGHT frames for this target
+    q = (
+        select(Image)
+        .where(Image.resolved_target_id == target_id)
+        .where(Image.image_type == "LIGHT")
+        .where(Image.capture_date.is_not(None))
+        .order_by(Image.capture_date)
+    )
+    images = (await session.execute(q)).scalars().all()
+
+    # Filter by selected sessions
+    selected_dates = None
+    if sessions:
+        selected_dates = set(sessions.split(","))
+
+    # Group by (date, filter)
+    import statistics as stats_mod
+    groups: dict[tuple[str, str], list] = defaultdict(list)
+    equip_set: set[tuple] = set()
+
+    for img in images:
+        date_key = img.capture_date.strftime("%Y-%m-%d")
+        if selected_dates and date_key not in selected_dates:
+            continue
+        filter_name = img.filter_used or "Unknown"
+        groups[(date_key, filter_name)].append(img)
+        equip_set.add((img.telescope, img.camera))
+
+    rows = []
+    all_dates = set()
+    total_seconds = 0.0
+
+    for (date_key, filter_name), imgs in sorted(groups.items()):
+        all_dates.add(date_key)
+        frame_count = len(imgs)
+        exposure = imgs[0].exposure_time or 0
+        integration = sum(i.exposure_time or 0 for i in imgs)
+        total_seconds += integration
+
+        gains = [i.camera_gain for i in imgs if i.camera_gain is not None]
+        temps = [i.sensor_temp for i in imgs if i.sensor_temp is not None]
+        fwhms = [i.fwhm for i in imgs if i.fwhm is not None]
+        sqms = [i.sky_quality for i in imgs if i.sky_quality is not None]
+        amb_temps = [i.ambient_temp for i in imgs if i.ambient_temp is not None]
+
+        # Normalize filter name for AstroBin ID lookup
+        alias_maps = await load_alias_maps(session)
+        canonical_filter = normalize_filter(filter_name, alias_maps.get("filters", {}))
+        ab_id = astrobin_filter_ids.get(canonical_filter) or astrobin_filter_ids.get(filter_name)
+
+        rows.append(ExportFilterRow(
+            date=date_key,
+            filter_name=filter_name,
+            astrobin_filter_id=ab_id,
+            frames=frame_count,
+            exposure=round(exposure, 4),
+            total_seconds=round(integration, 1),
+            gain=max(set(gains), key=gains.count) if gains else None,  # mode
+            sensor_temp=round(stats_mod.median(temps)) if temps else None,
+            fwhm=round(stats_mod.median(fwhms), 2) if fwhms else None,
+            sky_quality=round(stats_mod.median(sqms), 2) if sqms else None,
+            ambient_temp=round(stats_mod.median(amb_temps), 2) if amb_temps else None,
+        ))
+
+    # Calibration frame counts
+    camera_names = {e[1] for e in equip_set if e[1]}
+
+    dark_q = (
+        select(func.count(Image.id))
+        .where(Image.image_type == "DARK")
+        .where(Image.camera.in_(camera_names) if camera_names else True)
+    )
+    dark_count = (await session.execute(dark_q)).scalar() or 0
+
+    flat_q = (
+        select(func.count(Image.id))
+        .where(Image.image_type == "FLAT")
+        .where(Image.camera.in_(camera_names) if camera_names else True)
+    )
+    flat_count = (await session.execute(flat_q)).scalar() or 0
+
+    bias_q = (
+        select(func.count(Image.id))
+        .where(Image.image_type == "BIAS")
+        .where(Image.camera.in_(camera_names) if camera_names else True)
+    )
+    bias_count = (await session.execute(bias_q)).scalar() or 0
+
+    return ExportResponse(
+        target_name=target.primary_name,
+        catalog_id=target.catalog_id,
+        equipment=[ExportEquipment(telescope=t, camera=c) for t, c in equip_set],
+        dates=sorted(all_dates),
+        rows=rows,
+        calibration=ExportCalibration(darks=dark_count, flats=flat_count, bias=bias_count),
+        total_integration_seconds=total_seconds,
+        bortle=bortle,
+    )
+
+
+# --- 2e. Target detail (before path-parameter routes) ---
 
 @router.get("/{target_id:path}/detail", response_model=TargetDetailResponse)
 async def get_target_detail(

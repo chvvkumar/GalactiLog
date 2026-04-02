@@ -152,6 +152,13 @@ export const api = {
   getTargetDetail: (targetId: string) =>
     fetchJson<TargetDetailResponse>(`/targets/${encodeURIComponent(decodeURIComponent(targetId))}/detail`),
 
+  getExport: (targetId: string, sessions?: string[]) => {
+    const params = sessions?.length ? `?sessions=${sessions.join(",")}` : "";
+    return fetchJson<import("../types").ExportResponse>(
+      `/targets/${encodeURIComponent(targetId)}/export${params}`
+    );
+  },
+
   getEquipment: () =>
     fetchJson<EquipmentList>("/targets/equipment"),
 
