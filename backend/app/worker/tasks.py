@@ -539,7 +539,28 @@ def detect_duplicate_targets():
             if matched:
                 continue
 
-            # Strategy 2: Trigram similarity fallback
+            # SIMBAD resolved the name but no existing target matched — create the target
+            # and resolve images directly instead of suggesting a wrong trigram match.
+            if simbad_result:
+                logger.info("detect_duplicates: '%s' resolved by SIMBAD to '%s' — creating target and resolving images",
+                            obj_name, simbad_result.get("primary_name"))
+                target_id = _resolve_or_cache_target(obj_name)
+                if target_id:
+                    from sqlalchemy import update as sa_update
+                    db.execute(
+                        sa_update(Image)
+                        .where(
+                            Image.raw_headers["OBJECT"].astext == obj_name,
+                            Image.resolved_target_id.is_(None),
+                        )
+                        .values(resolved_target_id=target_id)
+                    )
+                    db.commit()
+                    logger.info("detect_duplicates: resolved %d images for '%s' to target %s",
+                                img_count, obj_name, target_id)
+                continue
+
+            # Strategy 2: Trigram similarity fallback (only for names SIMBAD can't resolve)
             trgm_query = sa_text("""
                 SELECT t.id, t.primary_name,
                        GREATEST(
