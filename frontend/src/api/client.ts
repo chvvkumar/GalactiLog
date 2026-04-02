@@ -307,4 +307,24 @@ export const api = {
     fetchJson<{ status: string; task_id: string }>("/targets/detect-duplicates", {
       method: "POST",
     }),
+
+  getCorrelation: (params: {
+    x_metric: string;
+    y_metric: string;
+    telescope?: string;
+    camera?: string;
+    granularity?: "frame" | "session";
+    date_from?: string;
+    date_to?: string;
+  }) => {
+    const qs = new URLSearchParams();
+    qs.set("x_metric", params.x_metric);
+    qs.set("y_metric", params.y_metric);
+    if (params.telescope) qs.set("telescope", params.telescope);
+    if (params.camera) qs.set("camera", params.camera);
+    if (params.granularity) qs.set("granularity", params.granularity);
+    if (params.date_from) qs.set("date_from", params.date_from);
+    if (params.date_to) qs.set("date_to", params.date_to);
+    return fetchJson<import("../types").CorrelationResponse>(`/analysis/correlation?${qs}`);
+  },
 };
