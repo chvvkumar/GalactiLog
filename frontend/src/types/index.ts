@@ -78,6 +78,7 @@ export interface SessionDetail {
   median_ambient_temp: number | null;
   median_humidity: number | null;
   median_cloud_cover: number | null;
+  notes: string | null;
 }
 
 // === Target Detail (Deep Dive Page) ===
@@ -104,6 +105,7 @@ export interface SessionOverview {
   median_detected_stars: number | null;
   median_guiding_rms_arcsec: number | null;
   filter_medians: FilterMedian[];
+  has_notes: boolean;
 }
 
 export interface TargetDetailResponse {
@@ -132,6 +134,7 @@ export interface TargetDetailResponse {
   avg_fwhm: number | null;
   avg_guiding_rms_arcsec: number | null;
   avg_detected_stars: number | null;
+  notes: string | null;
 }
 
 export interface FilterDetail {

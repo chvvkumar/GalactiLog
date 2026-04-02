@@ -302,4 +302,16 @@ export const api = {
     fetchJson<{ status: string; task_id: string }>("/targets/detect-duplicates", {
       method: "POST",
     }),
+
+  updateTargetNotes: (targetId: string, notes: string | null) =>
+    fetchJson<{ status: string }>(`/targets/${encodeURIComponent(targetId)}/notes`, {
+      method: "PUT",
+      body: JSON.stringify({ notes }),
+    }),
+
+  updateSessionNotes: (targetId: string, date: string, notes: string | null) =>
+    fetchJson<{ status: string }>(`/targets/${encodeURIComponent(targetId)}/sessions/${date}/notes`, {
+      method: "PUT",
+      body: JSON.stringify({ notes }),
+    }),
 };
