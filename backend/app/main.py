@@ -48,6 +48,15 @@ async def lifespan(app: FastAPI):
                 logger.info("%s user '%s' created from environment variables", role.value.capitalize(), username)
             await session.commit()
 
+    # Dispatch dark hours backfill to Celery worker (runs in background,
+    # doesn't block startup or the event loop)
+    try:
+        from app.worker.tasks import backfill_dark_hours
+        backfill_dark_hours.apply_async(countdown=5)
+        logger.info("Dark hours backfill task dispatched")
+    except Exception as e:
+        logger.warning("Failed to dispatch dark hours backfill: %s", e)
+
     yield
 
 
