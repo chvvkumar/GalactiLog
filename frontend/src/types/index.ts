@@ -408,6 +408,15 @@ export interface StatsResponse {
   ingest_history: { date: string; files_added: number }[];
 }
 
+// === Calendar ===
+
+export interface CalendarEntry {
+  date: string;
+  integration_seconds: number;
+  target_count: number;
+  frame_count: number;
+}
+
 // === Settings ===
 
 export interface MetricGroupSettings {
