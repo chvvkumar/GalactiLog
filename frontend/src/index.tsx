@@ -11,6 +11,7 @@ import { SettingsProvider } from "./components/SettingsProvider";
 import { SettingsPage } from "./pages/SettingsPage";
 import { AuthProvider } from "./components/AuthProvider";
 import ProtectedRoute from "./components/ProtectedRoute";
+import MosaicDetailPage from "./pages/MosaicDetailPage";
 
 const Protected = (Page: any) => () => (
   <ProtectedRoute><Page /></ProtectedRoute>
@@ -26,6 +27,7 @@ render(
           <Route path="/" component={Protected(DashboardPage)} />
           <Route path="/targets/:targetId" component={Protected(TargetDetailPage)} />
           <Route path="/statistics" component={Protected(StatisticsPage)} />
+          <Route path="/mosaics/:mosaicId" component={Protected(MosaicDetailPage)} />
           <Route path="/settings" component={Protected(SettingsPage)} />
         </Router>
       </SettingsProvider>
