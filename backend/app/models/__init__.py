@@ -9,5 +9,6 @@ from .refresh_token import RefreshToken
 from .app_metadata import AppMetadata
 from .openngc import OpenNGCEntry
 from .vizier_cache import VizierCache
+from .session_note import SessionNote
 
-__all__ = ["Base", "Target", "Image", "UserSettings", "SETTINGS_ROW_ID", "MergeCandidate", "SimbadCache", "User", "UserRole", "RefreshToken", "AppMetadata", "OpenNGCEntry", "VizierCache"]
+__all__ = ["Base", "Target", "Image", "UserSettings", "SETTINGS_ROW_ID", "MergeCandidate", "SimbadCache", "User", "UserRole", "RefreshToken", "AppMetadata", "OpenNGCEntry", "VizierCache", "SessionNote"]
