@@ -453,11 +453,17 @@ def regenerate_thumbnail(self, image_id: str, fits_path: str, thumb_path: str) -
 
 @celery_app.task(name="detect_duplicate_targets")
 def detect_duplicate_targets():
-    """Detect potential duplicate targets by comparing unresolved names against resolved targets."""
+    """Detect potential duplicate targets by comparing unresolved names against resolved targets.
+
+    Strategy:
+    1. Try SIMBAD resolution to find the canonical catalog ID, then match against existing targets.
+    2. Fall back to trigram similarity if SIMBAD doesn't resolve or match.
+    """
     from sqlalchemy import text as sa_text, select as sa_select, func as sa_func
     from app.models.target import Target
     from app.models.image import Image
     from app.models.merge_candidate import MergeCandidate
+    from app.services.simbad import resolve_target_name_cached, normalize_object_name
 
     with Session(_sync_engine) as db:
         # Find distinct unresolved OBJECT names with image counts
@@ -492,7 +498,48 @@ def detect_duplicate_targets():
             if not obj_name or obj_name in existing_names:
                 continue
 
-            # Trigram similarity search against all resolved target aliases
+            matched = False
+
+            # Strategy 1: SIMBAD resolution — resolve the name and match against existing targets
+            simbad_result = resolve_target_name_cached(obj_name, db)
+            if simbad_result:
+                catalog_id = simbad_result.get("catalog_id")
+                simbad_aliases = [normalize_object_name(a) for a in simbad_result.get("aliases", [])]
+                if catalog_id:
+                    simbad_aliases.append(normalize_object_name(catalog_id))
+
+                # Check if any existing target shares the same catalog_id or aliases
+                if simbad_aliases:
+                    alias_match_query = sa_text("""
+                        SELECT t.id, t.primary_name
+                        FROM targets t
+                        WHERE t.merged_into_id IS NULL
+                          AND (
+                            upper(t.catalog_id) = ANY(:aliases)
+                            OR EXISTS (
+                              SELECT 1 FROM unnest(t.aliases) a
+                              WHERE upper(a) = ANY(:aliases)
+                            )
+                          )
+                        LIMIT 1
+                    """)
+                    result = db.execute(alias_match_query, {"aliases": simbad_aliases}).first()
+                    if result:
+                        target_id, target_name = result
+                        db.add(MergeCandidate(
+                            source_name=obj_name,
+                            source_image_count=img_count,
+                            suggested_target_id=target_id,
+                            similarity_score=1.0,
+                            method="simbad",
+                        ))
+                        candidates_found += 1
+                        matched = True
+
+            if matched:
+                continue
+
+            # Strategy 2: Trigram similarity fallback
             trgm_query = sa_text("""
                 SELECT t.id, t.primary_name,
                        GREATEST(

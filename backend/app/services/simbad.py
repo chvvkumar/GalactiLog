@@ -316,7 +316,7 @@ COMMON_NAME_MAP: dict[str, str] = {
     "elephant's trunk nebula": "IC 1396A",
     "elephant's trunk neb": "IC 1396A",
     "gam cas nebula": "IC 63",
-    "markarian's chain": "NAME Markarian's Chain",
+    "markarian's chain": "NAME Markarian Chain",
     "california nebula": "NGC 1499",
     "heart nebula": "IC 1805",
     "soul nebula": "IC 1848",
@@ -339,10 +339,10 @@ COMMON_NAME_MAP: dict[str, str] = {
     "caldwell 38": "NGC 4565",
     "triangulum pinwheel": "M 33",
     "andromeda galaxy": "M 31",
-    "markarian's chain": "NAME Markarian Chain",
-    "spaghetti nebula": "SNR G180.0-01.7",
     "seagull nebula": "IC 2177",
     "seagull's wings": "IC 2177",
+    "spider nebula": "IC 417",
+    "casper the friendly ghost nebula": "Sh2-136",
 }
 
 # Strip "Panel N" suffix to get the base object name
@@ -351,6 +351,7 @@ _PANEL_RE = re.compile(r"\s+Panel\s+\d+$", re.IGNORECASE)
 
 _SH2_RE = re.compile(r"^Sh2[\s\-_]+(\d+)$", re.IGNORECASE)
 _LBN_RE = re.compile(r"^LBN[\s\-_]+(\d+)$", re.IGNORECASE)
+_CALDWELL_RE = re.compile(r"^Caldwell\s+(\d+)$", re.IGNORECASE)
 
 
 def _get_simbad_id(object_name: str) -> str:
@@ -361,6 +362,11 @@ def _get_simbad_id(object_name: str) -> str:
 
     if key in COMMON_NAME_MAP:
         return COMMON_NAME_MAP[key]
+
+    # Caldwell catalog: "Caldwell 7" -> "C 7" (SIMBAD format)
+    m = _CALDWELL_RE.match(base)
+    if m:
+        return f"C {m.group(1)}"
 
     # Sharpless catalog: "Sh2 174" -> "SH 2-174"
     m = _SH2_RE.match(base)

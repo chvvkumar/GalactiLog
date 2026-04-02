@@ -2,26 +2,23 @@ import { Component, For, Show, createSignal, onMount } from "solid-js";
 import { api } from "../../api/client";
 import { showToast } from "../Toast";
 import { useAuth } from "../AuthProvider";
-import type { MergeCandidateResponse, MergedTargetResponse } from "../../types";
-import { formatDate } from "../../utils/dateTime";
-import { useSettingsContext } from "../SettingsProvider";
+import type { MergeCandidateResponse } from "../../types";
 
 export const MergesTab: Component = () => {
   const { isAdmin } = useAuth();
-  const settingsCtx = useSettingsContext();
   const [candidates, setCandidates] = createSignal<MergeCandidateResponse[]>([]);
-  const [merged, setMerged] = createSignal<MergedTargetResponse[]>([]);
+  const [accepted, setAccepted] = createSignal<MergeCandidateResponse[]>([]);
   const [detecting, setDetecting] = createSignal(false);
   const [view, setView] = createSignal<"suggestions" | "merged">("suggestions");
 
   const refresh = async () => {
     try {
-      const [c, m] = await Promise.all([
-        api.getMergeCandidates(),
-        api.getMergedTargets(),
+      const [c, a] = await Promise.all([
+        api.getMergeCandidates("pending"),
+        api.getMergeCandidates("accepted"),
       ]);
       setCandidates(c);
-      setMerged(m);
+      setAccepted(a);
     } catch {
       // Non-blocking
     }
@@ -52,13 +49,13 @@ export const MergesTab: Component = () => {
     }
   };
 
-  const handleUnmerge = async (target: MergedTargetResponse) => {
+  const handleRevert = async (candidate: MergeCandidateResponse) => {
     try {
-      await api.unmergeTarget(target.id);
-      showToast(`Unmerged "${target.primary_name}"`);
+      await api.revertMergeCandidate(candidate.id);
+      showToast(`Reverted merge of "${candidate.source_name}"`);
       await refresh();
     } catch {
-      showToast("Unmerge failed", "error");
+      showToast("Revert failed", "error");
     }
   };
 
@@ -105,7 +102,7 @@ export const MergesTab: Component = () => {
               view() === "merged" ? "bg-theme-accent text-white" : "border border-theme-border text-theme-text-secondary hover:text-theme-text-primary"
             }`}
           >
-            Merged ({merged().length})
+            Merged ({accepted().length})
           </button>
         </div>
 
@@ -152,27 +149,28 @@ export const MergesTab: Component = () => {
 
         <Show when={view() === "merged"}>
           <Show
-            when={merged().length > 0}
+            when={accepted().length > 0}
             fallback={<p class="text-sm text-theme-text-secondary">No merged targets yet.</p>}
           >
             <div class="space-y-2">
-              <For each={merged()}>
-                {(m) => (
+              <For each={accepted()}>
+                {(c) => (
                   <div class="flex items-center justify-between p-3 bg-theme-base/50 border border-theme-border rounded-[var(--radius-sm)]">
                     <div class="flex-1">
-                      <span class="text-theme-text-secondary text-sm">{m.primary_name}</span>
-                      <span class="text-theme-text-secondary text-xs mx-2">&larr; merged into &rarr;</span>
-                      <span class="text-theme-text-primary text-sm font-medium">{m.merged_into_name}</span>
+                      <span class="text-theme-text-primary text-sm font-medium">{c.source_name}</span>
+                      <span class="text-theme-text-secondary text-xs mx-2">&rarr; merged into &rarr;</span>
+                      <span class="text-theme-accent text-sm">{c.suggested_target_name}</span>
                       <div class="text-xs text-theme-text-secondary mt-0.5">
-                        {m.image_count} images {" \u00b7 "} {formatDate(m.merged_at, settingsCtx.timezone())}
+                        {c.method === "simbad" ? "SIMBAD confirmed" : `${Math.round(c.similarity_score * 100)}% match`}
+                        {" \u00b7 "}{c.source_image_count} images
                       </div>
                     </div>
                     <Show when={isAdmin()}>
                       <button
-                        onClick={() => handleUnmerge(m)}
+                        onClick={() => handleRevert(c)}
                         class="px-2 py-1 text-xs border border-theme-border text-theme-text-secondary rounded-[var(--radius-sm)] hover:text-theme-text-primary transition-colors"
                       >
-                        Unmerge
+                        Revert
                       </button>
                     </Show>
                   </div>

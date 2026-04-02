@@ -310,6 +310,11 @@ export const api = {
       method: "POST",
     }),
 
+  revertMergeCandidate: (candidateId: string) =>
+    fetchJson<{ status: string }>(`/targets/merge-candidates/${candidateId}/revert`, {
+      method: "POST",
+    }),
+
   triggerDuplicateDetection: () =>
     fetchJson<{ status: string; task_id: string }>("/targets/detect-duplicates", {
       method: "POST",
