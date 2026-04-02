@@ -13,7 +13,7 @@ const BAR_GAP = 2;
 const BAR_AREA_HEIGHT = 220;
 
 type Preset = "all" | "1y" | "q" | "m" | "w";
-type DailyMode = "imaged" | "all";
+type GapMode = "imaged" | "all";
 type Granularity = "monthly" | "weekly" | "daily";
 
 interface Props {
@@ -86,7 +86,56 @@ function periodToDateRange(period: string, gran: Granularity): { from: string; t
   return { from: period, to: period };
 }
 
-/** Generate all dates between first and last entry */
+/** Generate all months between first and last entry (YYYY-MM format) */
+function allMonthsBetween(data: TimelineDetailEntry[]): string[] {
+  if (data.length === 0) return [];
+  const [sy, sm] = data[0].period.split("-").map(Number);
+  const [ey, em] = data[data.length - 1].period.split("-").map(Number);
+  const months: string[] = [];
+  let y = sy, m = sm;
+  while (y < ey || (y === ey && m <= em)) {
+    months.push(`${y}-${String(m).padStart(2, "0")}`);
+    m++;
+    if (m > 12) { m = 1; y++; }
+  }
+  return months;
+}
+
+/** Generate all ISO weeks between first and last entry (YYYY-WNN format) */
+function allWeeksBetween(data: TimelineDetailEntry[]): string[] {
+  if (data.length === 0) return [];
+  const parseWeek = (s: string) => {
+    const parts = s.split("-W");
+    return { y: parseInt(parts[0]), w: parseInt(parts[1]) };
+  };
+  const start = parseWeek(data[0].period);
+  const end = parseWeek(data[data.length - 1].period);
+  // Walk via dates: find Monday of start week, iterate 7 days at a time
+  const jan4 = new Date(start.y, 0, 4);
+  const startOfWeek1 = new Date(jan4);
+  startOfWeek1.setDate(jan4.getDate() - jan4.getDay() + 1);
+  const monday = new Date(startOfWeek1);
+  monday.setDate(startOfWeek1.getDate() + (start.w - 1) * 7);
+
+  const weeks: string[] = [];
+  const endLabel = `${end.y}-W${String(end.w).padStart(2, "0")}`;
+  let cur = new Date(monday);
+  for (let safety = 0; safety < 1000; safety++) {
+    // Get ISO week/year for cur (Thursday-based)
+    const thu = new Date(cur);
+    thu.setDate(cur.getDate() + 3);
+    const isoYear = thu.getFullYear();
+    const jan1 = new Date(isoYear, 0, 1);
+    const isoWeek = Math.ceil(((thu.getTime() - jan1.getTime()) / 86400000 + jan1.getDay() + 1) / 7);
+    const label = `${isoYear}-W${String(isoWeek).padStart(2, "0")}`;
+    weeks.push(label);
+    if (label === endLabel) break;
+    cur.setDate(cur.getDate() + 7);
+  }
+  return weeks;
+}
+
+/** Generate all dates between first and last entry (YYYY-MM-DD format) */
 function allDatesBetween(data: TimelineDetailEntry[]): string[] {
   if (data.length === 0) return [];
   const start = new Date(data[0].period);
@@ -94,17 +143,26 @@ function allDatesBetween(data: TimelineDetailEntry[]): string[] {
   const dates: string[] = [];
   const cur = new Date(start);
   while (cur <= end) {
-    dates.push(cur.toISOString().slice(0, 10));
+    const y = cur.getFullYear();
+    const m = String(cur.getMonth() + 1).padStart(2, "0");
+    const d = String(cur.getDate()).padStart(2, "0");
+    dates.push(`${y}-${m}-${d}`);
     cur.setDate(cur.getDate() + 1);
   }
   return dates;
+}
+
+/** Fill gaps in data using a period generator */
+function fillGaps(data: TimelineDetailEntry[], allPeriods: string[]): TimelineDetailEntry[] {
+  const dataMap = new Map(data.map(e => [e.period, e]));
+  return allPeriods.map(p => dataMap.get(p) ?? { period: p, integration_seconds: 0, efficiency_pct: null });
 }
 
 const ImagingTimeline: Component<Props> = (props) => {
   const navigate = useNavigate();
   const [zoom, setZoom] = createSignal(1);
   const [activePreset, setActivePreset] = createSignal<Preset | null>("all");
-  const [dailyMode, setDailyMode] = createSignal<DailyMode>("imaged");
+  const [gapMode, setGapMode] = createSignal<GapMode>("imaged");
 
   // Drag-to-pan state
   const [isDragging, setIsDragging] = createSignal(false);
@@ -116,18 +174,18 @@ const ImagingTimeline: Component<Props> = (props) => {
 
   const granularity = createMemo(() => granularityForZoom(zoom()));
 
-  /** Active dataset based on zoom level */
+  /** Active dataset based on zoom level and gap mode */
   const activeData = createMemo((): TimelineDetailEntry[] => {
     const gran = granularity();
-    if (gran === "monthly") return props.monthly;
-    if (gran === "weekly") return props.weekly;
+    const showAll = gapMode() === "all";
 
-    if (dailyMode() === "all") {
-      const allDates = allDatesBetween(props.daily);
-      const dataMap = new Map(props.daily.map(e => [e.period, e]));
-      return allDates.map(d => dataMap.get(d) ?? { period: d, integration_seconds: 0, efficiency_pct: null });
+    if (gran === "monthly") {
+      return showAll ? fillGaps(props.monthly, allMonthsBetween(props.monthly)) : props.monthly;
     }
-    return props.daily;
+    if (gran === "weekly") {
+      return showAll ? fillGaps(props.weekly, allWeeksBetween(props.weekly)) : props.weekly;
+    }
+    return showAll ? fillGaps(props.daily, allDatesBetween(props.daily)) : props.daily;
   });
 
   const maxVal = createMemo(() => Math.max(...activeData().map(e => e.integration_seconds), 1));
@@ -286,25 +344,23 @@ const ImagingTimeline: Component<Props> = (props) => {
       <div class="flex items-center justify-between flex-wrap gap-2">
         <h3 class="text-white font-medium text-sm">Imaging Timeline</h3>
         <div class="flex items-center gap-3">
-          {/* Daily mode toggle */}
-          <Show when={granularity() === "daily"}>
-            <div class="flex gap-0.5">
-              <button
-                class={`px-2 py-0.5 text-xs rounded ${dailyMode() === "imaged" ? "bg-theme-accent text-white" : "bg-theme-surface-alt text-theme-text-secondary"}`}
-                onClick={() => setDailyMode("imaged")}
-              >Imaged only</button>
-              <button
-                class={`px-2 py-0.5 text-xs rounded ${dailyMode() === "all" ? "bg-theme-accent text-white" : "bg-theme-surface-alt text-theme-text-secondary"}`}
-                onClick={() => setDailyMode("all")}
-              >All nights</button>
-            </div>
-          </Show>
+          {/* Gap mode toggle */}
+          <div class="flex gap-0.5">
+            <button
+              class={`px-2 py-0.5 text-xs rounded transition-colors duration-200 ${gapMode() === "imaged" ? "bg-theme-accent text-white" : "bg-theme-surface-alt text-theme-text-secondary"}`}
+              onClick={() => setGapMode("imaged")}
+            >Imaged only</button>
+            <button
+              class={`px-2 py-0.5 text-xs rounded transition-colors duration-200 ${gapMode() === "all" ? "bg-theme-accent text-white" : "bg-theme-surface-alt text-theme-text-secondary"}`}
+              onClick={() => setGapMode("all")}
+            >{granularity() === "daily" ? "All nights" : granularity() === "weekly" ? "All weeks" : "All months"}</button>
+          </div>
           {/* Presets */}
           <div class="flex gap-0.5">
             <For each={presets}>
               {(p) => (
                 <button
-                  class={`px-2 py-0.5 text-xs rounded ${activePreset() === p.key ? "bg-theme-accent text-white" : "bg-theme-surface-alt text-theme-text-secondary hover:text-white"}`}
+                  class={`px-2 py-0.5 text-xs rounded transition-colors duration-200 ${activePreset() === p.key ? "bg-theme-accent text-white" : "bg-theme-surface-alt text-theme-text-secondary hover:text-white"}`}
                   onClick={() => applyPreset(p.key)}
                 >{p.label}</button>
               )}
@@ -329,7 +385,7 @@ const ImagingTimeline: Component<Props> = (props) => {
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
       >
-        <div style={{ width: `${innerWidth()}px`, "min-width": "100%" }}>
+        <div style={{ width: `${innerWidth()}px`, "min-width": "100%", transition: "width 300ms ease" }}>
           {/* Bars with labels above */}
           <div class="flex items-end" style={{ height: `${BAR_AREA_HEIGHT}px`, gap: `${BAR_GAP}px` }}>
             <For each={activeData()}>
@@ -355,8 +411,8 @@ const ImagingTimeline: Component<Props> = (props) => {
                     </Show>
                     {/* Bar */}
                     <div
-                      class={`w-full rounded-t transition-colors ${isEmpty() ? "" : "bg-theme-accent hover:opacity-80 cursor-pointer"}`}
-                      style={{ height: isEmpty() ? "0px" : `${Math.max(pct(), 1)}%`, "min-height": isEmpty() ? "0" : "2px" }}
+                      class={`w-full rounded-t ${isEmpty() ? "" : "bg-theme-accent hover:opacity-80 cursor-pointer"}`}
+                      style={{ height: isEmpty() ? "0px" : `${Math.max(pct(), 1)}%`, "min-height": isEmpty() ? "0" : "2px", transition: "height 300ms ease" }}
                       title={!isEmpty() ? `${formatLabel(entry.period, granularity())}: ${formatHours(entry.integration_seconds)}` : undefined}
                       onClick={() => !isEmpty() && handleBarClick(entry)}
                     />
