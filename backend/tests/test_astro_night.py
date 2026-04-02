@@ -1,7 +1,7 @@
 """Tests for astronomical night duration calculation."""
 import pytest
 from datetime import date
-from app.services.astro_night import dark_hours_for_night, dark_hours_for_month
+from app.services.astro_night import dark_hours_for_night, dark_hours_for_month, dark_hours_for_week
 
 
 class TestDarkHoursForNight:
@@ -47,3 +47,18 @@ class TestDarkHoursForMonth:
         feb = dark_hours_for_month(2025, 2, 33.0, -117.0)
         mar = dark_hours_for_month(2025, 3, 33.0, -117.0)
         assert feb < mar
+
+
+class TestDarkHoursForWeek:
+    """Test weekly aggregation of dark hours."""
+
+    def test_winter_week_more_than_summer_week(self):
+        """At mid-northern latitude, a December week should have more dark hours than a June week."""
+        winter = dark_hours_for_week(2025, 51, 33.0, -117.0)  # mid-December
+        summer = dark_hours_for_week(2025, 25, 33.0, -117.0)  # mid-June
+        assert winter > summer
+
+    def test_returns_positive_float(self):
+        hours = dark_hours_for_week(2025, 1, 33.0, -117.0)
+        assert isinstance(hours, float)
+        assert hours > 0.0
