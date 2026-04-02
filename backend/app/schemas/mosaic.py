@@ -36,6 +36,7 @@ class PanelStats(BaseModel):
     total_frames: int
     filter_distribution: dict[str, float]
     last_session_date: str | None = None
+    thumbnail_url: str | None = None
 
 
 class MosaicSummary(BaseModel):

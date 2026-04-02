@@ -1,4 +1,5 @@
 import { Component, For, Show, createMemo, createSignal } from "solid-js";
+import { api } from "../../api/client";
 import type { PanelStats } from "../../types";
 
 function formatHours(seconds: number): string {
@@ -53,7 +54,7 @@ const MosaicGrid: Component<Props> = (props) => {
 
     // --- Fallback: numbered grid when no spatial data ---
     if (!hasSpatial) {
-      const CELL = 90;
+      const CELL = 120;
       const GAP = 6;
       const sorted = [...panels].sort((a, b) => {
         const na = parseInt(a.panel_label.replace(/\D/g, "")) || a.sort_order;
@@ -147,6 +148,8 @@ const MosaicGrid: Component<Props> = (props) => {
     return { positions, svgW, svgH };
   });
 
+  const BORDER = 3;
+
   return (
     <div>
       <Show when={layout().positions.length > 0}>
@@ -157,10 +160,27 @@ const MosaicGrid: Component<Props> = (props) => {
             style={{ "max-width": "100%", height: `${Math.min(layout().svgH, 500)}px` }}
             preserveAspectRatio="xMidYMid meet"
           >
+            <defs>
+              <For each={layout().positions}>
+                {(pos) => (
+                  <clipPath id={`clip-${pos.panel.panel_id}`}>
+                    <rect
+                      x={pos.x + BORDER}
+                      y={pos.y + BORDER}
+                      width={pos.w - BORDER * 2}
+                      height={pos.h - BORDER * 2}
+                      rx={2}
+                    />
+                  </clipPath>
+                )}
+              </For>
+            </defs>
             <For each={layout().positions}>
               {(pos) => {
                 const color = () => completionColor(pos.pct);
                 const opacity = () => completionOpacity(pos.pct);
+                const thumbUrl = () =>
+                  pos.panel.thumbnail_url ? api.thumbnailUrl(pos.panel.thumbnail_url) : null;
                 return (
                   <g
                     onMouseEnter={(e) => setTooltip({ x: e.clientX, y: e.clientY, panel: pos.panel })}
@@ -168,6 +188,7 @@ const MosaicGrid: Component<Props> = (props) => {
                     onMouseLeave={() => setTooltip(null)}
                     class="cursor-pointer"
                   >
+                    {/* Completion-colored border rect */}
                     <rect
                       x={pos.x}
                       y={pos.y}
@@ -176,17 +197,46 @@ const MosaicGrid: Component<Props> = (props) => {
                       rx={3}
                       fill={color()}
                       opacity={opacity()}
-                      stroke="rgba(255,255,255,0.15)"
-                      stroke-width={1}
                     />
+                    {/* Thumbnail image or fallback fill */}
+                    <Show
+                      when={thumbUrl()}
+                      fallback={
+                        <rect
+                          x={pos.x + BORDER}
+                          y={pos.y + BORDER}
+                          width={pos.w - BORDER * 2}
+                          height={pos.h - BORDER * 2}
+                          rx={2}
+                          fill={color()}
+                          opacity={opacity()}
+                          stroke="rgba(255,255,255,0.15)"
+                          stroke-width={1}
+                        />
+                      }
+                    >
+                      {(url) => (
+                        <image
+                          href={url()}
+                          x={pos.x + BORDER}
+                          y={pos.y + BORDER}
+                          width={pos.w - BORDER * 2}
+                          height={pos.h - BORDER * 2}
+                          preserveAspectRatio="xMidYMid slice"
+                          clip-path={`url(#clip-${pos.panel.panel_id})`}
+                        />
+                      )}
+                    </Show>
+                    {/* Label overlay */}
                     <text
                       x={pos.x + pos.w / 2}
                       y={pos.y + pos.h / 2 - 6}
                       text-anchor="middle"
                       dominant-baseline="central"
                       class="fill-white"
-                      font-size={`${Math.max(9, Math.min(13, pos.w * 0.15))}px`}
+                      font-size={`${Math.max(9, Math.min(13, pos.w * 0.12))}px`}
                       font-weight="600"
+                      style={{ "text-shadow": "0 1px 3px rgba(0,0,0,0.8)" }}
                     >
                       {pos.panel.panel_label}
                     </text>
@@ -196,8 +246,9 @@ const MosaicGrid: Component<Props> = (props) => {
                       text-anchor="middle"
                       dominant-baseline="central"
                       class="fill-white"
-                      font-size={`${Math.max(8, Math.min(10, pos.w * 0.12))}px`}
-                      opacity={0.7}
+                      font-size={`${Math.max(8, Math.min(10, pos.w * 0.1))}px`}
+                      opacity={0.85}
+                      style={{ "text-shadow": "0 1px 3px rgba(0,0,0,0.8)" }}
                     >
                       {formatHours(pos.panel.total_integration_seconds)}
                     </text>
@@ -230,16 +281,21 @@ const MosaicGrid: Component<Props> = (props) => {
       </Show>
 
       {/* Legend */}
-      <div class="flex items-center justify-center gap-4 mt-3 text-xs text-theme-text-secondary">
-        <span class="flex items-center gap-1.5">
-          <div class="w-3 h-3 rounded-sm" style={{ background: "#f85149", opacity: 0.8 }} /> &lt;40%
-        </span>
-        <span class="flex items-center gap-1.5">
-          <div class="w-3 h-3 rounded-sm" style={{ background: "#d29922", opacity: 0.8 }} /> 40-80%
-        </span>
-        <span class="flex items-center gap-1.5">
-          <div class="w-3 h-3 rounded-sm" style={{ background: "#26a641", opacity: 0.8 }} /> &gt;80%
-        </span>
+      <div class="flex flex-col items-center gap-1.5 mt-3 text-xs text-theme-text-secondary">
+        <div class="flex items-center gap-4">
+          <span class="flex items-center gap-1.5">
+            <div class="w-3 h-3 rounded-sm" style={{ background: "#f85149", opacity: 0.8 }} /> &lt;40%
+          </span>
+          <span class="flex items-center gap-1.5">
+            <div class="w-3 h-3 rounded-sm" style={{ background: "#d29922", opacity: 0.8 }} /> 40-80%
+          </span>
+          <span class="flex items-center gap-1.5">
+            <div class="w-3 h-3 rounded-sm" style={{ background: "#26a641", opacity: 0.8 }} /> &gt;80%
+          </span>
+        </div>
+        <div class="text-theme-text-tertiary">
+          Completion relative to the most-imaged panel in this mosaic
+        </div>
       </div>
     </div>
   );

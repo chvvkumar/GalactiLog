@@ -74,6 +74,20 @@ async def _panel_stats(panel: MosaicPanel, session: AsyncSession) -> PanelStats:
     )
     filter_dist = {r[0]: r[1] or 0 for r in (await session.execute(fq)).all()}
 
+    # Most recent thumbnail for this panel
+    thumb_q = (
+        select(Image.thumbnail_path)
+        .where(*base_filter)
+        .where(Image.thumbnail_path.is_not(None))
+        .order_by(Image.capture_date.desc())
+        .limit(1)
+    )
+    thumb_row = (await session.execute(thumb_q)).scalar_one_or_none()
+    thumb_url = None
+    if thumb_row:
+        filename = thumb_row.split("/")[-1].split("\\")[-1]
+        thumb_url = f"/thumbnails/{filename}"
+
     # Compute per-panel center from frame FITS headers (median of OBJCTRA/OBJCTDEC).
     # This gives the actual pointing position for each panel, even when multiple
     # panels are merged into the same target by SIMBAD resolution.
@@ -111,6 +125,7 @@ async def _panel_stats(panel: MosaicPanel, session: AsyncSession) -> PanelStats:
         total_frames=row.frames or 0,
         filter_distribution=filter_dist,
         last_session_date=str(row.last_date) if row.last_date else None,
+        thumbnail_url=thumb_url,
     )
 
 

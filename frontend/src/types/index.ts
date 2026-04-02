@@ -603,6 +603,7 @@ export interface PanelStats {
   total_frames: number;
   filter_distribution: Record<string, number>;
   last_session_date: string | null;
+  thumbnail_url: string | null;
 }
 
 export interface MosaicSummary {

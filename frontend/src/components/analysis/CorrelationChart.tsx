@@ -114,8 +114,12 @@ const CorrelationChart: Component<Props> = (props) => {
         label: "Data",
         data: points.map((p) => ({ x: p.x, y: p.y })),
         backgroundColor: isSession
-          ? "rgba(99, 132, 255, 0.8)"
-          : "rgba(99, 132, 255, 0.3)",
+          ? "rgba(100, 180, 255, 0.85)"
+          : "rgba(100, 180, 255, 0.55)",
+        borderColor: isSession
+          ? "rgba(130, 200, 255, 1)"
+          : "rgba(130, 200, 255, 0.7)",
+        borderWidth: 1,
         pointRadius: isSession ? 5 : 3,
         pointHoverRadius: isSession ? 7 : 5,
       },
@@ -133,8 +137,8 @@ const CorrelationChart: Component<Props> = (props) => {
           { x: xMax, y: trend.slope * xMax + trend.intercept },
         ],
         type: "line" as const,
-        borderColor: "rgba(255, 99, 132, 0.7)",
-        borderWidth: 2,
+        borderColor: "rgba(255, 180, 80, 0.9)",
+        borderWidth: 2.5,
         pointRadius: 0,
         fill: false,
       });
@@ -148,14 +152,14 @@ const CorrelationChart: Component<Props> = (props) => {
         maintainAspectRatio: false,
         scales: {
           x: {
-            title: { display: true, text: METRIC_LABELS[x_metric] || x_metric, color: "rgb(var(--text-secondary))" },
-            ticks: { color: "rgb(var(--text-secondary))" },
-            grid: { color: "rgba(var(--text-secondary), 0.1)" },
+            title: { display: true, text: METRIC_LABELS[x_metric] || x_metric, color: "rgba(200, 210, 220, 0.8)" },
+            ticks: { color: "rgba(200, 210, 220, 0.7)" },
+            grid: { color: "rgba(200, 210, 220, 0.12)" },
           },
           y: {
-            title: { display: true, text: METRIC_LABELS[y_metric] || y_metric, color: "rgb(var(--text-secondary))" },
-            ticks: { color: "rgb(var(--text-secondary))" },
-            grid: { color: "rgba(var(--text-secondary), 0.1)" },
+            title: { display: true, text: METRIC_LABELS[y_metric] || y_metric, color: "rgba(200, 210, 220, 0.8)" },
+            ticks: { color: "rgba(200, 210, 220, 0.7)" },
+            grid: { color: "rgba(200, 210, 220, 0.12)" },
           },
         },
         plugins: {
