@@ -19,6 +19,8 @@ export interface TargetAggregation {
   sessions: SessionSummary[];
   matched_sessions?: number | null;
   total_sessions?: number | null;
+  mosaic_id: string | null;
+  mosaic_name: string | null;
 }
 
 export interface AggregateStats {
@@ -495,4 +497,47 @@ export interface DiscoveredItem {
 
 export interface DiscoveredResponse {
   items: DiscoveredItem[];
+}
+
+// === Mosaics ===
+
+export interface PanelStats {
+  panel_id: string;
+  target_id: string;
+  target_name: string;
+  panel_label: string;
+  sort_order: number;
+  ra: number | null;
+  dec: number | null;
+  total_integration_seconds: number;
+  total_frames: number;
+  filter_distribution: Record<string, number>;
+  last_session_date: string | null;
+}
+
+export interface MosaicSummary {
+  id: string;
+  name: string;
+  notes: string | null;
+  panel_count: number;
+  total_integration_seconds: number;
+  total_frames: number;
+  completion_pct: number;
+}
+
+export interface MosaicDetailResponse {
+  id: string;
+  name: string;
+  notes: string | null;
+  total_integration_seconds: number;
+  total_frames: number;
+  panels: PanelStats[];
+}
+
+export interface MosaicSuggestionResponse {
+  id: string;
+  suggested_name: string;
+  target_ids: string[];
+  panel_labels: string[];
+  status: string;
 }

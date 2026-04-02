@@ -302,4 +302,44 @@ export const api = {
     fetchJson<{ status: string; task_id: string }>("/targets/detect-duplicates", {
       method: "POST",
     }),
+
+  // Mosaics
+  getMosaics: () =>
+    fetchJson<import("../types").MosaicSummary[]>("/mosaics"),
+
+  createMosaic: (name: string, notes?: string, panels?: { target_id: string; panel_label: string }[]) =>
+    fetchJson<import("../types").MosaicSummary>("/mosaics", {
+      method: "POST",
+      body: JSON.stringify({ name, notes, panels: panels || [] }),
+    }),
+
+  getMosaicDetail: (id: string) =>
+    fetchJson<import("../types").MosaicDetailResponse>(`/mosaics/${id}`),
+
+  updateMosaic: (id: string, data: { name?: string; notes?: string }) =>
+    fetchJson<{ status: string }>(`/mosaics/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+
+  deleteMosaic: (id: string) =>
+    fetchJson<{ status: string }>(`/mosaics/${id}`, { method: "DELETE" }),
+
+  addMosaicPanel: (mosaicId: string, targetId: string, label: string) =>
+    fetchJson<{ status: string; panel_id: string }>(`/mosaics/${mosaicId}/panels`, {
+      method: "POST",
+      body: JSON.stringify({ target_id: targetId, panel_label: label }),
+    }),
+
+  updateMosaicPanel: (mosaicId: string, panelId: string, data: { panel_label?: string; sort_order?: number }) =>
+    fetchJson<{ status: string }>(`/mosaics/${mosaicId}/panels/${panelId}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+
+  removeMosaicPanel: (mosaicId: string, panelId: string) =>
+    fetchJson<{ status: string }>(`/mosaics/${mosaicId}/panels/${panelId}`, { method: "DELETE" }),
+
+  getMosaicSuggestions: () =>
+    fetchJson<import("../types").MosaicSuggestionResponse[]>("/mosaics/suggestions"),
 };
