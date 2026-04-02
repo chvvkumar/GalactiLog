@@ -328,6 +328,17 @@ export interface TimelineEntry {
   integration_seconds: number;
 }
 
+export interface TimelineDetailEntry {
+  period: string;
+  integration_seconds: number;
+  efficiency_pct: number | null;
+}
+
+export interface SiteCoords {
+  latitude: number;
+  longitude: number;
+}
+
 export interface TopTarget {
   name: string;
   integration_seconds: number;
@@ -378,6 +389,10 @@ export interface StatsResponse {
   equipment_performance: EquipmentComboMetrics[];
   filter_usage: Record<string, number>;
   timeline: TimelineEntry[];
+  timeline_monthly: TimelineDetailEntry[];
+  timeline_weekly: TimelineDetailEntry[];
+  timeline_daily: TimelineDetailEntry[];
+  site_coords: SiteCoords | null;
   top_targets: TopTarget[];
   data_quality: {
     avg_hfr: number | null;
