@@ -68,7 +68,7 @@ export const MosaicsTab: Component = () => {
   // Keywords
   const addKeyword = async () => {
     const kw = newKeyword().trim();
-    if (!kw || keywords().includes(kw)) return;
+    if (!kw || keywords().some((k) => k.toLowerCase() === kw.toLowerCase())) return;
     const updated = [...keywords(), kw];
     try {
       const current = settingsCtx.settings()?.general;
@@ -109,7 +109,10 @@ export const MosaicsTab: Component = () => {
     try {
       await api.acceptMosaicSuggestion(s.id);
       showToast(`Created mosaic "${s.suggested_name}"`);
-      await refresh();
+      setExpandedSuggestion(null);
+      // Update both lists independently so one failure doesn't block the other
+      api.getMosaicSuggestions().then(setSuggestions).catch(() => {});
+      api.getMosaics().then(setMosaics).catch(() => {});
     } catch {
       showToast("Failed to accept suggestion", "error");
     }
@@ -118,6 +121,7 @@ export const MosaicsTab: Component = () => {
   const handleDismiss = async (s: MosaicSuggestionResponse) => {
     try {
       await api.dismissMosaicSuggestion(s.id);
+      setExpandedSuggestion(null);
       setSuggestions((prev) => prev.filter((x) => x.id !== s.id));
     } catch {
       showToast("Failed to dismiss suggestion", "error");
@@ -307,6 +311,27 @@ export const MosaicsTab: Component = () => {
                 const uniqueTargets = () => [...new Set(s.target_ids)];
                 const totalFrames = () => s.sessions.reduce((a, r) => a + r.frames, 0);
                 const totalInt = () => s.sessions.reduce((a, r) => a + r.integration_seconds, 0);
+
+                type SortKey = "panel_label" | "object_name" | "date" | "filter_used" | "frames" | "integration_seconds";
+                const [sortKey, setSortKey] = createSignal<SortKey>("panel_label");
+                const [sortAsc, setSortAsc] = createSignal(true);
+                const toggleSort = (key: SortKey) => {
+                  if (sortKey() === key) setSortAsc(!sortAsc());
+                  else { setSortKey(key); setSortAsc(true); }
+                };
+                const sortedSessions = () => {
+                  const key = sortKey();
+                  const asc = sortAsc();
+                  return [...s.sessions].sort((a, b) => {
+                    const av = a[key] ?? "";
+                    const bv = b[key] ?? "";
+                    const cmp = typeof av === "number" ? av - (bv as number) : String(av).localeCompare(String(bv));
+                    return asc ? cmp : -cmp;
+                  });
+                };
+                const sortIcon = (key: SortKey) =>
+                  sortKey() === key ? (sortAsc() ? " \u25B4" : " \u25BE") : "";
+
                 return (
                   <div class="border border-theme-border rounded-[var(--radius-sm)] overflow-hidden">
                     <button
@@ -351,16 +376,18 @@ export const MosaicsTab: Component = () => {
                           <table class="w-full text-xs">
                             <thead>
                               <tr class="text-theme-text-secondary border-b border-theme-border/50">
-                                <th class="text-left px-3 py-1.5 font-medium">Panel</th>
-                                <th class="text-left px-3 py-1.5 font-medium">OBJECT</th>
-                                <th class="text-left px-3 py-1.5 font-medium">Date</th>
-                                <th class="text-left px-3 py-1.5 font-medium">Filter</th>
-                                <th class="text-right px-3 py-1.5 font-medium">Frames</th>
-                                <th class="text-right px-3 py-1.5 font-medium">Integration</th>
+                                {([["panel_label", "Panel", "left"], ["object_name", "OBJECT", "left"], ["date", "Date", "left"], ["filter_used", "Filter", "left"], ["frames", "Frames", "right"], ["integration_seconds", "Integration", "right"]] as const).map(([key, label, align]) => (
+                                  <th
+                                    class={`text-${align} px-3 py-1.5 font-medium cursor-pointer select-none hover:text-theme-text-primary transition-colors`}
+                                    onClick={() => toggleSort(key)}
+                                  >
+                                    {label}{sortIcon(key)}
+                                  </th>
+                                ))}
                               </tr>
                             </thead>
                             <tbody>
-                              <For each={s.sessions}>
+                              <For each={sortedSessions()}>
                                 {(sess) => (
                                   <tr class="border-b border-theme-border/30 hover:bg-theme-base/30">
                                     <td class="px-3 py-1.5 text-theme-text-primary">{sess.panel_label}</td>
