@@ -120,8 +120,8 @@ const CorrelationChart: Component<Props> = (props) => {
           ? "rgba(130, 200, 255, 1)"
           : "rgba(130, 200, 255, 0.7)",
         borderWidth: 1,
-        pointRadius: isSession ? 5 : 3,
-        pointHoverRadius: isSession ? 7 : 5,
+        pointRadius: isSession ? 6 : 4,
+        pointHoverRadius: isSession ? 8 : 6,
       },
     ];
 
@@ -152,18 +152,20 @@ const CorrelationChart: Component<Props> = (props) => {
         maintainAspectRatio: false,
         scales: {
           x: {
-            title: { display: true, text: METRIC_LABELS[x_metric] || x_metric, color: "rgba(200, 210, 220, 0.8)" },
-            ticks: { color: "rgba(200, 210, 220, 0.7)" },
+            title: { display: true, text: METRIC_LABELS[x_metric] || x_metric, color: "rgba(200, 210, 220, 0.8)", font: { size: 14 } },
+            ticks: { color: "rgba(200, 210, 220, 0.7)", font: { size: 12 } },
             grid: { color: "rgba(200, 210, 220, 0.12)" },
           },
           y: {
-            title: { display: true, text: METRIC_LABELS[y_metric] || y_metric, color: "rgba(200, 210, 220, 0.8)" },
-            ticks: { color: "rgba(200, 210, 220, 0.7)" },
+            title: { display: true, text: METRIC_LABELS[y_metric] || y_metric, color: "rgba(200, 210, 220, 0.8)", font: { size: 14 } },
+            ticks: { color: "rgba(200, 210, 220, 0.7)", font: { size: 12 } },
             grid: { color: "rgba(200, 210, 220, 0.12)" },
           },
         },
         plugins: {
           tooltip: {
+            titleFont: { size: 13 },
+            bodyFont: { size: 13 },
             callbacks: {
               label: (ctx) => {
                 const pt = points[ctx.dataIndex];
@@ -188,20 +190,23 @@ const CorrelationChart: Component<Props> = (props) => {
   return (
     <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-4">
       {props.title && <h3 class="text-sm font-medium text-theme-text-primary mb-2">{props.title}</h3>}
-      <div class="relative" style={{ height: "300px" }}>
+      <div class="relative" style={{ height: "100%" }}>
         {props.loading && !props.data && (
-          <div class="absolute inset-0 flex items-center justify-center text-xs text-theme-text-secondary">
+          <div class="absolute inset-0 flex items-center justify-center text-sm text-theme-text-secondary">
             Loading...
           </div>
         )}
         <canvas ref={canvasRef} />
       </div>
       {props.data && props.data.points.length > 0 && (
-        <div class="text-xs text-theme-text-secondary mt-2 leading-relaxed">
+        <div class="text-sm text-theme-text-secondary mt-3 leading-relaxed">
           {describeCorrelation(props.data)}
           <span class="opacity-60"> ({props.data.points.length} points)</span>
         </div>
       )}
+      <p class="text-xs text-theme-text-tertiary mt-3 opacity-50">
+        Correlations show statistical associations, not causation. Many factors affect image quality simultaneously.
+      </p>
     </div>
   );
 };

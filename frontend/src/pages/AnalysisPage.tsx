@@ -73,9 +73,9 @@ const AnalysisPage: Component = () => {
     return `${tel}|||${cam}`;
   };
 
-  const selectClass = "text-xs bg-theme-elevated border border-theme-border rounded px-2 py-1 text-theme-text-primary";
+  const selectClass = "text-sm bg-theme-elevated border border-theme-border rounded px-2.5 py-1.5 text-theme-text-primary";
   const toggleClass = (active: boolean) =>
-    `text-xs px-2.5 py-1 rounded-[var(--radius-sm)] transition-colors ${
+    `text-sm px-3 py-1.5 rounded-[var(--radius-sm)] transition-colors ${
       active
         ? "bg-theme-elevated text-theme-text-primary font-medium"
         : "text-theme-text-secondary hover:text-theme-text-primary"
@@ -118,18 +118,18 @@ const AnalysisPage: Component = () => {
 
       {/* Correlation explorer */}
       <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-4">
-        <h3 class="text-sm font-medium text-theme-text-primary mb-3">Correlation Explorer</h3>
+        <h3 class="text-base font-medium text-theme-text-primary mb-3">Correlation Explorer</h3>
         <div class="flex flex-wrap items-center gap-3 mb-4">
-          <label class="text-xs text-theme-text-secondary">X Axis:</label>
+          <label class="text-sm text-theme-text-secondary">X Axis:</label>
           <select class={selectClass} value={customX()} onChange={(e) => setCustomX(e.currentTarget.value)}>
             {X_OPTIONS.map((o) => <option value={o.value}>{o.label}</option>)}
           </select>
-          <label class="text-xs text-theme-text-secondary">Y Axis:</label>
+          <label class="text-sm text-theme-text-secondary">Y Axis:</label>
           <select class={selectClass} value={customY()} onChange={(e) => setCustomY(e.currentTarget.value)}>
             {Y_OPTIONS.map((o) => <option value={o.value}>{o.label}</option>)}
           </select>
         </div>
-        <div style={{ height: "400px" }} class="relative">
+        <div style={{ height: "600px" }} class="relative">
           <CorrelationChart data={customData()} loading={customData.loading} />
         </div>
       </div>
