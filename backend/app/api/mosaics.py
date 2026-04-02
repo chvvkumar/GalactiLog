@@ -60,6 +60,16 @@ async def _panel_stats(panel: MosaicPanel, session: AsyncSession) -> PanelStats:
     )
 
 
+@router.post("/detect")
+async def trigger_detection(
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    from app.services.mosaic_detection import detect_mosaic_panels
+    count = await detect_mosaic_panels(session)
+    return {"status": "ok", "new_suggestions": count}
+
+
 # NOTE: This endpoint MUST be defined BEFORE the /{mosaic_id} routes
 # to avoid FastAPI interpreting "suggestions" as a UUID path parameter.
 @router.get("/suggestions", response_model=list[MosaicSuggestionResponse])
@@ -79,6 +89,63 @@ async def get_suggestions(
         )
         for r in rows
     ]
+
+
+@router.post("/suggestions/{suggestion_id}/accept", response_model=MosaicSummary)
+async def accept_suggestion(
+    suggestion_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    suggestion = await session.get(MosaicSuggestion, suggestion_id)
+    if not suggestion or suggestion.status != "pending":
+        raise HTTPException(404, "Suggestion not found or already resolved")
+
+    # Create the mosaic
+    mosaic = Mosaic(name=suggestion.suggested_name)
+    session.add(mosaic)
+    await session.flush()
+
+    # Create panels
+    for target_id, label in zip(suggestion.target_ids, suggestion.panel_labels):
+        # Skip if target already in a mosaic
+        existing = (await session.execute(
+            select(MosaicPanel).where(MosaicPanel.target_id == target_id)
+        )).scalar_one_or_none()
+        if not existing:
+            panel = MosaicPanel(
+                mosaic_id=mosaic.id,
+                target_id=target_id,
+                panel_label=label,
+            )
+            session.add(panel)
+
+    suggestion.status = "accepted"
+    await session.commit()
+
+    return MosaicSummary(
+        id=str(mosaic.id),
+        name=mosaic.name,
+        notes=mosaic.notes,
+        panel_count=len(suggestion.target_ids),
+        total_integration_seconds=0,
+        total_frames=0,
+        completion_pct=0,
+    )
+
+
+@router.post("/suggestions/{suggestion_id}/dismiss")
+async def dismiss_suggestion(
+    suggestion_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    suggestion = await session.get(MosaicSuggestion, suggestion_id)
+    if not suggestion or suggestion.status != "pending":
+        raise HTTPException(404, "Suggestion not found or already resolved")
+    suggestion.status = "rejected"
+    await session.commit()
+    return {"status": "ok"}
 
 
 @router.get("", response_model=list[MosaicSummary])
