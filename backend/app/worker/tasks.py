@@ -170,8 +170,9 @@ def run_scan(self, include_calibration: bool = True) -> dict:
     # Some tasks may have already completed during discovery, check now
     check_complete_sync(_redis)
 
-    # Queue duplicate detection after ingest
+    # Queue duplicate detection and dark hours backfill after ingest
     detect_duplicate_targets.apply_async(countdown=30)
+    backfill_dark_hours.apply_async(countdown=45)
 
     return {
         "status": "ingesting",
@@ -974,3 +975,79 @@ def run_data_migrations(self, from_version: int) -> dict:
         return {"status": "complete", "from": from_version, "to": DATA_VERSION}
     finally:
         _redis.delete(DATA_MIGRATION_LOCK)
+
+
+DARK_HOURS_LOCK = "dark_hours:lock"
+DARK_HOURS_LOCK_TTL = 300  # 5 minutes
+
+
+@celery_app.task
+def backfill_dark_hours() -> dict:
+    """Compute astronomical dark hours for all imaging dates missing from site_dark_hours.
+
+    Extracts site coordinates from FITS headers, then batch-computes dark hours
+    for every unique capture_date not yet in the table. Runs on startup and after scans.
+    """
+    from app.models.site_dark_hours import SiteDarkHours
+    from app.services.astro_night import dark_hours_batch
+    from app.api.stats import _extract_site_coords_sync
+    from datetime import date as date_type
+
+    # Prevent overlapping runs
+    if not _redis.set(DARK_HOURS_LOCK, "1", nx=True, ex=DARK_HOURS_LOCK_TTL):
+        return {"status": "skipped", "reason": "already running"}
+
+    try:
+        with Session(_sync_engine) as session:
+            # Get site coordinates from FITS headers
+            site_coords = _extract_site_coords_sync(session)
+            if not site_coords:
+                logger.info("dark_hours: no site coordinates in FITS headers, skipping")
+                return {"status": "skipped", "reason": "no site coords"}
+
+            lat, lon = site_coords.latitude, site_coords.longitude
+
+            # Find unique capture dates that are missing from site_dark_hours
+            existing_q = select(SiteDarkHours.date).where(
+                SiteDarkHours.latitude == lat,
+                SiteDarkHours.longitude == lon,
+            )
+            existing_dates = {row[0] for row in session.execute(existing_q).all()}
+
+            all_dates_q = select(
+                text("DISTINCT capture_date::date")
+            ).select_from(Image.__table__).where(
+                Image.capture_date.isnot(None),
+                Image.image_type == "LIGHT",
+            )
+            all_imaging_dates = {row[0] for row in session.execute(all_dates_q).all()}
+
+            missing = sorted(all_imaging_dates - existing_dates)
+            if not missing:
+                logger.info("dark_hours: all %d dates already computed", len(existing_dates))
+                return {"status": "noop", "existing": len(existing_dates)}
+
+            logger.info("dark_hours: computing %d missing dates (lat=%.2f, lon=%.2f)",
+                        len(missing), lat, lon)
+
+            # Batch compute in chunks to avoid memory issues
+            CHUNK = 200
+            computed = 0
+            for i in range(0, len(missing), CHUNK):
+                chunk = missing[i:i + CHUNK]
+                dark_values = dark_hours_batch(chunk, lat, lon)
+                for d, dh in zip(chunk, dark_values):
+                    session.merge(SiteDarkHours(
+                        date=d, dark_hours=dh, latitude=lat, longitude=lon,
+                    ))
+                session.commit()
+                computed += len(chunk)
+                logger.info("dark_hours: %d/%d dates computed", computed, len(missing))
+
+            logger.info("dark_hours: backfill complete, %d dates added", computed)
+            return {"status": "complete", "computed": computed, "total": len(all_imaging_dates)}
+    except Exception:
+        logger.exception("dark_hours: backfill failed")
+        raise
+    finally:
+        _redis.delete(DARK_HOURS_LOCK)

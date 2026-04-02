@@ -48,16 +48,14 @@ async def lifespan(app: FastAPI):
                 logger.info("%s user '%s' created from environment variables", role.value.capitalize(), username)
             await session.commit()
 
-    # Pre-warm astropy coordinate transforms in a thread so we don't block
-    # the event loop (first call downloads IERS data and builds frames)
-    import asyncio
+    # Dispatch dark hours backfill to Celery worker (runs in background,
+    # doesn't block startup or the event loop)
     try:
-        from datetime import date
-        from app.services.astro_night import dark_hours_for_night
-        await asyncio.to_thread(dark_hours_for_night, date(2025, 1, 1), 33.0, -117.0)
-        logger.info("Astropy coordinate transforms warmed up")
+        from app.worker.tasks import backfill_dark_hours
+        backfill_dark_hours.apply_async(countdown=5)
+        logger.info("Dark hours backfill task dispatched")
     except Exception as e:
-        logger.warning("Astropy warmup failed (efficiency metrics may be slow on first request): %s", e)
+        logger.warning("Failed to dispatch dark hours backfill: %s", e)
 
     yield
 
