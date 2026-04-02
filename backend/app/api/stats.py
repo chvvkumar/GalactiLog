@@ -399,59 +399,84 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
     ]
 
     # --- Efficiency computation (CPU-bound, run in thread to avoid blocking event loop) ---
-    from datetime import date as date_type
+    from datetime import date as date_type, timedelta
 
     def _compute_efficiency():
-        lat = site_coords.latitude if site_coords else 0.0
-        lon = site_coords.longitude if site_coords else 0.0
+        if not site_coords:
+            # No location data — return everything without efficiency
+            tl_monthly = [TimelineDetailEntry(period=e.month, integration_seconds=e.integration_seconds, efficiency_pct=None) for e in timeline]
+            tl_weekly = [TimelineDetailEntry(period=p, integration_seconds=s, efficiency_pct=None) for p, s in weekly_raw]
+            tl_daily = [TimelineDetailEntry(period=p, integration_seconds=s, efficiency_pct=None) for p, s in daily_raw]
+            return tl_monthly, tl_weekly, tl_daily
 
-        # Monthly — uses cached per-month batch internally
-        tl_monthly: list[TimelineDetailEntry] = []
+        lat, lon = site_coords.latitude, site_coords.longitude
+
+        # Collect ALL unique dates needed across all granularities into one set,
+        # then do a single vectorized astropy call for all of them.
+        import calendar as cal
+        all_dates_set: dict[date_type, None] = {}  # ordered set via dict
+
+        # Monthly: need every day in each month
+        monthly_date_ranges: list[list[date_type]] = []
         for entry in timeline:
-            eff = None
-            if site_coords:
-                year, month = map(int, entry.month.split("-"))
-                dark_h = dark_hours_for_month(year, month, lat, lon)
-                if dark_h > 0:
-                    eff = round((entry.integration_seconds / 3600) / dark_h * 100, 1)
+            year, month = map(int, entry.month.split("-"))
+            days = [date_type(year, month, d) for d in range(1, cal.monthrange(year, month)[1] + 1)]
+            monthly_date_ranges.append(days)
+            for d in days:
+                all_dates_set[d] = None
+
+        # Weekly: need 7 days per week
+        weekly_date_ranges: list[list[date_type]] = []
+        for period, _ in weekly_raw:
+            parts = period.split("-W")
+            year, week = int(parts[0]), int(parts[1])
+            jan4 = date_type(year, 1, 4)
+            start_of_week1 = jan4 - timedelta(days=jan4.weekday())
+            monday = start_of_week1 + timedelta(weeks=week - 1)
+            days = [monday + timedelta(days=i) for i in range(7)]
+            weekly_date_ranges.append(days)
+            for d in days:
+                all_dates_set[d] = None
+
+        # Daily: single date each
+        daily_dates: list[date_type] = []
+        for period, _ in daily_raw:
+            parts = period.split("-")
+            d = date_type(int(parts[0]), int(parts[1]), int(parts[2]))
+            daily_dates.append(d)
+            all_dates_set[d] = None
+
+        # ONE batch call for all unique dates
+        unique_dates = list(all_dates_set.keys())
+        unique_dark = dark_hours_batch(unique_dates, lat, lon)
+        dark_map: dict[date_type, float] = dict(zip(unique_dates, unique_dark))
+
+        # Assemble monthly
+        tl_monthly: list[TimelineDetailEntry] = []
+        for entry, date_range in zip(timeline, monthly_date_ranges):
+            dark_h = sum(dark_map[d] for d in date_range)
+            eff = round((entry.integration_seconds / 3600) / dark_h * 100, 1) if dark_h > 0 else None
             tl_monthly.append(TimelineDetailEntry(
-                period=entry.month,
-                integration_seconds=entry.integration_seconds,
-                efficiency_pct=eff,
+                period=entry.month, integration_seconds=entry.integration_seconds, efficiency_pct=eff,
             ))
 
-        # Weekly — uses cached per-week batch internally
+        # Assemble weekly
         tl_weekly: list[TimelineDetailEntry] = []
-        for period, secs in weekly_raw:
-            eff = None
-            if site_coords:
-                parts = period.split("-W")
-                year, week = int(parts[0]), int(parts[1])
-                dark_h = dark_hours_for_week(year, week, lat, lon)
-                if dark_h > 0:
-                    eff = round((secs / 3600) / dark_h * 100, 1)
+        for (period, secs), date_range in zip(weekly_raw, weekly_date_ranges):
+            dark_h = sum(dark_map[d] for d in date_range)
+            eff = round((secs / 3600) / dark_h * 100, 1) if dark_h > 0 else None
             tl_weekly.append(TimelineDetailEntry(
                 period=period, integration_seconds=secs, efficiency_pct=eff,
             ))
 
-        # Daily — batch all dates in one vectorized call
+        # Assemble daily
         tl_daily: list[TimelineDetailEntry] = []
-        if site_coords and daily_raw:
-            daily_dates = []
-            for period, _ in daily_raw:
-                parts = period.split("-")
-                daily_dates.append(date_type(int(parts[0]), int(parts[1]), int(parts[2])))
-            daily_dark = dark_hours_batch(daily_dates, lat, lon)
-            for (period, secs), dark_h in zip(daily_raw, daily_dark):
-                eff = round((secs / 3600) / dark_h * 100, 1) if dark_h > 0 else None
-                tl_daily.append(TimelineDetailEntry(
-                    period=period, integration_seconds=secs, efficiency_pct=eff,
-                ))
-        else:
-            for period, secs in daily_raw:
-                tl_daily.append(TimelineDetailEntry(
-                    period=period, integration_seconds=secs, efficiency_pct=None,
-                ))
+        for (period, secs), d in zip(daily_raw, daily_dates):
+            dark_h = dark_map[d]
+            eff = round((secs / 3600) / dark_h * 100, 1) if dark_h > 0 else None
+            tl_daily.append(TimelineDetailEntry(
+                period=period, integration_seconds=secs, efficiency_pct=eff,
+            ))
 
         return tl_monthly, tl_weekly, tl_daily
 
