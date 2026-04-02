@@ -496,3 +496,26 @@ export interface DiscoveredItem {
 export interface DiscoveredResponse {
   items: DiscoveredItem[];
 }
+
+// === Correlation Analysis ===
+
+export interface CorrelationPoint {
+  x: number;
+  y: number;
+  date: string;
+  target_name: string | null;
+}
+
+export interface TrendLine {
+  slope: number;
+  intercept: number;
+  r_squared: number;
+}
+
+export interface CorrelationResponse {
+  points: CorrelationPoint[];
+  trend: TrendLine | null;
+  x_metric: string;
+  y_metric: string;
+  granularity: string;
+}
