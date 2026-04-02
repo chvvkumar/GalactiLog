@@ -41,7 +41,17 @@ const TargetRow: Component<{
             ? "text-theme-text-tertiary italic"
             : "text-theme-text-primary"
         }`}>
-          {displayName()}
+          <span class="inline-flex items-center gap-1.5">
+            {displayName()}
+            {props.target.mosaic_id && (
+              <A href={`/mosaics/${props.target.mosaic_id}`} class="text-theme-accent" title={`Mosaic: ${props.target.mosaic_name}`} onClick={(e) => e.stopPropagation()}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                  <rect x="2" y="2" width="9" height="9" rx="1" /><rect x="13" y="2" width="9" height="9" rx="1" />
+                  <rect x="2" y="13" width="9" height="9" rx="1" /><rect x="13" y="13" width="9" height="9" rx="1" />
+                </svg>
+              </A>
+            )}
+          </span>
         </td>
         <td class="py-2.5 px-3 font-mono text-theme-text-secondary text-xs">
           {props.target.target_id === "obj:__uncategorized__" ? "" : props.target.primary_name}
@@ -79,12 +89,20 @@ const TargetRow: Component<{
         <td colspan="7" class="p-3">
           <div class="space-y-1.5">
             <div class="flex items-start justify-between gap-2">
-              <span class={`font-bold text-sm hover:text-theme-accent transition-colors ${
+              <span class={`font-bold text-sm hover:text-theme-accent transition-colors inline-flex items-center gap-1.5 ${
                 props.target.target_id === "obj:__uncategorized__"
                   ? "text-theme-text-tertiary italic"
                   : "text-theme-text-primary"
               }`}>
                 {displayName()}
+                {props.target.mosaic_id && (
+                  <A href={`/mosaics/${props.target.mosaic_id}`} class="text-theme-accent" title={`Mosaic: ${props.target.mosaic_name}`} onClick={(e) => e.stopPropagation()}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                      <rect x="2" y="2" width="9" height="9" rx="1" /><rect x="13" y="2" width="9" height="9" rx="1" />
+                      <rect x="2" y="13" width="9" height="9" rx="1" /><rect x="13" y="13" width="9" height="9" rx="1" />
+                    </svg>
+                  </A>
+                )}
               </span>
               <button
                 class="px-2 py-0.5 border border-theme-border-em rounded text-label text-theme-text-secondary hover:text-theme-text-primary hover:border-theme-accent transition-colors flex-shrink-0"

@@ -3,6 +3,10 @@ import uuid
 from pydantic import BaseModel
 
 
+class NotesUpdate(BaseModel):
+    notes: str | None = None
+
+
 class TargetBase(BaseModel):
     primary_name: str
     aliases: list[str] = []
@@ -54,6 +58,7 @@ class SessionOverview(BaseModel):
     median_detected_stars: float | None = None
     median_guiding_rms_arcsec: float | None = None
     filter_medians: list[FilterMedian] = []
+    has_notes: bool = False
 
 
 class FrameHighlight(BaseModel):
@@ -123,6 +128,8 @@ class TargetAggregation(BaseModel):
     sessions: list[SessionSummary]
     matched_sessions: int | None = None
     total_sessions: int | None = None
+    mosaic_id: str | None = None
+    mosaic_name: str | None = None
 
 
 class AggregateStats(BaseModel):
@@ -168,6 +175,7 @@ class TargetDetailResponse(BaseModel):
     avg_fwhm: float | None = None
     avg_guiding_rms_arcsec: float | None = None
     avg_detected_stars: float | None = None
+    notes: str | None = None
 
 
 class SessionDetailResponse(BaseModel):
@@ -207,6 +215,7 @@ class SessionDetailResponse(BaseModel):
     median_ambient_temp: float | None = None
     median_humidity: float | None = None
     median_cloud_cover: float | None = None
+    notes: str | None = None
 
 
 class EquipmentOption(BaseModel):

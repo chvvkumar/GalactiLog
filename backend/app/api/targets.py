@@ -2,7 +2,7 @@ import re
 import uuid
 import statistics
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import date as date_type, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 import sqlalchemy as sa
@@ -12,14 +12,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_session
 from app.api.deps import get_current_user
 from app.models import Target, Image
+from app.models.session_note import SessionNote
 from app.models.user import User
 from app.services.normalization import load_alias_maps, normalize_filter, normalize_equipment, expand_canonical
 from app.schemas.target import (
     TargetAggregationResponse, TargetAggregation, SessionSummary,
     AggregateStats, EquipmentResponse, SessionDetailResponse,
     TargetDetailResponse, SessionOverview, FilterDetail, FilterMedian, SessionInsight, FrameRecord,
-    TargetSearchResultFuzzy, ObjectTypeCount,
+    TargetSearchResultFuzzy, ObjectTypeCount, NotesUpdate,
 )
+from app.schemas.export import ExportResponse, ExportFilterRow, ExportEquipment, ExportCalibration
 
 router = APIRouter(prefix="/targets", tags=["targets"])
 
@@ -229,7 +231,127 @@ async def get_object_types(
     )
 
 
-# --- 2d. Target detail (before path-parameter routes) ---
+# --- 2d. Export (before path-parameter routes) ---
+
+@router.get("/{target_id}/export", response_model=ExportResponse)
+async def export_target(
+    target_id: uuid.UUID,
+    sessions: str | None = Query(None, description="Comma-separated dates to include"),
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    target = await session.get(Target, target_id)
+    if not target:
+        raise HTTPException(404, "Target not found")
+
+    # Get settings for AstroBin filter IDs and bortle
+    from app.models import UserSettings, SETTINGS_ROW_ID
+    settings_row = await session.get(UserSettings, SETTINGS_ROW_ID)
+    general = settings_row.general if settings_row else {}
+    astrobin_filter_ids = general.get("astrobin_filter_ids", {})
+    bortle = general.get("astrobin_bortle")
+
+    # Fetch LIGHT frames for this target
+    q = (
+        select(Image)
+        .where(Image.resolved_target_id == target_id)
+        .where(Image.image_type == "LIGHT")
+        .where(Image.capture_date.is_not(None))
+        .order_by(Image.capture_date)
+    )
+    images = (await session.execute(q)).scalars().all()
+
+    # Filter by selected sessions
+    selected_dates = None
+    if sessions:
+        selected_dates = set(sessions.split(","))
+
+    # Group by (date, filter)
+    import statistics as stats_mod
+    groups: dict[tuple[str, str], list] = defaultdict(list)
+    equip_set: set[tuple] = set()
+
+    for img in images:
+        date_key = img.capture_date.strftime("%Y-%m-%d")
+        if selected_dates and date_key not in selected_dates:
+            continue
+        filter_name = img.filter_used or "Unknown"
+        groups[(date_key, filter_name)].append(img)
+        equip_set.add((img.telescope, img.camera))
+
+    rows = []
+    all_dates = set()
+    total_seconds = 0.0
+
+    for (date_key, filter_name), imgs in sorted(groups.items()):
+        all_dates.add(date_key)
+        frame_count = len(imgs)
+        exposure = imgs[0].exposure_time or 0
+        integration = sum(i.exposure_time or 0 for i in imgs)
+        total_seconds += integration
+
+        gains = [i.camera_gain for i in imgs if i.camera_gain is not None]
+        temps = [i.sensor_temp for i in imgs if i.sensor_temp is not None]
+        fwhms = [i.fwhm for i in imgs if i.fwhm is not None]
+        sqms = [i.sky_quality for i in imgs if i.sky_quality is not None]
+        amb_temps = [i.ambient_temp for i in imgs if i.ambient_temp is not None]
+
+        # Normalize filter name for AstroBin ID lookup
+        filter_aliases, _, _ = await load_alias_maps(session)
+        canonical_filter = normalize_filter(filter_name, filter_aliases)
+        ab_id = astrobin_filter_ids.get(canonical_filter) or astrobin_filter_ids.get(filter_name)
+
+        rows.append(ExportFilterRow(
+            date=date_key,
+            filter_name=filter_name,
+            astrobin_filter_id=ab_id,
+            frames=frame_count,
+            exposure=round(exposure, 4),
+            total_seconds=round(integration, 1),
+            gain=max(set(gains), key=gains.count) if gains else None,  # mode
+            sensor_temp=round(stats_mod.median(temps)) if temps else None,
+            fwhm=round(stats_mod.median(fwhms), 2) if fwhms else None,
+            sky_quality=round(stats_mod.median(sqms), 2) if sqms else None,
+            ambient_temp=round(stats_mod.median(amb_temps), 2) if amb_temps else None,
+        ))
+
+    # Calibration frame counts
+    camera_names = {e[1] for e in equip_set if e[1]}
+
+    dark_q = (
+        select(func.count(Image.id))
+        .where(Image.image_type == "DARK")
+        .where(Image.camera.in_(camera_names) if camera_names else True)
+    )
+    dark_count = (await session.execute(dark_q)).scalar() or 0
+
+    flat_q = (
+        select(func.count(Image.id))
+        .where(Image.image_type == "FLAT")
+        .where(Image.camera.in_(camera_names) if camera_names else True)
+    )
+    flat_count = (await session.execute(flat_q)).scalar() or 0
+
+    bias_q = (
+        select(func.count(Image.id))
+        .where(Image.image_type == "BIAS")
+        .where(Image.camera.in_(camera_names) if camera_names else True)
+    )
+    bias_count = (await session.execute(bias_q)).scalar() or 0
+
+    return ExportResponse(
+        target_name=target.primary_name,
+        catalog_id=target.catalog_id,
+        equipment=[ExportEquipment(telescope=t, camera=c) for t, c in equip_set],
+        dates=sorted(all_dates),
+        rows=rows,
+        calibration=ExportCalibration(darks=dark_count, flats=flat_count, bias=bias_count),
+        total_integration_seconds=total_seconds,
+        bortle=bortle,
+    )
+
+
+# --- 2e. Target detail (before path-parameter routes) ---
 
 @router.get("/{target_id:path}/detail", response_model=TargetDetailResponse)
 async def get_target_detail(
@@ -293,6 +415,12 @@ async def get_target_detail(
         raise HTTPException(status_code=404, detail="No images found for this target")
 
     filter_map, cam_map, tel_map = await load_alias_maps(session)
+
+    # Fetch session note dates for has_notes flag
+    note_dates: set = set()
+    if target_obj:
+        note_dates_q = select(SessionNote.session_date).where(SessionNote.target_id == target_obj.id)
+        note_dates = {r[0] for r in (await session.execute(note_dates_q)).all()}
 
     sessions_map: dict[str, list] = defaultdict(list)
     all_hfr = []
@@ -375,6 +503,7 @@ async def get_target_detail(
             median_detected_stars=statistics.median(sess_detected_stars) if sess_detected_stars else None,
             median_guiding_rms_arcsec=statistics.median(sess_guiding_rms) if sess_guiding_rms else None,
             filter_medians=sess_filter_medians,
+            has_notes=date_type.fromisoformat(date_key) in note_dates if date_key != "unknown" else False,
         ))
 
     sorted_dates = sorted(sessions_map.keys())
@@ -399,6 +528,7 @@ async def get_target_detail(
         avg_fwhm=statistics.mean(all_fwhm) if all_fwhm else None,
         avg_guiding_rms_arcsec=statistics.mean(all_guiding_rms) if all_guiding_rms else None,
         avg_detected_stars=statistics.mean(all_detected_stars) if all_detected_stars else None,
+        notes=target_obj.notes if target_obj else None,
     )
 
 
@@ -741,6 +871,15 @@ async def list_targets_aggregated(
             s["filters_set"].add(f)
 
     # ---------------------------------------------------------------
+    # Phase 4b: Mosaic membership lookup
+    # ---------------------------------------------------------------
+    from app.models.mosaic_panel import MosaicPanel
+    from app.models.mosaic import Mosaic
+    panel_q = select(MosaicPanel.target_id, Mosaic.id, Mosaic.name).join(Mosaic)
+    panel_rows = (await session.execute(panel_q)).all()
+    mosaic_map = {str(r[0]): (str(r[1]), r[2]) for r in panel_rows}
+
+    # ---------------------------------------------------------------
     # Phase 5: Assemble the response
     # ---------------------------------------------------------------
     target_list = []
@@ -775,6 +914,8 @@ async def list_targets_aggregated(
             sessions=sessions,
             matched_sessions=matched_session_count,
             total_sessions=total_session_count if matched_session_count is not None else None,
+            mosaic_id=mosaic_map.get(basics["target_key"], (None, None))[0],
+            mosaic_name=mosaic_map.get(basics["target_key"], (None, None))[1],
         ))
 
     return TargetAggregationResponse(
@@ -1080,6 +1221,16 @@ async def get_session_detail(
         last_frame=images[-1],
     )
 
+    # Fetch session note
+    session_note = None
+    resolved_target_id = target_obj.id if target_obj else None
+    if resolved_target_id:
+        note_q = select(SessionNote.notes).where(
+            SessionNote.target_id == resolved_target_id,
+            SessionNote.session_date == date_type.fromisoformat(date),
+        )
+        session_note = (await session.execute(note_q)).scalar_one_or_none()
+
     return SessionDetailResponse(
         target_name=target_name,
         session_date=date,
@@ -1120,4 +1271,77 @@ async def get_session_detail(
         median_ambient_temp=statistics.median(ambient_temp_values) if ambient_temp_values else None,
         median_humidity=statistics.median(humidity_values) if humidity_values else None,
         median_cloud_cover=statistics.median(cloud_cover_values) if cloud_cover_values else None,
+        notes=session_note,
     )
+
+
+# --- Notes endpoints ---
+
+@router.put("/{target_id}/notes")
+async def update_target_notes(
+    target_id: uuid.UUID,
+    body: NotesUpdate,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    target = await session.get(Target, target_id)
+    if not target:
+        raise HTTPException(404, "Target not found")
+    target.notes = body.notes if body.notes else None
+    await session.commit()
+    return {"status": "ok"}
+
+
+@router.put("/{target_id}/sessions/{date}/notes")
+async def update_session_notes(
+    target_id: str,
+    date: str,
+    body: NotesUpdate,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    session_date = date_type.fromisoformat(date)
+
+    # Resolve target_id (may be UUID or obj:name)
+    resolved_id = None
+    try:
+        resolved_id = uuid.UUID(target_id)
+    except ValueError:
+        if target_id.startswith("obj:"):
+            name = target_id[4:]
+            tq = select(Target.id).where(Target.primary_name == name)
+            row = (await session.execute(tq)).scalar_one_or_none()
+            if row:
+                resolved_id = row
+    if not resolved_id:
+        raise HTTPException(404, "Target not found")
+
+    # Upsert note
+    if not body.notes:
+        # Delete if empty
+        q = select(SessionNote).where(
+            SessionNote.target_id == resolved_id,
+            SessionNote.session_date == session_date,
+        )
+        note = (await session.execute(q)).scalar_one_or_none()
+        if note:
+            await session.delete(note)
+            await session.commit()
+    else:
+        q = select(SessionNote).where(
+            SessionNote.target_id == resolved_id,
+            SessionNote.session_date == session_date,
+        )
+        note = (await session.execute(q)).scalar_one_or_none()
+        if note:
+            note.notes = body.notes
+        else:
+            note = SessionNote(
+                target_id=resolved_id,
+                session_date=session_date,
+                notes=body.notes,
+            )
+            session.add(note)
+        await session.commit()
+
+    return {"status": "ok"}

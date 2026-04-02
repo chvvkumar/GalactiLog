@@ -10,5 +10,9 @@ from .app_metadata import AppMetadata
 from .openngc import OpenNGCEntry
 from .vizier_cache import VizierCache
 from .site_dark_hours import SiteDarkHours
+from .session_note import SessionNote
+from .mosaic import Mosaic
+from .mosaic_panel import MosaicPanel
+from .mosaic_suggestion import MosaicSuggestion
 
-__all__ = ["Base", "Target", "Image", "UserSettings", "SETTINGS_ROW_ID", "MergeCandidate", "SimbadCache", "User", "UserRole", "RefreshToken", "AppMetadata", "OpenNGCEntry", "VizierCache", "SiteDarkHours"]
+__all__ = ["Base", "Target", "Image", "UserSettings", "SETTINGS_ROW_ID", "MergeCandidate", "SimbadCache", "User", "UserRole", "RefreshToken", "AppMetadata", "OpenNGCEntry", "VizierCache", "SiteDarkHours", "SessionNote", "Mosaic", "MosaicPanel", "MosaicSuggestion"]

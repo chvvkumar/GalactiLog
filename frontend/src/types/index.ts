@@ -19,6 +19,8 @@ export interface TargetAggregation {
   sessions: SessionSummary[];
   matched_sessions?: number | null;
   total_sessions?: number | null;
+  mosaic_id: string | null;
+  mosaic_name: string | null;
 }
 
 export interface AggregateStats {
@@ -78,6 +80,7 @@ export interface SessionDetail {
   median_ambient_temp: number | null;
   median_humidity: number | null;
   median_cloud_cover: number | null;
+  notes: string | null;
 }
 
 // === Target Detail (Deep Dive Page) ===
@@ -104,6 +107,7 @@ export interface SessionOverview {
   median_detected_stars: number | null;
   median_guiding_rms_arcsec: number | null;
   filter_medians: FilterMedian[];
+  has_notes: boolean;
 }
 
 export interface TargetDetailResponse {
@@ -132,6 +136,7 @@ export interface TargetDetailResponse {
   avg_fwhm: number | null;
   avg_guiding_rms_arcsec: number | null;
   avg_detected_stars: number | null;
+  notes: string | null;
 }
 
 export interface FilterDetail {
@@ -408,6 +413,15 @@ export interface StatsResponse {
   ingest_history: { date: string; files_added: number }[];
 }
 
+// === Calendar ===
+
+export interface CalendarEntry {
+  date: string;
+  integration_seconds: number;
+  target_count: number;
+  frame_count: number;
+}
+
 // === Settings ===
 
 export interface MetricGroupSettings {
@@ -434,6 +448,8 @@ export interface GeneralSettings {
   theme: string;
   text_size: string;
   timezone: string;
+  astrobin_filter_ids?: Record<string, number>;
+  astrobin_bortle?: number | null;
 }
 
 export interface FilterConfig {
@@ -510,4 +526,119 @@ export interface DiscoveredItem {
 
 export interface DiscoveredResponse {
   items: DiscoveredItem[];
+}
+
+// === Correlation Analysis ===
+
+export interface CorrelationPoint {
+  x: number;
+  y: number;
+  date: string;
+  target_name: string | null;
+}
+
+export interface TrendLine {
+  slope: number;
+  intercept: number;
+  r_squared: number;
+}
+
+export interface CorrelationResponse {
+  points: CorrelationPoint[];
+  trend: TrendLine | null;
+  x_metric: string;
+  y_metric: string;
+  granularity: string;
+}
+
+// === AstroBin Export ===
+
+export interface ExportFilterRow {
+  date: string;
+  filter_name: string;
+  astrobin_filter_id: number | null;
+  frames: number;
+  exposure: number;
+  total_seconds: number;
+  gain: number | null;
+  sensor_temp: number | null;
+  fwhm: number | null;
+  sky_quality: number | null;
+  ambient_temp: number | null;
+}
+
+export interface ExportEquipment {
+  telescope: string | null;
+  camera: string | null;
+}
+
+export interface ExportCalibration {
+  darks: number;
+  flats: number;
+  bias: number;
+}
+
+export interface ExportResponse {
+  target_name: string;
+  catalog_id: string | null;
+  equipment: ExportEquipment[];
+  dates: string[];
+  rows: ExportFilterRow[];
+  calibration: ExportCalibration;
+  total_integration_seconds: number;
+  bortle: number | null;
+}
+
+// === Mosaics ===
+
+export interface PanelStats {
+  panel_id: string;
+  target_id: string;
+  target_name: string;
+  panel_label: string;
+  sort_order: number;
+  ra: number | null;
+  dec: number | null;
+  total_integration_seconds: number;
+  total_frames: number;
+  filter_distribution: Record<string, number>;
+  last_session_date: string | null;
+}
+
+export interface MosaicSummary {
+  id: string;
+  name: string;
+  notes: string | null;
+  panel_count: number;
+  total_integration_seconds: number;
+  total_frames: number;
+  completion_pct: number;
+}
+
+export interface MosaicDetailResponse {
+  id: string;
+  name: string;
+  notes: string | null;
+  total_integration_seconds: number;
+  total_frames: number;
+  panels: PanelStats[];
+}
+
+export interface SuggestionPanelSession {
+  panel_label: string;
+  object_name: string;
+  date: string;
+  frames: number;
+  integration_seconds: number;
+  filter_used: string | null;
+}
+
+export interface MosaicSuggestionResponse {
+  id: string;
+  suggested_name: string;
+  target_ids: string[];
+  panel_labels: string[];
+  target_names: Record<string, string>;
+  sessions: SuggestionPanelSession[];
+  status: string;
 }

@@ -42,6 +42,10 @@ docs/
 # Local resources (MCP data, images, plans, etc.)
 resources/
 
+# Superpowers plans and specs (committed docs go in guides/ root files only)
+guides/plans/
+guides/specs/
+
 # Log files
 *.log
 .worktrees/

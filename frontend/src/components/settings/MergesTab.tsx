@@ -131,7 +131,7 @@ export const MergesTab: Component = () => {
                       <div class="flex gap-2">
                         <button
                           onClick={() => handleMerge(c)}
-                          class="px-2 py-1 text-xs bg-theme-success text-theme-text-primary rounded hover:opacity-90"
+                          class="px-2 py-1 text-xs border border-theme-accent/50 text-theme-accent rounded-[var(--radius-sm)] hover:bg-theme-accent/10 transition-colors"
                         >
                           Merge
                         </button>
@@ -170,7 +170,7 @@ export const MergesTab: Component = () => {
                     <Show when={isAdmin()}>
                       <button
                         onClick={() => handleUnmerge(m)}
-                        class="px-2 py-1 text-xs bg-theme-warning text-theme-text-primary rounded hover:opacity-90"
+                        class="px-2 py-1 text-xs border border-theme-border text-theme-text-secondary rounded-[var(--radius-sm)] hover:text-theme-text-primary transition-colors"
                       >
                         Unmerge
                       </button>
