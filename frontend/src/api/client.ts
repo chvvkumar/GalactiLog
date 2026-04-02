@@ -327,4 +327,16 @@ export const api = {
     if (params.date_to) qs.set("date_to", params.date_to);
     return fetchJson<import("../types").CorrelationResponse>(`/analysis/correlation?${qs}`);
   },
+
+  updateTargetNotes: (targetId: string, notes: string | null) =>
+    fetchJson<{ status: string }>(`/targets/${encodeURIComponent(targetId)}/notes`, {
+      method: "PUT",
+      body: JSON.stringify({ notes }),
+    }),
+
+  updateSessionNotes: (targetId: string, date: string, notes: string | null) =>
+    fetchJson<{ status: string }>(`/targets/${encodeURIComponent(targetId)}/sessions/${date}/notes`, {
+      method: "PUT",
+      body: JSON.stringify({ notes }),
+    }),
 };

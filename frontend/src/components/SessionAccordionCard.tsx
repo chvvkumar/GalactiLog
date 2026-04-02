@@ -1,5 +1,6 @@
 import { Component, Show, For, createSignal, createEffect } from "solid-js";
 import type { SessionOverview, SessionDetail, FrameRecord } from "../types";
+import { api } from "../api/client";
 import ReferenceThumbnail from "./ReferenceThumbnail";
 import RawHeaderAccordion from "./RawHeaderAccordion";
 import FilterBadges from "./FilterBadges";
@@ -43,6 +44,7 @@ const SessionAccordionCard: Component<{
   showCheckbox?: boolean;
   checked?: boolean;
   onCheckChange?: () => void;
+  targetId?: string;
 }> = (props) => {
   let cardRef: HTMLDivElement | undefined;
   const settingsCtx = useSettingsContext();
@@ -53,6 +55,30 @@ const SessionAccordionCard: Component<{
   const [sortColumn, setSortColumn] = createSignal<keyof FrameRecord>("timestamp");
   const [sortAsc, setSortAsc] = createSignal(true);
   const [csvCopied, setCsvCopied] = createSignal(false);
+
+  const [sessionNote, setSessionNote] = createSignal(props.detail?.notes || "");
+  const [noteSaving, setNoteSaving] = createSignal(false);
+  let noteTimer: ReturnType<typeof setTimeout> | undefined;
+
+  // Sync when detail loads
+  createEffect(() => {
+    if (props.detail?.notes !== undefined) {
+      setSessionNote(props.detail.notes || "");
+    }
+  });
+
+  const saveSessionNote = (text: string) => {
+    if (!props.targetId) return;
+    clearTimeout(noteTimer);
+    noteTimer = setTimeout(async () => {
+      setNoteSaving(true);
+      try {
+        await api.updateSessionNotes(props.targetId!, props.session.session_date, text || null);
+      } finally {
+        setNoteSaving(false);
+      }
+    }, 1000);
+  };
 
   const copyAstrobinCsv = () => {
     const d = props.detail;
@@ -161,13 +187,23 @@ const SessionAccordionCard: Component<{
           </div>
         </td>
         <td class="py-3 px-2">
-          <span class={`px-2.5 py-1 border rounded text-label transition-colors ${
-            props.isExpanded
-              ? "border-theme-accent text-theme-accent"
-              : "border-theme-border-em text-theme-text-tertiary hover:text-theme-text-primary hover:border-theme-accent"
-          }`}>
-            {props.isExpanded ? "Collapse" : "Expand"}
-          </span>
+          <div class="flex items-center gap-1.5 justify-end">
+            <span
+              class={`inline-block w-4 h-4 ${props.session.has_notes ? "text-theme-accent" : "text-theme-text-secondary opacity-30"}`}
+              title={props.session.has_notes ? "Has notes" : "No notes"}
+            >
+              <svg viewBox="0 0 20 20" fill="currentColor" width="16" height="16">
+                <path d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" />
+              </svg>
+            </span>
+            <span class={`px-2.5 py-1 border rounded text-label transition-colors ${
+              props.isExpanded
+                ? "border-theme-accent text-theme-accent"
+                : "border-theme-border-em text-theme-text-tertiary hover:text-theme-text-primary hover:border-theme-accent"
+            }`}>
+              {props.isExpanded ? "Collapse" : "Expand"}
+            </span>
+          </div>
         </td>
       </tr>
 
@@ -555,6 +591,26 @@ const SessionAccordionCard: Component<{
 
                 {/* Row 5: FITS Headers */}
                 <RawHeaderAccordion headers={detail().raw_reference_header} />
+
+                {/* Session Notes */}
+                <div class="mt-4 pt-4 border-t border-theme-border">
+                  <div class="flex items-center justify-between mb-2">
+                    <h4 class="text-xs font-medium text-theme-text-secondary uppercase tracking-wide">Session Notes</h4>
+                    <Show when={noteSaving()}>
+                      <span class="text-xs text-theme-text-secondary">Saving...</span>
+                    </Show>
+                  </div>
+                  <textarea
+                    class="w-full bg-theme-elevated border border-theme-border rounded px-3 py-2 text-sm text-theme-text-primary placeholder-theme-text-secondary resize-y min-h-[50px]"
+                    placeholder="Add notes for this session..."
+                    value={sessionNote()}
+                    onInput={(e) => {
+                      const val = e.currentTarget.value;
+                      setSessionNote(val);
+                      saveSessionNote(val);
+                    }}
+                  />
+                </div>
               </div>
             )}
           </Show>

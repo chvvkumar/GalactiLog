@@ -2,7 +2,7 @@ import re
 import uuid
 import statistics
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import date as date_type, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 import sqlalchemy as sa
@@ -12,13 +12,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_session
 from app.api.deps import get_current_user
 from app.models import Target, Image
+from app.models.session_note import SessionNote
 from app.models.user import User
 from app.services.normalization import load_alias_maps, normalize_filter, normalize_equipment, expand_canonical
 from app.schemas.target import (
     TargetAggregationResponse, TargetAggregation, SessionSummary,
     AggregateStats, EquipmentResponse, SessionDetailResponse,
     TargetDetailResponse, SessionOverview, FilterDetail, FilterMedian, SessionInsight, FrameRecord,
-    TargetSearchResultFuzzy, ObjectTypeCount,
+    TargetSearchResultFuzzy, ObjectTypeCount, NotesUpdate,
 )
 
 router = APIRouter(prefix="/targets", tags=["targets"])
@@ -294,6 +295,12 @@ async def get_target_detail(
 
     filter_map, cam_map, tel_map = await load_alias_maps(session)
 
+    # Fetch session note dates for has_notes flag
+    note_dates: set = set()
+    if target_obj:
+        note_dates_q = select(SessionNote.session_date).where(SessionNote.target_id == target_obj.id)
+        note_dates = {r[0] for r in (await session.execute(note_dates_q)).all()}
+
     sessions_map: dict[str, list] = defaultdict(list)
     all_hfr = []
     all_ecc = []
@@ -375,6 +382,7 @@ async def get_target_detail(
             median_detected_stars=statistics.median(sess_detected_stars) if sess_detected_stars else None,
             median_guiding_rms_arcsec=statistics.median(sess_guiding_rms) if sess_guiding_rms else None,
             filter_medians=sess_filter_medians,
+            has_notes=date_type.fromisoformat(date_key) in note_dates if date_key != "unknown" else False,
         ))
 
     sorted_dates = sorted(sessions_map.keys())
@@ -399,6 +407,7 @@ async def get_target_detail(
         avg_fwhm=statistics.mean(all_fwhm) if all_fwhm else None,
         avg_guiding_rms_arcsec=statistics.mean(all_guiding_rms) if all_guiding_rms else None,
         avg_detected_stars=statistics.mean(all_detected_stars) if all_detected_stars else None,
+        notes=target_obj.notes if target_obj else None,
     )
 
 
@@ -1080,6 +1089,16 @@ async def get_session_detail(
         last_frame=images[-1],
     )
 
+    # Fetch session note
+    session_note = None
+    resolved_target_id = target_obj.id if target_obj else None
+    if resolved_target_id:
+        note_q = select(SessionNote.notes).where(
+            SessionNote.target_id == resolved_target_id,
+            SessionNote.session_date == date_type.fromisoformat(date),
+        )
+        session_note = (await session.execute(note_q)).scalar_one_or_none()
+
     return SessionDetailResponse(
         target_name=target_name,
         session_date=date,
@@ -1120,4 +1139,77 @@ async def get_session_detail(
         median_ambient_temp=statistics.median(ambient_temp_values) if ambient_temp_values else None,
         median_humidity=statistics.median(humidity_values) if humidity_values else None,
         median_cloud_cover=statistics.median(cloud_cover_values) if cloud_cover_values else None,
+        notes=session_note,
     )
+
+
+# --- Notes endpoints ---
+
+@router.put("/{target_id}/notes")
+async def update_target_notes(
+    target_id: uuid.UUID,
+    body: NotesUpdate,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    target = await session.get(Target, target_id)
+    if not target:
+        raise HTTPException(404, "Target not found")
+    target.notes = body.notes if body.notes else None
+    await session.commit()
+    return {"status": "ok"}
+
+
+@router.put("/{target_id}/sessions/{date}/notes")
+async def update_session_notes(
+    target_id: str,
+    date: str,
+    body: NotesUpdate,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    session_date = date_type.fromisoformat(date)
+
+    # Resolve target_id (may be UUID or obj:name)
+    resolved_id = None
+    try:
+        resolved_id = uuid.UUID(target_id)
+    except ValueError:
+        if target_id.startswith("obj:"):
+            name = target_id[4:]
+            tq = select(Target.id).where(Target.primary_name == name)
+            row = (await session.execute(tq)).scalar_one_or_none()
+            if row:
+                resolved_id = row
+    if not resolved_id:
+        raise HTTPException(404, "Target not found")
+
+    # Upsert note
+    if not body.notes:
+        # Delete if empty
+        q = select(SessionNote).where(
+            SessionNote.target_id == resolved_id,
+            SessionNote.session_date == session_date,
+        )
+        note = (await session.execute(q)).scalar_one_or_none()
+        if note:
+            await session.delete(note)
+            await session.commit()
+    else:
+        q = select(SessionNote).where(
+            SessionNote.target_id == resolved_id,
+            SessionNote.session_date == session_date,
+        )
+        note = (await session.execute(q)).scalar_one_or_none()
+        if note:
+            note.notes = body.notes
+        else:
+            note = SessionNote(
+                target_id=resolved_id,
+                session_date=session_date,
+                notes=body.notes,
+            )
+            session.add(note)
+        await session.commit()
+
+    return {"status": "ok"}
