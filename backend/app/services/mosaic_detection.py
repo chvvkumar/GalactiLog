@@ -37,19 +37,25 @@ async def detect_mosaic_panels(session: AsyncSession) -> int:
     targets = (await session.execute(targets_q)).scalars().all()
 
     # Group by base name
+    # A single target may have multiple panel aliases (e.g., SIMBAD merged
+    # "Andromeda Galaxy Panel 1..6" into one target with panel names as aliases).
     groups: dict[str, list[tuple[Target, str]]] = defaultdict(list)
     for t in targets:
         if t.id in in_mosaic:
             continue
-        # Check primary name and aliases
+        # Check primary name and aliases — don't break, one target may match
+        # multiple panels via its aliases
         names_to_check = [t.primary_name] + (t.aliases or [])
+        seen_panels: set[str] = set()
         for name in names_to_check:
             m = pattern.match(name)
             if m:
                 base = m.group(1).strip()
                 panel_num = m.group(2)
-                groups[base].append((t, f"Panel {panel_num}"))
-                break
+                panel_key = f"{base}|{panel_num}"
+                if panel_key not in seen_panels:
+                    seen_panels.add(panel_key)
+                    groups[base].append((t, f"Panel {panel_num}"))
 
     # Create suggestions for groups with 2+ panels
     # Skip if a suggestion for this base name already exists

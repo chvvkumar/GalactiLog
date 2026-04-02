@@ -24,22 +24,29 @@ async def _panel_stats(panel: MosaicPanel, session: AsyncSession) -> PanelStats:
     """Compute stats for a single panel."""
     target = panel.target
 
+    # When an object_pattern is set, filter frames by OBJECT header
+    # (needed when multiple panels share the same target after SIMBAD merge)
+    base_filter = [
+        Image.resolved_target_id == panel.target_id,
+        Image.image_type == "LIGHT",
+    ]
+    if panel.object_pattern:
+        base_filter.append(Image.raw_headers["OBJECT"].astext.ilike(panel.object_pattern))
+
     q = (
         select(
             func.sum(Image.exposure_time).label("integration"),
             func.count(Image.id).label("frames"),
             func.max(cast(Image.capture_date, Date)).label("last_date"),
         )
-        .where(Image.resolved_target_id == panel.target_id)
-        .where(Image.image_type == "LIGHT")
+        .where(*base_filter)
     )
     row = (await session.execute(q)).one()
 
     # Filter distribution
     fq = (
         select(Image.filter_used, func.sum(Image.exposure_time))
-        .where(Image.resolved_target_id == panel.target_id)
-        .where(Image.image_type == "LIGHT")
+        .where(*base_filter)
         .where(Image.filter_used.is_not(None))
         .group_by(Image.filter_used)
     )
@@ -106,19 +113,23 @@ async def accept_suggestion(
     session.add(mosaic)
     await session.flush()
 
-    # Create panels
+    # Create panels — multiple panels may share the same target_id
+    # (SIMBAD often merges panel variants into one target)
+    panel_num = 0
     for target_id, label in zip(suggestion.target_ids, suggestion.panel_labels):
-        # Skip if target already in a mosaic
-        existing = (await session.execute(
-            select(MosaicPanel).where(MosaicPanel.target_id == target_id)
-        )).scalar_one_or_none()
-        if not existing:
-            panel = MosaicPanel(
-                mosaic_id=mosaic.id,
-                target_id=target_id,
-                panel_label=label,
-            )
-            session.add(panel)
+        # Build OBJECT header pattern for filtering frames per panel
+        # e.g., base "Andromeda Galaxy" + "Panel 3" → "%Andromeda Galaxy%Panel%3%"
+        num = label.split()[-1] if label.startswith("Panel ") else label
+        obj_pattern = f"%{suggestion.suggested_name}%{num}%"
+        panel = MosaicPanel(
+            mosaic_id=mosaic.id,
+            target_id=target_id,
+            panel_label=label,
+            sort_order=panel_num,
+            object_pattern=obj_pattern,
+        )
+        session.add(panel)
+        panel_num += 1
 
     suggestion.status = "accepted"
     await session.commit()
@@ -162,11 +173,13 @@ async def list_mosaics(
         total_frames = 0
         panel_integrations = []
         for p in m.panels:
-            iq = (
-                select(func.sum(Image.exposure_time), func.count(Image.id))
-                .where(Image.resolved_target_id == p.target_id)
-                .where(Image.image_type == "LIGHT")
-            )
+            filters = [
+                Image.resolved_target_id == p.target_id,
+                Image.image_type == "LIGHT",
+            ]
+            if p.object_pattern:
+                filters.append(Image.raw_headers["OBJECT"].astext.ilike(p.object_pattern))
+            iq = select(func.sum(Image.exposure_time), func.count(Image.id)).where(*filters)
             row = (await session.execute(iq)).one()
             pi = row[0] or 0
             total_int += pi
@@ -296,12 +309,16 @@ async def add_panel(
     if not mosaic:
         raise HTTPException(404, "Mosaic not found")
 
-    # Check target not already in a mosaic
+    # Check this exact target+label combo doesn't already exist in this mosaic
     existing = (await session.execute(
-        select(MosaicPanel).where(MosaicPanel.target_id == body.target_id)
+        select(MosaicPanel).where(
+            MosaicPanel.mosaic_id == mosaic_id,
+            MosaicPanel.target_id == body.target_id,
+            MosaicPanel.panel_label == body.panel_label,
+        )
     )).scalar_one_or_none()
     if existing:
-        raise HTTPException(400, "Target already belongs to a mosaic")
+        raise HTTPException(400, "This panel already exists in the mosaic")
 
     panel = MosaicPanel(
         mosaic_id=mosaic_id,
