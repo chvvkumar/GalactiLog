@@ -20,6 +20,28 @@ from app.api.auth import get_current_user
 router = APIRouter(prefix="/mosaics", tags=["mosaics"])
 
 
+def _parse_sexa_ra(s: str) -> float | None:
+    """Parse sexagesimal RA 'HH MM SS' to degrees."""
+    try:
+        parts = s.strip().split()
+        h, m, sec = float(parts[0]), float(parts[1]), float(parts[2])
+        return (h + m / 60 + sec / 3600) * 15
+    except (ValueError, IndexError):
+        return None
+
+
+def _parse_sexa_dec(s: str) -> float | None:
+    """Parse sexagesimal Dec '+DD MM SS' to degrees."""
+    try:
+        s = s.strip()
+        sign = -1 if s.startswith("-") else 1
+        parts = s.lstrip("+-").split()
+        d, m, sec = float(parts[0]), float(parts[1]), float(parts[2])
+        return sign * (d + m / 60 + sec / 3600)
+    except (ValueError, IndexError):
+        return None
+
+
 async def _panel_stats(panel: MosaicPanel, session: AsyncSession) -> PanelStats:
     """Compute stats for a single panel."""
     target = panel.target
@@ -52,14 +74,39 @@ async def _panel_stats(panel: MosaicPanel, session: AsyncSession) -> PanelStats:
     )
     filter_dist = {r[0]: r[1] or 0 for r in (await session.execute(fq)).all()}
 
+    # Compute per-panel center from frame FITS headers (median of OBJCTRA/OBJCTDEC).
+    # This gives the actual pointing position for each panel, even when multiple
+    # panels are merged into the same target by SIMBAD resolution.
+    panel_ra = target.ra
+    panel_dec = target.dec
+    if panel.object_pattern:
+        coord_q = (
+            select(
+                Image.raw_headers["OBJCTRA"].astext.label("ra_str"),
+                Image.raw_headers["OBJCTDEC"].astext.label("dec_str"),
+            )
+            .where(*base_filter)
+            .where(Image.raw_headers["OBJCTRA"].isnot(None))
+            .where(Image.raw_headers["OBJCTDEC"].isnot(None))
+            .limit(50)
+        )
+        coord_rows = (await session.execute(coord_q)).all()
+        if coord_rows:
+            ras = sorted(r for row in coord_rows if (r := _parse_sexa_ra(row.ra_str)) is not None)
+            decs = sorted(r for row in coord_rows if (r := _parse_sexa_dec(row.dec_str)) is not None)
+            if ras:
+                panel_ra = ras[len(ras) // 2]
+            if decs:
+                panel_dec = decs[len(decs) // 2]
+
     return PanelStats(
         panel_id=str(panel.id),
         target_id=str(panel.target_id),
         target_name=target.primary_name,
         panel_label=panel.panel_label,
         sort_order=panel.sort_order,
-        ra=target.ra,
-        dec=target.dec,
+        ra=panel_ra,
+        dec=panel_dec,
         total_integration_seconds=row.integration or 0,
         total_frames=row.frames or 0,
         filter_distribution=filter_dist,
