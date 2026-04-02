@@ -164,6 +164,11 @@ export const api = {
   getStats: () =>
     fetchJson<StatsResponse>("/stats"),
 
+  getCalendar: (year?: number) =>
+    fetchJson<import("../types").CalendarEntry[]>(
+      `/stats/calendar${year != null ? `?year=${year}` : ""}`
+    ),
+
   triggerScan: (options?: { includeCalibration?: boolean }) => {
     const params = new URLSearchParams();
     if (options?.includeCalibration === false) {
