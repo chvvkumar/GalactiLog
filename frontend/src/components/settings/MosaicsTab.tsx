@@ -229,7 +229,10 @@ export const MosaicsTab: Component = () => {
   };
 
   return (
-    <div class="space-y-4">
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+      {/* Left column: Detection + Suggestions */}
+      <div class="space-y-4">
+
       {/* Detection Keywords */}
       <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-4 space-y-3">
         <div class="flex justify-between items-center">
@@ -373,7 +376,9 @@ export const MosaicsTab: Component = () => {
         </Show>
       </div>
 
-      {/* Existing Mosaics */}
+      </div>{/* end left column */}
+
+      {/* Right column: Existing Mosaics */}
       <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-4 space-y-3">
         <div class="flex justify-between items-center">
           <h3 class="text-theme-text-primary font-medium">

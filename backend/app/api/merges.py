@@ -244,7 +244,7 @@ async def list_merged_targets(
             func.count(Image.id).label("image_count"),
         )
         .join(winner_alias, Target.merged_into_id == winner_alias.id)
-        .outerjoin(Image, Image.resolved_target_id == Target.id)
+        .outerjoin(Image, Image.resolved_target_id == winner_alias.id)
         .where(Target.merged_into_id.is_not(None))
         .group_by(Target.id, winner_alias.primary_name)
         .order_by(Target.merged_at.desc())
