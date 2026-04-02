@@ -629,5 +629,6 @@ export interface MosaicSuggestionResponse {
   suggested_name: string;
   target_ids: string[];
   panel_labels: string[];
+  target_names: Record<string, string>;
   status: string;
 }

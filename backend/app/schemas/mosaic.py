@@ -62,4 +62,5 @@ class MosaicSuggestionResponse(BaseModel):
     suggested_name: str
     target_ids: list[str]
     panel_labels: list[str]
+    target_names: dict[str, str]
     status: str

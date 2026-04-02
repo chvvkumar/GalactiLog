@@ -185,7 +185,7 @@ const MosaicGrid: Component<Props> = (props) => {
                       text-anchor="middle"
                       dominant-baseline="central"
                       class="fill-white"
-                      font-size={Math.max(9, Math.min(13, pos.w * 0.15))}
+                      font-size={`${Math.max(9, Math.min(13, pos.w * 0.15))}px`}
                       font-weight="600"
                     >
                       {pos.panel.panel_label}
@@ -196,7 +196,7 @@ const MosaicGrid: Component<Props> = (props) => {
                       text-anchor="middle"
                       dominant-baseline="central"
                       class="fill-white"
-                      font-size={Math.max(8, Math.min(10, pos.w * 0.12))}
+                      font-size={`${Math.max(8, Math.min(10, pos.w * 0.12))}px`}
                       opacity={0.7}
                     >
                       {formatHours(pos.panel.total_integration_seconds)}

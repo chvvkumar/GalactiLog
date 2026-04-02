@@ -133,12 +133,22 @@ async def get_suggestions(
 ):
     q = select(MosaicSuggestion).where(MosaicSuggestion.status == "pending")
     rows = (await session.execute(q)).scalars().all()
+
+    # Resolve target names in batch
+    all_ids = {t for r in rows for t in r.target_ids}
+    name_map: dict[str, str] = {}
+    if all_ids:
+        tq = select(Target.id, Target.primary_name).where(Target.id.in_(all_ids))
+        for tid, tname in (await session.execute(tq)).all():
+            name_map[str(tid)] = tname
+
     return [
         MosaicSuggestionResponse(
             id=str(r.id),
             suggested_name=r.suggested_name,
             target_ids=[str(t) for t in r.target_ids],
             panel_labels=r.panel_labels,
+            target_names={str(t): name_map.get(str(t), "Unknown") for t in set(r.target_ids)},
             status=r.status,
         )
         for r in rows

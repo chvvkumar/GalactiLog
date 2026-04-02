@@ -38,6 +38,9 @@ export const MosaicsTab: Component = () => {
   const [selectedTarget, setSelectedTarget] = createSignal<TargetSearchResultFuzzy | null>(null);
   const [addingPanelFor, setAddingPanelFor] = createSignal<string | null>(null);
 
+  // Expanded suggestion
+  const [expandedSuggestion, setExpandedSuggestion] = createSignal<string | null>(null);
+
   // Create mosaic state
   const [showCreate, setShowCreate] = createSignal(false);
   const [newMosaicName, setNewMosaicName] = createSignal("");
@@ -274,7 +277,7 @@ export const MosaicsTab: Component = () => {
             />
             <button
               onClick={addKeyword}
-              class="px-3 py-1.5 text-sm bg-theme-accent text-white rounded-[var(--radius-sm)] hover:opacity-90"
+              class="px-3 py-1.5 text-sm border border-theme-accent/50 text-theme-accent rounded-[var(--radius-sm)] hover:bg-theme-accent/10 transition-colors"
             >
               Add
             </button>
@@ -297,34 +300,74 @@ export const MosaicsTab: Component = () => {
         >
           <div class="space-y-2">
             <For each={suggestions()}>
-              {(s) => (
-                <div class="flex items-center justify-between p-3 bg-theme-base/50 border border-theme-border rounded-[var(--radius-sm)]">
-                  <div class="flex-1">
-                    <span class="text-theme-text-primary text-sm font-medium">
-                      {s.suggested_name}
-                    </span>
-                    <div class="text-xs text-theme-text-secondary mt-0.5">
-                      {s.target_ids.length} panels: {s.panel_labels.join(", ")}
-                    </div>
+              {(s) => {
+                const uniqueTargets = () => [...new Set(s.target_ids)];
+                return (
+                  <div class="border border-theme-border rounded-[var(--radius-sm)] overflow-hidden">
+                    <button
+                      onClick={() => setExpandedSuggestion(expandedSuggestion() === s.id ? null : s.id)}
+                      class="w-full flex items-center justify-between p-3 bg-theme-base/50 text-left hover:bg-theme-base/80 transition-colors"
+                    >
+                      <div class="flex-1">
+                        <span class="text-theme-text-primary text-sm font-medium">
+                          {s.suggested_name}
+                        </span>
+                        <div class="text-xs text-theme-text-secondary mt-0.5">
+                          {s.panel_labels.length} panels: {s.panel_labels.join(", ")}
+                        </div>
+                      </div>
+                      <span class="text-theme-text-secondary text-xs ml-2">
+                        {expandedSuggestion() === s.id ? "\u25B2" : "\u25BC"}
+                      </span>
+                    </button>
+
+                    <Show when={expandedSuggestion() === s.id}>
+                      <div class="p-3 border-t border-theme-border space-y-3">
+                        {/* Target details */}
+                        <div class="space-y-1.5">
+                          <div class="text-xs text-theme-text-secondary font-medium uppercase tracking-wide">Targets</div>
+                          <For each={uniqueTargets()}>
+                            {(tid) => {
+                              const panelsForTarget = () =>
+                                s.panel_labels.filter((_, i) => s.target_ids[i] === tid);
+                              return (
+                                <div class="flex items-center gap-2 p-2 bg-theme-base/30 border border-theme-border/50 rounded-[var(--radius-sm)]">
+                                  <a
+                                    href={`/targets/${tid}`}
+                                    class="text-sm text-theme-accent hover:underline flex-1"
+                                  >
+                                    {s.target_names[tid] || tid}
+                                  </a>
+                                  <span class="text-xs text-theme-text-secondary">
+                                    {panelsForTarget().join(", ")}
+                                  </span>
+                                </div>
+                              );
+                            }}
+                          </For>
+                        </div>
+
+                        <Show when={isAdmin()}>
+                          <div class="flex gap-2 pt-1">
+                            <button
+                              onClick={() => handleAccept(s)}
+                              class="px-2.5 py-1 text-xs border border-theme-accent/50 text-theme-accent rounded-[var(--radius-sm)] hover:bg-theme-accent/10 transition-colors"
+                            >
+                              Accept
+                            </button>
+                            <button
+                              onClick={() => handleDismiss(s)}
+                              class="px-2.5 py-1 text-xs border border-theme-border text-theme-text-secondary rounded-[var(--radius-sm)] hover:text-theme-text-primary transition-colors"
+                            >
+                              Dismiss
+                            </button>
+                          </div>
+                        </Show>
+                      </div>
+                    </Show>
                   </div>
-                  <Show when={isAdmin()}>
-                    <div class="flex gap-2">
-                      <button
-                        onClick={() => handleAccept(s)}
-                        class="px-2 py-1 text-xs bg-theme-success text-theme-text-primary rounded hover:opacity-90"
-                      >
-                        Accept
-                      </button>
-                      <button
-                        onClick={() => handleDismiss(s)}
-                        class="px-2 py-1 text-xs border border-theme-border text-theme-text-secondary rounded hover:text-theme-text-primary transition-colors"
-                      >
-                        Dismiss
-                      </button>
-                    </div>
-                  </Show>
-                </div>
-              )}
+                );
+              }}
             </For>
           </div>
         </Show>
@@ -359,7 +402,7 @@ export const MosaicsTab: Component = () => {
             />
             <button
               onClick={handleCreate}
-              class="px-3 py-1.5 text-sm bg-theme-accent text-white rounded-[var(--radius-sm)] hover:opacity-90"
+              class="px-3 py-1.5 text-sm border border-theme-accent/50 text-theme-accent rounded-[var(--radius-sm)] hover:bg-theme-accent/10 transition-colors"
             >
               Create
             </button>
@@ -494,7 +537,7 @@ export const MosaicsTab: Component = () => {
                             <div class="flex gap-2">
                               <button
                                 onClick={() => handleAddPanel(m.id)}
-                                class="px-2 py-1 text-xs bg-theme-accent text-white rounded hover:opacity-90"
+                                class="px-2 py-1 text-xs border border-theme-accent/50 text-theme-accent rounded-[var(--radius-sm)] hover:bg-theme-accent/10 transition-colors"
                               >
                                 Add
                               </button>
@@ -533,7 +576,7 @@ export const MosaicsTab: Component = () => {
                               <span class="text-xs text-theme-danger">Delete this mosaic?</span>
                               <button
                                 onClick={() => handleDeleteMosaic(m.id)}
-                                class="px-2 py-1 text-xs bg-theme-danger text-white rounded hover:opacity-90"
+                                class="px-2 py-1 text-xs border border-theme-error/50 text-theme-error rounded-[var(--radius-sm)] hover:bg-theme-error/10 transition-colors"
                               >
                                 Confirm
                               </button>
