@@ -3,7 +3,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select, func, case
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,11 +13,15 @@ from app.api.deps import get_current_user
 from app.models.user import User
 from app.models import Image, Target
 from app.services.normalization import load_alias_maps, normalize_filter, normalize_equipment
+from sqlalchemy import cast
+from sqlalchemy.types import Date
+
 from app.schemas.stats import (
     StatsResponse, OverviewStats, EquipmentStats, EquipmentItem,
     TimelineEntry, TopTarget, DataQualityStats, HfrBucket,
     StorageStats, IngestEntry,
     EquipmentComboMetrics, EquipmentFilterMetrics,
+    CalendarEntry,
 )
 
 router = APIRouter(prefix="/stats", tags=["stats"])
@@ -353,3 +357,41 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
         storage=storage,
         ingest_history=ingest_history,
     )
+
+
+@router.get("/calendar", response_model=list[CalendarEntry])
+async def get_calendar(
+    year: int | None = Query(None),
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    date_col = cast(Image.capture_date, Date)
+    q = (
+        select(
+            date_col.label("night"),
+            func.sum(Image.exposure_time).label("integration"),
+            func.count(func.distinct(Image.resolved_target_id)).label("targets"),
+            func.count(Image.id).label("frames"),
+        )
+        .where(Image.image_type == "LIGHT")
+        .where(Image.capture_date.is_not(None))
+        .group_by(date_col)
+        .order_by(date_col)
+    )
+    if year:
+        q = q.where(func.extract("year", Image.capture_date) == year)
+    else:
+        from datetime import datetime, timedelta
+        cutoff = datetime.utcnow() - timedelta(days=365)
+        q = q.where(Image.capture_date >= cutoff)
+
+    rows = (await session.execute(q)).all()
+    return [
+        CalendarEntry(
+            date=str(r.night),
+            integration_seconds=r.integration or 0,
+            target_count=r.targets,
+            frame_count=r.frames,
+        )
+        for r in rows
+    ]

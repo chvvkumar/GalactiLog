@@ -76,6 +76,13 @@ class EquipmentComboMetrics(BaseModel):
     filter_breakdown: list[EquipmentFilterMetrics]
 
 
+class CalendarEntry(BaseModel):
+    date: str
+    integration_seconds: float
+    target_count: int
+    frame_count: int
+
+
 class StatsResponse(BaseModel):
     overview: OverviewStats
     equipment: EquipmentStats
