@@ -20,7 +20,7 @@ from app.schemas.stats import (
     EquipmentComboMetrics, EquipmentFilterMetrics,
     SiteCoords,
 )
-from app.services.astro_night import dark_hours_for_night, dark_hours_for_month, dark_hours_for_week
+from app.services.astro_night import dark_hours_for_night, dark_hours_for_month, dark_hours_for_week, dark_hours_batch
 
 router = APIRouter(prefix="/stats", tags=["stats"])
 
@@ -402,12 +402,16 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
     from datetime import date as date_type
 
     def _compute_efficiency():
+        lat = site_coords.latitude if site_coords else 0.0
+        lon = site_coords.longitude if site_coords else 0.0
+
+        # Monthly — uses cached per-month batch internally
         tl_monthly: list[TimelineDetailEntry] = []
         for entry in timeline:
             eff = None
             if site_coords:
                 year, month = map(int, entry.month.split("-"))
-                dark_h = dark_hours_for_month(year, month, site_coords.latitude, site_coords.longitude)
+                dark_h = dark_hours_for_month(year, month, lat, lon)
                 if dark_h > 0:
                     eff = round((entry.integration_seconds / 3600) / dark_h * 100, 1)
             tl_monthly.append(TimelineDetailEntry(
@@ -416,31 +420,38 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
                 efficiency_pct=eff,
             ))
 
+        # Weekly — uses cached per-week batch internally
         tl_weekly: list[TimelineDetailEntry] = []
         for period, secs in weekly_raw:
             eff = None
             if site_coords:
                 parts = period.split("-W")
                 year, week = int(parts[0]), int(parts[1])
-                dark_h = dark_hours_for_week(year, week, site_coords.latitude, site_coords.longitude)
+                dark_h = dark_hours_for_week(year, week, lat, lon)
                 if dark_h > 0:
                     eff = round((secs / 3600) / dark_h * 100, 1)
             tl_weekly.append(TimelineDetailEntry(
                 period=period, integration_seconds=secs, efficiency_pct=eff,
             ))
 
+        # Daily — batch all dates in one vectorized call
         tl_daily: list[TimelineDetailEntry] = []
-        for period, secs in daily_raw:
-            eff = None
-            if site_coords:
+        if site_coords and daily_raw:
+            daily_dates = []
+            for period, _ in daily_raw:
                 parts = period.split("-")
-                d = date_type(int(parts[0]), int(parts[1]), int(parts[2]))
-                dark_h = dark_hours_for_night(d, site_coords.latitude, site_coords.longitude)
-                if dark_h > 0:
-                    eff = round((secs / 3600) / dark_h * 100, 1)
-            tl_daily.append(TimelineDetailEntry(
-                period=period, integration_seconds=secs, efficiency_pct=eff,
-            ))
+                daily_dates.append(date_type(int(parts[0]), int(parts[1]), int(parts[2])))
+            daily_dark = dark_hours_batch(daily_dates, lat, lon)
+            for (period, secs), dark_h in zip(daily_raw, daily_dark):
+                eff = round((secs / 3600) / dark_h * 100, 1) if dark_h > 0 else None
+                tl_daily.append(TimelineDetailEntry(
+                    period=period, integration_seconds=secs, efficiency_pct=eff,
+                ))
+        else:
+            for period, secs in daily_raw:
+                tl_daily.append(TimelineDetailEntry(
+                    period=period, integration_seconds=secs, efficiency_pct=None,
+                ))
 
         return tl_monthly, tl_weekly, tl_daily
 
