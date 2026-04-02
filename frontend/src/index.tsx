@@ -6,6 +6,7 @@ import App from "./App";
 import DashboardPage from "./pages/DashboardPage";
 import StatisticsPage from "./pages/StatisticsPage";
 import TargetDetailPage from "./pages/TargetDetailPage";
+import AnalysisPage from "./pages/AnalysisPage";
 import LoginPage from "./pages/LoginPage";
 import { SettingsProvider } from "./components/SettingsProvider";
 import { SettingsPage } from "./pages/SettingsPage";
@@ -26,6 +27,7 @@ render(
           <Route path="/" component={Protected(DashboardPage)} />
           <Route path="/targets/:targetId" component={Protected(TargetDetailPage)} />
           <Route path="/statistics" component={Protected(StatisticsPage)} />
+          <Route path="/analysis" component={Protected(AnalysisPage)} />
           <Route path="/settings" component={Protected(SettingsPage)} />
         </Router>
       </SettingsProvider>

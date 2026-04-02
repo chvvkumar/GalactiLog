@@ -38,6 +38,13 @@ const NavBar: Component = () => {
           Statistics
         </A>
         <A
+          href="/analysis"
+          class="text-sm text-theme-text-secondary hover:text-theme-text-primary transition-colors"
+          activeClass="text-theme-text-primary font-medium bg-theme-elevated rounded-[var(--radius-sm)] px-2.5 py-1"
+        >
+          Analysis
+        </A>
+        <A
           href="/settings"
           class="text-theme-text-secondary hover:text-theme-text-primary transition-colors text-sm"
           activeClass="text-theme-text-primary font-medium bg-theme-elevated rounded-[var(--radius-sm)] px-2.5 py-1"
@@ -126,6 +133,14 @@ const NavBar: Component = () => {
               onClick={() => setMenuOpen(false)}
             >
               Statistics
+            </A>
+            <A
+              href="/analysis"
+              class="text-sm text-theme-text-secondary hover:text-theme-text-primary transition-colors py-2 px-3 rounded-[var(--radius-sm)]"
+              activeClass="text-theme-text-primary font-medium bg-theme-elevated"
+              onClick={() => setMenuOpen(false)}
+            >
+              Analysis
             </A>
             <A
               href="/settings"
