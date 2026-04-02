@@ -194,12 +194,19 @@ const ImagingTimeline: Component<Props> = (props) => {
 
   const innerWidth = createMemo(() => activeData().length * (barWidth() + BAR_GAP));
 
+  /** Estimate label width in px based on granularity */
+  const estimatedLabelWidth = createMemo(() => {
+    const gran = granularity();
+    // "May 2024" ~65px, "W3 '25" ~45px, "Dec 3" ~38px (at ~7px/char)
+    if (gran === "monthly") return 65;
+    if (gran === "weekly") return 45;
+    return 38;
+  });
+
   const labelInterval = createMemo(() => {
-    const w = barWidth();
-    if (w >= 50) return 1;
-    if (w >= 35) return 2;
-    if (w >= 25) return 3;
-    return 4;
+    const slotWidth = barWidth() + BAR_GAP;
+    const needed = estimatedLabelWidth();
+    return Math.max(1, Math.ceil(needed / slotWidth));
   });
 
   const showEfficiency = createMemo(() => barWidth() >= 36);
@@ -366,9 +373,6 @@ const ImagingTimeline: Component<Props> = (props) => {
               )}
             </For>
           </div>
-          <span class="text-micro text-theme-text-secondary select-none hidden sm:inline">
-            Scroll to zoom · Drag to pan
-          </span>
         </div>
       </div>
 
@@ -438,6 +442,12 @@ const ImagingTimeline: Component<Props> = (props) => {
             </For>
           </div>
         </div>
+      </div>
+      {/* Hint */}
+      <div class="flex justify-end">
+        <span class="text-micro text-theme-text-secondary select-none hidden sm:inline">
+          Scroll to zoom · Drag to pan
+        </span>
       </div>
     </div>
   );
