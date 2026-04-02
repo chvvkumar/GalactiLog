@@ -306,22 +306,7 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
     # Site coordinates (for efficiency calc)
     site_coords = await _extract_site_coords(session)
 
-    # Timeline — monthly with efficiency
-    timeline_monthly: list[TimelineDetailEntry] = []
-    for entry in timeline:
-        eff = None
-        if site_coords:
-            year, month = map(int, entry.month.split("-"))
-            dark_h = dark_hours_for_month(year, month, site_coords.latitude, site_coords.longitude)
-            if dark_h > 0:
-                eff = round((entry.integration_seconds / 3600) / dark_h * 100, 1)
-        timeline_monthly.append(TimelineDetailEntry(
-            period=entry.month,
-            integration_seconds=entry.integration_seconds,
-            efficiency_pct=eff,
-        ))
-
-    # Timeline — weekly
+    # Timeline — weekly (raw data only, efficiency computed after DB work)
     week_label = func.to_char(Image.capture_date, 'IYYY-"W"IW').label('week')
     weekly_q = select(
         week_label,
@@ -330,20 +315,9 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
         Image.capture_date.isnot(None), Image.image_type == "LIGHT"
     ).group_by(week_label).order_by(week_label)
     weekly_result = await session.execute(weekly_q)
-    timeline_weekly: list[TimelineDetailEntry] = []
-    for r in weekly_result.all():
-        eff = None
-        if site_coords:
-            parts = r[0].split("-W")
-            year, week = int(parts[0]), int(parts[1])
-            dark_h = dark_hours_for_week(year, week, site_coords.latitude, site_coords.longitude)
-            if dark_h > 0:
-                eff = round((float(r[1]) / 3600) / dark_h * 100, 1)
-        timeline_weekly.append(TimelineDetailEntry(
-            period=r[0], integration_seconds=float(r[1]), efficiency_pct=eff,
-        ))
+    weekly_raw = [(r[0], float(r[1])) for r in weekly_result.all()]
 
-    # Timeline — daily
+    # Timeline — daily (raw data only)
     day_label = func.to_char(Image.capture_date, 'YYYY-MM-DD').label('day')
     daily_q = select(
         day_label,
@@ -352,19 +326,7 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
         Image.capture_date.isnot(None), Image.image_type == "LIGHT"
     ).group_by(day_label).order_by(day_label)
     daily_result = await session.execute(daily_q)
-    timeline_daily: list[TimelineDetailEntry] = []
-    for r in daily_result.all():
-        eff = None
-        if site_coords:
-            from datetime import date as date_type
-            parts = r[0].split("-")
-            d = date_type(int(parts[0]), int(parts[1]), int(parts[2]))
-            dark_h = dark_hours_for_night(d, site_coords.latitude, site_coords.longitude)
-            if dark_h > 0:
-                eff = round((float(r[1]) / 3600) / dark_h * 100, 1)
-        timeline_daily.append(TimelineDetailEntry(
-            period=r[0], integration_seconds=float(r[1]), efficiency_pct=eff,
-        ))
+    daily_raw = [(r[0], float(r[1])) for r in daily_result.all()]
 
     # Top targets
     top_q = select(
@@ -435,6 +397,49 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
     ingest_history = [
         IngestEntry(date=str(r[0]), files_added=r[1]) for r in ingest_result.all()
     ]
+
+    # --- Efficiency computation (CPU-bound, done after all DB work) ---
+    from datetime import date as date_type
+
+    timeline_monthly: list[TimelineDetailEntry] = []
+    for entry in timeline:
+        eff = None
+        if site_coords:
+            year, month = map(int, entry.month.split("-"))
+            dark_h = dark_hours_for_month(year, month, site_coords.latitude, site_coords.longitude)
+            if dark_h > 0:
+                eff = round((entry.integration_seconds / 3600) / dark_h * 100, 1)
+        timeline_monthly.append(TimelineDetailEntry(
+            period=entry.month,
+            integration_seconds=entry.integration_seconds,
+            efficiency_pct=eff,
+        ))
+
+    timeline_weekly: list[TimelineDetailEntry] = []
+    for period, secs in weekly_raw:
+        eff = None
+        if site_coords:
+            parts = period.split("-W")
+            year, week = int(parts[0]), int(parts[1])
+            dark_h = dark_hours_for_week(year, week, site_coords.latitude, site_coords.longitude)
+            if dark_h > 0:
+                eff = round((secs / 3600) / dark_h * 100, 1)
+        timeline_weekly.append(TimelineDetailEntry(
+            period=period, integration_seconds=secs, efficiency_pct=eff,
+        ))
+
+    timeline_daily: list[TimelineDetailEntry] = []
+    for period, secs in daily_raw:
+        eff = None
+        if site_coords:
+            parts = period.split("-")
+            d = date_type(int(parts[0]), int(parts[1]), int(parts[2]))
+            dark_h = dark_hours_for_night(d, site_coords.latitude, site_coords.longitude)
+            if dark_h > 0:
+                eff = round((secs / 3600) / dark_h * 100, 1)
+        timeline_daily.append(TimelineDetailEntry(
+            period=period, integration_seconds=secs, efficiency_pct=eff,
+        ))
 
     return StatsResponse(
         overview=overview,
