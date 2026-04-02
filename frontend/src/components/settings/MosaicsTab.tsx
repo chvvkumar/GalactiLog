@@ -1,6 +1,6 @@
 import { Component, For, Show, createSignal, onMount } from "solid-js";
 import { api } from "../../api/client";
-import { showToast } from "../Toast";
+import { showToast, dismissToast } from "../Toast";
 import { useAuth } from "../AuthProvider";
 import { useSettingsContext } from "../SettingsProvider";
 import type {
@@ -51,6 +51,7 @@ export const MosaicsTab: Component = () => {
   const keywords = () => settingsCtx.settings()?.general?.mosaic_keywords ?? ["Panel", "P"];
 
   const refresh = async () => {
+    showToast("Loading mosaics...", "info", 15000);
     try {
       const [s, m] = await Promise.all([
         api.getMosaicSuggestions(),
@@ -58,8 +59,9 @@ export const MosaicsTab: Component = () => {
       ]);
       setSuggestions(s);
       setMosaics(m);
+      dismissToast();
     } catch {
-      // Non-blocking
+      dismissToast();
     }
   };
 
