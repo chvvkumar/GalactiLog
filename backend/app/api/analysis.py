@@ -108,12 +108,12 @@ async def get_correlation(
 
     # Equipment filtering with alias expansion
     if telescope or camera:
-        alias_maps = await load_alias_maps(session)
+        _, cam_aliases, tel_aliases = await load_alias_maps(session)
     if telescope:
-        variants = expand_canonical(telescope, alias_maps.get("telescopes", {}))
+        variants = expand_canonical(telescope, tel_aliases)
         q = q.where(Image.telescope.in_(variants))
     if camera:
-        variants = expand_canonical(camera, alias_maps.get("cameras", {}))
+        variants = expand_canonical(camera, cam_aliases)
         q = q.where(Image.camera.in_(variants))
 
     if date_from:

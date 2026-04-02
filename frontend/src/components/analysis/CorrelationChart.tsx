@@ -185,7 +185,7 @@ const CorrelationChart: Component<Props> = (props) => {
     <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-4">
       {props.title && <h3 class="text-sm font-medium text-theme-text-primary mb-2">{props.title}</h3>}
       <div class="relative" style={{ height: "300px" }}>
-        {props.loading && (
+        {props.loading && !props.data && (
           <div class="absolute inset-0 flex items-center justify-center text-xs text-theme-text-secondary">
             Loading...
           </div>

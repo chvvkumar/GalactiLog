@@ -297,8 +297,8 @@ async def export_target(
         amb_temps = [i.ambient_temp for i in imgs if i.ambient_temp is not None]
 
         # Normalize filter name for AstroBin ID lookup
-        alias_maps = await load_alias_maps(session)
-        canonical_filter = normalize_filter(filter_name, alias_maps.get("filters", {}))
+        filter_aliases, _, _ = await load_alias_maps(session)
+        canonical_filter = normalize_filter(filter_name, filter_aliases)
         ab_id = astrobin_filter_ids.get(canonical_filter) or astrobin_filter_ids.get(filter_name)
 
         rows.append(ExportFilterRow(
