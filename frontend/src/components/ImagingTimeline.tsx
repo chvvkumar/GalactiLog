@@ -443,8 +443,11 @@ const ImagingTimeline: Component<Props> = (props) => {
           </div>
         </div>
       </div>
-      {/* Hint */}
-      <div class="flex justify-end">
+      {/* Footer */}
+      <div class="flex items-center justify-between">
+        <span class="text-micro text-theme-text-secondary select-none hidden sm:inline">
+          <span class="text-green-400">%</span> = imaging time / astronomical dark hours
+        </span>
         <span class="text-micro text-theme-text-secondary select-none hidden sm:inline">
           Scroll to zoom · Drag to pan
         </span>
