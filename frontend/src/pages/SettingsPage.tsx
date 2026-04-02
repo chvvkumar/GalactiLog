@@ -1,9 +1,10 @@
 // frontend/src/pages/SettingsPage.tsx
-import { Show, type Component } from "solid-js";
+import { Show, createSignal, type Component } from "solid-js";
 import { useSearchParams } from "@solidjs/router";
 import { FiltersTab } from "../components/settings/FiltersTab";
 import { EquipmentTab } from "../components/settings/EquipmentTab";
 import { MergesTab } from "../components/settings/MergesTab";
+import { MosaicsTab } from "../components/settings/MosaicsTab";
 import { UsersTab } from "../components/settings/UsersTab";
 import ScanManager from "../components/ScanManager";
 import DisplayTab from "../components/DisplayTab";
@@ -14,11 +15,44 @@ const ALL_TABS = [
   { id: "filters", label: "Filters" },
   { id: "equipment", label: "Equipment" },
   { id: "display", label: "Display" },
-  { id: "merges", label: "Target Merges" },
+  { id: "targets", label: "Target Management" },
   { id: "users", label: "Users", adminOnly: true },
 ] as const;
 
 type TabId = (typeof ALL_TABS)[number]["id"];
+
+const TargetManagementTab: Component = () => {
+  const [subTab, setSubTab] = createSignal<"merges" | "mosaics">("merges");
+
+  return (
+    <div class="space-y-4">
+      <div class="flex gap-2">
+        <button
+          onClick={() => setSubTab("merges")}
+          class={`px-3 py-1.5 text-sm rounded-[var(--radius-sm)] transition-colors ${
+            subTab() === "merges" ? "bg-theme-accent text-white" : "border border-theme-border text-theme-text-secondary hover:text-theme-text-primary"
+          }`}
+        >
+          Merges
+        </button>
+        <button
+          onClick={() => setSubTab("mosaics")}
+          class={`px-3 py-1.5 text-sm rounded-[var(--radius-sm)] transition-colors ${
+            subTab() === "mosaics" ? "bg-theme-accent text-white" : "border border-theme-border text-theme-text-secondary hover:text-theme-text-primary"
+          }`}
+        >
+          Mosaics
+        </button>
+      </div>
+      <Show when={subTab() === "merges"}>
+        <MergesTab />
+      </Show>
+      <Show when={subTab() === "mosaics"}>
+        <MosaicsTab />
+      </Show>
+    </div>
+  );
+};
 
 export const SettingsPage: Component = () => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -60,8 +94,8 @@ export const SettingsPage: Component = () => {
       <Show when={activeTab() === "display"}>
         <DisplayTab />
       </Show>
-      <Show when={activeTab() === "merges"}>
-        <MergesTab />
+      <Show when={activeTab() === "targets"}>
+        <TargetManagementTab />
       </Show>
       <Show when={activeTab() === "users" && isAdmin()}>
         <UsersTab />
