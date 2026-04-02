@@ -1,16 +1,18 @@
-import { Component, Show } from "solid-js";
+import { Component, Show, createSignal } from "solid-js";
 import { useStats } from "../store/stats";
 import StatsOverview from "../components/StatsOverview";
 import EquipmentInventory from "../components/EquipmentInventory";
 import EquipmentPerformance from "../components/EquipmentPerformance";
 import FilterUsageChart from "../components/FilterUsageChart";
 import ImagingTimeline from "../components/ImagingTimeline";
+import ImagingCalendar from "../components/ImagingCalendar";
 import TopTargets from "../components/TopTargets";
 import StorageBreakdown from "../components/StorageBreakdown";
 import IngestHistory from "../components/IngestHistory";
 
 const StatisticsPage: Component = () => {
   const { stats } = useStats();
+  const [timelineView, setTimelineView] = createSignal<"timeline" | "calendar">("timeline");
 
   return (
     <div class="p-4 space-y-4 max-w-7xl mx-auto">
@@ -41,7 +43,26 @@ const StatisticsPage: Component = () => {
               <TopTargets targets={data().top_targets} />
             </div>
 
-            <ImagingTimeline timeline={data().timeline} />
+            <div class="flex items-center gap-2 mb-1">
+              <button
+                class={`px-3 py-1 text-xs rounded ${timelineView() === "timeline" ? "bg-theme-accent text-white" : "bg-theme-bg text-theme-text-secondary border border-theme-border"}`}
+                onClick={() => setTimelineView("timeline")}
+              >
+                Timeline
+              </button>
+              <button
+                class={`px-3 py-1 text-xs rounded ${timelineView() === "calendar" ? "bg-theme-accent text-white" : "bg-theme-bg text-theme-text-secondary border border-theme-border"}`}
+                onClick={() => setTimelineView("calendar")}
+              >
+                Calendar
+              </button>
+            </div>
+            <Show when={timelineView() === "timeline"}>
+              <ImagingTimeline timeline={data().timeline} />
+            </Show>
+            <Show when={timelineView() === "calendar"}>
+              <ImagingCalendar />
+            </Show>
 
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4 [&>*]:border [&>*]:border-theme-border [&>*]:rounded-[var(--radius-md)] [&>*]:shadow-[var(--shadow-sm)]">
               <StorageBreakdown
