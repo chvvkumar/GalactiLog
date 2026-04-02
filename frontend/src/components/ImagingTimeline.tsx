@@ -30,6 +30,7 @@ function presetToZoom(preset: Preset): number {
     case "q": return 5;
     case "m": return 11;
     case "w": return 16;
+    default: return 1;
   }
 }
 
@@ -74,7 +75,12 @@ function periodToDateRange(period: string, gran: Granularity): { from: string; t
     monday.setDate(startOfWeek1.getDate() + (week - 1) * 7);
     const sunday = new Date(monday);
     sunday.setDate(monday.getDate() + 6);
-    const fmt = (d: Date) => d.toISOString().slice(0, 10);
+    const fmt = (d: Date) => {
+      const y = d.getFullYear();
+      const mo = String(d.getMonth() + 1).padStart(2, "0");
+      const day = String(d.getDate()).padStart(2, "0");
+      return `${y}-${mo}-${day}`;
+    };
     return { from: fmt(monday), to: fmt(sunday) };
   }
   return { from: period, to: period };
@@ -336,7 +342,7 @@ const ImagingTimeline: Component<Props> = (props) => {
                     style={{ width: `${barWidth()}px`, "flex-shrink": "0" }}
                   >
                     {/* Efficiency label */}
-                    <Show when={showEfficiency() && entry.efficiency_pct != null}>
+                    <Show when={showEfficiency() && entry.efficiency_pct != null && i() % labelInterval() === 0}>
                       <span class="text-green-400 leading-none mb-0.5" style={{ "font-size": "0.6rem" }}>
                         {entry.efficiency_pct}%
                       </span>
@@ -349,8 +355,9 @@ const ImagingTimeline: Component<Props> = (props) => {
                     </Show>
                     {/* Bar */}
                     <div
-                      class={`w-full rounded-t transition-colors ${isEmpty() ? "" : "bg-theme-accent hover:brightness-125 cursor-pointer"}`}
+                      class={`w-full rounded-t transition-colors ${isEmpty() ? "" : "bg-theme-accent hover:opacity-80 cursor-pointer"}`}
                       style={{ height: isEmpty() ? "0px" : `${Math.max(pct(), 1)}%`, "min-height": isEmpty() ? "0" : "2px" }}
+                      title={!isEmpty() ? `${formatLabel(entry.period, granularity())}: ${formatHours(entry.integration_seconds)}` : undefined}
                       onClick={() => !isEmpty() && handleBarClick(entry)}
                     />
                   </div>
