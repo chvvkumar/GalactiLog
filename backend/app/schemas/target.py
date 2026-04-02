@@ -128,6 +128,8 @@ class TargetAggregation(BaseModel):
     sessions: list[SessionSummary]
     matched_sessions: int | None = None
     total_sessions: int | None = None
+    mosaic_id: str | None = None
+    mosaic_name: str | None = None
 
 
 class AggregateStats(BaseModel):

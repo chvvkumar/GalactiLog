@@ -871,6 +871,15 @@ async def list_targets_aggregated(
             s["filters_set"].add(f)
 
     # ---------------------------------------------------------------
+    # Phase 4b: Mosaic membership lookup
+    # ---------------------------------------------------------------
+    from app.models.mosaic_panel import MosaicPanel
+    from app.models.mosaic import Mosaic
+    panel_q = select(MosaicPanel.target_id, Mosaic.id, Mosaic.name).join(Mosaic)
+    panel_rows = (await session.execute(panel_q)).all()
+    mosaic_map = {str(r[0]): (str(r[1]), r[2]) for r in panel_rows}
+
+    # ---------------------------------------------------------------
     # Phase 5: Assemble the response
     # ---------------------------------------------------------------
     target_list = []
@@ -905,6 +914,8 @@ async def list_targets_aggregated(
             sessions=sessions,
             matched_sessions=matched_session_count,
             total_sessions=total_session_count if matched_session_count is not None else None,
+            mosaic_id=mosaic_map.get(basics["target_key"], (None, None))[0],
+            mosaic_name=mosaic_map.get(basics["target_key"], (None, None))[1],
         ))
 
     return TargetAggregationResponse(

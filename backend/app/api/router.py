@@ -9,6 +9,7 @@ from .settings import router as settings_router
 from .merges import router as merges_router
 from .auth import router as auth_router
 from .analysis import router as analysis_router
+from .mosaics import router as mosaics_router
 from app.database import async_session
 from app.config import async_redis
 
@@ -20,6 +21,7 @@ api_router.include_router(settings_router)
 api_router.include_router(merges_router)
 api_router.include_router(auth_router)
 api_router.include_router(analysis_router)
+api_router.include_router(mosaics_router)
 
 
 @api_router.get("/health")

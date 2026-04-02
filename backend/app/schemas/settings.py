@@ -13,6 +13,7 @@ class GeneralSettings(BaseModel):
     timezone: str = "UTC"
     astrobin_filter_ids: dict[str, int] = {}
     astrobin_bortle: int | None = None
+    mosaic_keywords: list[str] = ["Panel", "P"]
 
 
 class FilterConfig(BaseModel):
