@@ -54,8 +54,8 @@ const MosaicGrid: Component<Props> = (props) => {
 
     // --- Fallback: numbered grid when no spatial data ---
     if (!hasSpatial) {
-      const CELL = 120;
-      const GAP = 6;
+      const CELL = 200;
+      const GAP = 8;
       const sorted = [...panels].sort((a, b) => {
         const na = parseInt(a.panel_label.replace(/\D/g, "")) || a.sort_order;
         const nb = parseInt(b.panel_label.replace(/\D/g, "")) || b.sort_order;
@@ -156,8 +156,8 @@ const MosaicGrid: Component<Props> = (props) => {
         <div class="relative overflow-x-auto" onMouseLeave={() => setTooltip(null)}>
           <svg
             viewBox={`0 0 ${layout().svgW} ${layout().svgH}`}
-            class="block mx-auto"
-            style={{ "max-width": "100%", height: `${Math.min(layout().svgH, 500)}px` }}
+            class="block mx-auto w-full"
+            style={{ "max-height": "70vh" }}
             preserveAspectRatio="xMidYMid meet"
           >
             <defs>

@@ -6,11 +6,13 @@ from pydantic import BaseModel
 class MosaicPanelCreate(BaseModel):
     target_id: uuid.UUID
     panel_label: str
+    object_pattern: str | None = None
 
 
 class MosaicPanelUpdate(BaseModel):
     panel_label: str | None = None
     sort_order: int | None = None
+    object_pattern: str | None = None
 
 
 class MosaicCreate(BaseModel):
@@ -37,6 +39,7 @@ class PanelStats(BaseModel):
     filter_distribution: dict[str, float]
     last_session_date: str | None = None
     thumbnail_url: str | None = None
+    object_pattern: str | None = None
 
 
 class MosaicSummary(BaseModel):
@@ -65,6 +68,10 @@ class SuggestionPanelSession(BaseModel):
     frames: int
     integration_seconds: float
     filter_used: str | None = None
+
+
+class AcceptSuggestionRequest(BaseModel):
+    selected_panels: list[str] | None = None  # subset of panel_labels to accept; None = all
 
 
 class MosaicSuggestionResponse(BaseModel):

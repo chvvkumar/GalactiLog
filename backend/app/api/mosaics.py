@@ -12,6 +12,7 @@ from app.models.mosaic import Mosaic
 from app.models.mosaic_panel import MosaicPanel
 from app.models.mosaic_suggestion import MosaicSuggestion
 from app.schemas.mosaic import (
+    AcceptSuggestionRequest,
     MosaicCreate, MosaicUpdate, MosaicPanelCreate, MosaicPanelUpdate,
     MosaicSummary, MosaicDetailResponse, PanelStats, MosaicSuggestionResponse,
 )
@@ -126,6 +127,7 @@ async def _panel_stats(panel: MosaicPanel, session: AsyncSession) -> PanelStats:
         filter_distribution=filter_dist,
         last_session_date=str(row.last_date) if row.last_date else None,
         thumbnail_url=thumb_url,
+        object_pattern=panel.object_pattern,
     )
 
 
@@ -208,12 +210,15 @@ async def get_suggestions(
 @router.post("/suggestions/{suggestion_id}/accept", response_model=MosaicSummary)
 async def accept_suggestion(
     suggestion_id: uuid.UUID,
+    body: AcceptSuggestionRequest = AcceptSuggestionRequest(),
     session: AsyncSession = Depends(get_session),
     user: User = Depends(get_current_user),
 ):
     suggestion = await session.get(MosaicSuggestion, suggestion_id)
     if not suggestion or suggestion.status != "pending":
         raise HTTPException(404, "Suggestion not found or already resolved")
+
+    selected = set(body.selected_panels) if body.selected_panels is not None else None
 
     # Create the mosaic
     mosaic = Mosaic(name=suggestion.suggested_name)
@@ -223,7 +228,10 @@ async def accept_suggestion(
     # Create panels — multiple panels may share the same target_id
     # (SIMBAD often merges panel variants into one target)
     panel_num = 0
+    created = 0
     for target_id, label in zip(suggestion.target_ids, suggestion.panel_labels):
+        if selected is not None and label not in selected:
+            continue
         # Build OBJECT header pattern for filtering frames per panel
         # e.g., base "Andromeda Galaxy" + "Panel 3" → "%Andromeda Galaxy%Panel%3%"
         num = label.split()[-1] if label.startswith("Panel ") else label
@@ -237,6 +245,7 @@ async def accept_suggestion(
         )
         session.add(panel)
         panel_num += 1
+        created += 1
 
     suggestion.status = "accepted"
     await session.commit()
@@ -245,7 +254,7 @@ async def accept_suggestion(
         id=str(mosaic.id),
         name=mosaic.name,
         notes=mosaic.notes,
-        panel_count=len(suggestion.target_ids),
+        panel_count=created,
         total_integration_seconds=0,
         total_frames=0,
         completion_pct=0,
@@ -322,10 +331,15 @@ async def create_mosaic(
     await session.flush()
 
     for p in body.panels:
+        obj_pattern = p.object_pattern
+        if obj_pattern is None:
+            num = p.panel_label.split()[-1] if p.panel_label.startswith("Panel ") else p.panel_label
+            obj_pattern = f"%{mosaic.name}%{num}%"
         panel = MosaicPanel(
             mosaic_id=mosaic.id,
             target_id=p.target_id,
             panel_label=p.panel_label,
+            object_pattern=obj_pattern,
         )
         session.add(panel)
 
@@ -427,10 +441,18 @@ async def add_panel(
     if existing:
         raise HTTPException(400, "This panel already exists in the mosaic")
 
+    # Derive object_pattern to filter frames by FITS OBJECT header,
+    # matching the logic used in accept_suggestion.
+    obj_pattern = body.object_pattern
+    if obj_pattern is None:
+        num = body.panel_label.split()[-1] if body.panel_label.startswith("Panel ") else body.panel_label
+        obj_pattern = f"%{mosaic.name}%{num}%"
+
     panel = MosaicPanel(
         mosaic_id=mosaic_id,
         target_id=body.target_id,
         panel_label=body.panel_label,
+        object_pattern=obj_pattern,
     )
     session.add(panel)
     await session.commit()
@@ -452,6 +474,8 @@ async def update_panel(
         panel.panel_label = body.panel_label
     if body.sort_order is not None:
         panel.sort_order = body.sort_order
+    if body.object_pattern is not None:
+        panel.object_pattern = body.object_pattern
     await session.commit()
     return {"status": "ok"}
 
