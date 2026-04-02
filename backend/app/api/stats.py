@@ -399,7 +399,6 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
     ]
 
     # --- Efficiency computation (CPU-bound, run in thread to avoid blocking event loop) ---
-    import asyncio
     from datetime import date as date_type
 
     def _compute_efficiency():
