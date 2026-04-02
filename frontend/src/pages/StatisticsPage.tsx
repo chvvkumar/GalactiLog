@@ -41,7 +41,11 @@ const StatisticsPage: Component = () => {
               <TopTargets targets={data().top_targets} />
             </div>
 
-            <ImagingTimeline timeline={data().timeline} />
+            <ImagingTimeline
+              monthly={data().timeline_monthly}
+              weekly={data().timeline_weekly}
+              daily={data().timeline_daily}
+            />
 
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4 [&>*]:border [&>*]:border-theme-border [&>*]:rounded-[var(--radius-md)] [&>*]:shadow-[var(--shadow-sm)]">
               <StorageBreakdown
