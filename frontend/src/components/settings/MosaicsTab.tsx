@@ -375,8 +375,14 @@ export const MosaicsTab: Component = () => {
               value={campaignGap()}
               onChange={async (e) => {
                 const val = parseInt(e.currentTarget.value, 10);
-                const current = settingsCtx.settings()?.general;
-                await settingsCtx.saveGeneral({ ...current!, mosaic_campaign_gap_days: val });
+                try {
+                  const current = settingsCtx.settings()?.general;
+                  await settingsCtx.saveGeneral({ ...current!, mosaic_campaign_gap_days: val });
+                  const label = GAP_OPTIONS.find((o) => o.value === val)?.label ?? String(val);
+                  showToast(`Campaign gap set to ${label}. Re-run detection to apply.`);
+                } catch {
+                  showToast("Failed to save campaign gap", "error");
+                }
               }}
               class="px-2 py-1.5 text-sm bg-theme-base border border-theme-border rounded-[var(--radius-sm)] text-theme-text-primary focus:outline-none focus:border-theme-accent"
             >
