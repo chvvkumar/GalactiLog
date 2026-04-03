@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.database import get_session
-from app.models import Image, Target, User
+from app.models import Image, Target, User, UserSettings, SETTINGS_ROW_ID
 from app.models.mosaic import Mosaic
 from app.models.mosaic_panel import MosaicPanel
 from app.models.mosaic_suggestion import MosaicSuggestion
@@ -137,7 +137,12 @@ async def trigger_detection(
     user: User = Depends(get_current_user),
 ):
     from app.services.mosaic_detection import detect_mosaic_panels
-    count = await detect_mosaic_panels(session)
+
+    settings = await session.get(UserSettings, SETTINGS_ROW_ID)
+    general = settings.general if settings else {}
+    gap_days = general.get("mosaic_campaign_gap_days", 0)
+
+    count = await detect_mosaic_panels(session, gap_days=gap_days)
     return {"status": "ok", "new_suggestions": count}
 
 
