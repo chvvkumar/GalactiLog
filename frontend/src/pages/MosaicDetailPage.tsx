@@ -1,6 +1,7 @@
 import { Component, Show, For, createResource, createSignal } from "solid-js";
 import { A, useParams } from "@solidjs/router";
 import { api } from "../api/client";
+import type { PanelStats } from "../types";
 
 function formatHours(seconds: number): string {
   const h = seconds / 3600;
@@ -64,26 +65,49 @@ const MosaicDetailPage: Component = () => {
               />
             </div>
 
-            {/* Mosaic Composite */}
-            <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-4">
-              <h3 class="text-sm font-medium text-theme-text-primary mb-3">Panel Layout</h3>
-              <div class="flex justify-center">
-                <img
-                  src={`/api/mosaics/${params.mosaicId}/composite`}
-                  alt={`${data().name} mosaic composite`}
-                  class="max-w-full h-auto rounded"
-                  style={{ "max-height": "600px" }}
-                  onError={(e) => {
-                    e.currentTarget.style.display = "none";
-                    const fallback = e.currentTarget.nextElementSibling as HTMLElement;
-                    if (fallback) fallback.style.display = "block";
-                  }}
-                />
-                <div class="text-center text-theme-text-secondary text-sm py-8" style={{ display: "none" }}>
-                  Could not generate mosaic composite. Panels may not have accessible FITS files.
-                </div>
+            {/* Panel Thumbnails Grid */}
+            <Show when={data().panels.some((p: PanelStats) => p.thumbnail_url)}>
+              <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-4">
+                <h3 class="text-sm font-medium text-theme-text-primary mb-3">Panel Layout</h3>
+                {(() => {
+                  const cols = Math.ceil(Math.sqrt(data().panels.length));
+                  return (
+                    <div
+                      class="grid gap-2 mx-auto"
+                      style={{ "grid-template-columns": `repeat(${cols}, 1fr)`, "max-width": "800px" }}
+                    >
+                      <For each={[...data().panels].sort((a: PanelStats, b: PanelStats) => {
+                        const na = parseInt(a.panel_label.replace(/\D/g, "")) || a.sort_order;
+                        const nb = parseInt(b.panel_label.replace(/\D/g, "")) || b.sort_order;
+                        return na - nb;
+                      })}>
+                        {(panel: PanelStats) => (
+                          <div class="relative">
+                            <Show
+                              when={panel.thumbnail_url}
+                              fallback={
+                                <div class="aspect-square bg-theme-elevated border border-theme-border rounded flex items-center justify-center text-theme-text-secondary text-xs">
+                                  {panel.panel_label}
+                                </div>
+                              }
+                            >
+                              <img
+                                src={api.thumbnailUrl(panel.thumbnail_url!)}
+                                alt={panel.panel_label}
+                                class="w-full aspect-square object-cover rounded border border-theme-border"
+                              />
+                            </Show>
+                            <span class="absolute bottom-1 left-1 bg-black/60 text-white text-[10px] px-1.5 py-0.5 rounded">
+                              {panel.panel_label}
+                            </span>
+                          </div>
+                        )}
+                      </For>
+                    </div>
+                  );
+                })()}
               </div>
-            </div>
+            </Show>
 
             {/* Panel Table */}
             <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] overflow-hidden">
@@ -95,7 +119,7 @@ const MosaicDetailPage: Component = () => {
                     <th class="px-3 py-2 text-right">Integration</th>
                     <th class="px-3 py-2 text-right">Frames</th>
                     <th class="px-3 py-2 text-left">Filters</th>
-                    <th class="px-3 py-2 text-left">Last Session</th>
+                    <th class="px-3 py-2 text-left">Session Date</th>
                     <th class="px-3 py-2"></th>
                   </tr>
                 </thead>
