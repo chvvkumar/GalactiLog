@@ -1,5 +1,6 @@
 import { Component, For, Show, createMemo, createSignal } from "solid-js";
 import { api } from "../../api/client";
+import { remToPx } from "../../utils/chartConfig";
 import type { PanelStats } from "../../types";
 
 function formatHours(seconds: number): string {
@@ -273,7 +274,7 @@ const MosaicGrid: Component<Props> = (props) => {
                       text-anchor="middle"
                       dominant-baseline="central"
                       class="fill-white"
-                      font-size={`${Math.max(9, Math.min(13, pos.w * 0.12))}px`}
+                      font-size={`${Math.max(remToPx(0.643), Math.min(remToPx(0.929), pos.w * 0.12))}px`}
                       font-weight="600"
                       style={{ "text-shadow": "0 1px 3px rgba(0,0,0,0.8)" }}
                     >
@@ -285,7 +286,7 @@ const MosaicGrid: Component<Props> = (props) => {
                       text-anchor="middle"
                       dominant-baseline="central"
                       class="fill-white"
-                      font-size={`${Math.max(8, Math.min(10, pos.w * 0.1))}px`}
+                      font-size={`${Math.max(remToPx(0.571), Math.min(remToPx(0.714), pos.w * 0.1))}px`}
                       opacity={0.85}
                       style={{ "text-shadow": "0 1px 3px rgba(0,0,0,0.8)" }}
                     >

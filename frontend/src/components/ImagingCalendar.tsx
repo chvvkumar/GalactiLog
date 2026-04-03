@@ -143,7 +143,7 @@ const ImagingCalendar: Component = () => {
                   x={30 + m.col * (CELL + GAP)}
                   y={10}
                   class="fill-theme-text-secondary"
-                  font-size="10"
+                  font-size="0.714rem"
                 >
                   {m.label}
                 </text>
@@ -158,7 +158,7 @@ const ImagingCalendar: Component = () => {
                     x={0}
                     y={20 + i() * (CELL + GAP) + CELL - 2}
                     class="fill-theme-text-secondary"
-                    font-size="10"
+                    font-size="0.714rem"
                   >
                     {label}
                   </text>
