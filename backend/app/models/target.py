@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import String, Float, Index, ForeignKey, DateTime
+from sqlalchemy import String, Float, Index, ForeignKey, DateTime, Text
 from sqlalchemy.dialects.postgresql import ARRAY, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -25,6 +25,7 @@ class Target(Base):
     position_angle: Mapped[float | None] = mapped_column(Float, nullable=True)
     v_mag: Mapped[float | None] = mapped_column(Float, nullable=True)
     surface_brightness: Mapped[float | None] = mapped_column(Float, nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     merged_into_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("targets.id"), nullable=True)
     merged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 

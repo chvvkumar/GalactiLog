@@ -14,11 +14,15 @@ const ALL_TABS = [
   { id: "filters", label: "Filters" },
   { id: "equipment", label: "Equipment" },
   { id: "display", label: "Display" },
-  { id: "merges", label: "Target Merges" },
+  { id: "targets", label: "Target Management" },
   { id: "users", label: "Users", adminOnly: true },
 ] as const;
 
 type TabId = (typeof ALL_TABS)[number]["id"];
+
+const TargetManagementTab: Component = () => {
+  return <MergesTab />;
+};
 
 export const SettingsPage: Component = () => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -28,14 +32,14 @@ export const SettingsPage: Component = () => {
   const activeTab = () => (tabs().some((t) => t.id === searchParams.tab) ? (searchParams.tab as TabId) : "scan");
 
   return (
-    <div class="p-4 max-w-4xl mx-auto space-y-6">
+    <div class={`p-4 mx-auto space-y-6 ${activeTab() === "targets" ? "max-w-6xl" : "max-w-4xl"}`}>
       <h1 class="text-xl font-semibold tracking-tight text-theme-text-primary">Settings</h1>
 
       {/* Tab bar */}
       <div class="flex flex-wrap gap-1">
         {tabs().map((tab) => (
           <button
-            onClick={() => setSearchParams({ tab: tab.id })}
+            onClick={() => setSearchParams({ tab: tab.id, sub: undefined })}
             class={`px-3 sm:px-4 py-2 text-sm transition-colors duration-150 ${
               activeTab() === tab.id
                 ? "bg-theme-elevated text-theme-text-primary rounded-[var(--radius-sm)] font-medium"
@@ -60,8 +64,8 @@ export const SettingsPage: Component = () => {
       <Show when={activeTab() === "display"}>
         <DisplayTab />
       </Show>
-      <Show when={activeTab() === "merges"}>
-        <MergesTab />
+      <Show when={activeTab() === "targets"}>
+        <TargetManagementTab />
       </Show>
       <Show when={activeTab() === "users" && isAdmin()}>
         <UsersTab />

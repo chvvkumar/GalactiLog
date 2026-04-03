@@ -3,7 +3,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select, func, case
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,12 +13,18 @@ from app.api.deps import get_current_user
 from app.models.user import User
 from app.models import Image, Target
 from app.services.normalization import load_alias_maps, normalize_filter, normalize_equipment
+from sqlalchemy import cast
+from sqlalchemy.types import Date
+
 from app.schemas.stats import (
     StatsResponse, OverviewStats, EquipmentStats, EquipmentItem,
-    TimelineEntry, TopTarget, DataQualityStats, HfrBucket,
+    TimelineEntry, TimelineDetailEntry, TopTarget, DataQualityStats, HfrBucket,
     StorageStats, IngestEntry,
     EquipmentComboMetrics, EquipmentFilterMetrics,
+    SiteCoords,
+    CalendarEntry,
 )
+# astro_night is no longer imported here — efficiency uses precomputed DB table
 
 router = APIRouter(prefix="/stats", tags=["stats"])
 
@@ -56,6 +62,60 @@ async def _refresh_storage_cache() -> None:
         _storage_cache["fits"] = fits
         _storage_cache["thumbnails"] = thumbs
         _storage_last_update = time.time()
+
+
+async def _extract_site_coords(session: AsyncSession) -> SiteCoords | None:
+    """Extract the most common lat/lon from FITS raw_headers.
+
+    Checks SITELAT/SITELONG (N.I.N.A.), OBSLAT/OBSLONG, and LAT-OBS/LONG-OBS.
+    Returns the most frequently occurring coordinate pair, or None.
+    """
+    lat_keys = ["SITELAT", "OBSLAT", "LAT-OBS"]
+    lon_keys = ["SITELONG", "OBSLONG", "LONG-OBS"]
+
+    for lat_key, lon_key in zip(lat_keys, lon_keys):
+        q = select(
+            Image.raw_headers[lat_key].astext.label("lat"),
+            Image.raw_headers[lon_key].astext.label("lon"),
+            func.count().label("cnt"),
+        ).where(
+            Image.raw_headers[lat_key].isnot(None),
+            Image.raw_headers[lon_key].isnot(None),
+        ).group_by("lat", "lon").order_by(func.count().desc()).limit(1)
+
+        result = await session.execute(q)
+        row = result.first()
+        if row and row.lat and row.lon:
+            try:
+                return SiteCoords(latitude=float(row.lat), longitude=float(row.lon))
+            except (ValueError, TypeError):
+                continue
+    return None
+
+
+def _extract_site_coords_sync(session) -> SiteCoords | None:
+    """Sync version of _extract_site_coords for use in Celery workers."""
+    lat_keys = ["SITELAT", "OBSLAT", "LAT-OBS"]
+    lon_keys = ["SITELONG", "OBSLONG", "LONG-OBS"]
+
+    for lat_key, lon_key in zip(lat_keys, lon_keys):
+        q = select(
+            Image.raw_headers[lat_key].astext.label("lat"),
+            Image.raw_headers[lon_key].astext.label("lon"),
+            func.count().label("cnt"),
+        ).where(
+            Image.raw_headers[lat_key].isnot(None),
+            Image.raw_headers[lon_key].isnot(None),
+        ).group_by("lat", "lon").order_by(func.count().desc()).limit(1)
+
+        result = session.execute(q)
+        row = result.first()
+        if row and row.lat and row.lon:
+            try:
+                return SiteCoords(latitude=float(row.lat), longitude=float(row.lon))
+            except (ValueError, TypeError):
+                continue
+    return None
 
 
 @router.get("", response_model=StatsResponse)
@@ -261,7 +321,7 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
         normalized_usage[canonical] = normalized_usage.get(canonical, 0.0) + seconds
     filter_usage = normalized_usage
 
-    # Timeline (monthly integration)
+    # Timeline — monthly (backward compat)
     month_label = func.to_char(Image.capture_date, 'YYYY-MM').label('month')
     timeline_q = select(
         month_label,
@@ -271,6 +331,31 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
     ).group_by(month_label).order_by(month_label)
     timeline_result = await session.execute(timeline_q)
     timeline = [TimelineEntry(month=r[0], integration_seconds=float(r[1])) for r in timeline_result.all()]
+
+    # Site coordinates (for efficiency calc)
+    site_coords = await _extract_site_coords(session)
+
+    # Timeline — weekly (raw data only, efficiency computed after DB work)
+    week_label = func.to_char(Image.capture_date, 'IYYY-"W"IW').label('week')
+    weekly_q = select(
+        week_label,
+        func.coalesce(func.sum(Image.exposure_time), 0),
+    ).where(
+        Image.capture_date.isnot(None), Image.image_type == "LIGHT"
+    ).group_by(week_label).order_by(week_label)
+    weekly_result = await session.execute(weekly_q)
+    weekly_raw = [(r[0], float(r[1])) for r in weekly_result.all()]
+
+    # Timeline — daily (raw data only)
+    day_label = func.to_char(Image.capture_date, 'YYYY-MM-DD').label('day')
+    daily_q = select(
+        day_label,
+        func.coalesce(func.sum(Image.exposure_time), 0),
+    ).where(
+        Image.capture_date.isnot(None), Image.image_type == "LIGHT"
+    ).group_by(day_label).order_by(day_label)
+    daily_result = await session.execute(daily_q)
+    daily_raw = [(r[0], float(r[1])) for r in daily_result.all()]
 
     # Top targets
     top_q = select(
@@ -342,14 +427,111 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
         IngestEntry(date=str(r[0]), files_added=r[1]) for r in ingest_result.all()
     ]
 
+    # --- Efficiency from precomputed site_dark_hours table (instant DB lookup) ---
+    from datetime import date as date_type, timedelta
+    from app.models.site_dark_hours import SiteDarkHours
+    import calendar as cal
+
+    dark_map: dict[date_type, float] = {}
+    if site_coords:
+        dark_q = select(SiteDarkHours.date, SiteDarkHours.dark_hours).where(
+            SiteDarkHours.latitude == site_coords.latitude,
+            SiteDarkHours.longitude == site_coords.longitude,
+        )
+        dark_result = await session.execute(dark_q)
+        dark_map = {row[0]: row[1] for row in dark_result.all()}
+
+    def _eff_for_dates(dates: list[date_type], integration_secs: float) -> float | None:
+        total_dark = sum(dark_map.get(d, 0.0) for d in dates)
+        if total_dark > 0:
+            return round((integration_secs / 3600) / total_dark * 100, 1)
+        return None
+
+    # Monthly
+    timeline_monthly: list[TimelineDetailEntry] = []
+    for entry in timeline:
+        year, month = map(int, entry.month.split("-"))
+        dates = [date_type(year, month, d) for d in range(1, cal.monthrange(year, month)[1] + 1)]
+        timeline_monthly.append(TimelineDetailEntry(
+            period=entry.month, integration_seconds=entry.integration_seconds,
+            efficiency_pct=_eff_for_dates(dates, entry.integration_seconds),
+        ))
+
+    # Weekly
+    timeline_weekly: list[TimelineDetailEntry] = []
+    for period, secs in weekly_raw:
+        parts = period.split("-W")
+        year, week = int(parts[0]), int(parts[1])
+        jan4 = date_type(year, 1, 4)
+        start_of_week1 = jan4 - timedelta(days=jan4.weekday())
+        monday = start_of_week1 + timedelta(weeks=week - 1)
+        dates = [monday + timedelta(days=i) for i in range(7)]
+        timeline_weekly.append(TimelineDetailEntry(
+            period=period, integration_seconds=secs,
+            efficiency_pct=_eff_for_dates(dates, secs),
+        ))
+
+    # Daily
+    timeline_daily: list[TimelineDetailEntry] = []
+    for period, secs in daily_raw:
+        parts = period.split("-")
+        d = date_type(int(parts[0]), int(parts[1]), int(parts[2]))
+        dark_h = dark_map.get(d, 0.0)
+        eff = round((secs / 3600) / dark_h * 100, 1) if dark_h > 0 else None
+        timeline_daily.append(TimelineDetailEntry(
+            period=period, integration_seconds=secs, efficiency_pct=eff,
+        ))
+
     return StatsResponse(
         overview=overview,
         equipment=equipment,
         equipment_performance=equipment_performance,
         filter_usage=filter_usage,
         timeline=timeline,
+        timeline_monthly=timeline_monthly,
+        timeline_weekly=timeline_weekly,
+        timeline_daily=timeline_daily,
+        site_coords=site_coords,
         top_targets=top_targets,
         data_quality=data_quality,
         storage=storage,
         ingest_history=ingest_history,
     )
+
+
+@router.get("/calendar", response_model=list[CalendarEntry])
+async def get_calendar(
+    year: int | None = Query(None),
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    date_col = cast(Image.capture_date, Date)
+    q = (
+        select(
+            date_col.label("night"),
+            func.sum(Image.exposure_time).label("integration"),
+            func.count(func.distinct(Image.resolved_target_id)).label("targets"),
+            func.count(Image.id).label("frames"),
+        )
+        .where(Image.image_type == "LIGHT")
+        .where(Image.capture_date.is_not(None))
+        .group_by(date_col)
+        .order_by(date_col)
+    )
+    if year:
+        q = q.where(func.extract("year", Image.capture_date) == year)
+    else:
+        from datetime import datetime, timedelta
+        cutoff = datetime.utcnow() - timedelta(days=365)
+        q = q.where(Image.capture_date >= cutoff)
+
+    rows = (await session.execute(q)).all()
+    return [
+        CalendarEntry(
+            date=str(r.night),
+            integration_seconds=r.integration or 0,
+            target_count=r.targets,
+            frame_count=r.frames,
+        )
+        for r in rows
+    ]

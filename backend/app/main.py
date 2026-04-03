@@ -21,9 +21,15 @@ async def lifespan(app: FastAPI):
     if not os.environ.get("GALACTILOG_JWT_SECRET"):
         logger.warning("GALACTILOG_JWT_SECRET is not set — using auto-generated secret. Sessions will not survive restarts. Set GALACTILOG_JWT_SECRET in .env for persistence.")
 
+    # Ensure required PostgreSQL extensions exist (idempotent)
+    from app.database import async_session
+    from sqlalchemy import text
+    async with async_session() as session:
+        await session.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
+        await session.commit()
+
     # Auto-create accounts from env vars if they don't already exist
     if settings.admin_password or settings.viewer_password:
-        from app.database import async_session
         from app.models.user import User, UserRole
         from app.services.auth import hash_password
         from sqlalchemy import select
@@ -47,6 +53,15 @@ async def lifespan(app: FastAPI):
                 ))
                 logger.info("%s user '%s' created from environment variables", role.value.capitalize(), username)
             await session.commit()
+
+    # Dispatch dark hours backfill to Celery worker (runs in background,
+    # doesn't block startup or the event loop)
+    try:
+        from app.worker.tasks import backfill_dark_hours
+        backfill_dark_hours.apply_async(countdown=5)
+        logger.info("Dark hours backfill task dispatched")
+    except Exception as e:
+        logger.warning("Failed to dispatch dark hours backfill: %s", e)
 
     yield
 

@@ -1,0 +1,191 @@
+import re
+import uuid
+from collections import defaultdict
+from datetime import datetime
+
+from sqlalchemy import select, func, cast, Date
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models import Target, UserSettings, SETTINGS_ROW_ID
+from app.models.image import Image
+from app.models.mosaic import Mosaic
+from app.models.mosaic_panel import MosaicPanel
+from app.models.mosaic_suggestion import MosaicSuggestion
+
+
+def cluster_sessions_by_gap(dates: list[str], gap_days: int) -> list[list[str]]:
+    """Split sorted date strings into clusters where consecutive dates are <= gap_days apart."""
+    if not dates:
+        return []
+    sorted_dates = sorted(dates)
+    parsed = [datetime.strptime(d, "%Y-%m-%d").date() for d in sorted_dates]
+    clusters: list[list[str]] = [[sorted_dates[0]]]
+    for i in range(1, len(parsed)):
+        if (parsed[i] - parsed[i - 1]).days > gap_days:
+            clusters.append([])
+        clusters[-1].append(sorted_dates[i])
+    return clusters
+
+
+def _year_range_suffix(dates: list[str]) -> str:
+    """Return '(YYYY)' or '(YYYY-YYYY)' from a list of date strings."""
+    years = sorted({d[:4] for d in dates})
+    if len(years) == 1:
+        return f"({years[0]})"
+    return f"({years[0]}-{years[-1]})"
+
+
+async def detect_mosaic_panels(session: AsyncSession, gap_days: int = 0) -> int:
+    """Scan targets for panel naming patterns and create suggestions."""
+    # Load keywords from settings
+    settings = await session.get(UserSettings, SETTINGS_ROW_ID)
+    general = settings.general if settings else {}
+    keywords = general.get("mosaic_keywords", ["Panel", "P"])
+
+    if not keywords:
+        return 0
+
+    # Build regex: matches "{base_name} {sep}? {keyword} {sep}? {number}"
+    # e.g., "Cygnus Wall Panel 1", "Veil_P3", "Heart Nebula Mosaic-2"
+    kw_pattern = "|".join(re.escape(k) for k in keywords)
+    pattern = re.compile(
+        rf"^(.+?)\s*[-_\s]?\s*(?:{kw_pattern})\s*[-_\s]?\s*(\d+)\s*$",
+        re.IGNORECASE,
+    )
+
+    # Get all targets not already in a mosaic
+    in_mosaic_q = select(MosaicPanel.target_id)
+    in_mosaic = {r[0] for r in (await session.execute(in_mosaic_q)).all()}
+
+    targets_q = select(Target).where(Target.merged_into_id.is_(None))
+    targets = (await session.execute(targets_q)).scalars().all()
+
+    # Group by base name
+    # Tuple: (Target, label, panel_num) — panel_num used for OBJECT queries
+    groups: dict[str, list[tuple[Target, str, str]]] = defaultdict(list)
+    for t in targets:
+        if t.id in in_mosaic:
+            continue
+        # Check primary name and aliases — don't break, one target may match
+        # multiple panels via its aliases
+        names_to_check = [t.primary_name] + (t.aliases or [])
+        seen_panels: set[str] = set()
+        for name in names_to_check:
+            m = pattern.match(name)
+            if m:
+                base = m.group(1).strip()
+                panel_num = m.group(2)
+                panel_key = f"{base}|{panel_num}"
+                if panel_key not in seen_panels:
+                    seen_panels.add(panel_key)
+                    groups[base].append((t, f"Panel {panel_num}", panel_num))
+
+    # Create suggestions for groups with 2+ panels
+    # Skip if a suggestion for this base name already exists
+    existing_q = select(MosaicSuggestion.suggested_name).where(MosaicSuggestion.status == "pending")
+    existing_names = {r[0] for r in (await session.execute(existing_q)).all()}
+
+    count = 0
+
+    if gap_days > 0:
+        for base_name, panels in groups.items():
+            if len(panels) < 2:
+                continue
+
+            # Collect distinct session dates per panel via OBJECT header pattern
+            panel_dates: list[tuple[Target, str, str, list[str]]] = []
+            for t, label, panel_num in panels:
+                # Build a pattern that matches the original name used for this panel
+                obj_pattern = f"%{base_name}%{panel_num}%"
+                dates_q = select(
+                    func.distinct(cast(Image.capture_date, Date))
+                ).where(
+                    Image.image_type == "LIGHT",
+                    Image.raw_headers["OBJECT"].astext.ilike(obj_pattern),
+                )
+                result = await session.execute(dates_q)
+                raw_dates = result.scalars().all()
+                date_strs = [
+                    d.strftime("%Y-%m-%d") if hasattr(d, "strftime") else str(d)
+                    for d in raw_dates
+                    if d is not None
+                ]
+                panel_dates.append((t, label, panel_num, date_strs))
+
+            # Gather all dates across all panels
+            all_dates: list[str] = []
+            for _, _, _, dates in panel_dates:
+                all_dates.extend(dates)
+
+            if not all_dates:
+                # No date info found — fall through to non-clustered creation
+                if base_name in existing_names:
+                    continue
+                suggestion = MosaicSuggestion(
+                    suggested_name=base_name,
+                    target_ids=[t.id for t, _, _, _ in panel_dates],
+                    panel_labels=[lbl for _, lbl, _, _ in panel_dates],
+                )
+                session.add(suggestion)
+                count += 1
+                continue
+
+            clusters = cluster_sessions_by_gap(all_dates, gap_days)
+
+            if len(clusters) == 1:
+                # Single campaign — use base name as-is
+                if base_name in existing_names:
+                    continue
+                suggestion = MosaicSuggestion(
+                    suggested_name=base_name,
+                    target_ids=[t.id for t, _, _, _ in panel_dates],
+                    panel_labels=[lbl for _, lbl, _, _ in panel_dates],
+                )
+                session.add(suggestion)
+                count += 1
+            else:
+                # Multiple campaigns — one suggestion per cluster with year suffix
+                for cluster_dates in clusters:
+                    cluster_set = set(cluster_dates)
+                    suffix = _year_range_suffix(cluster_dates)
+                    campaign_name = f"{base_name} {suffix}"
+
+                    if campaign_name in existing_names:
+                        continue
+
+                    # Only include panels that have at least one session in this cluster
+                    campaign_panels = [
+                        (t, lbl)
+                        for t, lbl, _, dates in panel_dates
+                        if any(d in cluster_set for d in dates)
+                    ]
+
+                    if len(campaign_panels) < 2:
+                        continue
+
+                    suggestion = MosaicSuggestion(
+                        suggested_name=campaign_name,
+                        target_ids=[t.id for t, _ in campaign_panels],
+                        panel_labels=[lbl for _, lbl in campaign_panels],
+                    )
+                    session.add(suggestion)
+                    count += 1
+
+    else:
+        # gap_days == 0: preserve existing behavior exactly
+        for base_name, panels in groups.items():
+            if len(panels) < 2:
+                continue
+            if base_name in existing_names:
+                continue
+
+            suggestion = MosaicSuggestion(
+                suggested_name=base_name,
+                target_ids=[t.id for t, _, _ in panels],
+                panel_labels=[label for _, label, _ in panels],
+            )
+            session.add(suggestion)
+            count += 1
+
+    await session.commit()
+    return count

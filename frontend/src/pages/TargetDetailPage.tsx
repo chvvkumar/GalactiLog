@@ -5,6 +5,7 @@ import type { TargetDetailResponse, SessionDetail } from "../types";
 import SessionAccordionCard from "../components/SessionAccordionCard";
 import FilterBadges from "../components/FilterBadges";
 import TargetMetricsChart, { MetricsTrendButton } from "../components/TargetMetricsChart";
+import ExportModal from "../components/ExportModal";
 import { useSettingsContext } from "../components/SettingsProvider";
 import { isFieldVisible } from "../utils/displaySettings";
 import { timezoneLabel } from "../utils/dateTime";
@@ -37,10 +38,33 @@ const TargetDetailPage: Component = () => {
     (id) => api.getTargetDetail(id),
   );
 
+  const [showExport, setShowExport] = createSignal(false);
   const [expandedSessions, setExpandedSessions] = createSignal<Set<string>>(new Set());
   const [sessionCache, setSessionCache] = createSignal<Record<string, SessionDetail>>({});
   const [targetChartExpanded, setTargetChartExpanded] = createSignal(graphSettings().target_chart_expanded);
   const [selectedChartDates, setSelectedChartDates] = createSignal<string[]>([]);
+
+  const [targetNotes, setTargetNotes] = createSignal<string>("");
+  const [notesSaving, setNotesSaving] = createSignal(false);
+  let notesTimer: ReturnType<typeof setTimeout> | undefined;
+
+  // Initialize notes when data loads
+  createEffect(() => {
+    const detail = targetDetail();
+    if (detail?.notes) setTargetNotes(detail.notes);
+  });
+
+  const saveTargetNotes = (text: string) => {
+    clearTimeout(notesTimer);
+    notesTimer = setTimeout(async () => {
+      setNotesSaving(true);
+      try {
+        await api.updateTargetNotes(params.targetId, text || null);
+      } finally {
+        setNotesSaving(false);
+      }
+    }, 1000);
+  };
 
   let chartDatesInitialized = false;
   createEffect(() => {
@@ -123,6 +147,15 @@ const TargetDetailPage: Component = () => {
         <div class="p-8 text-theme-error">Failed to load target detail</div>
       </Show>
 
+      <Show when={showExport() && targetDetail()}>
+        <ExportModal
+          targetId={params.targetId}
+          targetName={targetDetail()!.primary_name}
+          sessions={targetDetail()!.sessions}
+          onClose={() => setShowExport(false)}
+        />
+      </Show>
+
       <Show when={targetDetail()}>
         {(detail) => (
           <>
@@ -165,10 +198,18 @@ const TargetDetailPage: Component = () => {
                     </Show>
                   </div>
                 </div>
-                <div class="text-left sm:text-right text-xs text-theme-text-secondary">
-                  <div>{detail().session_count} sessions</div>
-                  <div class="mt-0.5">
-                    {detail().first_session_date} → {detail().last_session_date} ({tzLabel()})
+                <div class="flex items-start gap-2">
+                  <button
+                    class="text-xs px-2.5 py-1 bg-theme-elevated border border-theme-border rounded hover:bg-theme-surface transition-colors text-theme-text-primary"
+                    onClick={() => setShowExport(true)}
+                  >
+                    Export
+                  </button>
+                  <div class="text-left sm:text-right text-xs text-theme-text-secondary">
+                    <div>{detail().session_count} sessions</div>
+                    <div class="mt-0.5">
+                      {detail().first_session_date} → {detail().last_session_date} ({tzLabel()})
+                    </div>
                   </div>
                 </div>
               </div>
@@ -230,6 +271,28 @@ const TargetDetailPage: Component = () => {
                   <div class="text-caption text-theme-text-secondary">Filters Used</div>
                 </div>
                 <MetricsTrendButton expanded={targetChartExpanded()} onToggle={toggleTargetChart} />
+              </div>
+            </div>
+
+            {/* Target Notes */}
+            <div class="px-4 sm:px-6 pt-4">
+              <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-4">
+                <div class="flex items-center justify-between mb-2">
+                  <h3 class="text-sm font-medium text-theme-text-primary">Notes</h3>
+                  <Show when={notesSaving()}>
+                    <span class="text-xs text-theme-text-secondary">Saving...</span>
+                  </Show>
+                </div>
+                <textarea
+                  class="w-full bg-theme-elevated border border-theme-border rounded px-3 py-2 text-sm text-theme-text-primary placeholder-theme-text-secondary resize-y min-h-[60px]"
+                  placeholder="Add notes about this target..."
+                  value={targetNotes()}
+                  onInput={(e) => {
+                    const val = e.currentTarget.value;
+                    setTargetNotes(val);
+                    saveTargetNotes(val);
+                  }}
+                />
               </div>
             </div>
 
@@ -310,6 +373,7 @@ const TargetDetailPage: Component = () => {
                         showCheckbox={targetChartExpanded()}
                         checked={selectedChartDates().includes(session.session_date)}
                         onCheckChange={() => toggleChartDate(session.session_date)}
+                        targetId={params.targetId}
                       />
                     )}
                   </For>

@@ -152,6 +152,13 @@ export const api = {
   getTargetDetail: (targetId: string) =>
     fetchJson<TargetDetailResponse>(`/targets/${encodeURIComponent(decodeURIComponent(targetId))}/detail`),
 
+  getExport: (targetId: string, sessions?: string[]) => {
+    const params = sessions?.length ? `?sessions=${sessions.join(",")}` : "";
+    return fetchJson<import("../types").ExportResponse>(
+      `/targets/${encodeURIComponent(targetId)}/export${params}`
+    );
+  },
+
   getEquipment: () =>
     fetchJson<EquipmentList>("/targets/equipment"),
 
@@ -163,6 +170,11 @@ export const api = {
 
   getStats: () =>
     fetchJson<StatsResponse>("/stats"),
+
+  getCalendar: (year?: number) =>
+    fetchJson<import("../types").CalendarEntry[]>(
+      `/stats/calendar${year != null ? `?year=${year}` : ""}`
+    ),
 
   triggerScan: (options?: { includeCalibration?: boolean }) => {
     const params = new URLSearchParams();
@@ -298,8 +310,97 @@ export const api = {
       method: "POST",
     }),
 
+  revertMergeCandidate: (candidateId: string) =>
+    fetchJson<{ status: string }>(`/targets/merge-candidates/${candidateId}/revert`, {
+      method: "POST",
+    }),
+
   triggerDuplicateDetection: () =>
     fetchJson<{ status: string; task_id: string }>("/targets/detect-duplicates", {
       method: "POST",
     }),
+
+  getCorrelation: (params: {
+    x_metric: string;
+    y_metric: string;
+    telescope?: string;
+    camera?: string;
+    granularity?: "frame" | "session";
+    date_from?: string;
+    date_to?: string;
+  }) => {
+    const qs = new URLSearchParams();
+    qs.set("x_metric", params.x_metric);
+    qs.set("y_metric", params.y_metric);
+    if (params.telescope) qs.set("telescope", params.telescope);
+    if (params.camera) qs.set("camera", params.camera);
+    if (params.granularity) qs.set("granularity", params.granularity);
+    if (params.date_from) qs.set("date_from", params.date_from);
+    if (params.date_to) qs.set("date_to", params.date_to);
+    return fetchJson<import("../types").CorrelationResponse>(`/analysis/correlation?${qs}`);
+  },
+
+  updateTargetNotes: (targetId: string, notes: string | null) =>
+    fetchJson<{ status: string }>(`/targets/${encodeURIComponent(targetId)}/notes`, {
+      method: "PUT",
+      body: JSON.stringify({ notes }),
+    }),
+
+  updateSessionNotes: (targetId: string, date: string, notes: string | null) =>
+    fetchJson<{ status: string }>(`/targets/${encodeURIComponent(targetId)}/sessions/${date}/notes`, {
+      method: "PUT",
+      body: JSON.stringify({ notes }),
+    }),
+
+  // Mosaics
+  getMosaics: () =>
+    fetchJson<import("../types").MosaicSummary[]>("/mosaics"),
+
+  createMosaic: (name: string, notes?: string, panels?: { target_id: string; panel_label: string }[]) =>
+    fetchJson<import("../types").MosaicSummary>("/mosaics", {
+      method: "POST",
+      body: JSON.stringify({ name, notes, panels: panels || [] }),
+    }),
+
+  getMosaicDetail: (id: string) =>
+    fetchJson<import("../types").MosaicDetailResponse>(`/mosaics/${id}`),
+
+  updateMosaic: (id: string, data: { name?: string; notes?: string }) =>
+    fetchJson<{ status: string }>(`/mosaics/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+
+  deleteMosaic: (id: string) =>
+    fetchJson<{ status: string }>(`/mosaics/${id}`, { method: "DELETE" }),
+
+  addMosaicPanel: (mosaicId: string, targetId: string, label: string) =>
+    fetchJson<{ status: string; panel_id: string }>(`/mosaics/${mosaicId}/panels`, {
+      method: "POST",
+      body: JSON.stringify({ target_id: targetId, panel_label: label }),
+    }),
+
+  updateMosaicPanel: (mosaicId: string, panelId: string, data: { panel_label?: string; sort_order?: number }) =>
+    fetchJson<{ status: string }>(`/mosaics/${mosaicId}/panels/${panelId}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+
+  removeMosaicPanel: (mosaicId: string, panelId: string) =>
+    fetchJson<{ status: string }>(`/mosaics/${mosaicId}/panels/${panelId}`, { method: "DELETE" }),
+
+  getMosaicSuggestions: () =>
+    fetchJson<import("../types").MosaicSuggestionResponse[]>("/mosaics/suggestions"),
+
+  triggerMosaicDetection: () =>
+    fetchJson<{ status: string; new_suggestions: number }>("/mosaics/detect", { method: "POST" }),
+
+  acceptMosaicSuggestion: (id: string, selectedPanels?: string[]) =>
+    fetchJson<import("../types").MosaicSummary>(`/mosaics/suggestions/${id}/accept`, {
+      method: "POST",
+      body: JSON.stringify({ selected_panels: selectedPanels ?? null }),
+    }),
+
+  dismissMosaicSuggestion: (id: string) =>
+    fetchJson<{ status: string }>(`/mosaics/suggestions/${id}/dismiss`, { method: "POST" }),
 };

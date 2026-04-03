@@ -31,11 +31,25 @@ const NavBar: Component = () => {
           Dashboard
         </A>
         <A
+          href="/mosaics"
+          class="text-sm text-theme-text-secondary hover:text-theme-text-primary transition-colors"
+          activeClass="text-theme-text-primary font-medium bg-theme-elevated rounded-[var(--radius-sm)] px-2.5 py-1"
+        >
+          Mosaics
+        </A>
+        <A
           href="/statistics"
           class="text-sm text-theme-text-secondary hover:text-theme-text-primary transition-colors"
           activeClass="text-theme-text-primary font-medium bg-theme-elevated rounded-[var(--radius-sm)] px-2.5 py-1"
         >
           Statistics
+        </A>
+        <A
+          href="/analysis"
+          class="text-sm text-theme-text-secondary hover:text-theme-text-primary transition-colors"
+          activeClass="text-theme-text-primary font-medium bg-theme-elevated rounded-[var(--radius-sm)] px-2.5 py-1"
+        >
+          Analysis
         </A>
         <A
           href="/settings"
@@ -120,12 +134,28 @@ const NavBar: Component = () => {
               Dashboard
             </A>
             <A
+              href="/mosaics"
+              class="text-sm text-theme-text-secondary hover:text-theme-text-primary transition-colors py-2 px-3 rounded-[var(--radius-sm)]"
+              activeClass="text-theme-text-primary font-medium bg-theme-elevated"
+              onClick={() => setMenuOpen(false)}
+            >
+              Mosaics
+            </A>
+            <A
               href="/statistics"
               class="text-sm text-theme-text-secondary hover:text-theme-text-primary transition-colors py-2 px-3 rounded-[var(--radius-sm)]"
               activeClass="text-theme-text-primary font-medium bg-theme-elevated"
               onClick={() => setMenuOpen(false)}
             >
               Statistics
+            </A>
+            <A
+              href="/analysis"
+              class="text-sm text-theme-text-secondary hover:text-theme-text-primary transition-colors py-2 px-3 rounded-[var(--radius-sm)]"
+              activeClass="text-theme-text-primary font-medium bg-theme-elevated"
+              onClick={() => setMenuOpen(false)}
+            >
+              Analysis
             </A>
             <A
               href="/settings"

@@ -18,7 +18,6 @@ from app.services.simbad import (
     resolve_target_name,
     normalize_object_name,
     _fetch_tap_aliases,
-    _normalize_ws,
     curate_aliases,
     extract_catalog_id,
     extract_common_name,
@@ -61,7 +60,7 @@ async def backfill_existing_targets():
 
             if not raw_aliases:
                 # TAP failed — try with normalized name
-                raw_aliases = await _fetch_tap_aliases(_normalize_ws(lookup_name))
+                raw_aliases = await _fetch_tap_aliases(normalize_object_name(lookup_name, upper=False))
             if not raw_aliases and lookup_name != raw_lookup:
                 # Try the full value as last resort
                 raw_aliases = await _fetch_tap_aliases(raw_lookup)
@@ -73,7 +72,7 @@ async def backfill_existing_targets():
             else:
                 # SIMBAD unavailable — do best-effort from existing data
                 log.warning("  No TAP data for %s — using existing aliases", lookup_name)
-                catalog_id = _normalize_ws(lookup_name)
+                catalog_id = normalize_object_name(lookup_name, upper=False)
                 common_name = extract_common_name([], fits_names=fits_names)
                 curated = [normalize_object_name(n) for n in fits_names]
 

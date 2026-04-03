@@ -13,13 +13,10 @@ from app.models.user_settings import UserSettings, SETTINGS_ROW_ID
 from app.services.csv_metadata import parse_image_metadata_csv, parse_weather_csv
 from app.services.scanner import extract_metadata, CALIBRATION_FRAME_TYPES
 from app.services.simbad import (
-    resolve_target_name, normalize_object_name, resolve_target_name_cached,
-    curate_simbad_result, get_cached_simbad, save_simbad_cache,
-    curate_aliases, extract_catalog_id, extract_common_name, build_primary_name,
-    _normalize_ws,
+    normalize_object_name, resolve_target_name_cached,
+    curate_simbad_result, get_cached_simbad,
 )
-from app.services.openngc import enrich_target_from_openngc
-from app.services.vizier import enrich_target_from_vizier
+from app.services.target_resolver import resolve_target, normalize_sql_expr
 from app.services.thumbnail import generate_thumbnail
 from app.services.xisf_parser import extract_xisf_metadata, generate_xisf_thumbnail
 from app.worker.celery_app import celery_app
@@ -170,8 +167,9 @@ def run_scan(self, include_calibration: bool = True) -> dict:
     # Some tasks may have already completed during discovery, check now
     check_complete_sync(_redis)
 
-    # Queue duplicate detection after ingest
+    # Queue duplicate detection and dark hours backfill after ingest
     detect_duplicate_targets.apply_async(countdown=30)
+    backfill_dark_hours.apply_async(countdown=45)
 
     return {
         "status": "ingesting",
@@ -276,7 +274,8 @@ def _do_ingest(fits_path: str, include_calibration: bool = True) -> dict:
     if not is_calibration:
         object_name = meta.get("object_name")
         if object_name:
-            target_id = _resolve_or_cache_target(object_name)
+            with Session(_sync_engine) as session:
+                target_id = resolve_target(object_name, session, redis=_redis)
 
     # Step 4: Insert into database
     # Capture file stat for delta rescans (detect changed files without re-reading headers)
@@ -452,11 +451,17 @@ def regenerate_thumbnail(self, image_id: str, fits_path: str, thumb_path: str) -
 
 @celery_app.task(name="detect_duplicate_targets")
 def detect_duplicate_targets():
-    """Detect potential duplicate targets by comparing unresolved names against resolved targets."""
+    """Detect potential duplicate targets by comparing unresolved names against resolved targets.
+
+    Strategy:
+    1. Try SIMBAD resolution to find the canonical catalog ID, then match against existing targets.
+    2. Fall back to trigram similarity if SIMBAD doesn't resolve or match.
+    """
     from sqlalchemy import text as sa_text, select as sa_select, func as sa_func
     from app.models.target import Target
     from app.models.image import Image
     from app.models.merge_candidate import MergeCandidate
+    from app.services.simbad import resolve_target_name_cached, normalize_object_name
 
     with Session(_sync_engine) as db:
         # Find distinct unresolved OBJECT names with image counts
@@ -491,7 +496,69 @@ def detect_duplicate_targets():
             if not obj_name or obj_name in existing_names:
                 continue
 
-            # Trigram similarity search against all resolved target aliases
+            matched = False
+
+            # Strategy 1: SIMBAD resolution — resolve the name and match against existing targets
+            simbad_result = resolve_target_name_cached(obj_name, db)
+            if simbad_result:
+                catalog_id = simbad_result.get("catalog_id")
+                simbad_aliases = [normalize_object_name(a) for a in simbad_result.get("aliases", [])]
+                if catalog_id:
+                    simbad_aliases.append(normalize_object_name(catalog_id))
+
+                # Check if any existing target shares the same catalog_id or aliases
+                if simbad_aliases:
+                    alias_match_query = sa_text("""
+                        SELECT t.id, t.primary_name
+                        FROM targets t
+                        WHERE t.merged_into_id IS NULL
+                          AND (
+                            upper(t.catalog_id) = ANY(:aliases)
+                            OR EXISTS (
+                              SELECT 1 FROM unnest(t.aliases) a
+                              WHERE upper(a) = ANY(:aliases)
+                            )
+                          )
+                        LIMIT 1
+                    """)
+                    result = db.execute(alias_match_query, {"aliases": simbad_aliases}).first()
+                    if result:
+                        target_id, target_name = result
+                        db.add(MergeCandidate(
+                            source_name=obj_name,
+                            source_image_count=img_count,
+                            suggested_target_id=target_id,
+                            similarity_score=1.0,
+                            method="simbad",
+                        ))
+                        candidates_found += 1
+                        matched = True
+
+            if matched:
+                continue
+
+            # SIMBAD resolved the name but no existing target matched — create the target
+            # and resolve images directly instead of suggesting a wrong trigram match.
+            if simbad_result:
+                logger.info("detect_duplicates: '%s' resolved by SIMBAD to '%s' — creating target and resolving images",
+                            obj_name, simbad_result.get("primary_name"))
+                target_id = resolve_target(obj_name, db, redis=_redis)
+                if target_id:
+                    from sqlalchemy import update as sa_update
+                    db.execute(
+                        sa_update(Image)
+                        .where(
+                            Image.raw_headers["OBJECT"].astext == obj_name,
+                            Image.resolved_target_id.is_(None),
+                        )
+                        .values(resolved_target_id=target_id)
+                    )
+                    db.commit()
+                    logger.info("detect_duplicates: resolved %d images for '%s' to target %s",
+                                img_count, obj_name, target_id)
+                continue
+
+            # Strategy 2: Trigram similarity fallback (only for names SIMBAD can't resolve)
             trgm_query = sa_text("""
                 SELECT t.id, t.primary_name,
                        GREATEST(
@@ -525,73 +592,6 @@ def detect_duplicate_targets():
     return {"candidates_found": candidates_found}
 
 
-# In-memory cache of object names that SIMBAD couldn't resolve.
-# Avoids repeated HTTP round-trips for the same unresolvable name
-# (e.g., "FlatWizard", "Target", "Moon_fast" on every calibration frame).
-_simbad_negative_cache: set[str] = set()
-
-
-def _resolve_or_cache_target(object_name: str) -> str | None:
-    """Check local DB for target, fall back to SIMBAD (with DB cache), create target."""
-    normalized = normalize_object_name(object_name)
-
-    # Check in-memory negative cache (fastest path, survives within worker lifetime)
-    if normalized in _simbad_negative_cache:
-        return None
-
-    with Session(_sync_engine) as session:
-        # Check local targets: search aliases array
-        stmt = select(Target).where(Target.aliases.any(normalized))
-        existing = session.execute(stmt).scalar_one_or_none()
-        if existing:
-            return str(existing.id)
-
-        # Also check by primary_name
-        stmt = select(Target).where(Target.primary_name == object_name)
-        existing = session.execute(stmt).scalar_one_or_none()
-        if existing:
-            return str(existing.id)
-
-    # Resolve via SIMBAD (uses persistent DB cache)
-    with Session(_sync_engine) as session:
-        result = resolve_target_name_cached(object_name, session)
-        session.commit()  # Persist cache entry
-
-    if result is None:
-        _simbad_negative_cache.add(normalized)
-        return None
-
-    # Create target record
-    with Session(_sync_engine) as session:
-        aliases = result.get("aliases", [])
-        if normalized not in [a.upper() for a in aliases]:
-            aliases.append(normalized)
-
-        target = Target(
-            primary_name=result["primary_name"],
-            catalog_id=result.get("catalog_id"),
-            common_name=result.get("common_name"),
-            aliases=aliases,
-            ra=result.get("ra"),
-            dec=result.get("dec"),
-            object_type=result.get("object_type"),
-        )
-        try:
-            session.add(target)
-            session.flush()
-            enrich_target_from_openngc(session, target)
-            if target.size_major is None:
-                enrich_target_from_vizier(session, target)
-            session.commit()
-            return str(target.id)
-        except IntegrityError:
-            session.rollback()
-            # Another worker inserted this target — re-query
-            stmt = select(Target).where(Target.primary_name == result["primary_name"])
-            existing = session.execute(stmt).scalar_one_or_none()
-            return str(existing.id) if existing else None
-
-
 @celery_app.task(bind=True)
 def rebuild_targets(self) -> dict:
     """Full target database rebuild: delete all targets, re-resolve from FITS headers.
@@ -600,7 +600,7 @@ def rebuild_targets(self) -> dict:
     2. Delete all targets and merge candidates
     3. Clear negative cache
     4. Get distinct OBJECT names from LIGHT frames
-    5. Re-resolve each through SIMBAD (reusing _resolve_or_cache_target)
+    5. Re-resolve each through SIMBAD (using resolve_target)
     6. Re-link images to new targets
     """
     logger.info("rebuild_targets: starting full rebuild")
@@ -614,7 +614,7 @@ def rebuild_targets(self) -> dict:
         session.commit()
     logger.info("rebuild_targets: cleared all targets and links")
 
-    _simbad_negative_cache.clear()
+    _redis.delete("target_resolver:negative")
 
     # Phase 2: Get distinct OBJECT names from LIGHT frames
     with Session(_sync_engine) as session:
@@ -638,7 +638,8 @@ def rebuild_targets(self) -> dict:
 
     # Phase 3: Resolve each and link images
     for i, (obj_name, img_count) in enumerate(object_names):
-        target_id = _resolve_or_cache_target(obj_name)
+        with Session(_sync_engine) as session:
+            target_id = resolve_target(obj_name, session, redis=_redis)
 
         if target_id:
             with Session(_sync_engine) as session:
@@ -708,7 +709,8 @@ def smart_rebuild_targets(self) -> dict:
         logger.info("smart_rebuild: redirected %d images from merged targets", result.rowcount)
 
         # Phase 2: Link unresolved images to existing targets via alias match
-        result = session.execute(text("""
+        norm_expr = normalize_sql_expr("images.raw_headers->>'OBJECT'")
+        result = session.execute(text(f"""
             UPDATE images
             SET resolved_target_id = t.id
             FROM targets t
@@ -716,21 +718,18 @@ def smart_rebuild_targets(self) -> dict:
               AND images.image_type = 'LIGHT'
               AND images.raw_headers->>'OBJECT' IS NOT NULL
               AND t.merged_into_id IS NULL
-              AND t.aliases @> ARRAY[UPPER(REGEXP_REPLACE(
-                  TRIM(images.raw_headers->>'OBJECT'), '\\s+', ' ', 'g'
-              ))]::varchar[]
+              AND t.aliases @> ARRAY[{norm_expr}]::varchar[]
         """))
         stats["linked_unresolved"] = result.rowcount
         logger.info("smart_rebuild: linked %d unresolved images via alias match", result.rowcount)
 
         # Phase 3: Ensure all FITS OBJECT names are in target aliases
-        result = session.execute(text("""
+        norm_expr = normalize_sql_expr("img.raw_headers->>'OBJECT'")
+        result = session.execute(text(f"""
             WITH target_fits AS (
                 SELECT
                     img.resolved_target_id as tid,
-                    array_agg(DISTINCT UPPER(REGEXP_REPLACE(
-                        TRIM(img.raw_headers->>'OBJECT'), '\\s+', ' ', 'g'
-                    ))) as fits_names
+                    array_agg(DISTINCT {norm_expr}) as fits_names
                 FROM images img
                 WHERE img.resolved_target_id IS NOT NULL
                   AND img.image_type = 'LIGHT'
@@ -974,3 +973,79 @@ def run_data_migrations(self, from_version: int) -> dict:
         return {"status": "complete", "from": from_version, "to": DATA_VERSION}
     finally:
         _redis.delete(DATA_MIGRATION_LOCK)
+
+
+DARK_HOURS_LOCK = "dark_hours:lock"
+DARK_HOURS_LOCK_TTL = 300  # 5 minutes
+
+
+@celery_app.task
+def backfill_dark_hours() -> dict:
+    """Compute astronomical dark hours for all imaging dates missing from site_dark_hours.
+
+    Extracts site coordinates from FITS headers, then batch-computes dark hours
+    for every unique capture_date not yet in the table. Runs on startup and after scans.
+    """
+    from app.models.site_dark_hours import SiteDarkHours
+    from app.services.astro_night import dark_hours_batch
+    from app.api.stats import _extract_site_coords_sync
+    from datetime import date as date_type
+
+    # Prevent overlapping runs
+    if not _redis.set(DARK_HOURS_LOCK, "1", nx=True, ex=DARK_HOURS_LOCK_TTL):
+        return {"status": "skipped", "reason": "already running"}
+
+    try:
+        with Session(_sync_engine) as session:
+            # Get site coordinates from FITS headers
+            site_coords = _extract_site_coords_sync(session)
+            if not site_coords:
+                logger.info("dark_hours: no site coordinates in FITS headers, skipping")
+                return {"status": "skipped", "reason": "no site coords"}
+
+            lat, lon = site_coords.latitude, site_coords.longitude
+
+            # Find unique capture dates that are missing from site_dark_hours
+            existing_q = select(SiteDarkHours.date).where(
+                SiteDarkHours.latitude == lat,
+                SiteDarkHours.longitude == lon,
+            )
+            existing_dates = {row[0] for row in session.execute(existing_q).all()}
+
+            all_dates_q = select(
+                text("DISTINCT capture_date::date")
+            ).select_from(Image.__table__).where(
+                Image.capture_date.isnot(None),
+                Image.image_type == "LIGHT",
+            )
+            all_imaging_dates = {row[0] for row in session.execute(all_dates_q).all()}
+
+            missing = sorted(all_imaging_dates - existing_dates)
+            if not missing:
+                logger.info("dark_hours: all %d dates already computed", len(existing_dates))
+                return {"status": "noop", "existing": len(existing_dates)}
+
+            logger.info("dark_hours: computing %d missing dates (lat=%.2f, lon=%.2f)",
+                        len(missing), lat, lon)
+
+            # Batch compute in chunks to avoid memory issues
+            CHUNK = 200
+            computed = 0
+            for i in range(0, len(missing), CHUNK):
+                chunk = missing[i:i + CHUNK]
+                dark_values = dark_hours_batch(chunk, lat, lon)
+                for d, dh in zip(chunk, dark_values):
+                    session.merge(SiteDarkHours(
+                        date=d, dark_hours=dh, latitude=lat, longitude=lon,
+                    ))
+                session.commit()
+                computed += len(chunk)
+                logger.info("dark_hours: %d/%d dates computed", computed, len(missing))
+
+            logger.info("dark_hours: backfill complete, %d dates added", computed)
+            return {"status": "complete", "computed": computed, "total": len(all_imaging_dates)}
+    except Exception:
+        logger.exception("dark_hours: backfill failed")
+        raise
+    finally:
+        _redis.delete(DARK_HOURS_LOCK)

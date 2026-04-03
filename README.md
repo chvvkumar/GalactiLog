@@ -21,7 +21,7 @@
   </tr>
   <tr>
     <td><strong>Release</strong></td>
-    <td><a href="https://github.com/chvvkumar/GalactiLog/releases/latest"><img src="https://img.shields.io/github/v/release/chvvkumar/GalactiLog?filter=*&label=release" alt="Latest Release"></a></td>
+    <td><a href="https://github.com/chvvkumar/GalactiLog/releases/latest"><img src="https://img.shields.io/github/v/release/chvvkumar/GalactiLog?label=release" alt="Latest Release"></a></td>
     <td><a href="https://github.com/chvvkumar/GalactiLog/releases"><img src="https://img.shields.io/github/v/release/chvvkumar/GalactiLog?include_prereleases&filter=*&label=pre-release" alt="Pre-release"></a></td>
   </tr>
   <tr>

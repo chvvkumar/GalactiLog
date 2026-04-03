@@ -244,7 +244,7 @@ async def list_merged_targets(
             func.count(Image.id).label("image_count"),
         )
         .join(winner_alias, Target.merged_into_id == winner_alias.id)
-        .outerjoin(Image, Image.resolved_target_id == Target.id)
+        .outerjoin(Image, Image.resolved_target_id == winner_alias.id)
         .where(Target.merged_into_id.is_not(None))
         .group_by(Target.id, winner_alias.primary_name)
         .order_by(Target.merged_at.desc())
@@ -262,6 +262,68 @@ async def list_merged_targets(
         )
         for target, merged_into_name, image_count in rows
     ]
+
+
+@router.post("/merge-candidates/{candidate_id}/revert")
+async def revert_merge_candidate(
+    candidate_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(require_admin),
+):
+    """Revert an accepted merge candidate: remove alias, un-resolve images, reset to pending."""
+    candidate = await session.get(MergeCandidate, candidate_id)
+    if not candidate:
+        raise HTTPException(status_code=404, detail="Merge candidate not found")
+    if candidate.status != "accepted":
+        raise HTTPException(status_code=400, detail="Only accepted candidates can be reverted")
+
+    winner = await session.get(Target, candidate.suggested_target_id)
+    if not winner:
+        raise HTTPException(status_code=404, detail="Target not found")
+
+    source_name = candidate.source_name
+
+    # Check if there's a soft-deleted target for this source name — if so, do a full unmerge
+    loser_result = await session.execute(
+        select(Target).where(
+            Target.merged_into_id == winner.id,
+            Target.primary_name == source_name,
+        )
+    )
+    loser = loser_result.scalar_one_or_none()
+
+    if loser:
+        # Target-to-target merge: reassign images back, restore target
+        loser_names = set([loser.primary_name] + list(loser.aliases or []))
+        for name in loser_names:
+            await session.execute(
+                update(Image)
+                .where(
+                    Image.resolved_target_id == winner.id,
+                    Image.raw_headers["OBJECT"].astext == name,
+                )
+                .values(resolved_target_id=loser.id)
+            )
+        winner.aliases = [a for a in (winner.aliases or []) if a not in loser_names]
+        loser.merged_into_id = None
+        loser.merged_at = None
+    else:
+        # Name-based merge: remove alias, un-resolve images
+        winner.aliases = [a for a in (winner.aliases or []) if a != source_name]
+        await session.execute(
+            update(Image)
+            .where(
+                Image.resolved_target_id == winner.id,
+                Image.raw_headers["OBJECT"].astext == source_name,
+            )
+            .values(resolved_target_id=None)
+        )
+
+    candidate.status = "pending"
+    candidate.resolved_at = None
+
+    await session.commit()
+    return {"status": "ok"}
 
 
 @router.post("/merge-candidates/{candidate_id}/dismiss")

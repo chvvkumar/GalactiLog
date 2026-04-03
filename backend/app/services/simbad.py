@@ -9,19 +9,14 @@ logger = logging.getLogger(__name__)
 SIMBAD_TAP_URL = "https://simbad.cds.unistra.fr/simbad/sim-tap/sync"
 
 
-def normalize_object_name(name: str) -> str:
-    """Normalize a target name: strip outer whitespace, uppercase, collapse inner spaces."""
-    cleaned = re.sub(r"\s+", " ", name.strip()).upper()
-    return cleaned
+def normalize_object_name(name: str, *, upper: bool = True) -> str:
+    """Normalize a target name: strip outer whitespace, collapse inner spaces.
 
-
-# ---------------------------------------------------------------------------
-# Catalog priority & alias curation helpers
-# ---------------------------------------------------------------------------
-
-def _normalize_ws(s: str) -> str:
-    """Collapse multiple whitespace to single space and strip."""
-    return re.sub(r"\s+", " ", s.strip())
+    With upper=True (default): also uppercase (for DB matching keys).
+    With upper=False: preserve original case (for display-quality normalization).
+    """
+    cleaned = re.sub(r"\s+", " ", name.strip())
+    return cleaned.upper() if upper else cleaned
 
 
 # Ordered list: index = priority (lower wins).
@@ -30,7 +25,7 @@ CATALOG_PATTERNS: list[re.Pattern] = [
     re.compile(r"^NGC\s*\d+$"),                        # 1  NGC
     re.compile(r"^IC\s*\d+[A-Z]?$"),                   # 2  IC
     re.compile(r"^(Caldwell|C)\s+\d+$"),               # 3  Caldwell
-    re.compile(r"^SH\s*2-\d+$", re.IGNORECASE),       # 4  Sharpless
+    re.compile(r"^SH?\s*2[\s\-_]+\d+$", re.IGNORECASE), # 4  Sharpless (all variants)
     re.compile(r"^(PN\s+A66\s+\d+|Abell\s+\d+)$"),    # 5  Abell PN
     re.compile(r"^Arp\s*\d+$"),                        # 6  Arp
     re.compile(r"^HCG\s*\d+$"),                        # 7  HCG
@@ -51,7 +46,6 @@ CATALOG_PATTERNS: list[re.Pattern] = [
     re.compile(r"^Cl\s+Berkeley\s+\d+$"),              # 22 Berkeley
     re.compile(r"^Cl\s+King\s+\d+$"),                  # 23 King
     re.compile(r"^Gum\s+\d+$"),                        # 24 Gum
-    re.compile(r"^Sh\s*2[\s\-]\d+$", re.IGNORECASE),  # 25 Sh2 variant
 ]
 
 # Pattern to detect coordinate-based / survey IDs we want to drop
@@ -67,7 +61,7 @@ _COORD_ID_RE = re.compile(
 
 def _catalog_priority(name: str) -> int | None:
     """Return the priority index of *name* if it matches a known catalog pattern, else None."""
-    n = _normalize_ws(name)
+    n = normalize_object_name(name, upper=False)
     for idx, pat in enumerate(CATALOG_PATTERNS):
         if pat.match(n):
             return idx
@@ -77,20 +71,20 @@ def _catalog_priority(name: str) -> int | None:
 def extract_catalog_id(aliases: list[str], simbad_main_id: str) -> str:
     """Pick the best catalog ID from *aliases* + *simbad_main_id* using catalog priority.
 
-    Falls back to ``_normalize_ws(simbad_main_id)`` if no catalog match is found.
+    Falls back to ``normalize_object_name(simbad_main_id, upper=False)`` if no catalog match is found.
     """
     best_name: str | None = None
     best_pri: int | None = None
 
     candidates = list(aliases) + [simbad_main_id]
     for raw in candidates:
-        n = _normalize_ws(raw)
+        n = normalize_object_name(raw, upper=False)
         pri = _catalog_priority(n)
         if pri is not None and (best_pri is None or pri < best_pri):
             best_pri = pri
             best_name = n
 
-    fallback = _normalize_ws(simbad_main_id)
+    fallback = normalize_object_name(simbad_main_id, upper=False)
     # Strip SIMBAD "NAME " prefix from fallback — it's a common-name marker, not a catalog ID
     if fallback.upper().startswith("NAME "):
         fallback = fallback[5:].strip()
@@ -118,7 +112,7 @@ def curate_aliases(raw_aliases: list[str], fits_names: list[str] | None = None) 
             result.append(value)
 
     for raw in raw_aliases:
-        n = _normalize_ws(raw)
+        n = normalize_object_name(raw, upper=False)
 
         # NAME entries -> title-cased common name
         if n.upper().startswith("NAME "):
@@ -136,7 +130,7 @@ def curate_aliases(raw_aliases: list[str], fits_names: list[str] | None = None) 
     # Add FITS names
     if fits_names:
         for fn in fits_names:
-            n = _normalize_ws(fn)
+            n = normalize_object_name(fn, upper=False)
             if n:
                 _add(n)
 
@@ -156,14 +150,14 @@ def extract_common_name(
     """
     # Check SIMBAD NAME aliases first
     for raw in raw_aliases:
-        n = _normalize_ws(raw)
+        n = normalize_object_name(raw, upper=False)
         if n.upper().startswith("NAME "):
             return n[5:].strip().title()
 
     # FITS name fallback — strip "Panel N" suffix
     if fits_names:
         for fn in fits_names:
-            n = _PANEL_RE.sub("", _normalize_ws(fn)).strip()
+            n = _PANEL_RE.sub("", normalize_object_name(fn, upper=False)).strip()
             if n and _catalog_priority(n) is None:
                 return n
 
@@ -316,7 +310,7 @@ COMMON_NAME_MAP: dict[str, str] = {
     "elephant's trunk nebula": "IC 1396A",
     "elephant's trunk neb": "IC 1396A",
     "gam cas nebula": "IC 63",
-    "markarian's chain": "NAME Markarian's Chain",
+    "markarian's chain": "NAME Markarian Chain",
     "california nebula": "NGC 1499",
     "heart nebula": "IC 1805",
     "soul nebula": "IC 1848",
@@ -335,21 +329,71 @@ COMMON_NAME_MAP: dict[str, str] = {
     "rho oph": "rho Oph",
     "cave nebula": "Sh2-155",
     "jellyfish nebula": "IC 443",
+    "caldwell 1": "NGC 188",
+    "caldwell 2": "NGC 40",
+    "caldwell 3": "NGC 4236",
     "caldwell 4": "NGC 7023",
+    "caldwell 5": "IC 342",
+    "caldwell 6": "NGC 6543",
+    "caldwell 7": "NGC 2403",
+    "caldwell 8": "NGC 559",
+    "caldwell 9": "Sh2-155",
+    "caldwell 10": "NGC 663",
+    "caldwell 11": "NGC 7635",
+    "caldwell 12": "NGC 6946",
+    "caldwell 13": "NGC 457",
+    "caldwell 14": "NGC 869",
+    "caldwell 15": "NGC 6826",
+    "caldwell 16": "NGC 7243",
+    "caldwell 17": "NGC 147",
+    "caldwell 18": "NGC 185",
+    "caldwell 19": "IC 5146",
+    "caldwell 20": "NGC 7000",
+    "caldwell 21": "NGC 4449",
+    "caldwell 22": "NGC 7662",
+    "caldwell 23": "NGC 891",
+    "caldwell 24": "NGC 1275",
+    "caldwell 25": "NGC 2419",
+    "caldwell 26": "NGC 4244",
+    "caldwell 27": "NGC 6888",
+    "caldwell 28": "NGC 752",
+    "caldwell 29": "NGC 5005",
+    "caldwell 30": "NGC 7331",
+    "caldwell 31": "IC 405",
+    "caldwell 32": "NGC 4631",
+    "caldwell 33": "NGC 6992",
+    "caldwell 34": "NGC 6960",
+    "caldwell 35": "NGC 4889",
+    "caldwell 36": "NGC 4559",
+    "caldwell 37": "NGC 6885",
     "caldwell 38": "NGC 4565",
+    "caldwell 39": "NGC 2392",
+    "caldwell 40": "NGC 3626",
+    "caldwell 41": "Melotte 25",
+    "caldwell 42": "NGC 7006",
+    "caldwell 43": "NGC 7814",
+    "caldwell 44": "NGC 7479",
+    "caldwell 45": "NGC 5248",
+    "caldwell 46": "NGC 2261",
+    "caldwell 47": "NGC 6934",
+    "caldwell 48": "NGC 2775",
+    "caldwell 49": "NGC 2237",
+    "caldwell 50": "NGC 2244",
     "triangulum pinwheel": "M 33",
     "andromeda galaxy": "M 31",
-    "markarian's chain": "NAME Markarian Chain",
-    "spaghetti nebula": "SNR G180.0-01.7",
     "seagull nebula": "IC 2177",
     "seagull's wings": "IC 2177",
+    "spider nebula": "IC 417",
+    "casper the friendly ghost nebula": "Sh2-136",
+    "hickson 44": "HCG 44",
+    "ou 4": "PN Ou 4",
 }
 
 # Strip "Panel N" suffix to get the base object name
 _PANEL_RE = re.compile(r"\s+Panel\s+\d+$", re.IGNORECASE)
 
 
-_SH2_RE = re.compile(r"^Sh2[\s\-_]+(\d+)$", re.IGNORECASE)
+_SH2_RE = re.compile(r"^SH?\s*2[\s\-_]+(\d+)$", re.IGNORECASE)
 _LBN_RE = re.compile(r"^LBN[\s\-_]+(\d+)$", re.IGNORECASE)
 
 
@@ -361,6 +405,15 @@ def _get_simbad_id(object_name: str) -> str:
 
     if key in COMMON_NAME_MAP:
         return COMMON_NAME_MAP[key]
+
+    # Strip descriptive suffix after " - " (e.g. "SH2-224 - Rice Hat Nebula" -> "SH2-224")
+    if " - " in base:
+        base_part = base.split(" - ", 1)[0].strip()
+        base_key = base_part.lower()
+        if base_key in COMMON_NAME_MAP:
+            return COMMON_NAME_MAP[base_key]
+        # Re-run catalog matchers on the stripped base
+        base = base_part
 
     # Sharpless catalog: "Sh2 174" -> "SH 2-174"
     m = _SH2_RE.match(base)
@@ -442,38 +495,44 @@ def resolve_target_name_cached(
     import asyncio
 
     normalized = normalize_object_name(object_name)
-
-    # Check cache
-    cached = get_cached_simbad(normalized, db_session)
-    if cached is not None:
-        if cached.get("_negative"):
-            return None
-        return curate_simbad_result(cached)
-
-    # Also try with common name mapping
     mapped = _get_simbad_id(object_name)
-    if mapped != object_name:
-        mapped_norm = normalize_object_name(mapped)
-        cached = get_cached_simbad(mapped_norm, db_session)
-        if cached is not None:
-            if cached.get("_negative"):
+    mapped_norm = normalize_object_name(mapped) if mapped != object_name else None
+
+    # Check cache for original name
+    orig_cached = get_cached_simbad(normalized, db_session)
+    if orig_cached is not None and not orig_cached.get("_negative"):
+        return curate_simbad_result(orig_cached)
+
+    # Check cache for mapped name (if different from original)
+    if mapped_norm:
+        mapped_cached = get_cached_simbad(mapped_norm, db_session)
+        if mapped_cached is not None:
+            if mapped_cached.get("_negative"):
                 return None
-            return curate_simbad_result(cached)
+            return curate_simbad_result(mapped_cached)
+
+    # Original was negative-cached and no mapped name — done
+    if orig_cached is not None and orig_cached.get("_negative"):
+        return None
 
     if skip_simbad:
         return None
 
-    # Query SIMBAD and cache
-    loop = asyncio.new_event_loop()
-    try:
-        raw = loop.run_until_complete(_query_simbad_raw(object_name))
-    finally:
-        loop.close()
-
-    if raw is None and mapped != object_name:
+    # Query SIMBAD — try mapped name first (more likely to resolve), fall back to original
+    raw = None
+    if mapped_norm:
         loop = asyncio.new_event_loop()
         try:
             raw = loop.run_until_complete(_query_simbad_raw(mapped))
+        finally:
+            loop.close()
+        if raw:
+            save_simbad_cache(mapped_norm, raw, db_session)
+
+    if raw is None:
+        loop = asyncio.new_event_loop()
+        try:
+            raw = loop.run_until_complete(_query_simbad_raw(object_name))
         finally:
             loop.close()
 
