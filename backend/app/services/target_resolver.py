@@ -23,6 +23,15 @@ logger = logging.getLogger(__name__)
 NEGATIVE_CACHE_KEY = "target_resolver:negative"
 NEGATIVE_CACHE_TTL = 300  # 5 minutes
 
+# SQL expression equivalent to normalize_object_name(x, upper=True).
+# Use in bulk UPDATE/SELECT where per-row Python calls aren't practical.
+NORMALIZE_SQL = "UPPER(REGEXP_REPLACE(TRIM({col}), '\\s+', ' ', 'g'))"
+
+
+def normalize_sql_expr(column_expr: str) -> str:
+    """Return SQL expression equivalent to normalize_object_name(column, upper=True)."""
+    return NORMALIZE_SQL.format(col=column_expr)
+
 
 def find_target_by_name(object_name: str, session: Session) -> Target | None:
     """Search for an existing target by normalized name in aliases, then primary_name.

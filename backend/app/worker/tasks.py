@@ -16,7 +16,7 @@ from app.services.simbad import (
     normalize_object_name, resolve_target_name_cached,
     curate_simbad_result, get_cached_simbad,
 )
-from app.services.target_resolver import resolve_target
+from app.services.target_resolver import resolve_target, normalize_sql_expr
 from app.services.thumbnail import generate_thumbnail
 from app.services.xisf_parser import extract_xisf_metadata, generate_xisf_thumbnail
 from app.worker.celery_app import celery_app
@@ -709,7 +709,8 @@ def smart_rebuild_targets(self) -> dict:
         logger.info("smart_rebuild: redirected %d images from merged targets", result.rowcount)
 
         # Phase 2: Link unresolved images to existing targets via alias match
-        result = session.execute(text("""
+        norm_expr = normalize_sql_expr("images.raw_headers->>'OBJECT'")
+        result = session.execute(text(f"""
             UPDATE images
             SET resolved_target_id = t.id
             FROM targets t
@@ -717,21 +718,18 @@ def smart_rebuild_targets(self) -> dict:
               AND images.image_type = 'LIGHT'
               AND images.raw_headers->>'OBJECT' IS NOT NULL
               AND t.merged_into_id IS NULL
-              AND t.aliases @> ARRAY[UPPER(REGEXP_REPLACE(
-                  TRIM(images.raw_headers->>'OBJECT'), '\\s+', ' ', 'g'
-              ))]::varchar[]
+              AND t.aliases @> ARRAY[{norm_expr}]::varchar[]
         """))
         stats["linked_unresolved"] = result.rowcount
         logger.info("smart_rebuild: linked %d unresolved images via alias match", result.rowcount)
 
         # Phase 3: Ensure all FITS OBJECT names are in target aliases
-        result = session.execute(text("""
+        norm_expr = normalize_sql_expr("img.raw_headers->>'OBJECT'")
+        result = session.execute(text(f"""
             WITH target_fits AS (
                 SELECT
                     img.resolved_target_id as tid,
-                    array_agg(DISTINCT UPPER(REGEXP_REPLACE(
-                        TRIM(img.raw_headers->>'OBJECT'), '\\s+', ' ', 'g'
-                    ))) as fits_names
+                    array_agg(DISTINCT {norm_expr}) as fits_names
                 FROM images img
                 WHERE img.resolved_target_id IS NOT NULL
                   AND img.image_type = 'LIGHT'
