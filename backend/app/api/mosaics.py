@@ -2,6 +2,7 @@ import uuid
 from collections import defaultdict
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import Response
 from sqlalchemy import select, func, cast, Date
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -17,6 +18,7 @@ from app.schemas.mosaic import (
     MosaicSummary, MosaicDetailResponse, PanelStats, MosaicSuggestionResponse,
 )
 from app.api.auth import get_current_user
+from app.services.mosaic_composite import build_mosaic_composite
 
 router = APIRouter(prefix="/mosaics", tags=["mosaics"])
 
@@ -75,19 +77,24 @@ async def _panel_stats(panel: MosaicPanel, session: AsyncSession) -> PanelStats:
     )
     filter_dist = {r[0]: r[1] or 0 for r in (await session.execute(fq)).all()}
 
-    # Most recent thumbnail for this panel
+    # Most recent thumbnail for this panel (also grab pier side for orientation)
     thumb_q = (
-        select(Image.thumbnail_path)
+        select(
+            Image.thumbnail_path,
+            Image.raw_headers["PIERSIDE"].astext.label("pier_side"),
+        )
         .where(*base_filter)
         .where(Image.thumbnail_path.is_not(None))
         .order_by(Image.capture_date.desc())
         .limit(1)
     )
-    thumb_row = (await session.execute(thumb_q)).scalar_one_or_none()
+    thumb_row = (await session.execute(thumb_q)).first()
     thumb_url = None
-    if thumb_row:
-        filename = thumb_row.split("/")[-1].split("\\")[-1]
+    thumb_pier_side = None
+    if thumb_row and thumb_row.thumbnail_path:
+        filename = thumb_row.thumbnail_path.split("/")[-1].split("\\")[-1]
         thumb_url = f"/thumbnails/{filename}"
+        thumb_pier_side = thumb_row.pier_side
 
     # Compute per-panel center from frame FITS headers (median of OBJCTRA/OBJCTDEC).
     # This gives the actual pointing position for each panel, even when multiple
@@ -127,6 +134,7 @@ async def _panel_stats(panel: MosaicPanel, session: AsyncSession) -> PanelStats:
         filter_distribution=filter_dist,
         last_session_date=str(row.last_date) if row.last_date else None,
         thumbnail_url=thumb_url,
+        thumbnail_pier_side=thumb_pier_side,
         object_pattern=panel.object_pattern,
     )
 
@@ -390,6 +398,38 @@ async def get_mosaic_detail(
         total_frames=total_frames,
         panels=panels,
     )
+
+
+@router.get("/{mosaic_id}/composite")
+async def get_mosaic_composite(
+    mosaic_id: str,
+    session: AsyncSession = Depends(get_session),
+    _user: User = Depends(get_current_user),
+):
+    """Generate and return a composite mosaic image as JPEG."""
+    mosaic = (
+        await session.execute(
+            select(Mosaic)
+            .where(Mosaic.id == mosaic_id)
+            .options(selectinload(Mosaic.panels).selectinload(MosaicPanel.target))
+        )
+    ).scalars().first()
+
+    if not mosaic:
+        raise HTTPException(status_code=404, detail="Mosaic not found")
+
+    panels = sorted(mosaic.panels, key=lambda p: p.sort_order)
+
+    try:
+        jpeg_bytes = await build_mosaic_composite(
+            mosaic_id=str(mosaic.id),
+            panels=panels,
+            session=session,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+    return Response(content=jpeg_bytes, media_type="image/jpeg")
 
 
 @router.put("/{mosaic_id}")
