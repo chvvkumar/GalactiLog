@@ -14,6 +14,7 @@ from app.models import Target
 from app.services.simbad import (
     normalize_object_name,
     resolve_target_name_cached,
+    _PANEL_RE,
 )
 from app.services.openngc import enrich_target_from_openngc
 from app.services.vizier import enrich_target_from_vizier
@@ -37,6 +38,7 @@ def find_target_by_name(object_name: str, session: Session) -> Target | None:
     """Search for an existing target by normalized name in aliases, then primary_name.
 
     This is the single DB lookup function — all target matching goes through here.
+    Also tries panel-stripped version (e.g. "M31 Panel 2" → "M31").
     """
     normalized = normalize_object_name(object_name)
 
@@ -49,6 +51,18 @@ def find_target_by_name(object_name: str, session: Session) -> Target | None:
     ).scalar_one_or_none()
     if target:
         return target
+
+    # Try with panel suffix stripped
+    stripped = _PANEL_RE.sub("", normalized).strip()
+    if stripped != normalized:
+        target = session.execute(
+            select(Target).where(
+                Target.merged_into_id.is_(None),
+                Target.aliases.any(stripped),
+            )
+        ).scalar_one_or_none()
+        if target:
+            return target
 
     # Fallback: normalized case-preserving match on primary_name
     target = session.execute(
@@ -65,8 +79,10 @@ def _create_target(
 ) -> str | None:
     """Create a new Target from a SIMBAD result. Handles race conditions."""
     aliases = simbad_result.get("aliases", [])
-    if normalized_name not in [a.upper() for a in aliases]:
-        aliases.append(normalized_name)
+    # Strip panel suffixes from the FITS-derived lookup name before adding as alias
+    clean_name = _PANEL_RE.sub("", normalized_name).strip()
+    if clean_name and clean_name not in [a.upper() for a in aliases]:
+        aliases.append(clean_name)
 
     target = Target(
         primary_name=simbad_result["primary_name"],

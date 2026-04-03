@@ -1,4 +1,4 @@
-import { Component, createSignal, createResource } from "solid-js";
+import { Component, createSignal, createResource, createEffect, For } from "solid-js";
 import { api } from "../api/client";
 import { useStats } from "../store/stats";
 import CorrelationChart from "../components/analysis/CorrelationChart";
@@ -73,6 +73,14 @@ const AnalysisPage: Component = () => {
     return `${tel}|||${cam}`;
   };
 
+  let equipSelectRef!: HTMLSelectElement;
+
+  // Re-sync the <select> value after options are recreated (e.g. stats poll)
+  createEffect(() => {
+    const v = equipmentValue();
+    if (equipSelectRef) equipSelectRef.value = v;
+  });
+
   const selectClass = "text-sm bg-theme-elevated border border-theme-border rounded px-2.5 py-1.5 text-theme-text-primary";
   const toggleClass = (active: boolean) =>
     `text-sm px-3 py-1.5 rounded-[var(--radius-sm)] transition-colors ${
@@ -86,6 +94,7 @@ const AnalysisPage: Component = () => {
       {/* Controls */}
       <div class="flex flex-wrap items-center gap-3">
         <select
+          ref={equipSelectRef}
           class={selectClass}
           value={equipmentValue()}
           onChange={(e) => {
@@ -101,9 +110,11 @@ const AnalysisPage: Component = () => {
           }}
         >
           <option value="">All equipment</option>
-          {combos().map((c) => (
-            <option value={`${c.telescope}|||${c.camera}`}>{c.label}{c.grouped ? " \u29C9" : ""}</option>
-          ))}
+          <For each={combos()}>
+            {(c) => (
+              <option value={`${c.telescope}|||${c.camera}`}>{c.label}{c.grouped ? " \u29C9" : ""}</option>
+            )}
+          </For>
         </select>
 
         <div class="flex items-center gap-1">
