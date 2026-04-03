@@ -13,12 +13,10 @@ from app.models.user_settings import UserSettings, SETTINGS_ROW_ID
 from app.services.csv_metadata import parse_image_metadata_csv, parse_weather_csv
 from app.services.scanner import extract_metadata, CALIBRATION_FRAME_TYPES
 from app.services.simbad import (
-    resolve_target_name, normalize_object_name, resolve_target_name_cached,
-    curate_simbad_result, get_cached_simbad, save_simbad_cache,
-    curate_aliases, extract_catalog_id, extract_common_name, build_primary_name,
+    normalize_object_name, resolve_target_name_cached,
+    curate_simbad_result, get_cached_simbad,
 )
-from app.services.openngc import enrich_target_from_openngc
-from app.services.vizier import enrich_target_from_vizier
+from app.services.target_resolver import resolve_target
 from app.services.thumbnail import generate_thumbnail
 from app.services.xisf_parser import extract_xisf_metadata, generate_xisf_thumbnail
 from app.worker.celery_app import celery_app
@@ -276,7 +274,8 @@ def _do_ingest(fits_path: str, include_calibration: bool = True) -> dict:
     if not is_calibration:
         object_name = meta.get("object_name")
         if object_name:
-            target_id = _resolve_or_cache_target(object_name)
+            with Session(_sync_engine) as session:
+                target_id = resolve_target(object_name, session, redis=_redis)
 
     # Step 4: Insert into database
     # Capture file stat for delta rescans (detect changed files without re-reading headers)
@@ -543,7 +542,7 @@ def detect_duplicate_targets():
             if simbad_result:
                 logger.info("detect_duplicates: '%s' resolved by SIMBAD to '%s' — creating target and resolving images",
                             obj_name, simbad_result.get("primary_name"))
-                target_id = _resolve_or_cache_target(obj_name)
+                target_id = resolve_target(obj_name, db, redis=_redis)
                 if target_id:
                     from sqlalchemy import update as sa_update
                     db.execute(
@@ -593,73 +592,6 @@ def detect_duplicate_targets():
     return {"candidates_found": candidates_found}
 
 
-# In-memory cache of object names that SIMBAD couldn't resolve.
-# Avoids repeated HTTP round-trips for the same unresolvable name
-# (e.g., "FlatWizard", "Target", "Moon_fast" on every calibration frame).
-_simbad_negative_cache: set[str] = set()
-
-
-def _resolve_or_cache_target(object_name: str) -> str | None:
-    """Check local DB for target, fall back to SIMBAD (with DB cache), create target."""
-    normalized = normalize_object_name(object_name)
-
-    # Check in-memory negative cache (fastest path, survives within worker lifetime)
-    if normalized in _simbad_negative_cache:
-        return None
-
-    with Session(_sync_engine) as session:
-        # Check local targets: search aliases array
-        stmt = select(Target).where(Target.aliases.any(normalized))
-        existing = session.execute(stmt).scalar_one_or_none()
-        if existing:
-            return str(existing.id)
-
-        # Also check by primary_name
-        stmt = select(Target).where(Target.primary_name == object_name)
-        existing = session.execute(stmt).scalar_one_or_none()
-        if existing:
-            return str(existing.id)
-
-    # Resolve via SIMBAD (uses persistent DB cache)
-    with Session(_sync_engine) as session:
-        result = resolve_target_name_cached(object_name, session)
-        session.commit()  # Persist cache entry
-
-    if result is None:
-        _simbad_negative_cache.add(normalized)
-        return None
-
-    # Create target record
-    with Session(_sync_engine) as session:
-        aliases = result.get("aliases", [])
-        if normalized not in [a.upper() for a in aliases]:
-            aliases.append(normalized)
-
-        target = Target(
-            primary_name=result["primary_name"],
-            catalog_id=result.get("catalog_id"),
-            common_name=result.get("common_name"),
-            aliases=aliases,
-            ra=result.get("ra"),
-            dec=result.get("dec"),
-            object_type=result.get("object_type"),
-        )
-        try:
-            session.add(target)
-            session.flush()
-            enrich_target_from_openngc(session, target)
-            if target.size_major is None:
-                enrich_target_from_vizier(session, target)
-            session.commit()
-            return str(target.id)
-        except IntegrityError:
-            session.rollback()
-            # Another worker inserted this target — re-query
-            stmt = select(Target).where(Target.primary_name == result["primary_name"])
-            existing = session.execute(stmt).scalar_one_or_none()
-            return str(existing.id) if existing else None
-
-
 @celery_app.task(bind=True)
 def rebuild_targets(self) -> dict:
     """Full target database rebuild: delete all targets, re-resolve from FITS headers.
@@ -668,7 +600,7 @@ def rebuild_targets(self) -> dict:
     2. Delete all targets and merge candidates
     3. Clear negative cache
     4. Get distinct OBJECT names from LIGHT frames
-    5. Re-resolve each through SIMBAD (reusing _resolve_or_cache_target)
+    5. Re-resolve each through SIMBAD (using resolve_target)
     6. Re-link images to new targets
     """
     logger.info("rebuild_targets: starting full rebuild")
@@ -682,7 +614,7 @@ def rebuild_targets(self) -> dict:
         session.commit()
     logger.info("rebuild_targets: cleared all targets and links")
 
-    _simbad_negative_cache.clear()
+    _redis.delete("target_resolver:negative")
 
     # Phase 2: Get distinct OBJECT names from LIGHT frames
     with Session(_sync_engine) as session:
@@ -706,7 +638,8 @@ def rebuild_targets(self) -> dict:
 
     # Phase 3: Resolve each and link images
     for i, (obj_name, img_count) in enumerate(object_names):
-        target_id = _resolve_or_cache_target(obj_name)
+        with Session(_sync_engine) as session:
+            target_id = resolve_target(obj_name, session, redis=_redis)
 
         if target_id:
             with Session(_sync_engine) as session:
