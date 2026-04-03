@@ -10,6 +10,10 @@ import type {
   TargetSearchResultFuzzy,
 } from "../../types";
 
+// Module-level cache so data persists across navigations
+let cachedSuggestions: MosaicSuggestionResponse[] | null = null;
+let cachedMosaics: MosaicSummary[] | null = null;
+
 function formatHours(seconds: number): string {
   const h = seconds / 3600;
   return h < 1 ? `${Math.round(h * 60)}m` : `${h.toFixed(1)}h`;
@@ -68,22 +72,32 @@ export const MosaicsTab: Component = () => {
   const campaignGap = () =>
     settingsCtx.settings()?.general?.mosaic_campaign_gap_days ?? 0;
 
-  const refresh = async () => {
-    showToast("Loading mosaics...", "info", 15000);
+  const refresh = async (silent = false) => {
+    if (!silent) showToast("Loading mosaics...", "info", 15000);
     try {
       const [s, m] = await Promise.all([
         api.getMosaicSuggestions(),
         api.getMosaics(),
       ]);
+      cachedSuggestions = s;
+      cachedMosaics = m;
       setSuggestions(s);
       setMosaics(m);
-      dismissToast();
+      if (!silent) dismissToast();
     } catch {
-      dismissToast();
+      if (!silent) dismissToast();
     }
   };
 
-  onMount(refresh);
+  onMount(() => {
+    if (cachedSuggestions && cachedMosaics) {
+      setSuggestions(cachedSuggestions);
+      setMosaics(cachedMosaics);
+      refresh(true);
+    } else {
+      refresh();
+    }
+  });
 
   // Keywords
   const addKeyword = async () => {
@@ -607,26 +621,34 @@ export const MosaicsTab: Component = () => {
               {(m) => (
                 <div class="border border-theme-border rounded-[var(--radius-sm)] overflow-hidden">
                   {/* Collapsed header */}
-                  <button
-                    onClick={() => toggleExpand(m.id)}
-                    class="w-full flex items-center justify-between p-3 bg-theme-base/50 text-left hover:bg-theme-base/80 transition-colors"
-                  >
-                    <div class="flex-1">
-                      <span class="text-theme-text-primary text-sm font-medium">
-                        {m.name}
-                      </span>
-                      <div class="text-xs text-theme-text-secondary mt-0.5">
-                        {m.panel_count} panels
-                        {" \u00b7 "}
-                        {formatHours(m.total_integration_seconds)} integration
-                        {" \u00b7 "}
-                        {m.total_frames} frames
+                  <div class="flex items-center p-3 bg-theme-base/50">
+                    <button
+                      onClick={() => toggleExpand(m.id)}
+                      class="flex-1 flex items-center justify-between text-left hover:bg-theme-base/80 transition-colors"
+                    >
+                      <div class="flex-1">
+                        <span class="text-theme-text-primary text-sm font-medium">
+                          {m.name}
+                        </span>
+                        <div class="text-xs text-theme-text-secondary mt-0.5">
+                          {m.panel_count} panels
+                          {" \u00b7 "}
+                          {formatHours(m.total_integration_seconds)} integration
+                          {" \u00b7 "}
+                          {m.total_frames} frames
+                        </div>
                       </div>
-                    </div>
-                    <span class="text-theme-text-secondary text-xs">
-                      {expandedId() === m.id ? "\u25B2" : "\u25BC"}
-                    </span>
-                  </button>
+                      <span class="text-theme-text-secondary text-xs">
+                        {expandedId() === m.id ? "\u25B2" : "\u25BC"}
+                      </span>
+                    </button>
+                    <a
+                      href={`/mosaics/${m.id}`}
+                      class="ml-3 px-2 py-1 text-xs text-theme-accent hover:underline shrink-0"
+                    >
+                      Detail
+                    </a>
+                  </div>
 
                   {/* Expanded detail */}
                   <Show when={expandedId() === m.id}>
@@ -778,13 +800,7 @@ export const MosaicsTab: Component = () => {
                       </Show>
 
                       {/* Footer actions */}
-                      <div class="flex items-center justify-between pt-2 border-t border-theme-border/50">
-                        <a
-                          href={`/mosaics/${m.id}`}
-                          class="text-xs text-theme-accent hover:underline"
-                        >
-                          View mosaic detail
-                        </a>
+                      <div class="flex items-center justify-end pt-2 border-t border-theme-border/50">
                         <Show when={isAdmin()}>
                           <Show
                             when={confirmDeleteId() === m.id}
