@@ -450,6 +450,8 @@ export interface GeneralSettings {
   timezone: string;
   astrobin_filter_ids?: Record<string, number>;
   astrobin_bortle?: number | null;
+  mosaic_keywords?: string[];
+  mosaic_campaign_gap_days?: number;
 }
 
 export interface FilterConfig {
@@ -603,6 +605,8 @@ export interface PanelStats {
   total_frames: number;
   filter_distribution: Record<string, number>;
   last_session_date: string | null;
+  thumbnail_url: string | null;
+  thumbnail_pier_side: string | null;
 }
 
 export interface MosaicSummary {

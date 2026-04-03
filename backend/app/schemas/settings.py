@@ -14,6 +14,7 @@ class GeneralSettings(BaseModel):
     astrobin_filter_ids: dict[str, int] = {}
     astrobin_bortle: int | None = None
     mosaic_keywords: list[str] = ["Panel", "P"]
+    mosaic_campaign_gap_days: int = 0
 
 
 class FilterConfig(BaseModel):

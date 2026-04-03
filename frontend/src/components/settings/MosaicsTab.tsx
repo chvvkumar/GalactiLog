@@ -1,6 +1,6 @@
 import { Component, For, Show, createSignal, onMount } from "solid-js";
 import { api } from "../../api/client";
-import { showToast } from "../Toast";
+import { showToast, dismissToast } from "../Toast";
 import { useAuth } from "../AuthProvider";
 import { useSettingsContext } from "../SettingsProvider";
 import type {
@@ -9,6 +9,10 @@ import type {
   MosaicSuggestionResponse,
   TargetSearchResultFuzzy,
 } from "../../types";
+
+// Module-level cache so data persists across navigations
+let cachedSuggestions: MosaicSuggestionResponse[] | null = null;
+let cachedMosaics: MosaicSummary[] | null = null;
 
 function formatHours(seconds: number): string {
   const h = seconds / 3600;
@@ -41,6 +45,13 @@ export const MosaicsTab: Component = () => {
   // Expanded suggestion
   const [expandedSuggestion, setExpandedSuggestion] = createSignal<string | null>(null);
 
+  // Per-suggestion panel selection: map suggestion id -> set of selected panel labels
+  const [selectedPanels, setSelectedPanels] = createSignal<Record<string, Set<string>>>({});
+
+  // Rename mosaic state
+  const [renamingId, setRenamingId] = createSignal<string | null>(null);
+  const [renameValue, setRenameValue] = createSignal("");
+
   // Create mosaic state
   const [showCreate, setShowCreate] = createSignal(false);
   const [newMosaicName, setNewMosaicName] = createSignal("");
@@ -50,20 +61,43 @@ export const MosaicsTab: Component = () => {
 
   const keywords = () => settingsCtx.settings()?.general?.mosaic_keywords ?? ["Panel", "P"];
 
-  const refresh = async () => {
+  const GAP_OPTIONS = [
+    { label: "No grouping", value: 0 },
+    { label: "1 month", value: 30 },
+    { label: "3 months", value: 90 },
+    { label: "6 months", value: 180 },
+    { label: "1 year", value: 365 },
+  ];
+
+  const campaignGap = () =>
+    settingsCtx.settings()?.general?.mosaic_campaign_gap_days ?? 0;
+
+  const refresh = async (silent = false) => {
+    if (!silent) showToast("Loading mosaics...", "info", 15000);
     try {
       const [s, m] = await Promise.all([
         api.getMosaicSuggestions(),
         api.getMosaics(),
       ]);
+      cachedSuggestions = s;
+      cachedMosaics = m;
       setSuggestions(s);
       setMosaics(m);
+      if (!silent) dismissToast();
     } catch {
-      // Non-blocking
+      if (!silent) dismissToast();
     }
   };
 
-  onMount(refresh);
+  onMount(() => {
+    if (cachedSuggestions && cachedMosaics) {
+      setSuggestions(cachedSuggestions);
+      setMosaics(cachedMosaics);
+      refresh(true);
+    } else {
+      refresh();
+    }
+  });
 
   // Keywords
   const addKeyword = async () => {
@@ -104,10 +138,48 @@ export const MosaicsTab: Component = () => {
     }
   };
 
+  // Initialize panel selection when expanding a suggestion (all selected by default)
+  const initSelection = (s: MosaicSuggestionResponse) => {
+    if (!selectedPanels()[s.id]) {
+      setSelectedPanels((prev) => ({
+        ...prev,
+        [s.id]: new Set(s.panel_labels),
+      }));
+    }
+  };
+
+  const togglePanel = (suggestionId: string, label: string) => {
+    setSelectedPanels((prev) => {
+      const cur = new Set(prev[suggestionId] ?? []);
+      if (cur.has(label)) cur.delete(label);
+      else cur.add(label);
+      return { ...prev, [suggestionId]: cur };
+    });
+  };
+
+  const toggleAllPanels = (s: MosaicSuggestionResponse) => {
+    const cur = selectedPanels()[s.id];
+    const allSelected = cur && cur.size === s.panel_labels.length;
+    setSelectedPanels((prev) => ({
+      ...prev,
+      [s.id]: allSelected ? new Set<string>() : new Set(s.panel_labels),
+    }));
+  };
+
+  const isPanelSelected = (suggestionId: string, label: string): boolean => {
+    return selectedPanels()[suggestionId]?.has(label) ?? true;
+  };
+
   // Suggestions
   const handleAccept = async (s: MosaicSuggestionResponse) => {
+    const sel = selectedPanels()[s.id];
+    const selected = sel && sel.size < s.panel_labels.length ? [...sel] : undefined;
+    if (sel && sel.size === 0) {
+      showToast("Select at least one panel", "error");
+      return;
+    }
     try {
-      await api.acceptMosaicSuggestion(s.id);
+      await api.acceptMosaicSuggestion(s.id, selected);
       showToast(`Created mosaic "${s.suggested_name}"`);
       setExpandedSuggestion(null);
       // Update both lists independently so one failure doesn't block the other
@@ -218,6 +290,20 @@ export const MosaicsTab: Component = () => {
     }
   };
 
+  const handleRename = async (id: string) => {
+    const name = renameValue().trim();
+    if (!name) return;
+    try {
+      await api.updateMosaic(id, { name });
+      showToast(`Renamed mosaic to "${name}"`);
+      setRenamingId(null);
+      setRenameValue("");
+      await refresh();
+    } catch {
+      showToast("Failed to rename mosaic", "error");
+    }
+  };
+
   const handleCreate = async () => {
     const name = newMosaicName().trim();
     if (!name) return;
@@ -294,9 +380,39 @@ export const MosaicsTab: Component = () => {
 
       {/* Auto-detected Suggestions */}
       <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-4 space-y-3">
-        <h3 class="text-theme-text-primary font-medium">
-          Suggestions ({suggestions().length})
-        </h3>
+        <div class="flex justify-between items-center">
+          <h3 class="text-theme-text-primary font-medium">
+            Suggestions ({suggestions().length})
+          </h3>
+          <Show when={isAdmin()}>
+            <select
+              value={campaignGap()}
+              onChange={async (e) => {
+                const val = parseInt(e.currentTarget.value, 10);
+                try {
+                  const current = settingsCtx.settings()?.general;
+                  await settingsCtx.saveGeneral({ ...current!, mosaic_campaign_gap_days: val });
+                  const label = GAP_OPTIONS.find((o) => o.value === val)?.label ?? String(val);
+                  showToast(`Campaign gap set to ${label}. Re-run detection to apply.`);
+                } catch {
+                  showToast("Failed to save campaign gap", "error");
+                }
+              }}
+              class="px-2 py-1.5 text-sm bg-theme-base border border-theme-border rounded-[var(--radius-sm)] text-theme-text-primary focus:outline-none focus:border-theme-accent"
+            >
+              <For each={GAP_OPTIONS}>
+                {(opt) => (
+                  <option value={opt.value} selected={opt.value === campaignGap()}>
+                    {opt.label}
+                  </option>
+                )}
+              </For>
+            </select>
+          </Show>
+        </div>
+        <p class="text-xs text-theme-text-secondary">
+          Sessions for the same panel shot more than the selected gap apart are treated as separate campaigns. Re-run detection after changing.
+        </p>
         <Show
           when={suggestions().length > 0}
           fallback={
@@ -335,7 +451,11 @@ export const MosaicsTab: Component = () => {
                 return (
                   <div class="border border-theme-border rounded-[var(--radius-sm)] overflow-hidden">
                     <button
-                      onClick={() => setExpandedSuggestion(expandedSuggestion() === s.id ? null : s.id)}
+                      onClick={() => {
+                        const next = expandedSuggestion() === s.id ? null : s.id;
+                        setExpandedSuggestion(next);
+                        if (next) initSelection(s);
+                      }}
                       class="w-full flex items-center justify-between p-3 bg-theme-base/50 text-left hover:bg-theme-base/80 transition-colors"
                     >
                       <div class="flex-1">
@@ -376,6 +496,14 @@ export const MosaicsTab: Component = () => {
                           <table class="w-full text-xs">
                             <thead>
                               <tr class="text-theme-text-secondary border-b border-theme-border/50">
+                                <th class="px-3 py-1.5 w-6">
+                                  <input
+                                    type="checkbox"
+                                    checked={(selectedPanels()[s.id]?.size ?? s.panel_labels.length) === s.panel_labels.length}
+                                    onChange={() => toggleAllPanels(s)}
+                                    class="accent-[var(--color-accent)]"
+                                  />
+                                </th>
                                 {([["panel_label", "Panel", "left"], ["object_name", "OBJECT", "left"], ["date", "Date", "left"], ["filter_used", "Filter", "left"], ["frames", "Frames", "right"], ["integration_seconds", "Integration", "right"]] as const).map(([key, label, align]) => (
                                   <th
                                     class={`text-${align} px-3 py-1.5 font-medium cursor-pointer select-none hover:text-theme-text-primary transition-colors`}
@@ -389,7 +517,18 @@ export const MosaicsTab: Component = () => {
                             <tbody>
                               <For each={sortedSessions()}>
                                 {(sess) => (
-                                  <tr class="border-b border-theme-border/30 hover:bg-theme-base/30">
+                                  <tr
+                                    class="border-b border-theme-border/30 hover:bg-theme-base/30"
+                                    classList={{ "opacity-40": !isPanelSelected(s.id, sess.panel_label) }}
+                                  >
+                                    <td class="px-3 py-1.5">
+                                      <input
+                                        type="checkbox"
+                                        checked={isPanelSelected(s.id, sess.panel_label)}
+                                        onChange={() => togglePanel(s.id, sess.panel_label)}
+                                        class="accent-[var(--color-accent)]"
+                                      />
+                                    </td>
                                     <td class="px-3 py-1.5 text-theme-text-primary">{sess.panel_label}</td>
                                     <td class="px-3 py-1.5 text-theme-text-secondary">{sess.object_name}</td>
                                     <td class="px-3 py-1.5 text-theme-text-secondary">{sess.date}</td>
@@ -409,7 +548,11 @@ export const MosaicsTab: Component = () => {
                               onClick={() => handleAccept(s)}
                               class="px-2.5 py-1 text-xs border border-theme-accent/50 text-theme-accent rounded-[var(--radius-sm)] hover:bg-theme-accent/10 transition-colors"
                             >
-                              Accept
+                              Accept{(() => {
+                                const sel = selectedPanels()[s.id];
+                                const count = sel?.size ?? s.panel_labels.length;
+                                return count < s.panel_labels.length ? ` (${count}/${s.panel_labels.length})` : "";
+                              })()}
                             </button>
                             <button
                               onClick={() => handleDismiss(s)}
@@ -478,30 +621,76 @@ export const MosaicsTab: Component = () => {
               {(m) => (
                 <div class="border border-theme-border rounded-[var(--radius-sm)] overflow-hidden">
                   {/* Collapsed header */}
-                  <button
-                    onClick={() => toggleExpand(m.id)}
-                    class="w-full flex items-center justify-between p-3 bg-theme-base/50 text-left hover:bg-theme-base/80 transition-colors"
-                  >
-                    <div class="flex-1">
-                      <span class="text-theme-text-primary text-sm font-medium">
-                        {m.name}
-                      </span>
-                      <div class="text-xs text-theme-text-secondary mt-0.5">
-                        {m.panel_count} panels
-                        {" \u00b7 "}
-                        {formatHours(m.total_integration_seconds)} integration
-                        {" \u00b7 "}
-                        {m.total_frames} frames
+                  <div class="flex items-center p-3 bg-theme-base/50">
+                    <button
+                      onClick={() => toggleExpand(m.id)}
+                      class="flex-1 flex items-center justify-between text-left hover:bg-theme-base/80 transition-colors"
+                    >
+                      <div class="flex-1">
+                        <span class="text-theme-text-primary text-sm font-medium">
+                          {m.name}
+                        </span>
+                        <div class="text-xs text-theme-text-secondary mt-0.5">
+                          {m.panel_count} panels
+                          {" \u00b7 "}
+                          {formatHours(m.total_integration_seconds)} integration
+                          {" \u00b7 "}
+                          {m.total_frames} frames
+                        </div>
                       </div>
-                    </div>
-                    <span class="text-theme-text-secondary text-xs">
-                      {expandedId() === m.id ? "\u25B2" : "\u25BC"}
-                    </span>
-                  </button>
+                      <span class="text-theme-text-secondary text-xs">
+                        {expandedId() === m.id ? "\u25B2" : "\u25BC"}
+                      </span>
+                    </button>
+                    <a
+                      href={`/mosaics/${m.id}`}
+                      class="ml-3 px-2 py-1 text-xs text-theme-accent hover:underline shrink-0"
+                    >
+                      Detail
+                    </a>
+                  </div>
 
                   {/* Expanded detail */}
                   <Show when={expandedId() === m.id}>
                     <div class="p-3 border-t border-theme-border space-y-3">
+                      {/* Rename */}
+                      <Show when={isAdmin()}>
+                        <Show
+                          when={renamingId() === m.id}
+                          fallback={
+                            <button
+                              onClick={() => { setRenamingId(m.id); setRenameValue(m.name); }}
+                              class="text-xs text-theme-text-secondary hover:text-theme-text-primary transition-colors"
+                              title="Rename mosaic"
+                            >
+                              Rename
+                            </button>
+                          }
+                        >
+                          <div class="flex gap-2 items-center">
+                            <input
+                              type="text"
+                              value={renameValue()}
+                              onInput={(e) => setRenameValue(e.currentTarget.value)}
+                              onKeyDown={(e) => e.key === "Enter" && handleRename(m.id)}
+                              class="flex-1 px-2 py-1 text-sm bg-theme-base border border-theme-border rounded-[var(--radius-sm)] text-theme-text-primary focus:outline-none focus:border-theme-accent"
+                            />
+                            <button
+                              onClick={() => handleRename(m.id)}
+                              class="px-2 py-1 text-xs border border-theme-accent/50 text-theme-accent rounded-[var(--radius-sm)] hover:bg-theme-accent/10 transition-colors"
+                            >
+                              Save
+                            </button>
+                            <button
+                              onClick={() => setRenamingId(null)}
+                              class="px-2 py-1 text-xs border border-theme-border text-theme-text-secondary rounded hover:text-theme-text-primary transition-colors"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </Show>
+                      </Show>
+
                       {/* Panel list */}
                       <Show when={details()[m.id]}>
                         {(detail) => (
@@ -611,13 +800,7 @@ export const MosaicsTab: Component = () => {
                       </Show>
 
                       {/* Footer actions */}
-                      <div class="flex items-center justify-between pt-2 border-t border-theme-border/50">
-                        <a
-                          href={`/mosaics/${m.id}`}
-                          class="text-xs text-theme-accent hover:underline"
-                        >
-                          View mosaic detail
-                        </a>
+                      <div class="flex items-center justify-end pt-2 border-t border-theme-border/50">
                         <Show when={isAdmin()}>
                           <Show
                             when={confirmDeleteId() === m.id}

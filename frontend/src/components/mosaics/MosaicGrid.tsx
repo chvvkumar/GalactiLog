@@ -1,4 +1,5 @@
 import { Component, For, Show, createMemo, createSignal } from "solid-js";
+import { api } from "../../api/client";
 import type { PanelStats } from "../../types";
 
 function formatHours(seconds: number): string {
@@ -36,9 +37,9 @@ interface Props {
 const MosaicGrid: Component<Props> = (props) => {
   const [tooltip, setTooltip] = createSignal<{ x: number; y: number; panel: PanelStats } | null>(null);
 
-  const layout = createMemo((): { positions: Position[]; svgW: number; svgH: number } => {
+  const layout = createMemo((): { positions: Position[]; svgW: number; svgH: number; spatial: boolean } => {
     const panels = props.panels;
-    if (panels.length === 0) return { positions: [], svgW: 0, svgH: 0 };
+    if (panels.length === 0) return { positions: [], svgW: 0, svgH: 0, spatial: false };
 
     const maxInt = Math.max(...panels.map((p) => p.total_integration_seconds), 1);
 
@@ -53,8 +54,8 @@ const MosaicGrid: Component<Props> = (props) => {
 
     // --- Fallback: numbered grid when no spatial data ---
     if (!hasSpatial) {
-      const CELL = 90;
-      const GAP = 6;
+      const CELL = 200;
+      const GAP = 8;
       const sorted = [...panels].sort((a, b) => {
         const na = parseInt(a.panel_label.replace(/\D/g, "")) || a.sort_order;
         const nb = parseInt(b.panel_label.replace(/\D/g, "")) || b.sort_order;
@@ -73,6 +74,7 @@ const MosaicGrid: Component<Props> = (props) => {
         })),
         svgW: cols * (CELL + GAP) - GAP,
         svgH: rows * (CELL + GAP) - GAP,
+        spatial: false,
       };
     }
 
@@ -113,8 +115,8 @@ const MosaicGrid: Component<Props> = (props) => {
     const PAD = innerCell * 0.5;
 
     const positions: Position[] = withCoords.map((p) => {
-      // Sky convention: RA increases right-to-left, Dec increases bottom-to-top
-      const x = PAD + (maxRa - p.ra!) * cosDec * scale;
+      // Display convention: lower RA on left, higher Dec on top
+      const x = PAD + (p.ra! - minRa) * cosDec * scale;
       const y = PAD + (maxDec - p.dec!) * scale;
       return {
         panel: p,
@@ -144,8 +146,33 @@ const MosaicGrid: Component<Props> = (props) => {
     const svgW = Math.max(...allX) + PAD;
     const svgH = Math.max(...allY) + PAD;
 
-    return { positions, svgW, svgH };
+    return { positions, svgW, svgH, spatial: true };
   });
+
+  const BORDER = 3;
+
+  // Determine the majority pier side so we can rotate mismatched thumbnails 180°
+  const majorityPierSide = createMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const p of props.panels) {
+      const ps = p.thumbnail_pier_side;
+      if (ps) counts[ps] = (counts[ps] || 0) + 1;
+    }
+    let best = "";
+    let bestCount = 0;
+    for (const [side, count] of Object.entries(counts)) {
+      if (count > bestCount) {
+        best = side;
+        bestCount = count;
+      }
+    }
+    return best;
+  });
+
+  const needsRotation = (panel: PanelStats) => {
+    const majority = majorityPierSide();
+    return majority && panel.thumbnail_pier_side && panel.thumbnail_pier_side !== majority;
+  };
 
   return (
     <div>
@@ -153,14 +180,31 @@ const MosaicGrid: Component<Props> = (props) => {
         <div class="relative overflow-x-auto" onMouseLeave={() => setTooltip(null)}>
           <svg
             viewBox={`0 0 ${layout().svgW} ${layout().svgH}`}
-            class="block mx-auto"
-            style={{ "max-width": "100%", height: `${Math.min(layout().svgH, 500)}px` }}
+            class="block mx-auto w-full"
+            style={{ "max-height": "70vh" }}
             preserveAspectRatio="xMidYMid meet"
           >
+            <defs>
+              <For each={layout().positions}>
+                {(pos) => (
+                  <clipPath id={`clip-${pos.panel.panel_id}`}>
+                    <rect
+                      x={pos.x + BORDER}
+                      y={pos.y + BORDER}
+                      width={pos.w - BORDER * 2}
+                      height={pos.h - BORDER * 2}
+                      rx={2}
+                    />
+                  </clipPath>
+                )}
+              </For>
+            </defs>
             <For each={layout().positions}>
               {(pos) => {
                 const color = () => completionColor(pos.pct);
                 const opacity = () => completionOpacity(pos.pct);
+                const thumbUrl = () =>
+                  pos.panel.thumbnail_url ? api.thumbnailUrl(pos.panel.thumbnail_url) : null;
                 return (
                   <g
                     onMouseEnter={(e) => setTooltip({ x: e.clientX, y: e.clientY, panel: pos.panel })}
@@ -168,6 +212,7 @@ const MosaicGrid: Component<Props> = (props) => {
                     onMouseLeave={() => setTooltip(null)}
                     class="cursor-pointer"
                   >
+                    {/* Completion-colored border rect */}
                     <rect
                       x={pos.x}
                       y={pos.y}
@@ -176,17 +221,61 @@ const MosaicGrid: Component<Props> = (props) => {
                       rx={3}
                       fill={color()}
                       opacity={opacity()}
-                      stroke="rgba(255,255,255,0.15)"
-                      stroke-width={1}
                     />
+                    {/* Thumbnail image or fallback fill */}
+                    <Show
+                      when={thumbUrl()}
+                      fallback={
+                        <rect
+                          x={pos.x + BORDER}
+                          y={pos.y + BORDER}
+                          width={pos.w - BORDER * 2}
+                          height={pos.h - BORDER * 2}
+                          rx={2}
+                          fill={color()}
+                          opacity={opacity()}
+                          stroke="rgba(255,255,255,0.15)"
+                          stroke-width={1}
+                        />
+                      }
+                    >
+                      {(url) => {
+                        const imgX = pos.x + BORDER;
+                        const imgY = pos.y + BORDER;
+                        const imgW = pos.w - BORDER * 2;
+                        const imgH = pos.h - BORDER * 2;
+                        const cx = imgX + imgW / 2;
+                        const cy = imgY + imgH / 2;
+                        // Build transform: spatial layout flips RA axis so mirror images horizontally;
+                        // pier side mismatch adds 180° rotation (equivalent to also flipping vertically)
+                        const parts: string[] = [];
+                        if (layout().spatial) parts.push(`translate(${2 * cx} 0) scale(-1 1)`);
+                        if (needsRotation(pos.panel)) parts.push(`rotate(180 ${cx} ${cy})`);
+                        const xform = parts.length > 0 ? parts.join(" ") : undefined;
+                        return (
+                          <image
+                            href={url()}
+                            x={imgX}
+                            y={imgY}
+                            width={imgW}
+                            height={imgH}
+                            preserveAspectRatio="xMidYMid slice"
+                            clip-path={`url(#clip-${pos.panel.panel_id})`}
+                            transform={xform}
+                          />
+                        );
+                      }}
+                    </Show>
+                    {/* Label overlay */}
                     <text
                       x={pos.x + pos.w / 2}
                       y={pos.y + pos.h / 2 - 6}
                       text-anchor="middle"
                       dominant-baseline="central"
                       class="fill-white"
-                      font-size={`${Math.max(9, Math.min(13, pos.w * 0.15))}px`}
+                      font-size={`${Math.max(9, Math.min(13, pos.w * 0.12))}px`}
                       font-weight="600"
+                      style={{ "text-shadow": "0 1px 3px rgba(0,0,0,0.8)" }}
                     >
                       {pos.panel.panel_label}
                     </text>
@@ -196,8 +285,9 @@ const MosaicGrid: Component<Props> = (props) => {
                       text-anchor="middle"
                       dominant-baseline="central"
                       class="fill-white"
-                      font-size={`${Math.max(8, Math.min(10, pos.w * 0.12))}px`}
-                      opacity={0.7}
+                      font-size={`${Math.max(8, Math.min(10, pos.w * 0.1))}px`}
+                      opacity={0.85}
+                      style={{ "text-shadow": "0 1px 3px rgba(0,0,0,0.8)" }}
                     >
                       {formatHours(pos.panel.total_integration_seconds)}
                     </text>
@@ -230,16 +320,21 @@ const MosaicGrid: Component<Props> = (props) => {
       </Show>
 
       {/* Legend */}
-      <div class="flex items-center justify-center gap-4 mt-3 text-xs text-theme-text-secondary">
-        <span class="flex items-center gap-1.5">
-          <div class="w-3 h-3 rounded-sm" style={{ background: "#f85149", opacity: 0.8 }} /> &lt;40%
-        </span>
-        <span class="flex items-center gap-1.5">
-          <div class="w-3 h-3 rounded-sm" style={{ background: "#d29922", opacity: 0.8 }} /> 40-80%
-        </span>
-        <span class="flex items-center gap-1.5">
-          <div class="w-3 h-3 rounded-sm" style={{ background: "#26a641", opacity: 0.8 }} /> &gt;80%
-        </span>
+      <div class="flex flex-col items-center gap-1.5 mt-3 text-xs text-theme-text-secondary">
+        <div class="flex items-center gap-4">
+          <span class="flex items-center gap-1.5">
+            <div class="w-3 h-3 rounded-sm" style={{ background: "#f85149", opacity: 0.8 }} /> &lt;40%
+          </span>
+          <span class="flex items-center gap-1.5">
+            <div class="w-3 h-3 rounded-sm" style={{ background: "#d29922", opacity: 0.8 }} /> 40-80%
+          </span>
+          <span class="flex items-center gap-1.5">
+            <div class="w-3 h-3 rounded-sm" style={{ background: "#26a641", opacity: 0.8 }} /> &gt;80%
+          </span>
+        </div>
+        <div class="text-theme-text-tertiary">
+          Completion relative to the most-imaged panel in this mosaic
+        </div>
       </div>
     </div>
   );

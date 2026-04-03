@@ -1,14 +1,7 @@
-import { Component, Show, createSignal, createResource } from "solid-js";
+import { Component, createSignal, createResource } from "solid-js";
 import { api } from "../api/client";
 import { useStats } from "../store/stats";
 import CorrelationChart from "../components/analysis/CorrelationChart";
-import type { CorrelationResponse } from "../types";
-
-const PREBUILT_CHARTS = [
-  { x: "humidity", y: "hfr", title: "HFR vs Humidity — When is it too humid to image?" },
-  { x: "wind_speed", y: "hfr", title: "HFR vs Wind Speed — What's your site's wind tolerance?" },
-  { x: "wind_speed", y: "guiding_rms", title: "Guiding RMS vs Wind Speed — When does wind wreck guiding?" },
-];
 
 const X_OPTIONS = [
   { value: "humidity", label: "Humidity" },
@@ -41,8 +34,9 @@ const AnalysisPage: Component = () => {
   const [telescope, setTelescope] = createSignal<string | undefined>(undefined);
   const [camera, setCamera] = createSignal<string | undefined>(undefined);
   const [granularity, setGranularity] = createSignal<"frame" | "session">("frame");
+  const [customX, setCustomX] = createSignal("humidity");
+  const [customY, setCustomY] = createSignal("hfr");
 
-  // Pre-built chart data
   const fetchChart = (x: string, y: string) => {
     const tel = telescope();
     const cam = camera();
@@ -56,21 +50,11 @@ const AnalysisPage: Component = () => {
     });
   };
 
-  const chartKey = () => `${telescope()}-${camera()}-${granularity()}`;
-
-  const [chart1] = createResource(chartKey, () => fetchChart("humidity", "hfr"));
-  const [chart2] = createResource(chartKey, () => fetchChart("wind_speed", "hfr"));
-  const [chart3] = createResource(chartKey, () => fetchChart("wind_speed", "guiding_rms"));
-
-  // Custom explorer
-  const [customX, setCustomX] = createSignal("humidity");
-  const [customY, setCustomY] = createSignal("hfr");
-  const customKey = () => `${chartKey()}-${customX()}-${customY()}`;
-  const [customData] = createResource(customKey, () =>
+  const chartKey = () => `${telescope()}-${camera()}-${granularity()}-${customX()}-${customY()}`;
+  const [customData] = createResource(chartKey, () =>
     fetchChart(customX(), customY())
   );
 
-  // Use actual observed equipment combos from stats (same as Statistics page)
   const combos = () => {
     const s = stats();
     if (!s) return [];
@@ -78,12 +62,20 @@ const AnalysisPage: Component = () => {
       telescope: c.telescope,
       camera: c.camera,
       label: `${c.telescope} + ${c.camera}`,
+      grouped: c.grouped,
     }));
   };
 
-  const selectClass = "text-xs bg-theme-elevated border border-theme-border rounded px-2 py-1 text-theme-text-primary";
+  const equipmentValue = () => {
+    const tel = telescope();
+    const cam = camera();
+    if (!tel && !cam) return "";
+    return `${tel}|||${cam}`;
+  };
+
+  const selectClass = "text-sm bg-theme-elevated border border-theme-border rounded px-2.5 py-1.5 text-theme-text-primary";
   const toggleClass = (active: boolean) =>
-    `text-xs px-2.5 py-1 rounded-[var(--radius-sm)] transition-colors ${
+    `text-sm px-3 py-1.5 rounded-[var(--radius-sm)] transition-colors ${
       active
         ? "bg-theme-elevated text-theme-text-primary font-medium"
         : "text-theme-text-secondary hover:text-theme-text-primary"
@@ -95,6 +87,7 @@ const AnalysisPage: Component = () => {
       <div class="flex flex-wrap items-center gap-3">
         <select
           class={selectClass}
+          value={equipmentValue()}
           onChange={(e) => {
             const val = e.currentTarget.value;
             if (!val) {
@@ -109,7 +102,7 @@ const AnalysisPage: Component = () => {
         >
           <option value="">All equipment</option>
           {combos().map((c) => (
-            <option value={`${c.telescope}|||${c.camera}`}>{c.label}</option>
+            <option value={`${c.telescope}|||${c.camera}`}>{c.label}{c.grouped ? " \u29C9" : ""}</option>
           ))}
         </select>
 
@@ -123,27 +116,20 @@ const AnalysisPage: Component = () => {
         </div>
       </div>
 
-      {/* Pre-built charts */}
-      <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <CorrelationChart data={chart1()} loading={chart1.loading} title={PREBUILT_CHARTS[0].title} />
-        <CorrelationChart data={chart2()} loading={chart2.loading} title={PREBUILT_CHARTS[1].title} />
-        <CorrelationChart data={chart3()} loading={chart3.loading} title={PREBUILT_CHARTS[2].title} />
-      </div>
-
-      {/* Custom explorer */}
+      {/* Correlation explorer */}
       <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-4">
-        <h3 class="text-sm font-medium text-theme-text-primary mb-3">Custom Correlation Explorer</h3>
+        <h3 class="text-base font-medium text-theme-text-primary mb-3">Correlation Explorer</h3>
         <div class="flex flex-wrap items-center gap-3 mb-4">
-          <label class="text-xs text-theme-text-secondary">X Axis:</label>
+          <label class="text-sm text-theme-text-secondary">X Axis:</label>
           <select class={selectClass} value={customX()} onChange={(e) => setCustomX(e.currentTarget.value)}>
             {X_OPTIONS.map((o) => <option value={o.value}>{o.label}</option>)}
           </select>
-          <label class="text-xs text-theme-text-secondary">Y Axis:</label>
+          <label class="text-sm text-theme-text-secondary">Y Axis:</label>
           <select class={selectClass} value={customY()} onChange={(e) => setCustomY(e.currentTarget.value)}>
             {Y_OPTIONS.map((o) => <option value={o.value}>{o.label}</option>)}
           </select>
         </div>
-        <div style={{ height: "400px" }} class="relative">
+        <div style={{ height: "600px" }} class="relative">
           <CorrelationChart data={customData()} loading={customData.loading} />
         </div>
       </div>

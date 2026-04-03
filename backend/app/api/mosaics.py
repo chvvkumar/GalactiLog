@@ -2,20 +2,23 @@ import uuid
 from collections import defaultdict
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import Response
 from sqlalchemy import select, func, cast, Date
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.database import get_session
-from app.models import Image, Target, User
+from app.models import Image, Target, User, UserSettings, SETTINGS_ROW_ID
 from app.models.mosaic import Mosaic
 from app.models.mosaic_panel import MosaicPanel
 from app.models.mosaic_suggestion import MosaicSuggestion
 from app.schemas.mosaic import (
+    AcceptSuggestionRequest,
     MosaicCreate, MosaicUpdate, MosaicPanelCreate, MosaicPanelUpdate,
     MosaicSummary, MosaicDetailResponse, PanelStats, MosaicSuggestionResponse,
 )
 from app.api.auth import get_current_user
+from app.services.mosaic_composite import build_mosaic_composite
 
 router = APIRouter(prefix="/mosaics", tags=["mosaics"])
 
@@ -74,6 +77,25 @@ async def _panel_stats(panel: MosaicPanel, session: AsyncSession) -> PanelStats:
     )
     filter_dist = {r[0]: r[1] or 0 for r in (await session.execute(fq)).all()}
 
+    # Most recent thumbnail for this panel (also grab pier side for orientation)
+    thumb_q = (
+        select(
+            Image.thumbnail_path,
+            Image.raw_headers["PIERSIDE"].astext.label("pier_side"),
+        )
+        .where(*base_filter)
+        .where(Image.thumbnail_path.is_not(None))
+        .order_by(Image.capture_date.desc())
+        .limit(1)
+    )
+    thumb_row = (await session.execute(thumb_q)).first()
+    thumb_url = None
+    thumb_pier_side = None
+    if thumb_row and thumb_row.thumbnail_path:
+        filename = thumb_row.thumbnail_path.split("/")[-1].split("\\")[-1]
+        thumb_url = f"/thumbnails/{filename}"
+        thumb_pier_side = thumb_row.pier_side
+
     # Compute per-panel center from frame FITS headers (median of OBJCTRA/OBJCTDEC).
     # This gives the actual pointing position for each panel, even when multiple
     # panels are merged into the same target by SIMBAD resolution.
@@ -111,6 +133,9 @@ async def _panel_stats(panel: MosaicPanel, session: AsyncSession) -> PanelStats:
         total_frames=row.frames or 0,
         filter_distribution=filter_dist,
         last_session_date=str(row.last_date) if row.last_date else None,
+        thumbnail_url=thumb_url,
+        thumbnail_pier_side=thumb_pier_side,
+        object_pattern=panel.object_pattern,
     )
 
 
@@ -120,7 +145,12 @@ async def trigger_detection(
     user: User = Depends(get_current_user),
 ):
     from app.services.mosaic_detection import detect_mosaic_panels
-    count = await detect_mosaic_panels(session)
+
+    settings = await session.get(UserSettings, SETTINGS_ROW_ID)
+    general = settings.general if settings else {}
+    gap_days = general.get("mosaic_campaign_gap_days", 0)
+
+    count = await detect_mosaic_panels(session, gap_days=gap_days)
     return {"status": "ok", "new_suggestions": count}
 
 
@@ -193,12 +223,15 @@ async def get_suggestions(
 @router.post("/suggestions/{suggestion_id}/accept", response_model=MosaicSummary)
 async def accept_suggestion(
     suggestion_id: uuid.UUID,
+    body: AcceptSuggestionRequest = AcceptSuggestionRequest(),
     session: AsyncSession = Depends(get_session),
     user: User = Depends(get_current_user),
 ):
     suggestion = await session.get(MosaicSuggestion, suggestion_id)
     if not suggestion or suggestion.status != "pending":
         raise HTTPException(404, "Suggestion not found or already resolved")
+
+    selected = set(body.selected_panels) if body.selected_panels is not None else None
 
     # Create the mosaic
     mosaic = Mosaic(name=suggestion.suggested_name)
@@ -208,7 +241,10 @@ async def accept_suggestion(
     # Create panels — multiple panels may share the same target_id
     # (SIMBAD often merges panel variants into one target)
     panel_num = 0
+    created = 0
     for target_id, label in zip(suggestion.target_ids, suggestion.panel_labels):
+        if selected is not None and label not in selected:
+            continue
         # Build OBJECT header pattern for filtering frames per panel
         # e.g., base "Andromeda Galaxy" + "Panel 3" → "%Andromeda Galaxy%Panel%3%"
         num = label.split()[-1] if label.startswith("Panel ") else label
@@ -222,6 +258,7 @@ async def accept_suggestion(
         )
         session.add(panel)
         panel_num += 1
+        created += 1
 
     suggestion.status = "accepted"
     await session.commit()
@@ -230,7 +267,7 @@ async def accept_suggestion(
         id=str(mosaic.id),
         name=mosaic.name,
         notes=mosaic.notes,
-        panel_count=len(suggestion.target_ids),
+        panel_count=created,
         total_integration_seconds=0,
         total_frames=0,
         completion_pct=0,
@@ -307,10 +344,15 @@ async def create_mosaic(
     await session.flush()
 
     for p in body.panels:
+        obj_pattern = p.object_pattern
+        if obj_pattern is None:
+            num = p.panel_label.split()[-1] if p.panel_label.startswith("Panel ") else p.panel_label
+            obj_pattern = f"%{mosaic.name}%{num}%"
         panel = MosaicPanel(
             mosaic_id=mosaic.id,
             target_id=p.target_id,
             panel_label=p.panel_label,
+            object_pattern=obj_pattern,
         )
         session.add(panel)
 
@@ -356,6 +398,147 @@ async def get_mosaic_detail(
         total_frames=total_frames,
         panels=panels,
     )
+
+
+@router.get("/{mosaic_id}/composite")
+async def get_mosaic_composite(
+    mosaic_id: str,
+    session: AsyncSession = Depends(get_session),
+    _user: User = Depends(get_current_user),
+):
+    """Generate and return a composite mosaic image as JPEG."""
+    mosaic = (
+        await session.execute(
+            select(Mosaic)
+            .where(Mosaic.id == mosaic_id)
+            .options(selectinload(Mosaic.panels).selectinload(MosaicPanel.target))
+        )
+    ).scalars().first()
+
+    if not mosaic:
+        raise HTTPException(status_code=404, detail="Mosaic not found")
+
+    panels = sorted(mosaic.panels, key=lambda p: p.sort_order)
+
+    try:
+        jpeg_bytes = await build_mosaic_composite(
+            mosaic_id=str(mosaic.id),
+            panels=panels,
+            session=session,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+    return Response(content=jpeg_bytes, media_type="image/jpeg")
+
+
+@router.get("/{mosaic_id}/composite/debug")
+async def get_mosaic_composite_debug(
+    mosaic_id: str,
+    session: AsyncSession = Depends(get_session),
+    _user: User = Depends(get_current_user),
+):
+    """Debug endpoint: return layout data as JSON instead of image."""
+    from app.services.mosaic_composite import (
+        select_best_frame, _parse_ra, _parse_coord,
+        PanelInfo, compute_panel_layout, generate_panel_thumbnail,
+    )
+    from pathlib import Path
+
+    mosaic = (
+        await session.execute(
+            select(Mosaic)
+            .where(Mosaic.id == mosaic_id)
+            .options(selectinload(Mosaic.panels).selectinload(MosaicPanel.target))
+        )
+    ).scalars().first()
+
+    if not mosaic:
+        raise HTTPException(status_code=404, detail="Mosaic not found")
+
+    panels = sorted(mosaic.panels, key=lambda p: p.sort_order)
+    debug_panels = []
+    panel_infos = []
+    native_width = 800
+    tile_w, tile_h = 800, 800
+
+    for panel in panels:
+        frame = await select_best_frame(panel.target_id, panel.object_pattern, session)
+        if not frame or not frame.file_path:
+            debug_panels.append({
+                "label": panel.panel_label,
+                "error": "no frame found",
+            })
+            continue
+
+        headers = frame.raw_headers or {}
+        ra_raw = headers.get("RA") or headers.get("OBJCTRA")
+        dec_raw = headers.get("DEC") or headers.get("OBJCTDEC")
+        ra = _parse_ra(ra_raw)
+        dec = _parse_coord(dec_raw)
+
+        fits_path = Path(frame.file_path)
+        exists = fits_path.exists()
+        if exists:
+            try:
+                tile_img, nw = generate_panel_thumbnail(fits_path, max_width=800)
+                native_width = nw
+                tile_w, tile_h = tile_img.size
+            except Exception as e:
+                exists = False
+
+        info = {
+            "label": panel.panel_label,
+            "object_pattern": panel.object_pattern,
+            "target_name": panel.target.primary_name if panel.target else None,
+            "frame_id": str(frame.id),
+            "file_path": frame.file_path,
+            "file_exists": exists,
+            "ra_raw": ra_raw,
+            "dec_raw": dec_raw,
+            "ra_deg": ra,
+            "dec_deg": dec,
+            "objctrot": headers.get("OBJCTROT"),
+            "pierside": headers.get("PIERSIDE"),
+            "focallen": headers.get("FOCALLEN"),
+            "xpixsz": headers.get("XPIXSZ"),
+            "median_hfr": frame.median_hfr,
+        }
+        debug_panels.append(info)
+
+        if ra is not None and dec is not None and exists:
+            panel_infos.append(PanelInfo(
+                panel_id=panel.panel_label,
+                ra=ra,
+                dec=dec,
+                objctrot=float(headers.get("OBJCTROT", 0)),
+                pierside=str(headers.get("PIERSIDE", "West")),
+                fits_path=frame.file_path,
+                focallen=float(headers.get("FOCALLEN", 448)),
+                xpixsz=float(headers.get("XPIXSZ", 3.76)),
+            ))
+
+    scale = tile_w / native_width if native_width > 0 else 1.0
+    layout = compute_panel_layout(panel_infos, tile_w, tile_h, scale=scale)
+
+    layout_debug = [
+        {
+            "panel_id": pos.panel_id,
+            "x": round(pos.x, 1),
+            "y": round(pos.y, 1),
+            "rotation": round(pos.rotation, 2),
+        }
+        for pos in layout
+    ]
+
+    return {
+        "mosaic_name": mosaic.name,
+        "native_width": native_width,
+        "tile_size": [tile_w, tile_h],
+        "scale": round(scale, 4),
+        "panels": debug_panels,
+        "layout": layout_debug,
+    }
 
 
 @router.put("/{mosaic_id}")
@@ -412,10 +595,18 @@ async def add_panel(
     if existing:
         raise HTTPException(400, "This panel already exists in the mosaic")
 
+    # Derive object_pattern to filter frames by FITS OBJECT header,
+    # matching the logic used in accept_suggestion.
+    obj_pattern = body.object_pattern
+    if obj_pattern is None:
+        num = body.panel_label.split()[-1] if body.panel_label.startswith("Panel ") else body.panel_label
+        obj_pattern = f"%{mosaic.name}%{num}%"
+
     panel = MosaicPanel(
         mosaic_id=mosaic_id,
         target_id=body.target_id,
         panel_label=body.panel_label,
+        object_pattern=obj_pattern,
     )
     session.add(panel)
     await session.commit()
@@ -437,6 +628,8 @@ async def update_panel(
         panel.panel_label = body.panel_label
     if body.sort_order is not None:
         panel.sort_order = body.sort_order
+    if body.object_pattern is not None:
+        panel.object_pattern = body.object_pattern
     await session.commit()
     return {"status": "ok"}
 

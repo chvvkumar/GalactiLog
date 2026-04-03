@@ -5,7 +5,6 @@ from unittest.mock import AsyncMock, patch, MagicMock
 from app.services.simbad import (
     resolve_target_name,
     normalize_object_name,
-    _normalize_ws,
     _catalog_priority,
     extract_catalog_id,
     curate_aliases,
@@ -54,21 +53,23 @@ class TestResolveTargetName:
 
 
 # ---------------------------------------------------------------------------
-# _normalize_ws
+# normalize_object_name (upper=False mode)
 # ---------------------------------------------------------------------------
 
-class TestNormalizeWs:
+class TestNormalizeObjectName:
+    def test_uppercase_by_default(self):
+        assert normalize_object_name("m 31") == "M 31"
+        assert normalize_object_name("  ngc  224 ") == "NGC 224"
+
+    def test_case_preserving_mode(self):
+        assert normalize_object_name("North  America Nebula", upper=False) == "North America Nebula"
+        assert normalize_object_name("  vdB  142 ", upper=False) == "vdB 142"
+
     def test_collapses_multiple_spaces(self):
-        assert _normalize_ws("M  31") == "M 31"
+        assert normalize_object_name("M  31", upper=False) == "M 31"
 
     def test_strips_leading_trailing(self):
-        assert _normalize_ws("  NGC 7000  ") == "NGC 7000"
-
-    def test_collapses_and_strips(self):
-        assert _normalize_ws("  M   31  ") == "M 31"
-
-    def test_single_space_unchanged(self):
-        assert _normalize_ws("IC 1805") == "IC 1805"
+        assert normalize_object_name("  NGC 7000  ", upper=False) == "NGC 7000"
 
 
 # ---------------------------------------------------------------------------
@@ -154,6 +155,24 @@ class TestCatalogPriority:
 
     def test_gum(self):
         assert _catalog_priority("Gum 12") is not None
+
+    def test_sharpless_all_variants(self):
+        """All common Sharpless notations should match the same priority."""
+        p = _catalog_priority("SH 2-155")
+        assert p is not None
+        # Space-separated variant
+        assert _catalog_priority("SH 2 155") == p
+        # No space after SH
+        assert _catalog_priority("Sh2-155") == p
+        # Underscore variant
+        assert _catalog_priority("Sh2_155") == p
+        # Space variant
+        assert _catalog_priority("Sh2 155") == p
+
+    def test_sharpless_variant_not_duplicate_priority(self):
+        """There should be no separate lower-priority Sharpless pattern."""
+        p = _catalog_priority("Sh 2 155")
+        assert p is not None and p < 10  # Should be in top tier, not at 25
 
 
 # ---------------------------------------------------------------------------
@@ -372,3 +391,45 @@ class TestFetchTapAliases:
             result = await _fetch_tap_aliases("M 31")
 
         assert result == []
+
+
+class TestResolveTargetNameCached:
+    def test_negative_cache_no_mapped_name_returns_none(self):
+        """When original is negative-cached and no mapping exists, return None without re-querying."""
+        from unittest.mock import MagicMock, patch
+        from app.services.simbad import resolve_target_name_cached
+
+        mock_session = MagicMock()
+
+        with patch("app.services.simbad.get_cached_simbad") as mock_get_cache, \
+             patch("app.services.simbad._get_simbad_id", return_value="XYZNOTREAL"):
+            # Name maps to itself (no mapped variant)
+            mock_get_cache.return_value = {"_negative": True}
+
+            result = resolve_target_name_cached("XYZNOTREAL", mock_session, skip_simbad=True)
+
+        assert result is None
+        # get_cached_simbad should be called exactly once (not twice for the same key)
+        assert mock_get_cache.call_count == 1
+
+    def test_negative_original_tries_mapped_name(self):
+        """When original is negative-cached but mapping exists, try the mapped name."""
+        from unittest.mock import MagicMock, patch
+        from app.services.simbad import resolve_target_name_cached
+
+        mock_session = MagicMock()
+
+        with patch("app.services.simbad.get_cached_simbad") as mock_get_cache, \
+             patch("app.services.simbad._get_simbad_id", return_value="NGC 7000"):
+            # First call (original) -> negative
+            # Second call (mapped "NGC 7000") -> positive result
+            mock_get_cache.side_effect = [
+                {"_negative": True},
+                {"main_id": "NGC 7000", "raw_aliases": ["NGC 7000"], "ra": 314.0, "dec": 44.0, "object_type": "HII"},
+            ]
+
+            result = resolve_target_name_cached("north america nebula", mock_session, skip_simbad=True)
+
+        assert result is not None
+        assert result["catalog_id"] == "NGC 7000"
+        assert mock_get_cache.call_count == 2
