@@ -1,7 +1,6 @@
 import { Component, Show, For, createResource, createSignal } from "solid-js";
 import { A, useParams } from "@solidjs/router";
 import { api } from "../api/client";
-import MosaicGrid from "../components/mosaics/MosaicGrid";
 
 function formatHours(seconds: number): string {
   const h = seconds / 3600;
@@ -65,10 +64,25 @@ const MosaicDetailPage: Component = () => {
               />
             </div>
 
-            {/* Spatial Grid */}
+            {/* Mosaic Composite */}
             <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-4">
               <h3 class="text-sm font-medium text-theme-text-primary mb-3">Panel Layout</h3>
-              <MosaicGrid panels={data().panels} />
+              <div class="flex justify-center">
+                <img
+                  src={`/api/mosaics/${params.mosaicId}/composite`}
+                  alt={`${data().name} mosaic composite`}
+                  class="max-w-full h-auto rounded"
+                  style={{ "max-height": "600px" }}
+                  onError={(e) => {
+                    e.currentTarget.style.display = "none";
+                    const fallback = e.currentTarget.nextElementSibling as HTMLElement;
+                    if (fallback) fallback.style.display = "block";
+                  }}
+                />
+                <div class="text-center text-theme-text-secondary text-sm py-8" style={{ display: "none" }}>
+                  Could not generate mosaic composite. Panels may not have accessible FITS files.
+                </div>
+              </div>
             </div>
 
             {/* Panel Table */}
