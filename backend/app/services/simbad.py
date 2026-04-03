@@ -9,19 +9,14 @@ logger = logging.getLogger(__name__)
 SIMBAD_TAP_URL = "https://simbad.cds.unistra.fr/simbad/sim-tap/sync"
 
 
-def normalize_object_name(name: str) -> str:
-    """Normalize a target name: strip outer whitespace, uppercase, collapse inner spaces."""
-    cleaned = re.sub(r"\s+", " ", name.strip()).upper()
-    return cleaned
+def normalize_object_name(name: str, *, upper: bool = True) -> str:
+    """Normalize a target name: strip outer whitespace, collapse inner spaces.
 
-
-# ---------------------------------------------------------------------------
-# Catalog priority & alias curation helpers
-# ---------------------------------------------------------------------------
-
-def _normalize_ws(s: str) -> str:
-    """Collapse multiple whitespace to single space and strip."""
-    return re.sub(r"\s+", " ", s.strip())
+    With upper=True (default): also uppercase (for DB matching keys).
+    With upper=False: preserve original case (for display-quality normalization).
+    """
+    cleaned = re.sub(r"\s+", " ", name.strip())
+    return cleaned.upper() if upper else cleaned
 
 
 # Ordered list: index = priority (lower wins).
@@ -67,7 +62,7 @@ _COORD_ID_RE = re.compile(
 
 def _catalog_priority(name: str) -> int | None:
     """Return the priority index of *name* if it matches a known catalog pattern, else None."""
-    n = _normalize_ws(name)
+    n = normalize_object_name(name, upper=False)
     for idx, pat in enumerate(CATALOG_PATTERNS):
         if pat.match(n):
             return idx
@@ -77,20 +72,20 @@ def _catalog_priority(name: str) -> int | None:
 def extract_catalog_id(aliases: list[str], simbad_main_id: str) -> str:
     """Pick the best catalog ID from *aliases* + *simbad_main_id* using catalog priority.
 
-    Falls back to ``_normalize_ws(simbad_main_id)`` if no catalog match is found.
+    Falls back to ``normalize_object_name(simbad_main_id, upper=False)`` if no catalog match is found.
     """
     best_name: str | None = None
     best_pri: int | None = None
 
     candidates = list(aliases) + [simbad_main_id]
     for raw in candidates:
-        n = _normalize_ws(raw)
+        n = normalize_object_name(raw, upper=False)
         pri = _catalog_priority(n)
         if pri is not None and (best_pri is None or pri < best_pri):
             best_pri = pri
             best_name = n
 
-    fallback = _normalize_ws(simbad_main_id)
+    fallback = normalize_object_name(simbad_main_id, upper=False)
     # Strip SIMBAD "NAME " prefix from fallback — it's a common-name marker, not a catalog ID
     if fallback.upper().startswith("NAME "):
         fallback = fallback[5:].strip()
@@ -118,7 +113,7 @@ def curate_aliases(raw_aliases: list[str], fits_names: list[str] | None = None) 
             result.append(value)
 
     for raw in raw_aliases:
-        n = _normalize_ws(raw)
+        n = normalize_object_name(raw, upper=False)
 
         # NAME entries -> title-cased common name
         if n.upper().startswith("NAME "):
@@ -136,7 +131,7 @@ def curate_aliases(raw_aliases: list[str], fits_names: list[str] | None = None) 
     # Add FITS names
     if fits_names:
         for fn in fits_names:
-            n = _normalize_ws(fn)
+            n = normalize_object_name(fn, upper=False)
             if n:
                 _add(n)
 
@@ -156,14 +151,14 @@ def extract_common_name(
     """
     # Check SIMBAD NAME aliases first
     for raw in raw_aliases:
-        n = _normalize_ws(raw)
+        n = normalize_object_name(raw, upper=False)
         if n.upper().startswith("NAME "):
             return n[5:].strip().title()
 
     # FITS name fallback — strip "Panel N" suffix
     if fits_names:
         for fn in fits_names:
-            n = _PANEL_RE.sub("", _normalize_ws(fn)).strip()
+            n = _PANEL_RE.sub("", normalize_object_name(fn, upper=False)).strip()
             if n and _catalog_priority(n) is None:
                 return n
 

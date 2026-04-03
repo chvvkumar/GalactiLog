@@ -16,7 +16,6 @@ from app.services.simbad import (
     resolve_target_name, normalize_object_name, resolve_target_name_cached,
     curate_simbad_result, get_cached_simbad, save_simbad_cache,
     curate_aliases, extract_catalog_id, extract_common_name, build_primary_name,
-    _normalize_ws,
 )
 from app.services.openngc import enrich_target_from_openngc
 from app.services.vizier import enrich_target_from_vizier

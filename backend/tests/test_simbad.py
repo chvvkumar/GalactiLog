@@ -5,7 +5,6 @@ from unittest.mock import AsyncMock, patch, MagicMock
 from app.services.simbad import (
     resolve_target_name,
     normalize_object_name,
-    _normalize_ws,
     _catalog_priority,
     extract_catalog_id,
     curate_aliases,
@@ -54,21 +53,23 @@ class TestResolveTargetName:
 
 
 # ---------------------------------------------------------------------------
-# _normalize_ws
+# normalize_object_name (upper=False mode)
 # ---------------------------------------------------------------------------
 
-class TestNormalizeWs:
+class TestNormalizeObjectName:
+    def test_uppercase_by_default(self):
+        assert normalize_object_name("m 31") == "M 31"
+        assert normalize_object_name("  ngc  224 ") == "NGC 224"
+
+    def test_case_preserving_mode(self):
+        assert normalize_object_name("North  America Nebula", upper=False) == "North America Nebula"
+        assert normalize_object_name("  vdB  142 ", upper=False) == "vdB 142"
+
     def test_collapses_multiple_spaces(self):
-        assert _normalize_ws("M  31") == "M 31"
+        assert normalize_object_name("M  31", upper=False) == "M 31"
 
     def test_strips_leading_trailing(self):
-        assert _normalize_ws("  NGC 7000  ") == "NGC 7000"
-
-    def test_collapses_and_strips(self):
-        assert _normalize_ws("  M   31  ") == "M 31"
-
-    def test_single_space_unchanged(self):
-        assert _normalize_ws("IC 1805") == "IC 1805"
+        assert normalize_object_name("  NGC 7000  ", upper=False) == "NGC 7000"
 
 
 # ---------------------------------------------------------------------------
