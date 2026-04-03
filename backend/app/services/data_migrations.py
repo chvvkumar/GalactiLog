@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 # Current data version — bump this and add a migration function when
 # code changes affect how stored target data is derived.
-DATA_VERSION = 4
+DATA_VERSION = 5
 
 
 def _migrate_v1_fix_catalog_designations(session: Session) -> str:
@@ -176,6 +176,43 @@ def _migrate_v4_vizier_and_common_names(session: Session) -> str:
     return "; ".join(parts) if parts else "No changes needed"
 
 
+def _migrate_v5_strip_panel_aliases(session: Session) -> str:
+    """Remove 'Panel N' suffixed aliases from targets.
+
+    These leaked in from FITS OBJECT headers like 'Andromeda Galaxy Panel 1'.
+    The panel suffix is not meaningful as an alias — the base name is sufficient.
+    """
+    import re
+    from app.models import Target
+
+    panel_re = re.compile(r"\s+Panel\s+\d+$", re.IGNORECASE)
+
+    targets = session.execute(
+        select(Target).where(Target.merged_into_id.is_(None))
+    ).scalars().all()
+
+    updated = 0
+    for target in targets:
+        if not target.aliases:
+            continue
+        cleaned = []
+        seen_upper: set[str] = set()
+        for alias in target.aliases:
+            stripped = panel_re.sub("", alias).strip()
+            if not stripped:
+                continue
+            key = stripped.upper()
+            if key not in seen_upper:
+                seen_upper.add(key)
+                cleaned.append(stripped)
+        if cleaned != target.aliases:
+            target.aliases = cleaned
+            updated += 1
+
+    session.flush()
+    return f"{updated} targets had panel suffixes stripped from aliases"
+
+
 # Registry: version number -> (description, migration function)
 # Version numbers must be sequential starting from 1.
 MIGRATIONS: dict[int, tuple[str, Callable[[Session], str]]] = {
@@ -183,6 +220,7 @@ MIGRATIONS: dict[int, tuple[str, Callable[[Session], str]]] = {
     2: ("Re-derive designations with improved cache lookup (fixes targets v1 missed)", _migrate_v1_fix_catalog_designations),
     3: ("Load OpenNGC catalog and enrich targets with size/magnitude", _migrate_v3_load_openngc),
     4: ("VizieR enrichment and OpenNGC common name backfill", _migrate_v4_vizier_and_common_names),
+    5: ("Strip panel suffixes from target aliases", _migrate_v5_strip_panel_aliases),
 }
 
 
