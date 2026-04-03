@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_session
 from app.api.deps import get_current_user
 from app.models import Target, Image
+from app.services.simbad import COMMON_NAME_MAP
 from app.models.session_note import SessionNote
 from app.models.user import User
 from app.services.normalization import load_alias_maps, normalize_filter, normalize_equipment, expand_canonical
@@ -81,18 +82,30 @@ async def search_targets(
     escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
     pattern = f"%{escaped}%"
 
+    # Also create a space-normalized pattern for catalog IDs like "M31" → "M 31"
+    spaced = re.sub(r"([A-Za-z])(\d)", r"\1 \2", escaped)
+    spaced_pattern = f"%{spaced}%" if spaced != escaped else None
+
     # Tier 1: Exact substring matches — exclude soft-deleted
     aliases_str = func.array_to_string(Target.aliases, ' ')
+    ilike_conditions = [
+        Target.primary_name.ilike(pattern),
+        Target.catalog_id.ilike(pattern),
+        Target.common_name.ilike(pattern),
+        aliases_str.ilike(pattern),
+    ]
+    if spaced_pattern:
+        ilike_conditions.extend([
+            Target.primary_name.ilike(spaced_pattern),
+            Target.catalog_id.ilike(spaced_pattern),
+            Target.common_name.ilike(spaced_pattern),
+            aliases_str.ilike(spaced_pattern),
+        ])
     exact_query = (
         select(Target)
         .where(
             Target.merged_into_id.is_(None),
-            or_(
-                Target.primary_name.ilike(pattern),
-                Target.catalog_id.ilike(pattern),
-                Target.common_name.ilike(pattern),
-                aliases_str.ilike(pattern),
-            ),
+            or_(*ilike_conditions),
         )
         .limit(limit)
     )
@@ -116,6 +129,43 @@ async def search_targets(
             match_source=match_source,
             similarity_score=1.0,
         ))
+
+    # Tier 1.5: Common name map lookup — match colloquial names to catalog IDs
+    if len(results) < limit:
+        q_lower = q.lower()
+        mapped_catalog_ids = set()
+        for common_name, catalog_id in COMMON_NAME_MAP.items():
+            if q_lower in common_name or common_name in q_lower:
+                mapped_catalog_ids.add(catalog_id)
+        if mapped_catalog_ids:
+            exclude_ids = exact_ids | {r.id for r in results}
+            map_conditions = [Target.catalog_id == cid for cid in mapped_catalog_ids]
+            map_query = (
+                select(Target)
+                .where(
+                    Target.merged_into_id.is_(None),
+                    Target.id.notin_(exclude_ids) if exclude_ids else True,
+                    or_(*map_conditions),
+                )
+                .limit(limit - len(results))
+            )
+            map_result = await session.execute(map_query)
+            for t in map_result.scalars().all():
+                # Find which common name matched for display
+                matched_name = None
+                for cn, cid in COMMON_NAME_MAP.items():
+                    if cid == t.catalog_id and (q_lower in cn or cn in q_lower):
+                        matched_name = cn.title()
+                        break
+                exact_ids.add(t.id)
+                results.append(TargetSearchResultFuzzy(
+                    id=t.id,
+                    primary_name=t.primary_name,
+                    object_type=t.object_type,
+                    aliases=t.aliases or [],
+                    match_source=matched_name,
+                    similarity_score=1.0,
+                ))
 
     # Tier 2: Fuzzy trigram matches if we need more
     if len(results) < limit:
