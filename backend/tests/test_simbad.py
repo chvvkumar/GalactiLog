@@ -156,6 +156,24 @@ class TestCatalogPriority:
     def test_gum(self):
         assert _catalog_priority("Gum 12") is not None
 
+    def test_sharpless_all_variants(self):
+        """All common Sharpless notations should match the same priority."""
+        p = _catalog_priority("SH 2-155")
+        assert p is not None
+        # Space-separated variant
+        assert _catalog_priority("SH 2 155") == p
+        # No space after SH
+        assert _catalog_priority("Sh2-155") == p
+        # Underscore variant
+        assert _catalog_priority("Sh2_155") == p
+        # Space variant
+        assert _catalog_priority("Sh2 155") == p
+
+    def test_sharpless_variant_not_duplicate_priority(self):
+        """There should be no separate lower-priority Sharpless pattern."""
+        p = _catalog_priority("Sh 2 155")
+        assert p is not None and p < 10  # Should be in top tier, not at 25
+
 
 # ---------------------------------------------------------------------------
 # extract_catalog_id

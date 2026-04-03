@@ -25,7 +25,7 @@ CATALOG_PATTERNS: list[re.Pattern] = [
     re.compile(r"^NGC\s*\d+$"),                        # 1  NGC
     re.compile(r"^IC\s*\d+[A-Z]?$"),                   # 2  IC
     re.compile(r"^(Caldwell|C)\s+\d+$"),               # 3  Caldwell
-    re.compile(r"^SH\s*2-\d+$", re.IGNORECASE),       # 4  Sharpless
+    re.compile(r"^SH?\s*2[\s\-_]+\d+$", re.IGNORECASE), # 4  Sharpless (all variants)
     re.compile(r"^(PN\s+A66\s+\d+|Abell\s+\d+)$"),    # 5  Abell PN
     re.compile(r"^Arp\s*\d+$"),                        # 6  Arp
     re.compile(r"^HCG\s*\d+$"),                        # 7  HCG
@@ -46,7 +46,6 @@ CATALOG_PATTERNS: list[re.Pattern] = [
     re.compile(r"^Cl\s+Berkeley\s+\d+$"),              # 22 Berkeley
     re.compile(r"^Cl\s+King\s+\d+$"),                  # 23 King
     re.compile(r"^Gum\s+\d+$"),                        # 24 Gum
-    re.compile(r"^Sh\s*2[\s\-]\d+$", re.IGNORECASE),  # 25 Sh2 variant
 ]
 
 # Pattern to detect coordinate-based / survey IDs we want to drop
@@ -394,7 +393,7 @@ COMMON_NAME_MAP: dict[str, str] = {
 _PANEL_RE = re.compile(r"\s+Panel\s+\d+$", re.IGNORECASE)
 
 
-_SH2_RE = re.compile(r"^Sh2[\s\-_]+(\d+)$", re.IGNORECASE)
+_SH2_RE = re.compile(r"^SH?\s*2[\s\-_]+(\d+)$", re.IGNORECASE)
 _LBN_RE = re.compile(r"^LBN[\s\-_]+(\d+)$", re.IGNORECASE)
 
 
