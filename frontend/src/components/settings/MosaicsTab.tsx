@@ -314,32 +314,13 @@ export const MosaicsTab: Component = () => {
         <div class="flex justify-between items-center">
           <h3 class="text-theme-text-primary font-medium">Detection Keywords</h3>
           <Show when={isAdmin()}>
-            <div class="flex items-center gap-2">
-              <select
-                value={campaignGap()}
-                onChange={async (e) => {
-                  const val = parseInt(e.currentTarget.value, 10);
-                  const current = settingsCtx.settings()?.general;
-                  await settingsCtx.saveGeneral({ ...current!, mosaic_campaign_gap_days: val });
-                }}
-                class="px-2 py-1.5 text-sm bg-theme-base border border-theme-border rounded-[var(--radius-sm)] text-theme-text-primary focus:outline-none focus:border-theme-accent"
-              >
-                <For each={GAP_OPTIONS}>
-                  {(opt) => (
-                    <option value={opt.value} selected={opt.value === campaignGap()}>
-                      {opt.label}
-                    </option>
-                  )}
-                </For>
-              </select>
-              <button
-                onClick={handleDetect}
-                disabled={detecting()}
-                class="px-3 py-1.5 border border-theme-border-em text-theme-text-secondary rounded text-sm disabled:opacity-50 hover:text-theme-text-primary hover:border-theme-accent transition-colors"
-              >
-                {detecting() ? "Detecting..." : "Run Detection"}
-              </button>
-            </div>
+            <button
+              onClick={handleDetect}
+              disabled={detecting()}
+              class="px-3 py-1.5 border border-theme-border-em text-theme-text-secondary rounded text-sm disabled:opacity-50 hover:text-theme-text-primary hover:border-theme-accent transition-colors"
+            >
+              {detecting() ? "Detecting..." : "Run Detection"}
+            </button>
           </Show>
         </div>
         <p class="text-xs text-theme-text-secondary">
@@ -385,9 +366,33 @@ export const MosaicsTab: Component = () => {
 
       {/* Auto-detected Suggestions */}
       <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-4 space-y-3">
-        <h3 class="text-theme-text-primary font-medium">
-          Suggestions ({suggestions().length})
-        </h3>
+        <div class="flex justify-between items-center">
+          <h3 class="text-theme-text-primary font-medium">
+            Suggestions ({suggestions().length})
+          </h3>
+          <Show when={isAdmin()}>
+            <select
+              value={campaignGap()}
+              onChange={async (e) => {
+                const val = parseInt(e.currentTarget.value, 10);
+                const current = settingsCtx.settings()?.general;
+                await settingsCtx.saveGeneral({ ...current!, mosaic_campaign_gap_days: val });
+              }}
+              class="px-2 py-1.5 text-sm bg-theme-base border border-theme-border rounded-[var(--radius-sm)] text-theme-text-primary focus:outline-none focus:border-theme-accent"
+            >
+              <For each={GAP_OPTIONS}>
+                {(opt) => (
+                  <option value={opt.value} selected={opt.value === campaignGap()}>
+                    {opt.label}
+                  </option>
+                )}
+              </For>
+            </select>
+          </Show>
+        </div>
+        <p class="text-xs text-theme-text-secondary">
+          Sessions for the same panel shot more than the selected gap apart are treated as separate campaigns. Re-run detection after changing.
+        </p>
         <Show
           when={suggestions().length > 0}
           fallback={
