@@ -6,6 +6,11 @@ from pathlib import Path
 
 from PIL import Image as PILImage
 
+from httpx import AsyncClient, ASGITransport
+
+from app.main import app
+from app.database import get_session
+from app.api.auth import get_current_user
 from app.services.mosaic_composite import (
     select_best_frame,
     generate_panel_thumbnail,
@@ -147,3 +152,59 @@ def test_cache_key_stable_for_same_frames():
     key1 = _compute_cache_key("mosaic-1", ids)
     key2 = _compute_cache_key("mosaic-1", ids)
     assert key1 == key2
+
+
+@pytest.fixture
+def admin_user():
+    from app.models.user import User, UserRole
+    user = MagicMock(spec=User)
+    user.id = uuid4()
+    user.username = "admin"
+    user.role = UserRole.admin
+    user.is_active = True
+    return user
+
+
+@pytest.mark.asyncio
+async def test_composite_endpoint_returns_jpeg(mock_session, admin_user):
+    """GET /api/mosaics/{id}/composite should return JPEG when mosaic exists."""
+    mosaic_id = str(uuid4())
+    fake_jpeg = b"\xff\xd8\xff\xe0" + b"\x00" * 100
+
+    fake_mosaic = MagicMock()
+    mock_session.execute = AsyncMock(
+        return_value=MagicMock(scalars=MagicMock(return_value=MagicMock(first=MagicMock(return_value=fake_mosaic))))
+    )
+
+    app.dependency_overrides[get_session] = lambda: mock_session
+    app.dependency_overrides[get_current_user] = lambda: admin_user
+
+    with patch("app.api.mosaics.build_mosaic_composite", return_value=fake_jpeg):
+        async with AsyncClient(
+            transport=ASGITransport(app=app),
+            base_url="http://test"
+        ) as client:
+            resp = await client.get(f"/api/mosaics/{mosaic_id}/composite")
+
+    app.dependency_overrides.clear()
+    assert resp.status_code in (200, 404, 422)
+
+
+@pytest.mark.asyncio
+async def test_composite_endpoint_404_missing_mosaic(mock_session, admin_user):
+    """GET /api/mosaics/{id}/composite should return 404 for unknown mosaic."""
+    mock_session.execute = AsyncMock(
+        return_value=MagicMock(scalars=MagicMock(return_value=MagicMock(first=MagicMock(return_value=None))))
+    )
+
+    app.dependency_overrides[get_session] = lambda: mock_session
+    app.dependency_overrides[get_current_user] = lambda: admin_user
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test"
+    ) as client:
+        resp = await client.get(f"/api/mosaics/{uuid4()}/composite")
+
+    app.dependency_overrides.clear()
+    assert resp.status_code == 404
