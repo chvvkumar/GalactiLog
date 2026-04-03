@@ -1,6 +1,7 @@
 import re
 import uuid
 from collections import defaultdict
+from datetime import datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,6 +10,20 @@ from app.models import Target, UserSettings, SETTINGS_ROW_ID
 from app.models.mosaic import Mosaic
 from app.models.mosaic_panel import MosaicPanel
 from app.models.mosaic_suggestion import MosaicSuggestion
+
+
+def cluster_sessions_by_gap(dates: list[str], gap_days: int) -> list[list[str]]:
+    """Split sorted date strings into clusters where consecutive dates are <= gap_days apart."""
+    if not dates:
+        return []
+    sorted_dates = sorted(dates)
+    parsed = [datetime.strptime(d, "%Y-%m-%d").date() for d in sorted_dates]
+    clusters: list[list[str]] = [[sorted_dates[0]]]
+    for i in range(1, len(parsed)):
+        if (parsed[i] - parsed[i - 1]).days > gap_days:
+            clusters.append([])
+        clusters[-1].append(sorted_dates[i])
+    return clusters
 
 
 async def detect_mosaic_panels(session: AsyncSession) -> int:
