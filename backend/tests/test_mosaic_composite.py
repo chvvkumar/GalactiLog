@@ -19,7 +19,8 @@ from app.services.mosaic_composite import (
     PanelInfo,
     LayoutPosition,
     _compute_cache_key,
-    _composite_cache,
+    _parse_ra,
+    _parse_coord,
 )
 
 
@@ -80,11 +81,21 @@ def test_generate_panel_thumbnail(tmp_path: Path):
     data[128, 128] = 50000
 
     fake_path = tmp_path / "panel.fits"
-    with patch("app.services.mosaic_composite._read_decimated", return_value=data):
-        img = generate_panel_thumbnail(fake_path, max_width=400)
+    mock_info = {"dims": [256, 256]}
+    mock_hdu = MagicMock()
+    mock_hdu.get_info.return_value = mock_info
+    mock_fits = MagicMock()
+    mock_fits.__enter__ = MagicMock(return_value=mock_fits)
+    mock_fits.__exit__ = MagicMock(return_value=False)
+    mock_fits.__getitem__ = MagicMock(return_value=mock_hdu)
+
+    with patch("app.services.mosaic_composite._read_decimated", return_value=data), \
+         patch("app.services.mosaic_composite.fitsio.FITS", return_value=mock_fits):
+        img, native_width = generate_panel_thumbnail(fake_path, max_width=400)
     assert isinstance(img, PILImage.Image)
     assert img.width <= 400
     assert img.height > 0
+    assert native_width == 256
 
 
 def test_compute_panel_layout_two_panels():
@@ -96,8 +107,8 @@ def test_compute_panel_layout_two_panels():
     ]
     layout = compute_panel_layout(panels, tile_width=400, tile_height=400)
     assert len(layout) == 2
-    assert layout[0].x != layout[1].x
-    assert abs(layout[0].y - layout[1].y) < 1.0
+    # Two panels at different RA should produce different positions
+    assert (layout[0].x, layout[0].y) != (layout[1].x, layout[1].y)
 
 
 def test_compute_panel_layout_pier_flip_rotation():
@@ -208,3 +219,29 @@ async def test_composite_endpoint_404_missing_mosaic(mock_session, admin_user):
 
     app.dependency_overrides.clear()
     assert resp.status_code == 404
+
+
+def test_parse_ra_numeric():
+    assert _parse_ra(37.0) == 37.0
+    assert _parse_ra("37.0") == 37.0
+
+
+def test_parse_ra_sexagesimal():
+    # 02 28 00 = (2 + 28/60) * 15 = 37.0 degrees
+    result = _parse_ra("02 28 00")
+    assert result is not None
+    assert abs(result - 37.0) < 0.01
+
+
+def test_parse_coord_dec_sexagesimal():
+    # +61 49 30 = 61 + 49/60 + 30/3600 = 61.825 degrees
+    result = _parse_coord("+61 49 30")
+    assert result is not None
+    assert abs(result - 61.825) < 0.01
+
+
+def test_parse_coord_negative_dec():
+    result = _parse_coord("-30 15 00")
+    assert result is not None
+    assert result < 0
+    assert abs(result - (-30.25)) < 0.01

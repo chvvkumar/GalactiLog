@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import fitsio
 import numpy as np
 from PIL import Image as PILImage
 from sqlalchemy import select, cast, Float
@@ -24,6 +25,58 @@ from app.services.thumbnail import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_coord(value) -> float | None:
+    """Parse a coordinate value that may be numeric or sexagesimal.
+
+    Handles:
+    - Numeric (float/int): returned directly
+    - RA sexagesimal 'HH MM SS.s': converted to degrees (* 15)
+    - DEC sexagesimal '[+-]DD MM SS.s': converted to degrees
+    """
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    s = str(value).strip()
+    try:
+        return float(s)
+    except ValueError:
+        pass
+    # Sexagesimal parsing
+    parts = s.lstrip("+-").split()
+    if len(parts) != 3:
+        return None
+    try:
+        d, m, sec = float(parts[0]), float(parts[1]), float(parts[2])
+        deg = d + m / 60 + sec / 3600
+        if s.startswith("-"):
+            deg = -deg
+        return deg
+    except (ValueError, IndexError):
+        return None
+
+
+def _parse_ra(value) -> float | None:
+    """Parse RA — if sexagesimal (HH MM SS), multiply by 15 for degrees."""
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    s = str(value).strip()
+    try:
+        return float(s)
+    except ValueError:
+        pass
+    parts = s.split()
+    if len(parts) != 3:
+        return None
+    try:
+        h, m, sec = float(parts[0]), float(parts[1]), float(parts[2])
+        return (h + m / 60 + sec / 3600) * 15
+    except (ValueError, IndexError):
+        return None
 
 
 async def select_best_frame(
@@ -66,11 +119,26 @@ async def select_best_frame(
     return row
 
 
-def generate_panel_thumbnail(fits_path: Path, max_width: int = 800) -> PILImage.Image:
+def generate_panel_thumbnail(
+    fits_path: Path, max_width: int = 800,
+) -> tuple[PILImage.Image, int]:
     """Generate an in-memory PIL Image from a FITS file using MTF stretch.
-    Reuses the existing thumbnail pipeline but returns a PIL Image
-    instead of saving to disk.
+
+    Returns (image, native_width) where native_width is the original sensor
+    width in pixels before any downscaling.
     """
+    # Read native dimensions before decimation
+    with fitsio.FITS(str(fits_path), "r") as fits:
+        info = fits[0].get_info()
+        dims = info.get("dims", [])
+        # dims is [NAXIS1, NAXIS2] for 2D (NAXIS1=width), [3, H, W] for color
+        if len(dims) == 2:
+            native_width = dims[0]  # NAXIS1 = width
+        elif len(dims) == 3:
+            native_width = dims[2]
+        else:
+            native_width = max(dims) if dims else max_width
+
     data = _read_decimated(fits_path, max_width)
 
     if data.ndim == 2:
@@ -78,7 +146,8 @@ def generate_panel_thumbnail(fits_path: Path, max_width: int = 800) -> PILImage.
         flipped = np.flipud(data)
         resized = _resize_array(flipped, max_width)
         stretched = _stretch_channel(resized)
-        return PILImage.fromarray(stretched, mode="L").convert("RGB")
+        img = PILImage.fromarray(stretched, mode="L").convert("RGB")
+        return img, native_width
     elif data.ndim == 3 and data.shape[0] == 3:
         channels = []
         for i in range(3):
@@ -88,7 +157,8 @@ def generate_panel_thumbnail(fits_path: Path, max_width: int = 800) -> PILImage.
             stretched = _stretch_channel(resized)
             channels.append(stretched)
         rgb = np.stack(channels, axis=-1)
-        return PILImage.fromarray(rgb, mode="RGB")
+        img = PILImage.fromarray(rgb, mode="RGB")
+        return img, native_width
     else:
         raise ValueError(f"Unsupported FITS data shape: {data.shape}")
 
@@ -118,8 +188,13 @@ def compute_panel_layout(
     panels: list[PanelInfo],
     tile_width: int,
     tile_height: int,
+    scale: float = 1.0,
 ) -> list[LayoutPosition]:
-    """Project panel RA/DEC onto a common tangent plane using gnomonic (TAN) projection."""
+    """Project panel RA/DEC onto a common tangent plane using gnomonic (TAN) projection.
+
+    The WCS projects at native sensor plate scale. The `scale` parameter
+    converts from native pixels to thumbnail pixels (tile_width / native_width).
+    """
     if not panels:
         return []
 
@@ -130,10 +205,19 @@ def compute_panel_layout(
     plate_scale_arcsec = (ref.xpixsz / ref.focallen) * 206.265
     plate_scale_deg = plate_scale_arcsec / 3600.0
 
+    # Include camera rotation (OBJCTROT) in WCS via CD matrix so that
+    # panel positions match the camera's field of view, not North-up sky.
+    theta = math.radians(ref.objctrot)
+    cos_t = math.cos(theta)
+    sin_t = math.sin(theta)
+
     w = WCS(naxis=2)
     w.wcs.crpix = [0.0, 0.0]
     w.wcs.crval = [center_ra, center_dec]
-    w.wcs.cdelt = [-plate_scale_deg, plate_scale_deg]
+    w.wcs.cd = [
+        [-plate_scale_deg * cos_t, -plate_scale_deg * sin_t],
+        [-plate_scale_deg * sin_t,  plate_scale_deg * cos_t],
+    ]
     w.wcs.ctype = ["RA---TAN", "DEC--TAN"]
 
     ref_pierside = ref.pierside
@@ -141,6 +225,15 @@ def compute_panel_layout(
     positions = []
     for p in panels:
         px, py = w.world_to_pixel_values(p.ra, p.dec)
+        # Scale from native sensor pixels to thumbnail pixels
+        # Negate X: the synthetic WCS cdelt1 is negative (standard sky
+        # parity), which puts East to the left in pixel coords; negating
+        # flips to match the camera's actual view where East pier side
+        # images are mirrored.  Y stays as-is because the CD matrix
+        # rotation already maps +DEC → correct screen direction.
+        px = float(-px) * scale
+        py = float(py) * scale
+
         rotation = p.objctrot - ref.objctrot
         if p.pierside != ref_pierside:
             rotation += 180.0
@@ -148,8 +241,8 @@ def compute_panel_layout(
 
         positions.append(LayoutPosition(
             panel_id=p.panel_id,
-            x=float(px),
-            y=float(py),
+            x=px,
+            y=py,
             rotation=rotation,
             fits_path=p.fits_path,
         ))
@@ -173,6 +266,9 @@ def composite_panels(
     if not layout or not tiles:
         raise ValueError("No panels to composite")
 
+    # Compute bounding box of all placed tiles
+    min_x = float("inf")
+    min_y = float("inf")
     max_x = 0.0
     max_y = 0.0
     for pos in layout:
@@ -183,11 +279,20 @@ def composite_panels(
         angle_rad = math.radians(abs(pos.rotation))
         rot_w = w * abs(math.cos(angle_rad)) + h * abs(math.sin(angle_rad))
         rot_h = w * abs(math.sin(angle_rad)) + h * abs(math.cos(angle_rad))
-        max_x = max(max_x, pos.x + rot_w)
-        max_y = max(max_y, pos.y + rot_h)
+        tx = pos.x - (rot_w - w) / 2
+        ty = pos.y - (rot_h - h) / 2
+        min_x = min(min_x, tx)
+        min_y = min(min_y, ty)
+        max_x = max(max_x, tx + rot_w)
+        max_y = max(max_y, ty + rot_h)
 
-    canvas_w = int(math.ceil(max_x))
-    canvas_h = int(math.ceil(max_y))
+    content_w = max_x - min_x
+    content_h = max_y - min_y
+    canvas_w = int(math.ceil(content_w))
+    canvas_h = int(math.ceil(content_h))
+    # Offset to center content: shift all positions so content starts at (0, 0)
+    offset_x = -min_x
+    offset_y = -min_y
     canvas = PILImage.new("RGB", (canvas_w, canvas_h), color=(0, 0, 0))
 
     for pos in layout:
@@ -204,8 +309,8 @@ def composite_panels(
         else:
             rotated = tile
 
-        paste_x = int(pos.x) - (rotated.width - tile.width) // 2
-        paste_y = int(pos.y) - (rotated.height - tile.height) // 2
+        paste_x = int(pos.x + offset_x) - (rotated.width - tile.width) // 2
+        paste_y = int(pos.y + offset_y) - (rotated.height - tile.height) // 2
 
         mask = rotated.convert("L").point(lambda p: 255 if p > 0 else 0)
         canvas.paste(rotated, (paste_x, paste_y), mask=mask)
@@ -264,39 +369,46 @@ async def build_mosaic_composite(
     tiles = {}
     for panel, frame in panel_frames:
         headers = frame.raw_headers or {}
-        ra = headers.get("RA") or headers.get("OBJCTRA")
-        dec = headers.get("DEC") or headers.get("OBJCTDEC")
+        ra_raw = headers.get("RA") or headers.get("OBJCTRA")
+        dec_raw = headers.get("DEC") or headers.get("OBJCTDEC")
+        ra = _parse_ra(ra_raw)
+        dec = _parse_coord(dec_raw)
         if ra is None or dec is None:
             continue
 
-        info = PanelInfo(
-            panel_id=str(panel.id),
-            ra=float(ra),
-            dec=float(dec),
+        pid = str(panel.id)
+        fits_path = Path(frame.file_path)
+        if not fits_path.exists():
+            continue
+        try:
+            tile_img, native_width = generate_panel_thumbnail(fits_path, max_width=tile_max_width)
+            tiles[pid] = tile_img
+        except Exception:
+            logger.warning("Failed to generate thumbnail for panel %s", panel.id)
+            continue
+
+        panel_infos.append(PanelInfo(
+            panel_id=pid,
+            ra=ra,
+            dec=dec,
             objctrot=float(headers.get("OBJCTROT", 0)),
             pierside=str(headers.get("PIERSIDE", "West")),
             fits_path=frame.file_path,
             focallen=float(headers.get("FOCALLEN", 448)),
             xpixsz=float(headers.get("XPIXSZ", 3.76)),
-        )
-        panel_infos.append(info)
-
-        fits_path = Path(frame.file_path)
-        if fits_path.exists():
-            try:
-                tile_img = generate_panel_thumbnail(fits_path, max_width=tile_max_width)
-                tiles[str(panel.id)] = tile_img
-            except Exception:
-                logger.warning("Failed to generate thumbnail for panel %s", panel.id)
+        ))
 
     if not tiles:
         raise ValueError("No panels could be rendered from FITS files")
 
     sample_tile = next(iter(tiles.values()))
+    # Scale factor: thumbnail pixels / native sensor pixels
+    thumb_scale = sample_tile.width / native_width if native_width > 0 else 1.0
     layout = compute_panel_layout(
         panel_infos,
         tile_width=sample_tile.width,
         tile_height=sample_tile.height,
+        scale=thumb_scale,
     )
 
     composite = composite_panels(tiles, layout)

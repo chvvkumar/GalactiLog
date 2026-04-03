@@ -39,6 +39,7 @@ class PanelStats(BaseModel):
     filter_distribution: dict[str, float]
     last_session_date: str | None = None
     thumbnail_url: str | None = None
+    thumbnail_pier_side: str | None = None
     object_pattern: str | None = None
 
 

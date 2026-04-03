@@ -432,6 +432,115 @@ async def get_mosaic_composite(
     return Response(content=jpeg_bytes, media_type="image/jpeg")
 
 
+@router.get("/{mosaic_id}/composite/debug")
+async def get_mosaic_composite_debug(
+    mosaic_id: str,
+    session: AsyncSession = Depends(get_session),
+    _user: User = Depends(get_current_user),
+):
+    """Debug endpoint: return layout data as JSON instead of image."""
+    from app.services.mosaic_composite import (
+        select_best_frame, _parse_ra, _parse_coord,
+        PanelInfo, compute_panel_layout, generate_panel_thumbnail,
+    )
+    from pathlib import Path
+
+    mosaic = (
+        await session.execute(
+            select(Mosaic)
+            .where(Mosaic.id == mosaic_id)
+            .options(selectinload(Mosaic.panels).selectinload(MosaicPanel.target))
+        )
+    ).scalars().first()
+
+    if not mosaic:
+        raise HTTPException(status_code=404, detail="Mosaic not found")
+
+    panels = sorted(mosaic.panels, key=lambda p: p.sort_order)
+    debug_panels = []
+    panel_infos = []
+    native_width = 800
+    tile_w, tile_h = 800, 800
+
+    for panel in panels:
+        frame = await select_best_frame(panel.target_id, panel.object_pattern, session)
+        if not frame or not frame.file_path:
+            debug_panels.append({
+                "label": panel.panel_label,
+                "error": "no frame found",
+            })
+            continue
+
+        headers = frame.raw_headers or {}
+        ra_raw = headers.get("RA") or headers.get("OBJCTRA")
+        dec_raw = headers.get("DEC") or headers.get("OBJCTDEC")
+        ra = _parse_ra(ra_raw)
+        dec = _parse_coord(dec_raw)
+
+        fits_path = Path(frame.file_path)
+        exists = fits_path.exists()
+        if exists:
+            try:
+                tile_img, nw = generate_panel_thumbnail(fits_path, max_width=800)
+                native_width = nw
+                tile_w, tile_h = tile_img.size
+            except Exception as e:
+                exists = False
+
+        info = {
+            "label": panel.panel_label,
+            "object_pattern": panel.object_pattern,
+            "target_name": panel.target.primary_name if panel.target else None,
+            "frame_id": str(frame.id),
+            "file_path": frame.file_path,
+            "file_exists": exists,
+            "ra_raw": ra_raw,
+            "dec_raw": dec_raw,
+            "ra_deg": ra,
+            "dec_deg": dec,
+            "objctrot": headers.get("OBJCTROT"),
+            "pierside": headers.get("PIERSIDE"),
+            "focallen": headers.get("FOCALLEN"),
+            "xpixsz": headers.get("XPIXSZ"),
+            "median_hfr": frame.median_hfr,
+        }
+        debug_panels.append(info)
+
+        if ra is not None and dec is not None and exists:
+            panel_infos.append(PanelInfo(
+                panel_id=panel.panel_label,
+                ra=ra,
+                dec=dec,
+                objctrot=float(headers.get("OBJCTROT", 0)),
+                pierside=str(headers.get("PIERSIDE", "West")),
+                fits_path=frame.file_path,
+                focallen=float(headers.get("FOCALLEN", 448)),
+                xpixsz=float(headers.get("XPIXSZ", 3.76)),
+            ))
+
+    scale = tile_w / native_width if native_width > 0 else 1.0
+    layout = compute_panel_layout(panel_infos, tile_w, tile_h, scale=scale)
+
+    layout_debug = [
+        {
+            "panel_id": pos.panel_id,
+            "x": round(pos.x, 1),
+            "y": round(pos.y, 1),
+            "rotation": round(pos.rotation, 2),
+        }
+        for pos in layout
+    ]
+
+    return {
+        "mosaic_name": mosaic.name,
+        "native_width": native_width,
+        "tile_size": [tile_w, tile_h],
+        "scale": round(scale, 4),
+        "panels": debug_panels,
+        "layout": layout_debug,
+    }
+
+
 @router.put("/{mosaic_id}")
 async def update_mosaic(
     mosaic_id: uuid.UUID,

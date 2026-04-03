@@ -606,6 +606,7 @@ export interface PanelStats {
   filter_distribution: Record<string, number>;
   last_session_date: string | null;
   thumbnail_url: string | null;
+  thumbnail_pier_side: string | null;
 }
 
 export interface MosaicSummary {

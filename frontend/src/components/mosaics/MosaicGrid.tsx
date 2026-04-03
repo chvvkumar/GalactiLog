@@ -37,9 +37,9 @@ interface Props {
 const MosaicGrid: Component<Props> = (props) => {
   const [tooltip, setTooltip] = createSignal<{ x: number; y: number; panel: PanelStats } | null>(null);
 
-  const layout = createMemo((): { positions: Position[]; svgW: number; svgH: number } => {
+  const layout = createMemo((): { positions: Position[]; svgW: number; svgH: number; spatial: boolean } => {
     const panels = props.panels;
-    if (panels.length === 0) return { positions: [], svgW: 0, svgH: 0 };
+    if (panels.length === 0) return { positions: [], svgW: 0, svgH: 0, spatial: false };
 
     const maxInt = Math.max(...panels.map((p) => p.total_integration_seconds), 1);
 
@@ -74,6 +74,7 @@ const MosaicGrid: Component<Props> = (props) => {
         })),
         svgW: cols * (CELL + GAP) - GAP,
         svgH: rows * (CELL + GAP) - GAP,
+        spatial: false,
       };
     }
 
@@ -114,8 +115,8 @@ const MosaicGrid: Component<Props> = (props) => {
     const PAD = innerCell * 0.5;
 
     const positions: Position[] = withCoords.map((p) => {
-      // Sky convention: RA increases right-to-left, Dec increases bottom-to-top
-      const x = PAD + (maxRa - p.ra!) * cosDec * scale;
+      // Display convention: lower RA on left, higher Dec on top
+      const x = PAD + (p.ra! - minRa) * cosDec * scale;
       const y = PAD + (maxDec - p.dec!) * scale;
       return {
         panel: p,
@@ -145,10 +146,33 @@ const MosaicGrid: Component<Props> = (props) => {
     const svgW = Math.max(...allX) + PAD;
     const svgH = Math.max(...allY) + PAD;
 
-    return { positions, svgW, svgH };
+    return { positions, svgW, svgH, spatial: true };
   });
 
   const BORDER = 3;
+
+  // Determine the majority pier side so we can rotate mismatched thumbnails 180°
+  const majorityPierSide = createMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const p of props.panels) {
+      const ps = p.thumbnail_pier_side;
+      if (ps) counts[ps] = (counts[ps] || 0) + 1;
+    }
+    let best = "";
+    let bestCount = 0;
+    for (const [side, count] of Object.entries(counts)) {
+      if (count > bestCount) {
+        best = side;
+        bestCount = count;
+      }
+    }
+    return best;
+  });
+
+  const needsRotation = (panel: PanelStats) => {
+    const majority = majorityPierSide();
+    return majority && panel.thumbnail_pier_side && panel.thumbnail_pier_side !== majority;
+  };
 
   return (
     <div>
@@ -215,17 +239,32 @@ const MosaicGrid: Component<Props> = (props) => {
                         />
                       }
                     >
-                      {(url) => (
-                        <image
-                          href={url()}
-                          x={pos.x + BORDER}
-                          y={pos.y + BORDER}
-                          width={pos.w - BORDER * 2}
-                          height={pos.h - BORDER * 2}
-                          preserveAspectRatio="xMidYMid slice"
-                          clip-path={`url(#clip-${pos.panel.panel_id})`}
-                        />
-                      )}
+                      {(url) => {
+                        const imgX = pos.x + BORDER;
+                        const imgY = pos.y + BORDER;
+                        const imgW = pos.w - BORDER * 2;
+                        const imgH = pos.h - BORDER * 2;
+                        const cx = imgX + imgW / 2;
+                        const cy = imgY + imgH / 2;
+                        // Build transform: spatial layout flips RA axis so mirror images horizontally;
+                        // pier side mismatch adds 180° rotation (equivalent to also flipping vertically)
+                        const parts: string[] = [];
+                        if (layout().spatial) parts.push(`translate(${2 * cx} 0) scale(-1 1)`);
+                        if (needsRotation(pos.panel)) parts.push(`rotate(180 ${cx} ${cy})`);
+                        const xform = parts.length > 0 ? parts.join(" ") : undefined;
+                        return (
+                          <image
+                            href={url()}
+                            x={imgX}
+                            y={imgY}
+                            width={imgW}
+                            height={imgH}
+                            preserveAspectRatio="xMidYMid slice"
+                            clip-path={`url(#clip-${pos.panel.panel_id})`}
+                            transform={xform}
+                          />
+                        );
+                      }}
                     </Show>
                     {/* Label overlay */}
                     <text
