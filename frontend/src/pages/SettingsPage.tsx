@@ -4,7 +4,6 @@ import { useSearchParams } from "@solidjs/router";
 import { FiltersTab } from "../components/settings/FiltersTab";
 import { EquipmentTab } from "../components/settings/EquipmentTab";
 import { MergesTab } from "../components/settings/MergesTab";
-import { MosaicsTab } from "../components/settings/MosaicsTab";
 import { UsersTab } from "../components/settings/UsersTab";
 import ScanManager from "../components/ScanManager";
 import DisplayTab from "../components/DisplayTab";
@@ -22,41 +21,7 @@ const ALL_TABS = [
 type TabId = (typeof ALL_TABS)[number]["id"];
 
 const TargetManagementTab: Component = () => {
-  const [searchParams, setSearchParams] = useSearchParams();
-  const subTab = () => (searchParams.sub === "mosaics" ? "mosaics" : "merges") as "merges" | "mosaics";
-
-  return (
-    <div class="space-y-4">
-      <div class="flex gap-2">
-        <button
-          onClick={() => setSearchParams({ tab: "targets", sub: "merges" })}
-          class={`px-3 py-1.5 text-sm rounded-[var(--radius-sm)] transition-colors ${
-            subTab() === "merges"
-              ? "bg-theme-elevated text-theme-text-primary font-medium"
-              : "border border-theme-border text-theme-text-secondary hover:text-theme-text-primary"
-          }`}
-        >
-          Merges
-        </button>
-        <button
-          onClick={() => setSearchParams({ tab: "targets", sub: "mosaics" })}
-          class={`px-3 py-1.5 text-sm rounded-[var(--radius-sm)] transition-colors ${
-            subTab() === "mosaics"
-              ? "bg-theme-elevated text-theme-text-primary font-medium"
-              : "border border-theme-border text-theme-text-secondary hover:text-theme-text-primary"
-          }`}
-        >
-          Mosaics
-        </button>
-      </div>
-      <Show when={subTab() === "merges"}>
-        <MergesTab />
-      </Show>
-      <Show when={subTab() === "mosaics"}>
-        <MosaicsTab />
-      </Show>
-    </div>
-  );
+  return <MergesTab />;
 };
 
 export const SettingsPage: Component = () => {

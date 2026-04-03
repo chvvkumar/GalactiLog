@@ -30,7 +30,7 @@ const MosaicDetailPage: Component = () => {
 
   return (
     <div class="p-4 space-y-4 max-w-7xl mx-auto">
-      <A href="/" class="text-xs text-theme-accent hover:underline">&larr; Dashboard</A>
+      <A href="/mosaics" class="text-xs text-theme-accent hover:underline">&larr; Mosaics</A>
 
       <Show when={mosaic()} fallback={<div class="text-center text-theme-text-secondary py-8">Loading...</div>}>
         {(data) => (
