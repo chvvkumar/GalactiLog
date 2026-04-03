@@ -499,21 +499,20 @@ def resolve_target_name_cached(
     mapped_norm = normalize_object_name(mapped) if mapped != object_name else None
 
     # Check cache for original name
-    cached = get_cached_simbad(normalized, db_session)
-    if cached is not None and not cached.get("_negative"):
-        return curate_simbad_result(cached)
-
-    # Check cache for mapped name (even if original was a negative cache hit)
-    if mapped_norm:
-        cached = get_cached_simbad(mapped_norm, db_session)
-        if cached is not None:
-            if cached.get("_negative"):
-                return None
-            return curate_simbad_result(cached)
-
-    # Original was a confirmed negative and no mapped name exists — done
     orig_cached = get_cached_simbad(normalized, db_session)
-    if orig_cached is not None and orig_cached.get("_negative") and not mapped_norm:
+    if orig_cached is not None and not orig_cached.get("_negative"):
+        return curate_simbad_result(orig_cached)
+
+    # Check cache for mapped name (if different from original)
+    if mapped_norm:
+        mapped_cached = get_cached_simbad(mapped_norm, db_session)
+        if mapped_cached is not None:
+            if mapped_cached.get("_negative"):
+                return None
+            return curate_simbad_result(mapped_cached)
+
+    # Original was negative-cached and no mapped name — done
+    if orig_cached is not None and orig_cached.get("_negative"):
         return None
 
     if skip_simbad:

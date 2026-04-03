@@ -391,3 +391,45 @@ class TestFetchTapAliases:
             result = await _fetch_tap_aliases("M 31")
 
         assert result == []
+
+
+class TestResolveTargetNameCached:
+    def test_negative_cache_no_mapped_name_returns_none(self):
+        """When original is negative-cached and no mapping exists, return None without re-querying."""
+        from unittest.mock import MagicMock, patch
+        from app.services.simbad import resolve_target_name_cached
+
+        mock_session = MagicMock()
+
+        with patch("app.services.simbad.get_cached_simbad") as mock_get_cache, \
+             patch("app.services.simbad._get_simbad_id", return_value="XYZNOTREAL"):
+            # Name maps to itself (no mapped variant)
+            mock_get_cache.return_value = {"_negative": True}
+
+            result = resolve_target_name_cached("XYZNOTREAL", mock_session, skip_simbad=True)
+
+        assert result is None
+        # get_cached_simbad should be called exactly once (not twice for the same key)
+        assert mock_get_cache.call_count == 1
+
+    def test_negative_original_tries_mapped_name(self):
+        """When original is negative-cached but mapping exists, try the mapped name."""
+        from unittest.mock import MagicMock, patch
+        from app.services.simbad import resolve_target_name_cached
+
+        mock_session = MagicMock()
+
+        with patch("app.services.simbad.get_cached_simbad") as mock_get_cache, \
+             patch("app.services.simbad._get_simbad_id", return_value="NGC 7000"):
+            # First call (original) -> negative
+            # Second call (mapped "NGC 7000") -> positive result
+            mock_get_cache.side_effect = [
+                {"_negative": True},
+                {"main_id": "NGC 7000", "raw_aliases": ["NGC 7000"], "ra": 314.0, "dec": 44.0, "object_type": "HII"},
+            ]
+
+            result = resolve_target_name_cached("north america nebula", mock_session, skip_simbad=True)
+
+        assert result is not None
+        assert result["catalog_id"] == "NGC 7000"
+        assert mock_get_cache.call_count == 2
