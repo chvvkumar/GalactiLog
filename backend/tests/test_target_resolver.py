@@ -150,3 +150,22 @@ class TestCreateTarget:
         result = _create_target(simbad_result, "NGC 7000", mock_session)
         assert result == "existing-target"
         mock_session.rollback.assert_called_once()
+
+
+class TestFindTargetByNameNormalization:
+    def test_primary_name_lookup_normalizes_input(self):
+        """Ensure primary_name lookup normalizes the input, not raw comparison.
+
+        Regression: old code compared raw 'ngc  7000' against primary_name which never matched.
+        """
+        from app.services.target_resolver import find_target_by_name
+
+        mock_session = MagicMock()
+        mock_target = MagicMock()
+        mock_target.id = "target-456"
+        # First call (aliases) returns None, second call (primary_name) returns target
+        mock_session.execute.return_value.scalar_one_or_none.side_effect = [None, mock_target]
+
+        result = find_target_by_name("ngc  7000", mock_session)
+        assert result is not None
+        assert str(result.id) == "target-456"
