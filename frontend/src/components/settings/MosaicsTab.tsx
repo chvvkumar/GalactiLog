@@ -57,6 +57,17 @@ export const MosaicsTab: Component = () => {
 
   const keywords = () => settingsCtx.settings()?.general?.mosaic_keywords ?? ["Panel", "P"];
 
+  const GAP_OPTIONS = [
+    { label: "No grouping", value: 0 },
+    { label: "1 month", value: 30 },
+    { label: "3 months", value: 90 },
+    { label: "6 months", value: 180 },
+    { label: "1 year", value: 365 },
+  ];
+
+  const campaignGap = () =>
+    settingsCtx.settings()?.general?.mosaic_campaign_gap_days ?? 0;
+
   const refresh = async () => {
     showToast("Loading mosaics...", "info", 15000);
     try {
@@ -303,13 +314,32 @@ export const MosaicsTab: Component = () => {
         <div class="flex justify-between items-center">
           <h3 class="text-theme-text-primary font-medium">Detection Keywords</h3>
           <Show when={isAdmin()}>
-            <button
-              onClick={handleDetect}
-              disabled={detecting()}
-              class="px-3 py-1.5 border border-theme-border-em text-theme-text-secondary rounded text-sm disabled:opacity-50 hover:text-theme-text-primary hover:border-theme-accent transition-colors"
-            >
-              {detecting() ? "Detecting..." : "Run Detection"}
-            </button>
+            <div class="flex items-center gap-2">
+              <select
+                value={campaignGap()}
+                onChange={async (e) => {
+                  const val = parseInt(e.currentTarget.value, 10);
+                  const current = settingsCtx.settings()?.general;
+                  await settingsCtx.saveGeneral({ ...current!, mosaic_campaign_gap_days: val });
+                }}
+                class="px-2 py-1.5 text-sm bg-theme-base border border-theme-border rounded-[var(--radius-sm)] text-theme-text-primary focus:outline-none focus:border-theme-accent"
+              >
+                <For each={GAP_OPTIONS}>
+                  {(opt) => (
+                    <option value={opt.value} selected={opt.value === campaignGap()}>
+                      {opt.label}
+                    </option>
+                  )}
+                </For>
+              </select>
+              <button
+                onClick={handleDetect}
+                disabled={detecting()}
+                class="px-3 py-1.5 border border-theme-border-em text-theme-text-secondary rounded text-sm disabled:opacity-50 hover:text-theme-text-primary hover:border-theme-accent transition-colors"
+              >
+                {detecting() ? "Detecting..." : "Run Detection"}
+              </button>
+            </div>
           </Show>
         </div>
         <p class="text-xs text-theme-text-secondary">
