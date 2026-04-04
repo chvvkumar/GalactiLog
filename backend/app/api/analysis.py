@@ -27,7 +27,7 @@ from app.schemas.analysis import (
     TimeSeriesResponse,
     TrendLine,
 )
-from app.services.normalization import load_alias_maps, expand_canonical
+from app.services.normalization import load_alias_maps, expand_canonical, normalize_equipment, normalize_filter
 from app.api.auth import get_current_user
 
 router = APIRouter(prefix="/analysis", tags=["analysis"])
@@ -450,32 +450,51 @@ async def get_boxplot(
 
     col = METRIC_MAP[metric]
 
-    if group_by == "filter":
-        group_col = Image.filter_used
-    elif group_by == "equipment":
-        group_col = func.concat(Image.telescope, " + ", Image.camera)
+    # For equipment and filter grouping, we need to normalize in Python
+    # so that grouped aliases are combined under their canonical names.
+    if group_by in ("equipment", "filter"):
+        extra_cols = [Image.telescope, Image.camera, Image.filter_used]
     elif group_by == "month":
-        group_col = func.to_char(Image.capture_date, "YYYY-MM")
-    else:
-        group_col = Image.resolved_target_id
+        extra_cols = [func.to_char(Image.capture_date, "YYYY-MM").label("month_grp")]
+    else:  # target
+        extra_cols = [Image.resolved_target_id]
 
     q = (
-        select(col.label("val"), group_col.label("grp"), Image.resolved_target_id)
+        select(col.label("val"), Image.resolved_target_id, *extra_cols)
         .where(Image.image_type == "LIGHT")
         .where(col.is_not(None))
         .where(Image.capture_date.is_not(None))
-        .where(group_col.is_not(None))
     )
     q = await _apply_filters(q, session, telescope, camera, filter_used, date_from, date_to)
     rows = (await session.execute(q)).all()
 
+    # Load alias maps for normalization
+    filter_map, cam_map, tel_map = await load_alias_maps(session)
+
     grouped: dict[str, list[float]] = defaultdict(list)
     target_id_map: dict[str, str | None] = {}
     for r in rows:
-        key = str(r.grp)
-        grouped[key].append(float(r.val))
-        if group_by == "target":
+        if group_by == "equipment":
+            tel_norm = normalize_equipment(r.telescope, tel_map) or r.telescope
+            cam_norm = normalize_equipment(r.camera, cam_map) or r.camera
+            if not tel_norm or not cam_norm:
+                continue
+            key = f"{tel_norm} + {cam_norm}"
+        elif group_by == "filter":
+            f = normalize_filter(r.filter_used, filter_map) or r.filter_used
+            if not f:
+                continue
+            key = f
+        elif group_by == "month":
+            if not r.month_grp:
+                continue
+            key = str(r.month_grp)
+        else:  # target
+            if not r.resolved_target_id:
+                continue
+            key = str(r.resolved_target_id)
             target_id_map[key] = r.resolved_target_id
+        grouped[key].append(float(r.val))
 
     if group_by == "target":
         tid_set = {v for v in target_id_map.values() if v}

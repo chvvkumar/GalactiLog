@@ -75,14 +75,14 @@ const CompareTab: Component<Props> = (props) => {
           <select class={selectClass} value={groupA()} onChange={(e) => setGroupA(e.currentTarget.value)}>
             <option value="">Select...</option>
             <For each={props.combos}>
-              {(c) => <option value={`${c.telescope}|||${c.camera}`}>{c.label}</option>}
+              {(c) => <option value={`${c.telescope}|||${c.camera}`}>{c.label}{c.grouped ? " \u29C9" : ""}</option>}
             </For>
           </select>
           <label class="text-sm text-theme-text-secondary">Group B:</label>
           <select class={selectClass} value={groupB()} onChange={(e) => setGroupB(e.currentTarget.value)}>
             <option value="">Select...</option>
             <For each={props.combos}>
-              {(c) => <option value={`${c.telescope}|||${c.camera}`}>{c.label}</option>}
+              {(c) => <option value={`${c.telescope}|||${c.camera}`}>{c.label}{c.grouped ? " \u29C9" : ""}</option>}
             </For>
           </select>
         </Show>
