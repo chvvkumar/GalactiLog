@@ -4,9 +4,7 @@ import FilterBadges from "./FilterBadges";
 import SessionTable from "./SessionTable";
 import { useCatalog } from "../store/catalog";
 
-function formatHours(seconds: number): string {
-  return (seconds / 3600).toFixed(1) + "h";
-}
+import { formatIntegration } from "../utils/format";
 
 const TargetCard: Component<{ target: TargetAggregation }> = (props) => {
   const { expandedTargets, toggleExpanded } = useCatalog();
@@ -19,13 +17,13 @@ const TargetCard: Component<{ target: TargetAggregation }> = (props) => {
         onClick={() => toggleExpanded(props.target.target_id)}
       >
         <div>
-          <h3 class="text-white font-medium">{props.target.primary_name}</h3>
+          <h3 class="text-theme-text-primary font-medium">{props.target.primary_name}</h3>
           <Show when={props.target.aliases.length > 0}>
             <p class="text-xs text-theme-text-secondary">{props.target.aliases.join(", ")}</p>
           </Show>
         </div>
         <div class="text-right text-sm">
-          <span class="text-white font-semibold">{formatHours(props.target.total_integration_seconds)}</span>
+          <span class="text-theme-text-primary font-semibold">{formatIntegration(props.target.total_integration_seconds)}</span>
           <span class="text-theme-text-secondary ml-2">{props.target.total_frames} frames</span>
         </div>
       </div>

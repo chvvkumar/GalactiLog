@@ -349,7 +349,7 @@ const ImagingTimeline: Component<Props> = (props) => {
     <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-4 space-y-2">
       {/* Header */}
       <div class="flex items-center justify-between flex-wrap gap-2">
-        <h3 class="text-white font-medium text-sm">Imaging Timeline</h3>
+        <h3 class="text-theme-text-primary font-medium text-sm">Imaging Timeline</h3>
         <div class="flex items-center gap-3">
           {/* Gap mode toggle */}
           <div class="flex gap-0.5">
@@ -367,7 +367,7 @@ const ImagingTimeline: Component<Props> = (props) => {
             <For each={presets}>
               {(p) => (
                 <button
-                  class={`px-2 py-0.5 text-xs rounded transition-colors duration-200 ${activePreset() === p.key ? "bg-theme-accent text-white" : "bg-theme-surface-alt text-theme-text-secondary hover:text-white"}`}
+                  class={`px-2 py-0.5 text-xs rounded transition-colors duration-200 ${activePreset() === p.key ? "bg-theme-accent text-white" : "bg-theme-surface-alt text-theme-text-secondary hover:text-theme-text-primary"}`}
                   onClick={() => applyPreset(p.key)}
                 >{p.label}</button>
               )}

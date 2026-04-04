@@ -14,10 +14,7 @@ import type {
 let cachedSuggestions: MosaicSuggestionResponse[] | null = null;
 let cachedMosaics: MosaicSummary[] | null = null;
 
-function formatHours(seconds: number): string {
-  const h = seconds / 3600;
-  return h < 1 ? `${Math.round(h * 60)}m` : `${h.toFixed(1)}h`;
-}
+import { formatIntegration } from "../../utils/format";
 
 export const MosaicsTab: Component = () => {
   const { isAdmin } = useAuth();
@@ -467,7 +464,7 @@ export const MosaicsTab: Component = () => {
                           {" \u00b7 "}
                           {totalFrames()} frames
                           {" \u00b7 "}
-                          {formatHours(totalInt())}
+                          {formatIntegration(totalInt())}
                         </div>
                       </div>
                       <span class="text-theme-text-secondary text-xs ml-2">
@@ -534,7 +531,7 @@ export const MosaicsTab: Component = () => {
                                     <td class="px-3 py-1.5 text-theme-text-secondary">{sess.date}</td>
                                     <td class="px-3 py-1.5 text-theme-text-secondary">{sess.filter_used || "\u2014"}</td>
                                     <td class="px-3 py-1.5 text-theme-text-secondary text-right">{sess.frames}</td>
-                                    <td class="px-3 py-1.5 text-theme-text-secondary text-right">{formatHours(sess.integration_seconds)}</td>
+                                    <td class="px-3 py-1.5 text-theme-text-secondary text-right">{formatIntegration(sess.integration_seconds)}</td>
                                   </tr>
                                 )}
                               </For>
@@ -633,7 +630,7 @@ export const MosaicsTab: Component = () => {
                         <div class="text-xs text-theme-text-secondary mt-0.5">
                           {m.panel_count} panels
                           {" \u00b7 "}
-                          {formatHours(m.total_integration_seconds)} integration
+                          {formatIntegration(m.total_integration_seconds)} integration
                           {" \u00b7 "}
                           {m.total_frames} frames
                         </div>
@@ -706,7 +703,7 @@ export const MosaicsTab: Component = () => {
                                       {p.target_name}
                                     </span>
                                     <div class="text-xs text-theme-text-secondary mt-0.5">
-                                      {formatHours(p.total_integration_seconds)}
+                                      {formatIntegration(p.total_integration_seconds)}
                                       {" \u00b7 "}
                                       {p.total_frames} frames
                                     </div>

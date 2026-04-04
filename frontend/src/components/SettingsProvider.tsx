@@ -22,6 +22,7 @@ interface SettingsContextValue {
   toggleFilter: (filter: string) => void;
   saveGraphSettings: (updates: Partial<GraphSettings>) => Promise<void>;
   timezone: () => string;
+  contentWidth: () => string;
 }
 
 const SettingsContext = createContext<SettingsContextValue>();
@@ -48,6 +49,7 @@ export const SettingsProvider: ParentComponent = (props) => {
     filterAliasMap: () => getFilterAliasMap(store.settings()),
     filterBadgeStyle: () => (store.settings()?.general.filter_style as FilterBadgeStyle) || "text-only",
     timezone: () => store.settings()?.general.timezone ?? "UTC",
+    contentWidth: () => store.settings()?.general.content_width ?? "full",
     saveGeneral: store.saveGeneral,
     saveFilters: store.saveFilters,
     saveEquipment: store.saveEquipment,

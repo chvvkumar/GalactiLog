@@ -17,6 +17,15 @@ const PREVIEW_FILTERS: { name: string; color: string }[] = [
   { name: "O", color: "#3a8fd4" },
 ];
 
+const CONTENT_WIDTH_OPTIONS: { value: string; label: string; desc: string }[] = [
+  { value: "full", label: "Full", desc: "100%" },
+  { value: "ultra-wide", label: "Ultra Wide", desc: "1536px" },
+  { value: "wide", label: "Wide", desc: "1280px" },
+  { value: "standard", label: "Standard", desc: "1152px" },
+  { value: "compact", label: "Compact", desc: "1024px" },
+  { value: "narrow", label: "Narrow", desc: "896px" },
+];
+
 const TIMEZONE_OPTIONS: { value: string; label: string }[] = [
   { value: "UTC", label: "UTC" },
   { value: "America/New_York", label: "Eastern Time (US)" },
@@ -90,6 +99,21 @@ export default function DisplayTab() {
     const current = ctx.settings()?.general;
     if (current) {
       await ctx.saveGeneral({ ...current, timezone: tz });
+    }
+  };
+
+  const [selectedContentWidth, setSelectedContentWidth] = createSignal<string>("full");
+
+  createEffect(() => {
+    const w = ctx.settings()?.general.content_width;
+    if (w) setSelectedContentWidth(w);
+  });
+
+  const handleContentWidthChange = async (width: string) => {
+    setSelectedContentWidth(width);
+    const current = ctx.settings()?.general;
+    if (current) {
+      await ctx.saveGeneral({ ...current, content_width: width });
     }
   };
 
@@ -266,6 +290,28 @@ export default function DisplayTab() {
           </div>
         </div>
 
+        <div class="flex items-center justify-between">
+          <span class="text-sm text-theme-text-secondary">Content Width</span>
+          <div class="flex gap-1">
+            <For each={CONTENT_WIDTH_OPTIONS}>
+              {(opt) => (
+                <button
+                  type="button"
+                  class={`px-2.5 py-1.5 rounded-[var(--radius-sm)] text-xs transition-colors duration-150 border ${
+                    selectedContentWidth() === opt.value
+                      ? "border-theme-accent bg-theme-accent text-white"
+                      : "border-theme-border text-theme-text-secondary hover:border-theme-border-em"
+                  }`}
+                  onClick={() => handleContentWidthChange(opt.value)}
+                  title={opt.desc}
+                >
+                  {opt.label}
+                </button>
+              )}
+            </For>
+          </div>
+        </div>
+
       </div>
 
       {/* Metric Visibility */}
@@ -364,7 +410,7 @@ export default function DisplayTab() {
 
       <Show when={local() && isAdmin()}>
         <div class="flex justify-end">
-          <button type="button" class="px-3 py-1.5 text-sm rounded-[var(--radius-sm)] bg-theme-accent hover:bg-theme-accent-hover text-white disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-150" disabled={saving()} onClick={handleSave}>
+          <button type="button" class="px-3 py-1.5 text-sm rounded-[var(--radius-sm)] bg-theme-accent text-white disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-90 transition-opacity" disabled={saving()} onClick={handleSave}>
             {saving() ? "Saving..." : "Save"}
           </button>
         </div>

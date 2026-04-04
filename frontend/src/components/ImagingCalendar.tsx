@@ -117,7 +117,7 @@ const ImagingCalendar: Component = () => {
   return (
     <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-4 space-y-2">
       <div class="flex items-center justify-between">
-        <h3 class="text-white font-medium text-sm">Imaging Calendar</h3>
+        <h3 class="text-theme-text-primary font-medium text-sm">Imaging Calendar</h3>
         <select
           class="bg-theme-bg border border-theme-border rounded px-2 py-1 text-xs text-theme-text-secondary"
           value={selectedYear() ?? ""}

@@ -8,11 +8,10 @@ import TargetMetricsChart from "../components/TargetMetricsChart";
 import ExportModal from "../components/ExportModal";
 import { useSettingsContext } from "../components/SettingsProvider";
 import { isFieldVisible } from "../utils/displaySettings";
+import { contentWidthClass } from "../utils/format";
 import { timezoneLabel } from "../utils/dateTime";
 
-function formatHours(seconds: number): string {
-  return (seconds / 3600).toFixed(1) + "h";
-}
+import { formatIntegration } from "../utils/format";
 
 function formatCoord(val: number | null, label: string): string {
   if (val === null) return "";
@@ -28,7 +27,7 @@ function formatSize(major: number | null, minor: number | null): string {
 const TargetDetailPage: Component = () => {
   const params = useParams<{ targetId: string }>();
   const [searchParams] = useSearchParams();
-  const { displaySettings, graphSettings, saveGraphSettings, timezone } = useSettingsContext();
+  const { displaySettings, graphSettings, saveGraphSettings, timezone, contentWidth } = useSettingsContext();
   const tzLabel = () => timezoneLabel(timezone());
   const visible = (group: Parameters<typeof isFieldVisible>[1], field: string) =>
     isFieldVisible(displaySettings(), group, field);
@@ -132,7 +131,7 @@ const TargetDetailPage: Component = () => {
   };
 
   return (
-    <div class="min-h-[calc(100vh-57px)] bg-theme-base">
+    <div class={`min-h-[calc(100vh-57px)] bg-theme-base ${contentWidthClass(contentWidth())}`}>
       {/* Back nav */}
       <div class="px-4 py-3 border-b border-theme-border">
         <A href="/" class="text-theme-text-secondary hover:text-theme-text-primary text-sm transition-colors">
@@ -218,7 +217,7 @@ const TargetDetailPage: Component = () => {
               {/* Cumulative stats bar */}
               <div class="flex flex-wrap gap-3 mt-4 items-center">
                 <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-3 text-center min-w-[80px] sm:min-w-[100px]">
-                  <div class="text-lg font-semibold text-metric-integration">{formatHours(detail().total_integration_seconds)}</div>
+                  <div class="text-lg font-semibold text-metric-integration">{formatIntegration(detail().total_integration_seconds)}</div>
                   <div class="text-caption text-theme-text-secondary">Total Integration</div>
                 </div>
                 <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-3 text-center min-w-[80px] sm:min-w-[100px]">

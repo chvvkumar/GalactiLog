@@ -1,5 +1,7 @@
 import { Component, Show, createSignal } from "solid-js";
 import { useStats } from "../store/stats";
+import { useSettingsContext } from "../components/SettingsProvider";
+import { contentWidthClass } from "../utils/format";
 import StatsOverview from "../components/StatsOverview";
 import EquipmentInventory from "../components/EquipmentInventory";
 import EquipmentPerformance from "../components/EquipmentPerformance";
@@ -12,10 +14,12 @@ import IngestHistory from "../components/IngestHistory";
 
 const StatisticsPage: Component = () => {
   const { stats } = useStats();
+  const ctx = useSettingsContext();
   const [timelineView, setTimelineView] = createSignal<"timeline" | "calendar">("timeline");
 
   return (
-    <div class="p-4 space-y-4 max-w-7xl mx-auto">
+    <div class={`p-4 space-y-4 ${contentWidthClass(ctx.contentWidth())}`}>
+      <h1 class="text-xl font-semibold tracking-tight text-theme-text-primary">Statistics</h1>
 
       <Show when={stats.loading && !stats()}>
         <div class="text-center text-theme-text-secondary py-8">Loading analytics...</div>

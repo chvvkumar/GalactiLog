@@ -2,9 +2,7 @@ import { Component, For, Show, createSignal } from "solid-js";
 import type { EquipmentComboMetrics, EquipmentFilterMetrics } from "../types";
 import FilterBadges from "./FilterBadges";
 
-function formatHours(seconds: number): string {
-  return (seconds / 3600).toFixed(1) + "h";
-}
+import { formatIntegration } from "../utils/format";
 
 function formatMetric(val: number | null, suffix = ""): string {
   if (val === null || val === undefined) return "\u2014";
@@ -26,7 +24,7 @@ const FilterBreakdownRow: Component<{ row: EquipmentFilterMetrics }> = (props) =
         {props.row.frame_count.toLocaleString()}
       </td>
       <td class="text-right text-theme-text-secondary py-1 px-2 tabular-nums">
-        {formatHours(props.row.total_integration_seconds)}
+        {formatIntegration(props.row.total_integration_seconds)}
       </td>
       <td class={`text-right py-1 px-2 tabular-nums ${metricClass(props.row.median_hfr)}`}>
         {formatMetric(props.row.median_hfr)}
@@ -57,7 +55,7 @@ const ComboRow: Component<{ combo: EquipmentComboMetrics }> = (props) => {
   return (
     <>
       <tr
-        class="border-b border-theme-border hover:bg-theme-surface-hover cursor-pointer"
+        class="border-b border-theme-border hover:bg-theme-hover transition-colors duration-150 cursor-pointer"
         onClick={() => setExpanded(!expanded())}
       >
         <td class="py-1.5 px-2">
@@ -88,7 +86,7 @@ const ComboRow: Component<{ combo: EquipmentComboMetrics }> = (props) => {
           {props.combo.frame_count.toLocaleString()}
         </td>
         <td class="text-right text-theme-text-secondary py-1.5 px-2 tabular-nums">
-          {formatHours(props.combo.total_integration_seconds)}
+          {formatIntegration(props.combo.total_integration_seconds)}
         </td>
         <td class={`text-right py-1.5 px-2 tabular-nums ${metricClass(props.combo.median_hfr)}`}>
           {formatMetric(props.combo.median_hfr)}

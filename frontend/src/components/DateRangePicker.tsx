@@ -19,7 +19,7 @@ const DateRangePicker: Component = () => {
           type="date"
           value={filters().dateRange.start || ""}
           min={dateBounds().oldest}
-          max={dateBounds().newest}
+          max={filters().dateRange.end || dateBounds().newest}
           placeholder={dateBounds().oldest}
           onInput={(e) =>
             updateFilter("dateRange", { ...filters().dateRange, start: e.currentTarget.value || null })
@@ -29,7 +29,7 @@ const DateRangePicker: Component = () => {
         <input
           type="date"
           value={filters().dateRange.end || ""}
-          min={dateBounds().oldest}
+          min={filters().dateRange.start || dateBounds().oldest}
           max={dateBounds().newest}
           placeholder={dateBounds().newest}
           onInput={(e) =>
