@@ -9,12 +9,22 @@ const RawHeaderAccordion: Component<{ headers: Record<string, unknown> | null }>
   };
 
   return (
-    <div class="border-t border-theme-border pt-2">
+    <div class="border-t border-theme-border/50 pt-3">
       <button
         onClick={() => setOpen((v) => !v)}
-        class="text-xs text-theme-accent hover:underline w-full text-left"
+        class="flex justify-between items-center w-full text-xs py-2 px-0 hover:text-theme-text-primary transition-colors cursor-pointer"
+        classList={{ "text-theme-text-primary": open(), "text-theme-text-secondary": !open() }}
       >
-        {open() ? "Hide FITS Headers" : "Show FITS Headers"} ({entries().length} keys)
+        <span class="font-semibold border-l-2 border-theme-accent pl-2">
+          FITS Headers <span class="text-theme-text-tertiary font-normal">({entries().length} keys)</span>
+        </span>
+        <svg
+          class={`w-3.5 h-3.5 transition-transform duration-200 ${open() ? "rotate-180" : ""}`}
+          viewBox="0 0 20 20"
+          fill="currentColor"
+        >
+          <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
+        </svg>
       </button>
       <Show when={open()}>
         <div class="mt-2 max-h-64 overflow-y-auto">
