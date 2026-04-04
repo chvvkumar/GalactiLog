@@ -232,9 +232,9 @@ const CorrelationChart: Component<Props> = (props) => {
   onCleanup(() => chartInstance?.destroy());
 
   return (
-    <>
+    <div class="flex flex-col h-full">
       {props.title && <h3 class="text-sm font-medium text-theme-text-primary mb-2">{props.title}</h3>}
-      <div class="relative w-full h-full">
+      <div class="relative flex-1 min-h-0">
         {props.loading && !props.data && (
           <div class="absolute inset-0 flex items-center justify-center text-sm text-theme-text-secondary">
             Loading...
@@ -243,15 +243,15 @@ const CorrelationChart: Component<Props> = (props) => {
         <canvas ref={canvasRef} />
       </div>
       {props.data && props.data.points.length > 0 && (
-        <div class="text-sm text-theme-text-secondary mt-3 leading-relaxed">
+        <div class="text-sm text-theme-text-secondary mt-3 leading-relaxed shrink-0">
           {describeCorrelation(props.data)}
           <span class="opacity-60"> ({props.data.points.length} points)</span>
         </div>
       )}
-      <p class="text-xs text-theme-text-tertiary mt-3 opacity-50">
+      <p class="text-xs text-theme-text-tertiary mt-1 opacity-50 shrink-0">
         Correlations show statistical associations, not causation. Many factors affect image quality simultaneously.
       </p>
-    </>
+    </div>
   );
 };
 
