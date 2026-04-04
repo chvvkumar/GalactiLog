@@ -1,5 +1,7 @@
 import { Component, createSignal, createResource, createEffect, For, Show, onMount, onCleanup } from "solid-js";
 import { api } from "../api/client";
+import { useSettingsContext } from "../components/SettingsProvider";
+import { contentWidthClass } from "../utils/format";
 import { useStats } from "../store/stats";
 import CorrelationTab from "../components/analysis/CorrelationTab";
 import DistributionsTab from "../components/analysis/DistributionsTab";
@@ -28,6 +30,7 @@ export interface SharedFilters {
 
 const AnalysisPage: Component = () => {
   const { stats } = useStats();
+  const ctx = useSettingsContext();
   const [activeTab, setActiveTab] = createSignal<TabId>("correlation");
   const [telescope, setTelescope] = createSignal<string | undefined>(undefined);
   const [camera, setCamera] = createSignal<string | undefined>(undefined);
@@ -102,7 +105,8 @@ const AnalysisPage: Component = () => {
     }`;
 
   return (
-    <div class="p-4 space-y-4 max-w-7xl mx-auto">
+    <div class={`p-4 space-y-4 ${contentWidthClass(ctx.contentWidth())}`}>
+      <h1 class="text-xl font-semibold tracking-tight text-theme-text-primary">Analysis</h1>
       {/* Shared Controls */}
       <div class="flex flex-wrap items-center gap-3">
         <select

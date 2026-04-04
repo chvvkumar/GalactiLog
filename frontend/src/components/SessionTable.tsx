@@ -4,9 +4,7 @@ import FilterBadges from "./FilterBadges";
 import { useSettingsContext } from "./SettingsProvider";
 import { timezoneLabel } from "../utils/dateTime";
 
-function formatHours(seconds: number): string {
-  return (seconds / 3600).toFixed(1) + "h";
-}
+import { formatIntegration } from "../utils/format";
 
 const SessionTable: Component<{
   sessions: SessionSummary[];
@@ -29,10 +27,10 @@ const SessionTable: Component<{
         <tbody>
           <For each={props.sessions}>
             {(session) => (
-              <tr class="border-b border-theme-border/50 hover:bg-theme-surface/50">
+              <tr class="border-b border-theme-border/50 hover:bg-theme-hover transition-colors duration-150">
                 <td class="py-1.5 px-2 text-theme-text-primary">{session.session_date}</td>
                 <td class="py-1.5 px-2 text-right text-theme-text-primary">{session.frame_count}</td>
-                <td class="py-1.5 px-2 text-right text-theme-text-primary">{formatHours(session.integration_seconds)}</td>
+                <td class="py-1.5 px-2 text-right text-theme-text-primary">{formatIntegration(session.integration_seconds)}</td>
                 <td class="py-1.5 px-2">
                   <FilterBadges distribution={Object.fromEntries(session.filters_used.map(f => [f, 0]))} compact />
                 </td>

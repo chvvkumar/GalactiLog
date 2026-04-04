@@ -57,9 +57,7 @@ function filterSortKey(name: string): number {
   return 100; // non-standard filters sort after LRGBSHO
 }
 
-function formatHours(seconds: number): string {
-  return (seconds / 3600).toFixed(1) + "h";
-}
+import { formatIntegration } from "../utils/format";
 
 const FilterBadges: Component<{ distribution: Record<string, number>; compact?: boolean; nowrap?: boolean }> = (props) => {
   const { filterColorMap, filterAliasMap, filterBadgeStyle } = useSettingsContext();
@@ -95,7 +93,7 @@ const FilterBadges: Component<{ distribution: Record<string, number>; compact?: 
                   <Show when={badgeStyle().dot}>
                     <span class="w-1.5 h-1.5 rounded-full inline-block" style={{ "background-color": badgeStyle().dot }} />
                   </Show>
-                  {name}&middot;{formatHours(seconds)}
+                  {name}&middot;{formatIntegration(seconds)}
                 </span>
               }
             >

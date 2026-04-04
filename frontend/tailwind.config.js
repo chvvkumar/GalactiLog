@@ -3,6 +3,12 @@ export default {
   content: ["./src/**/*.{ts,tsx}", "./index.html"],
   theme: {
     extend: {
+      fontSize: {
+        micro: "var(--font-size-micro)",
+        tiny: "var(--font-size-tiny)",
+        caption: "var(--font-size-caption)",
+        label: "var(--font-size-label)",
+      },
       colors: {
         theme: {
           base: "var(--color-bg-base)",

@@ -2,16 +2,11 @@ import { Component, Show, For, createResource, createSignal, createMemo } from "
 import { A, useParams } from "@solidjs/router";
 import { api } from "../api/client";
 import type { PanelStats } from "../types";
-
-function formatDuration(seconds: number): string {
-  const h = Math.floor(seconds / 3600);
-  const m = Math.round((seconds % 3600) / 60);
-  if (h === 0) return `${m}m`;
-  if (m === 0) return `${h}h`;
-  return `${h}h ${m}m`;
-}
+import { formatIntegration, contentWidthClass } from "../utils/format";
+import { useSettingsContext } from "../components/SettingsProvider";
 
 const MosaicDetailPage: Component = () => {
+  const ctx = useSettingsContext();
   const params = useParams<{ mosaicId: string }>();
   const [mosaic, { refetch }] = createResource(() => params.mosaicId, (id) => api.getMosaicDetail(id));
 
@@ -70,8 +65,15 @@ const MosaicDetailPage: Component = () => {
   };
 
   return (
-    <div class="p-4 space-y-4 max-w-7xl mx-auto">
-      <A href="/mosaics" class="text-xs text-theme-accent hover:underline">&larr; Mosaics</A>
+    <div class={`min-h-[calc(100vh-57px)] bg-theme-base ${contentWidthClass(ctx.contentWidth())}`}>
+      {/* Back nav */}
+      <div class="px-4 py-3 border-b border-theme-border">
+        <A href="/mosaics" class="text-theme-text-secondary hover:text-theme-text-primary text-sm transition-colors">
+          ← Back to Mosaics
+        </A>
+      </div>
+
+      <div class="p-4 space-y-4">
 
       <Show when={mosaic()} fallback={<div class="text-center text-theme-text-secondary py-8">Loading...</div>}>
         {(data) => (
@@ -81,7 +83,7 @@ const MosaicDetailPage: Component = () => {
               <h2 class="text-lg font-bold text-theme-text-primary">{data().name}</h2>
               <div class="flex gap-4 mt-2 text-xs text-theme-text-secondary">
                 <span>{data().panels.length} panels</span>
-                <span>{formatDuration(data().total_integration_seconds)} total</span>
+                <span>{formatIntegration(data().total_integration_seconds)} total</span>
                 <span>{data().total_frames} frames</span>
               </div>
             </div>
@@ -149,12 +151,12 @@ const MosaicDetailPage: Component = () => {
                               <div
                                 class="text-center text-[10px] mt-1 text-theme-text-secondary"
                                 title={diff < 0
-                                  ? `${formatDuration(Math.abs(diff))} less than the most-imaged panel`
+                                  ? `${formatIntegration(Math.abs(diff))} less than the most-imaged panel`
                                   : "Most integration time across all panels"}
                               >
-                                {formatDuration(panel.total_integration_seconds)}
+                                {formatIntegration(panel.total_integration_seconds)}
                                 <Show when={diff < 0}>
-                                  <span class="ml-1 text-amber-400">(-{formatDuration(Math.abs(diff))})</span>
+                                  <span class="ml-1 text-amber-400">(-{formatIntegration(Math.abs(diff))})</span>
                                 </Show>
                               </div>
                             </div>
@@ -187,11 +189,11 @@ const MosaicDetailPage: Component = () => {
                       <tr class="border-t border-theme-border hover:bg-theme-elevated/50">
                         <td class="px-3 py-2 text-theme-text-primary font-medium">{panel.panel_label}</td>
                         <td class="px-3 py-2 text-theme-text-primary">{panel.target_name}</td>
-                        <td class="px-3 py-2 text-right text-theme-text-primary">{formatDuration(panel.total_integration_seconds)}</td>
+                        <td class="px-3 py-2 text-right text-theme-text-primary">{formatIntegration(panel.total_integration_seconds)}</td>
                         <td class="px-3 py-2 text-right text-theme-text-secondary">{panel.total_frames}</td>
                         <td class="px-3 py-2 text-theme-text-secondary">
                           {Object.entries(panel.filter_distribution)
-                            .map(([f, s]) => `${f}: ${formatDuration(s)}`)
+                            .map(([f, s]) => `${f}: ${formatIntegration(s)}`)
                             .join(", ")}
                         </td>
                         <td class="px-3 py-2 text-theme-text-secondary">{panel.last_session_date || "\u2014"}</td>
@@ -212,6 +214,7 @@ const MosaicDetailPage: Component = () => {
           </>
         )}
       </Show>
+      </div>
     </div>
   );
 };

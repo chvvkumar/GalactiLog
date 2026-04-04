@@ -168,7 +168,7 @@ const ActivityFeed: Component<{
           <div class="flex gap-2 pt-1">
             <button
               onClick={props.onResetAndRescan}
-              class="px-3 py-1.5 bg-theme-accent text-theme-text-primary rounded text-xs font-medium hover:bg-theme-accent/80 transition-colors"
+              class="px-3 py-1.5 bg-theme-accent text-white rounded text-xs font-medium hover:opacity-90 transition-opacity"
             >
               Reset & Rescan
             </button>

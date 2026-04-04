@@ -450,6 +450,7 @@ export interface GeneralSettings {
   timezone: string;
   astrobin_filter_ids?: Record<string, number>;
   astrobin_bortle?: number | null;
+  content_width: string;
   mosaic_keywords?: string[];
   mosaic_campaign_gap_days?: number;
 }

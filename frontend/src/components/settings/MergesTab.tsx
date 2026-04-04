@@ -10,6 +10,8 @@ export const MergesTab: Component = () => {
   const [accepted, setAccepted] = createSignal<MergeCandidateResponse[]>([]);
   const [detecting, setDetecting] = createSignal(false);
   const [view, setView] = createSignal<"suggestions" | "merged">("suggestions");
+  const [confirmMergeId, setConfirmMergeId] = createSignal<string | null>(null);
+  const [confirmRevertId, setConfirmRevertId] = createSignal<string | null>(null);
 
   const refresh = async () => {
     try {
@@ -27,6 +29,7 @@ export const MergesTab: Component = () => {
   onMount(refresh);
 
   const handleMerge = async (candidate: MergeCandidateResponse) => {
+    setConfirmMergeId(null);
     try {
       await api.mergeTargets(
         candidate.suggested_target_id,
@@ -50,6 +53,7 @@ export const MergesTab: Component = () => {
   };
 
   const handleRevert = async (candidate: MergeCandidateResponse) => {
+    setConfirmRevertId(null);
     try {
       await api.revertMergeCandidate(candidate.id);
       showToast(`Reverted merge of "${candidate.source_name}"`);
@@ -127,7 +131,7 @@ export const MergesTab: Component = () => {
                     <Show when={isAdmin()}>
                       <div class="flex gap-2">
                         <button
-                          onClick={() => handleMerge(c)}
+                          onClick={() => setConfirmMergeId(c.id)}
                           class="px-2 py-1 text-xs border border-theme-accent/50 text-theme-accent rounded-[var(--radius-sm)] hover:bg-theme-accent/10 transition-colors"
                         >
                           Merge
@@ -138,6 +142,26 @@ export const MergesTab: Component = () => {
                         >
                           Dismiss
                         </button>
+                      </div>
+                    </Show>
+                    <Show when={confirmMergeId() === c.id}>
+                      <div class="w-full mt-2 bg-theme-accent/10 border border-theme-accent/30 rounded-[var(--radius-md)] p-3 space-y-2">
+                        <p class="text-sm text-theme-accent font-medium">Merge "{c.source_name}" into "{c.suggested_target_name}"?</p>
+                        <p class="text-xs text-theme-text-secondary">All images from "{c.source_name}" will be reassigned. This can be reverted later.</p>
+                        <div class="flex gap-2 pt-1">
+                          <button
+                            onClick={() => handleMerge(c)}
+                            class="px-3 py-1.5 bg-theme-accent text-white rounded text-xs font-medium hover:opacity-90 transition-opacity"
+                          >
+                            Yes, merge
+                          </button>
+                          <button
+                            onClick={() => setConfirmMergeId(null)}
+                            class="px-3 py-1.5 border border-theme-border-em text-theme-text-secondary rounded text-xs hover:text-theme-text-primary transition-colors"
+                          >
+                            Cancel
+                          </button>
+                        </div>
                       </div>
                     </Show>
                   </div>
@@ -167,11 +191,31 @@ export const MergesTab: Component = () => {
                     </div>
                     <Show when={isAdmin()}>
                       <button
-                        onClick={() => handleRevert(c)}
+                        onClick={() => setConfirmRevertId(c.id)}
                         class="px-2 py-1 text-xs border border-theme-border text-theme-text-secondary rounded-[var(--radius-sm)] hover:text-theme-text-primary transition-colors"
                       >
                         Revert
                       </button>
+                    </Show>
+                    <Show when={confirmRevertId() === c.id}>
+                      <div class="w-full mt-2 bg-theme-warning/10 border border-theme-warning/30 rounded-[var(--radius-md)] p-3 space-y-2">
+                        <p class="text-sm text-theme-warning font-medium">Revert merge of "{c.source_name}"?</p>
+                        <p class="text-xs text-theme-text-secondary">Images will be unlinked from "{c.suggested_target_name}" and restored to their original target.</p>
+                        <div class="flex gap-2 pt-1">
+                          <button
+                            onClick={() => handleRevert(c)}
+                            class="px-3 py-1.5 bg-theme-warning text-white rounded text-xs font-medium hover:opacity-90 transition-opacity"
+                          >
+                            Yes, revert
+                          </button>
+                          <button
+                            onClick={() => setConfirmRevertId(null)}
+                            class="px-3 py-1.5 border border-theme-border-em text-theme-text-secondary rounded text-xs hover:text-theme-text-primary transition-colors"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
                     </Show>
                   </div>
                 )}

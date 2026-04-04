@@ -15,6 +15,7 @@ export const UsersTab: Component = () => {
   const [newPassword, setNewPassword] = createSignal("");
   const [newRole, setNewRole] = createSignal<"admin" | "viewer">("viewer");
   const [creating, setCreating] = createSignal(false);
+  const [confirmDeleteId, setConfirmDeleteId] = createSignal<string | null>(null);
 
   const refresh = async () => {
     try {
@@ -67,7 +68,7 @@ export const UsersTab: Component = () => {
   };
 
   const handleDelete = async (u: UserAccount) => {
-    if (!confirm(`Delete user "${u.username}"? This cannot be undone.`)) return;
+    setConfirmDeleteId(null);
     try {
       await api.deleteUser(u.id);
       showToast(`User "${u.username}" deleted`);
@@ -193,12 +194,32 @@ export const UsersTab: Component = () => {
                           {u.is_active ? "Disable" : "Enable"}
                         </button>
                         <button
-                          onClick={() => handleDelete(u)}
+                          onClick={() => setConfirmDeleteId(u.id)}
                           class="text-xs text-red-400 hover:text-red-300 transition-colors"
                         >
                           Delete
                         </button>
                       </div>
+                      <Show when={confirmDeleteId() === u.id}>
+                        <div class="mt-2 bg-theme-error/20 border border-theme-error/50 rounded-[var(--radius-md)] p-3 space-y-2">
+                          <p class="text-sm text-theme-error font-medium">Delete "{u.username}"?</p>
+                          <p class="text-xs text-theme-error/70">This cannot be undone. All data associated with this user will be removed.</p>
+                          <div class="flex gap-2 pt-1">
+                            <button
+                              onClick={() => handleDelete(u)}
+                              class="px-3 py-1.5 bg-theme-error text-white rounded text-xs font-medium hover:opacity-90 transition-opacity"
+                            >
+                              Yes, delete
+                            </button>
+                            <button
+                              onClick={() => setConfirmDeleteId(null)}
+                              class="px-3 py-1.5 border border-theme-border-em text-theme-text-secondary rounded text-xs hover:text-theme-text-primary transition-colors"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      </Show>
                     </Show>
                   </td>
                 </tr>

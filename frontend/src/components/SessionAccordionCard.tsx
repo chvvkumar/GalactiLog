@@ -9,10 +9,7 @@ import { useSettingsContext } from "./SettingsProvider";
 import { isFieldVisible } from "../utils/displaySettings";
 import { formatTime as formatTimeUtil, timezoneLabel } from "../utils/dateTime";
 
-function formatHours(seconds: number): string {
-  return (seconds / 3600).toFixed(1) + "h";
-}
-
+import { formatIntegration } from "../utils/format";
 
 const INSIGHT_STYLES: Record<string, string> = {
   good: "text-theme-success",
@@ -165,7 +162,7 @@ const SessionAccordionCard: Component<{
             </span>
           </div>
         </td>
-        <td class="py-3 px-2 text-right text-metric-integration tabular-nums whitespace-nowrap">{formatHours(props.session.integration_seconds)}</td>
+        <td class="py-3 px-2 text-right text-metric-integration tabular-nums whitespace-nowrap">{formatIntegration(props.session.integration_seconds)}</td>
         <td class="py-3 px-2 text-right text-metric-frames tabular-nums whitespace-nowrap">{props.session.frame_count} fr</td>
         <Show when={props.visibleColumns?.hfr ?? true}>
           <td class="py-3 px-2 text-right text-metric-hfr tabular-nums whitespace-nowrap">{props.session.median_hfr?.toFixed(1) ?? "—"}</td>
@@ -245,7 +242,7 @@ const SessionAccordionCard: Component<{
                 <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-label">
                   <span>
                     <span class="text-theme-text-tertiary">Integration:</span>{" "}
-                    <span class="font-bold text-metric-integration">{formatHours(detail().integration_seconds)}</span>
+                    <span class="font-bold text-metric-integration">{formatIntegration(detail().integration_seconds)}</span>
                   </span>
                   <span>
                     <span class="text-theme-text-tertiary">Frames:</span>{" "}
@@ -346,7 +343,7 @@ const SessionAccordionCard: Component<{
                                 {f ? (
                                   <>
                                     <td class="py-1.5 px-2 font-bold text-theme-text-primary border-l border-theme-border">{f.filter_name}</td>
-                                    <td class="py-1.5 px-2 text-theme-text-secondary">{f.frame_count} · {formatHours(f.integration_seconds)}</td>
+                                    <td class="py-1.5 px-2 text-theme-text-secondary">{f.frame_count} · {formatIntegration(f.integration_seconds)}</td>
                                     <td class="py-1.5 px-2 text-right text-metric-hfr">{f.median_hfr?.toFixed(1) ?? "—"}</td>
                                     <td class="py-1.5 px-2 text-right text-metric-eccentricity">{f.median_eccentricity?.toFixed(2) ?? "—"}</td>
                                     <td class="py-1.5 px-2 text-right text-theme-text-secondary">{f.exposure_time ?? "—"}s</td>
