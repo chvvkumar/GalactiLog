@@ -43,7 +43,7 @@ function buildWeeks(entries: CalendarEntry[], year: number | null): { date: stri
   while (current <= end || weeks.length === 0) {
     const week: { date: string; hours: number; targets: number; frames: number }[] = [];
     for (let d = 0; d < 7; d++) {
-      const iso = current.toISOString().slice(0, 10);
+      const iso = `${current.getFullYear()}-${String(current.getMonth() + 1).padStart(2, "0")}-${String(current.getDate()).padStart(2, "0")}`;
       const entry = map.get(iso);
       week.push({
         date: iso,
@@ -134,8 +134,13 @@ const ImagingCalendar: Component = () => {
       </Show>
 
       <Show when={!data.loading && weeks().length > 0}>
-        <div class="overflow-x-auto scrollbar-thin" style={{ position: "relative" }}>
-          <svg width={svgWidth()} height={7 * (CELL + GAP) + 30} class="block">
+        <div style={{ position: "relative" }}>
+          <svg
+            viewBox={`0 0 ${svgWidth()} ${7 * (CELL + GAP) + 30}`}
+            width="100%"
+            preserveAspectRatio="xMinYMid meet"
+            class="block"
+          >
             {/* Month labels */}
             <For each={months()}>
               {(m) => (
