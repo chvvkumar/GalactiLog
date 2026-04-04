@@ -530,19 +530,38 @@ export interface DiscoveredResponse {
   items: DiscoveredItem[];
 }
 
-// === Correlation Analysis ===
+// === Analysis ===
+
+export interface SummaryStats {
+  count: number;
+  min: number;
+  max: number;
+  mean: number;
+  median: number;
+  std_dev: number;
+}
 
 export interface CorrelationPoint {
   x: number;
   y: number;
   date: string;
   target_name: string | null;
+  outlier: boolean;
+}
+
+export interface ConfidenceBandPoint {
+  x: number;
+  y: number;
 }
 
 export interface TrendLine {
   slope: number;
   intercept: number;
   r_squared: number;
+  pearson_r: number;
+  spearman_rho: number;
+  confidence_upper: ConfidenceBandPoint[];
+  confidence_lower: ConfidenceBandPoint[];
 }
 
 export interface CorrelationResponse {
@@ -551,6 +570,85 @@ export interface CorrelationResponse {
   x_metric: string;
   y_metric: string;
   granularity: string;
+  x_stats: SummaryStats | null;
+  y_stats: SummaryStats | null;
+}
+
+export interface HistogramBin {
+  bin_start: number;
+  bin_end: number;
+  count: number;
+}
+
+export interface DistributionResponse {
+  bins: HistogramBin[];
+  stats: SummaryStats;
+  metric: string;
+  skewness: number;
+}
+
+export interface BoxPlotGroup {
+  group_name: string;
+  min: number;
+  q1: number;
+  median: number;
+  q3: number;
+  max: number;
+  outliers: number[];
+  count: number;
+}
+
+export interface BoxPlotResponse {
+  groups: BoxPlotGroup[];
+  metric: string;
+  group_by: string;
+}
+
+export interface TimeSeriesPoint {
+  date: string;
+  value: number;
+  target_name: string | null;
+  frame_count: number;
+}
+
+export interface MovingAveragePoint {
+  date: string;
+  value: number;
+}
+
+export interface TimeSeriesResponse {
+  points: TimeSeriesPoint[];
+  ma_7: MovingAveragePoint[];
+  ma_30: MovingAveragePoint[];
+  metric: string;
+  month_boundaries: string[];
+}
+
+export interface MatrixCell {
+  x_metric: string;
+  y_metric: string;
+  pearson_r: number | null;
+  n_points: number;
+}
+
+export interface MatrixResponse {
+  cells: MatrixCell[];
+  x_metrics: string[];
+  y_metrics: string[];
+}
+
+export interface CompareGroupStats {
+  name: string;
+  box: BoxPlotGroup;
+  stats: SummaryStats;
+}
+
+export interface CompareResponse {
+  group_a: CompareGroupStats;
+  group_b: CompareGroupStats;
+  metric: string;
+  mode: string;
+  verdict: string;
 }
 
 // === AstroBin Export ===

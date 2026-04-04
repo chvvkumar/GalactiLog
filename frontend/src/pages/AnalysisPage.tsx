@@ -1,59 +1,67 @@
-import { Component, createSignal, createResource, createEffect, For } from "solid-js";
+import { Component, createSignal, createResource, createEffect, For, Show, onMount, onCleanup } from "solid-js";
 import { api } from "../api/client";
 import { useStats } from "../store/stats";
-import CorrelationChart from "../components/analysis/CorrelationChart";
+import CorrelationTab from "../components/analysis/CorrelationTab";
+import DistributionsTab from "../components/analysis/DistributionsTab";
+import TimeSeriesTab from "../components/analysis/TimeSeriesTab";
+import MatrixTab from "../components/analysis/MatrixTab";
+import CompareTab from "../components/analysis/CompareTab";
 
-const X_OPTIONS = [
-  { value: "humidity", label: "Humidity" },
-  { value: "wind_speed", label: "Wind Speed" },
-  { value: "ambient_temp", label: "Ambient Temp" },
-  { value: "dew_point", label: "Dew Point" },
-  { value: "pressure", label: "Pressure" },
-  { value: "cloud_cover", label: "Cloud Cover" },
-  { value: "sky_quality", label: "Sky Quality" },
-  { value: "focuser_temp", label: "Focuser Temp" },
-  { value: "airmass", label: "Airmass" },
-  { value: "sensor_temp", label: "Sensor Temp" },
-];
+const TABS = [
+  { id: "correlation", label: "Correlation" },
+  { id: "distributions", label: "Distributions" },
+  { id: "timeseries", label: "Time Series" },
+  { id: "matrix", label: "Matrix" },
+  { id: "compare", label: "Compare" },
+] as const;
 
-const Y_OPTIONS = [
-  { value: "hfr", label: "HFR" },
-  { value: "fwhm", label: "FWHM" },
-  { value: "eccentricity", label: "Eccentricity" },
-  { value: "guiding_rms", label: "Guiding RMS" },
-  { value: "guiding_rms_ra", label: "Guiding RA RMS" },
-  { value: "guiding_rms_dec", label: "Guiding DEC RMS" },
-  { value: "detected_stars", label: "Detected Stars" },
-  { value: "adu_mean", label: "ADU Mean" },
-  { value: "adu_median", label: "ADU Median" },
-  { value: "adu_stdev", label: "ADU StDev" },
-];
+type TabId = (typeof TABS)[number]["id"];
+
+export interface SharedFilters {
+  telescope: string | undefined;
+  camera: string | undefined;
+  filterUsed: string | undefined;
+  granularity: "frame" | "session";
+  dateFrom: string | undefined;
+  dateTo: string | undefined;
+}
 
 const AnalysisPage: Component = () => {
   const { stats } = useStats();
+  const [activeTab, setActiveTab] = createSignal<TabId>("correlation");
   const [telescope, setTelescope] = createSignal<string | undefined>(undefined);
   const [camera, setCamera] = createSignal<string | undefined>(undefined);
+  const [filterUsed, setFilterUsed] = createSignal<string | undefined>(undefined);
   const [granularity, setGranularity] = createSignal<"frame" | "session">("frame");
-  const [customX, setCustomX] = createSignal("humidity");
-  const [customY, setCustomY] = createSignal("hfr");
+  const [dateFrom, setDateFrom] = createSignal<string | undefined>(undefined);
+  const [dateTo, setDateTo] = createSignal<string | undefined>(undefined);
 
-  const fetchChart = (x: string, y: string) => {
-    const tel = telescope();
-    const cam = camera();
-    const gran = granularity();
-    return api.getCorrelation({
-      x_metric: x,
-      y_metric: y,
-      telescope: tel,
-      camera: cam,
-      granularity: gran,
-    });
+  // Navigation from matrix cell click
+  const [navX, setNavX] = createSignal<string | undefined>(undefined);
+  const [navY, setNavY] = createSignal<string | undefined>(undefined);
+
+  const handleMatrixNav = (e: Event) => {
+    const detail = (e as CustomEvent).detail;
+    if (detail?.tab === "correlation") {
+      setNavX(detail.x);
+      setNavY(detail.y);
+      setActiveTab("correlation");
+    }
   };
 
-  const chartKey = () => `${telescope()}-${camera()}-${granularity()}-${customX()}-${customY()}`;
-  const [customData] = createResource(chartKey, () =>
-    fetchChart(customX(), customY())
-  );
+  onMount(() => window.addEventListener("analysis-navigate", handleMatrixNav));
+  onCleanup(() => window.removeEventListener("analysis-navigate", handleMatrixNav));
+
+  const [filters] = createResource(() => api.getAnalysisFilters());
+
+  const shared = (): SharedFilters => ({
+    telescope: telescope(),
+    camera: camera(),
+    filterUsed: filterUsed(),
+    granularity: granularity(),
+    dateFrom: dateFrom(),
+    dateTo: dateTo(),
+  });
 
   const combos = () => {
     const s = stats();
@@ -74,8 +82,6 @@ const AnalysisPage: Component = () => {
   };
 
   let equipSelectRef!: HTMLSelectElement;
-
-  // Re-sync the <select> value after options are recreated (e.g. stats poll)
   createEffect(() => {
     const v = equipmentValue();
     if (equipSelectRef) equipSelectRef.value = v;
@@ -88,10 +94,16 @@ const AnalysisPage: Component = () => {
         ? "bg-theme-elevated text-theme-text-primary font-medium"
         : "text-theme-text-secondary hover:text-theme-text-primary"
     }`;
+  const tabClass = (active: boolean) =>
+    `px-3 sm:px-4 py-2 text-sm transition-colors duration-150 ${
+      active
+        ? "bg-theme-elevated text-theme-text-primary rounded-[var(--radius-sm)] font-medium"
+        : "text-theme-text-secondary hover:text-theme-text-primary hover:bg-theme-hover rounded-[var(--radius-sm)]"
+    }`;
 
   return (
     <div class="p-4 space-y-4 max-w-7xl mx-auto">
-      {/* Controls */}
+      {/* Shared Controls */}
       <div class="flex flex-wrap items-center gap-3">
         <select
           ref={equipSelectRef}
@@ -117,6 +129,17 @@ const AnalysisPage: Component = () => {
           </For>
         </select>
 
+        <select
+          class={selectClass}
+          value={filterUsed() || ""}
+          onChange={(e) => setFilterUsed(e.currentTarget.value || undefined)}
+        >
+          <option value="">All filters</option>
+          <For each={filters() || []}>
+            {(f) => <option value={f}>{f}</option>}
+          </For>
+        </select>
+
         <div class="flex items-center gap-1">
           <button class={toggleClass(granularity() === "frame")} onClick={() => setGranularity("frame")}>
             Per Frame
@@ -125,25 +148,52 @@ const AnalysisPage: Component = () => {
             Per Session
           </button>
         </div>
+
+        <div class="flex items-center gap-1.5 text-sm text-theme-text-secondary">
+          <span>From</span>
+          <input
+            type="date"
+            class={selectClass}
+            value={dateFrom() || ""}
+            onChange={(e) => setDateFrom(e.currentTarget.value || undefined)}
+          />
+          <span>To</span>
+          <input
+            type="date"
+            class={selectClass}
+            value={dateTo() || ""}
+            onChange={(e) => setDateTo(e.currentTarget.value || undefined)}
+          />
+        </div>
       </div>
 
-      {/* Correlation explorer */}
-      <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-4">
-        <h3 class="text-base font-medium text-theme-text-primary mb-3">Correlation Explorer</h3>
-        <div class="flex flex-wrap items-center gap-3 mb-4">
-          <label class="text-sm text-theme-text-secondary">X Axis:</label>
-          <select class={selectClass} value={customX()} onChange={(e) => setCustomX(e.currentTarget.value)}>
-            {X_OPTIONS.map((o) => <option value={o.value}>{o.label}</option>)}
-          </select>
-          <label class="text-sm text-theme-text-secondary">Y Axis:</label>
-          <select class={selectClass} value={customY()} onChange={(e) => setCustomY(e.currentTarget.value)}>
-            {Y_OPTIONS.map((o) => <option value={o.value}>{o.label}</option>)}
-          </select>
-        </div>
-        <div style={{ height: "600px" }} class="relative">
-          <CorrelationChart data={customData()} loading={customData.loading} />
-        </div>
+      {/* Tab Bar */}
+      <div class="flex flex-wrap gap-1">
+        <For each={TABS}>
+          {(tab) => (
+            <button class={tabClass(activeTab() === tab.id)} onClick={() => setActiveTab(tab.id)}>
+              {tab.label}
+            </button>
+          )}
+        </For>
       </div>
+
+      {/* Tab Content */}
+      <Show when={activeTab() === "correlation"}>
+        <CorrelationTab filters={shared()} navX={navX()} navY={navY()} onNavConsumed={() => { setNavX(undefined); setNavY(undefined); }} />
+      </Show>
+      <Show when={activeTab() === "distributions"}>
+        <DistributionsTab filters={shared()} />
+      </Show>
+      <Show when={activeTab() === "timeseries"}>
+        <TimeSeriesTab filters={shared()} />
+      </Show>
+      <Show when={activeTab() === "matrix"}>
+        <MatrixTab filters={shared()} />
+      </Show>
+      <Show when={activeTab() === "compare"}>
+        <CompareTab filters={shared()} combos={combos()} availableFilters={filters() || []} />
+      </Show>
     </div>
   );
 };
