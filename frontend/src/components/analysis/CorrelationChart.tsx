@@ -214,7 +214,7 @@ const CorrelationChart: Component<Props> = (props) => {
                 const allPts = [...(props.data?.points || [])];
                 const pt = allPts.find((p) => p.x === ctx.parsed.x && p.y === ctx.parsed.y);
                 if (!pt) return `(${ctx.parsed.x}, ${ctx.parsed.y})`;
-                return `${pt.target_name || "Unknown"} (${pt.date}): ${ctx.parsed.x.toFixed(1)}, ${ctx.parsed.y.toFixed(2)}`;
+                return `${pt.target_name || "Unknown"} (${pt.date}): ${ctx.parsed.x?.toFixed(1)}, ${ctx.parsed.y?.toFixed(2)}`;
               },
             },
           },

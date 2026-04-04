@@ -102,7 +102,7 @@ const TimeSeriesChart: Component<Props> = (props) => {
                 if (pt) {
                   return `${pt.target_name || "Mixed"}: ${pt.value.toFixed(2)} (${pt.frame_count} frames)`;
                 }
-                return `${ctx.parsed.y.toFixed(2)}`;
+                return `${ctx.parsed.y?.toFixed(2)}`;
               },
             },
           },
