@@ -51,12 +51,15 @@ const SessionAccordionCard: Component<{
   const { displaySettings } = settingsCtx;
   const visible = (group: Parameters<typeof isFieldVisible>[1], field: string) =>
     isFieldVisible(displaySettings(), group, field);
+  const [showSummary, setShowSummary] = createSignal(true);
+  const [showInsights, setShowInsights] = createSignal(true);
   const [showFrames, setShowFrames] = createSignal(false);
   const [sortColumn, setSortColumn] = createSignal<keyof FrameRecord>("timestamp");
   const [sortAsc, setSortAsc] = createSignal(true);
   const [csvCopied, setCsvCopied] = createSignal(false);
 
   const [sessionNote, setSessionNote] = createSignal(props.detail?.notes || "");
+  const [showNotes, setShowNotes] = createSignal(false);
   const [noteSaving, setNoteSaving] = createSignal(false);
   let noteTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -139,8 +142,8 @@ const SessionAccordionCard: Component<{
       {/* Collapsed header row */}
       <tr
         ref={cardRef}
-        class={`border-b border-theme-border cursor-pointer hover:bg-theme-hover transition-all duration-150 text-xs border-l-2 ${
-          props.isExpanded ? "bg-theme-surface border-l-theme-accent" : "border-l-transparent hover:border-l-theme-accent/50"
+        class={`border-b border-theme-border cursor-pointer hover:bg-theme-hover transition-all duration-150 text-xs border-l-[3px] ${
+          props.isExpanded ? "bg-theme-elevated border-l-theme-accent font-medium" : "border-l-transparent hover:border-l-theme-accent/50"
         }`}
         onClick={props.onToggle}
       >
@@ -196,29 +199,87 @@ const SessionAccordionCard: Component<{
                 <path d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" />
               </svg>
             </span>
-            <span class={`px-2.5 py-1 border rounded text-label transition-colors ${
-              props.isExpanded
-                ? "border-theme-accent text-theme-accent"
-                : "border-theme-border-em text-theme-text-tertiary hover:text-theme-text-primary hover:border-theme-accent"
-            }`}>
-              {props.isExpanded ? "Collapse" : "Expand"}
-            </span>
+            <svg
+              class={`w-4 h-4 transition-transform duration-200 ${
+                props.isExpanded ? "rotate-180 text-theme-accent" : "text-theme-text-tertiary"
+              }`}
+              viewBox="0 0 20 20"
+              fill="currentColor"
+            >
+              <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
+            </svg>
           </div>
         </td>
       </tr>
 
       {/* Expanded content row */}
       <Show when={props.isExpanded}>
-        <tr class="bg-theme-surface">
-          <td colspan="12" class="px-4 pb-4 border-b border-theme-accent">
+        <tr class="bg-theme-elevated">
+          <td colspan="12" class="px-4 pb-4 border-b-2 border-theme-accent/40 border-l-[3px] border-l-theme-accent">
           <Show when={!props.detail}>
             <div class="py-4 text-theme-text-secondary text-sm">Loading session data...</div>
           </Show>
 
           <Show when={props.detail}>
             {(detail) => (
-              <div class="space-y-5 pt-4">
-                {/* Unified session overview table */}
+              <div class="space-y-3 pt-3">
+                {/* Session Summary (collapsible) */}
+                <div>
+                  <button
+                    class="flex justify-between items-center w-full text-xs py-2 px-0 hover:text-theme-text-primary transition-colors cursor-pointer"
+                    classList={{ "text-theme-text-primary": showSummary(), "text-theme-text-secondary": !showSummary() }}
+                    onClick={() => setShowSummary((v) => !v)}
+                  >
+                    <span class="font-semibold border-l-2 border-theme-accent pl-2">Session Summary</span>
+                    <svg
+                      class={`w-3.5 h-3.5 transition-transform duration-200 ${showSummary() ? "rotate-180" : ""}`}
+                      viewBox="0 0 20 20"
+                      fill="currentColor"
+                    >
+                      <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
+                    </svg>
+                  </button>
+                </div>
+                <Show when={showSummary()}>
+                {/* Single-value metrics + Astrobin export */}
+                <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-label">
+                  <span>
+                    <span class="text-theme-text-tertiary">Integration:</span>{" "}
+                    <span class="font-bold text-metric-integration">{formatHours(detail().integration_seconds)}</span>
+                  </span>
+                  <span>
+                    <span class="text-theme-text-tertiary">Frames:</span>{" "}
+                    <span class="font-bold text-metric-frames">{detail().frame_count}</span>
+                  </span>
+                  <span>
+                    <span class="text-theme-text-tertiary">Gain / Offset:</span>{" "}
+                    <span class="font-bold text-metric-gain">
+                      {detail().gain !== null ? detail().gain : "—"} / {detail().offset !== null ? detail().offset : "—"}
+                    </span>
+                  </span>
+                  <span>
+                    <span class="text-theme-text-tertiary">Exp:</span>{" "}
+                    <span class="font-bold text-metric-gain">
+                      {detail().exposure_times.length > 0 ? detail().exposure_times.map(e => e + "s").join(", ") : "—"}
+                    </span>
+                  </span>
+                  <span>
+                    <span class="text-theme-text-tertiary">Time:</span>{" "}
+                    <span class="font-bold text-metric-time">
+                      {detail().first_frame_time ? `${formatTimeUtil(detail().first_frame_time!, settingsCtx.timezone())} → ${detail().last_frame_time ? formatTimeUtil(detail().last_frame_time!, settingsCtx.timezone()) : ""}` : "—"}
+                    </span>
+                  </span>
+                  <span class="ml-auto">
+                    <button
+                      class="text-label px-2.5 py-1 border border-theme-border-em rounded text-theme-text-secondary hover:text-theme-text-primary hover:border-theme-accent transition-colors cursor-pointer"
+                      onClick={copyAstrobinCsv}
+                    >
+                      {csvCopied() ? "Copied!" : "Copy Astrobin CSV"}
+                    </button>
+                  </span>
+                </div>
+
+                {/* Metrics table + thumbnail */}
                 <div class="grid gap-4 grid-cols-1 md:grid-cols-[1fr_200px]">
                   <div class="bg-theme-base rounded-[var(--radius-md)] overflow-x-auto">
                     <table class="w-full text-xs table-fixed" style={{ "border-collapse": "collapse" }}>
@@ -235,7 +296,7 @@ const SessionAccordionCard: Component<{
                       </colgroup>
                       <thead>
                         <tr class="text-tiny text-theme-text-tertiary uppercase tracking-wider border-b border-theme-border">
-                          <th class="text-left px-3 pb-1.5 pt-2.5" colspan={4}>Session Summary</th>
+                          <th class="text-left px-3 pb-1.5 pt-2.5" colspan={4}>Metrics</th>
                           <th class="text-left px-2 pb-1.5 pt-2.5 border-l border-theme-border" colspan={5}>Filters</th>
                         </tr>
                         <tr class="text-tiny text-theme-text-tertiary border-b border-theme-border">
@@ -309,79 +370,63 @@ const SessionAccordionCard: Component<{
                     </div>
                   </div>
                 </div>
+                </Show>
 
-                {/* Single-value metrics */}
-                <div class="flex flex-wrap gap-x-4 gap-y-1 mt-2 text-label">
-                  <span>
-                    <span class="text-theme-text-tertiary">Integration:</span>{" "}
-                    <span class="font-bold text-metric-integration">{formatHours(detail().integration_seconds)}</span>
-                  </span>
-                  <span>
-                    <span class="text-theme-text-tertiary">Frames:</span>{" "}
-                    <span class="font-bold text-metric-frames">{detail().frame_count}</span>
-                  </span>
-                  <span>
-                    <span class="text-theme-text-tertiary">Gain / Offset:</span>{" "}
-                    <span class="font-bold text-metric-gain">
-                      {detail().gain !== null ? detail().gain : "—"} / {detail().offset !== null ? detail().offset : "—"}
-                    </span>
-                  </span>
-                  <span>
-                    <span class="text-theme-text-tertiary">Exp:</span>{" "}
-                    <span class="font-bold text-metric-gain">
-                      {detail().exposure_times.length > 0 ? detail().exposure_times.map(e => e + "s").join(", ") : "—"}
-                    </span>
-                  </span>
-                  <span>
-                    <span class="text-theme-text-tertiary">Time:</span>{" "}
-                    <span class="font-bold text-metric-time">
-                      {detail().first_frame_time ? `${formatTimeUtil(detail().first_frame_time!, settingsCtx.timezone())} → ${detail().last_frame_time ? formatTimeUtil(detail().last_frame_time!, settingsCtx.timezone()) : ""}` : "—"}
-                    </span>
-                  </span>
-                </div>
-
-                {/* Export to Astrobin */}
-                <div class="flex justify-end">
-                  <button
-                    class="text-label px-2.5 py-1 border border-theme-border-em rounded text-theme-text-secondary hover:text-theme-text-primary hover:border-theme-accent transition-colors cursor-pointer"
-                    onClick={copyAstrobinCsv}
-                  >
-                    {csvCopied() ? "Copied!" : "Copy Astrobin CSV"}
-                  </button>
-                </div>
-
-                {/* Session Metrics Chart */}
-                <SessionMetricsChart detail={detail()} />
-
-                {/* Row 3: Session Insights */}
+                {/* Session Insights */}
                 <Show when={detail().insights.length > 0}>
-                  <div>
-                    <h4 class="text-xs font-bold text-theme-text-primary mb-2">Session Insights</h4>
-                    <div class="bg-theme-base rounded-[var(--radius-md)] p-3 space-y-1">
-                      <For each={detail().insights}>
-                        {(insight) => (
-                          <div class={`text-xs ${INSIGHT_STYLES[insight.level]}`}>
-                            {INSIGHT_ICONS[insight.level]} {insight.message}
-                          </div>
-                        )}
-                      </For>
-                    </div>
+                  <div class="border-t border-theme-border/50 pt-3">
+                    <button
+                      class="flex justify-between items-center w-full text-xs py-2 px-0 hover:text-theme-text-primary transition-colors cursor-pointer"
+                      classList={{ "text-theme-text-primary": showInsights(), "text-theme-text-secondary": !showInsights() }}
+                      onClick={() => setShowInsights((v) => !v)}
+                    >
+                      <span class="font-semibold border-l-2 border-theme-accent pl-2">
+                        Session Insights <span class="text-theme-text-tertiary font-normal">({detail().insights.length})</span>
+                      </span>
+                      <svg
+                        class={`w-3.5 h-3.5 transition-transform duration-200 ${showInsights() ? "rotate-180" : ""}`}
+                        viewBox="0 0 20 20"
+                        fill="currentColor"
+                      >
+                        <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
+                      </svg>
+                    </button>
+                    <Show when={showInsights()}>
+                      <div class="bg-theme-base rounded-[var(--radius-md)] p-3 space-y-1 mt-2">
+                        <For each={detail().insights}>
+                          {(insight) => (
+                            <div class={`text-xs ${INSIGHT_STYLES[insight.level]}`}>
+                              {INSIGHT_ICONS[insight.level]} {insight.message}
+                            </div>
+                          )}
+                        </For>
+                      </div>
+                    </Show>
                   </div>
                 </Show>
 
+                {/* Session Metrics Chart */}
+                <div class="border-t border-theme-border/50 pt-3">
+                  <SessionMetricsChart detail={detail()} />
+                </div>
+
                 {/* Row 4: Per-Frame Table (collapsed) */}
-                <div>
+                <div class="border-t border-theme-border/50 pt-3">
                   <button
-                    class="flex justify-between items-center w-full text-xs py-2.5 px-3 -mx-3 rounded-[var(--radius-md)] hover:bg-theme-hover transition-all cursor-pointer border-l-2 border-l-transparent hover:border-l-theme-accent/50"
-                    classList={{ "!border-l-theme-accent bg-theme-hover/50": showFrames() }}
+                    class="flex justify-between items-center w-full text-xs py-2 px-0 hover:text-theme-text-primary transition-colors cursor-pointer"
+                    classList={{ "text-theme-text-primary": showFrames(), "text-theme-text-secondary": !showFrames() }}
                     onClick={() => setShowFrames(!showFrames())}
                   >
-                    <span class="font-bold text-theme-text-primary">
-                      Per-Frame Data <span class="text-theme-text-secondary font-normal">({detail().frames.length} frames)</span>
+                    <span class="font-semibold border-l-2 border-theme-accent pl-2">
+                      Per-Frame Data <span class="text-theme-text-tertiary font-normal">({detail().frames.length} frames)</span>
                     </span>
-                    <span class="px-2.5 py-1 border border-theme-border-em rounded text-label text-theme-text-secondary hover:text-theme-text-primary hover:border-theme-accent transition-colors">
-                      {showFrames() ? "Collapse" : "Expand"}
-                    </span>
+                    <svg
+                      class={`w-3.5 h-3.5 transition-transform duration-200 ${showFrames() ? "rotate-180" : ""}`}
+                      viewBox="0 0 20 20"
+                      fill="currentColor"
+                    >
+                      <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
+                    </svg>
                   </button>
                   <Show when={showFrames()}>
                     <div class="bg-theme-base rounded-[var(--radius-md)] overflow-x-auto max-h-[600px] overflow-y-auto mt-2">
@@ -590,26 +635,48 @@ const SessionAccordionCard: Component<{
                 </div>
 
                 {/* Row 5: FITS Headers */}
-                <RawHeaderAccordion headers={detail().raw_reference_header} />
+                <div class="border-t border-theme-border/50 pt-3">
+                  <RawHeaderAccordion headers={detail().raw_reference_header} />
+                </div>
 
                 {/* Session Notes */}
-                <div class="mt-4 pt-4 border-t border-theme-border">
-                  <div class="flex items-center justify-between mb-2">
-                    <h4 class="text-xs font-medium text-theme-text-secondary uppercase tracking-wide">Session Notes</h4>
-                    <Show when={noteSaving()}>
-                      <span class="text-xs text-theme-text-secondary">Saving...</span>
-                    </Show>
-                  </div>
-                  <textarea
-                    class="w-full bg-theme-elevated border border-theme-border rounded px-3 py-2 text-sm text-theme-text-primary placeholder-theme-text-secondary resize-y min-h-[50px]"
-                    placeholder="Add notes for this session..."
-                    value={sessionNote()}
-                    onInput={(e) => {
-                      const val = e.currentTarget.value;
-                      setSessionNote(val);
-                      saveSessionNote(val);
-                    }}
-                  />
+                <div class="border-t border-theme-border/50 pt-3">
+                  <button
+                    class="flex justify-between items-center w-full text-xs py-2 px-0 hover:text-theme-text-primary transition-colors cursor-pointer"
+                    classList={{ "text-theme-text-primary": showNotes(), "text-theme-text-secondary": !showNotes() }}
+                    onClick={() => setShowNotes((v) => !v)}
+                  >
+                    <span class="font-semibold border-l-2 border-theme-accent pl-2">
+                      Session Notes
+                      <Show when={sessionNote()}>
+                        <span class="text-theme-text-tertiary font-normal ml-2">has content</span>
+                      </Show>
+                    </span>
+                    <div class="flex items-center gap-2">
+                      <Show when={noteSaving()}>
+                        <span class="text-theme-text-tertiary font-normal">Saving...</span>
+                      </Show>
+                      <svg
+                        class={`w-3.5 h-3.5 transition-transform duration-200 ${showNotes() ? "rotate-180" : ""}`}
+                        viewBox="0 0 20 20"
+                        fill="currentColor"
+                      >
+                        <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
+                      </svg>
+                    </div>
+                  </button>
+                  <Show when={showNotes()}>
+                    <textarea
+                      class="w-full bg-theme-elevated border border-theme-border rounded px-3 py-2 text-sm text-theme-text-primary placeholder-theme-text-secondary resize-y min-h-[50px] mt-2"
+                      placeholder="Add notes for this session..."
+                      value={sessionNote()}
+                      onInput={(e) => {
+                        const val = e.currentTarget.value;
+                        setSessionNote(val);
+                        saveSessionNote(val);
+                      }}
+                    />
+                  </Show>
                 </div>
               </div>
             )}

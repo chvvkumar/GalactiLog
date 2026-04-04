@@ -4,7 +4,7 @@ import { api } from "../api/client";
 import type { TargetDetailResponse, SessionDetail } from "../types";
 import SessionAccordionCard from "../components/SessionAccordionCard";
 import FilterBadges from "../components/FilterBadges";
-import TargetMetricsChart, { MetricsTrendButton } from "../components/TargetMetricsChart";
+import TargetMetricsChart from "../components/TargetMetricsChart";
 import ExportModal from "../components/ExportModal";
 import { useSettingsContext } from "../components/SettingsProvider";
 import { isFieldVisible } from "../utils/displaySettings";
@@ -44,6 +44,7 @@ const TargetDetailPage: Component = () => {
   const [targetChartExpanded, setTargetChartExpanded] = createSignal(graphSettings().target_chart_expanded);
   const [selectedChartDates, setSelectedChartDates] = createSignal<string[]>([]);
 
+  const [notesExpanded, setNotesExpanded] = createSignal(false);
   const [targetNotes, setTargetNotes] = createSignal<string>("");
   const [notesSaving, setNotesSaving] = createSignal(false);
   let notesTimer: ReturnType<typeof setTimeout> | undefined;
@@ -270,21 +271,37 @@ const TargetDetailPage: Component = () => {
                   </div>
                   <div class="text-caption text-theme-text-secondary">Filters Used</div>
                 </div>
-                <MetricsTrendButton expanded={targetChartExpanded()} onToggle={toggleTargetChart} />
               </div>
             </div>
 
             {/* Target Notes */}
             <div class="px-4 sm:px-6 pt-4">
-              <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-4">
-                <div class="flex items-center justify-between mb-2">
-                  <h3 class="text-sm font-medium text-theme-text-primary">Notes</h3>
+              <button
+                class="flex items-center justify-between w-full py-2 cursor-pointer group"
+                onClick={() => setNotesExpanded((v) => !v)}
+              >
+                <h3 class="text-xs font-semibold uppercase tracking-wider text-theme-text-secondary border-l-2 border-theme-accent pl-2 group-hover:text-theme-text-primary transition-colors">
+                  Notes
+                  <Show when={targetNotes()}>
+                    <span class="text-theme-text-tertiary font-normal normal-case tracking-normal ml-2">has content</span>
+                  </Show>
+                </h3>
+                <div class="flex items-center gap-2">
                   <Show when={notesSaving()}>
                     <span class="text-xs text-theme-text-secondary">Saving...</span>
                   </Show>
+                  <svg
+                    class={`w-3.5 h-3.5 transition-transform duration-200 text-theme-text-tertiary ${notesExpanded() ? "rotate-180" : ""}`}
+                    viewBox="0 0 20 20"
+                    fill="currentColor"
+                  >
+                    <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
+                  </svg>
                 </div>
+              </button>
+              <Show when={notesExpanded()}>
                 <textarea
-                  class="w-full bg-theme-elevated border border-theme-border rounded px-3 py-2 text-sm text-theme-text-primary placeholder-theme-text-secondary resize-y min-h-[60px]"
+                  class="w-full bg-theme-elevated border border-theme-border rounded px-3 py-2 text-sm text-theme-text-primary placeholder-theme-text-secondary resize-y min-h-[60px] mt-2"
                   placeholder="Add notes about this target..."
                   value={targetNotes()}
                   onInput={(e) => {
@@ -293,17 +310,36 @@ const TargetDetailPage: Component = () => {
                     saveTargetNotes(val);
                   }}
                 />
-              </div>
+              </Show>
             </div>
 
             {/* Target Metrics Chart */}
             <Show when={targetDetail()}>
-              <TargetMetricsChart
-                selectedDates={selectedChartDates()}
-                sessionDetails={sessionCache()}
-                expanded={targetChartExpanded()}
-                onLoadSession={loadSessionDetail}
-              />
+              <div class="px-4 sm:px-6 pt-4">
+                <button
+                  class="flex items-center justify-between w-full py-2 cursor-pointer group"
+                  onClick={toggleTargetChart}
+                >
+                  <h3 class="text-xs font-semibold uppercase tracking-wider text-theme-text-secondary border-l-2 border-theme-accent pl-2 group-hover:text-theme-text-primary transition-colors">
+                    Target Metrics Across Sessions
+                  </h3>
+                  <svg
+                    class={`w-3.5 h-3.5 transition-transform duration-200 text-theme-text-tertiary ${targetChartExpanded() ? "rotate-180" : ""}`}
+                    viewBox="0 0 20 20"
+                    fill="currentColor"
+                  >
+                    <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
+                  </svg>
+                </button>
+                <Show when={targetChartExpanded()}>
+                  <TargetMetricsChart
+                    selectedDates={selectedChartDates()}
+                    sessionDetails={sessionCache()}
+                    expanded={targetChartExpanded()}
+                    onLoadSession={loadSessionDetail}
+                  />
+                </Show>
+              </div>
             </Show>
 
             {/* Session Table */}
