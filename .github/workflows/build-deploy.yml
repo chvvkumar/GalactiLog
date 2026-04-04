@@ -156,8 +156,18 @@ jobs:
 
           if [ "$PRERELEASE" = "true" ]; then
             RELEASE_TYPE="pre-release (release candidate)"
+            RC_NOTE="> **This is a release candidate for testing.** These changes are not yet in the stable channel."
           else
             RELEASE_TYPE="stable release"
+            # Find the latest RC tag that preceded this stable release
+            GRADUATED_FROM=$(git tag --list --sort=-version:refname \
+              | grep -E "^${TAG}-rc\.[0-9]+$" 2>/dev/null \
+              | head -n 1 || true)
+            if [ -n "$GRADUATED_FROM" ]; then
+              RC_NOTE="This stable release graduates changes tested in ${GRADUATED_FROM}."
+            else
+              RC_NOTE=""
+            fi
           fi
 
           if [ -n "$PREV_TAG" ]; then
@@ -188,10 +198,10 @@ jobs:
 
           Do NOT use AI phraseology or filler words. Avoid words like: leverage, enhance, streamline, robust, seamless, comprehensive, cutting-edge, utilize, facilitate, empower, elevate, harness, spearhead, foster, bolster, pivotal, groundbreaking, synergy, paradigm, holistic, transformative. Write like a human developer -- plain, direct, technical language only.
 
-          Format the release notes in Markdown with these sections. Omit any section that has no relevant content:
+          Format the release notes in Markdown with these sections. If a section has ZERO items, do NOT output its heading at all -- omit it entirely:
 
-          ## Summary
-          A 2-3 sentence overview of what this release delivers.
+          ## Highlights
+          The top 1-3 most impactful changes for end users, written as short action-oriented bullets.
 
           ## What's New
           Bullet list of new features or enhancements, grouped by area (e.g. Frontend, Backend, API) if there are many.
@@ -201,6 +211,9 @@ jobs:
 
           ## Technical Changes
           Bullet list of infrastructure, refactoring, or dependency updates.
+
+          ## Upgrade Notes
+          Any breaking changes, required database migrations, or config changes users must handle when upgrading. Only include this section if there are actual breaking or required changes.
 
           ${DIFF_SECTION}
 
@@ -213,21 +226,29 @@ jobs:
             -H "Content-Type: application/json" \
             -d "{
               \"contents\": [{\"parts\": [{\"text\": $ESCAPED_PROMPT}]}],
-              \"generationConfig\": {\"temperature\": 0.7, \"maxOutputTokens\": 1024}
+              \"generationConfig\": {\"temperature\": 0.7, \"maxOutputTokens\": 4096}
             }" 2>/dev/null)
 
           HTTP_CODE=$(echo "$RESPONSE" | tail -n 1)
           BODY=$(echo "$RESPONSE" | sed '$d')
 
           if [ "$HTTP_CODE" = "200" ]; then
-            echo "$BODY" | python3 -c '
-          import sys, json
+            echo "$BODY" | TAG="$TAG" PREV_TAG="$PREV_TAG" RC_NOTE="$RC_NOTE" python3 -c '
+          import sys, json, os
           try:
               data = json.load(sys.stdin)
               text = data["candidates"][0]["content"]["parts"][0]["text"]
+              tag = os.environ["TAG"]
+              prev_tag = os.environ.get("PREV_TAG", "")
+              rc_note = os.environ.get("RC_NOTE", "")
               with open("/tmp/release_notes.txt", "w") as f:
+                  if rc_note:
+                      f.write(rc_note + "\n\n")
                   f.write(text)
-                  f.write("\n\n---\n*Release notes generated from commit messages automatically.*\n")
+                  f.write("\n\n---\n")
+                  f.write(f"## Docker\n\n```\ndocker pull chvvkumar/galactilog:{tag}\n```\n\n")
+                  if prev_tag:
+                      f.write(f"**Full diff:** https://github.com/chvvkumar/GalactiLog/compare/{prev_tag}...{tag}\n")
           except (KeyError, IndexError, json.JSONDecodeError):
               sys.exit(1)
           '
