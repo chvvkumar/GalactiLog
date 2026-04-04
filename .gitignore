@@ -50,3 +50,4 @@ guides/specs/
 *.log
 .worktrees/
 repomix-output.*
+.repomixignore

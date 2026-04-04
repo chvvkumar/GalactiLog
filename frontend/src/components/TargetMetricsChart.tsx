@@ -285,43 +285,24 @@ export default function TargetMetricsChart(props: Props) {
   });
 
   return (
-    <Show when={props.expanded}>
-      <div class="border border-theme-border rounded-[var(--radius-md)] p-3 bg-theme-base mb-4">
-        <div class="flex justify-between items-start gap-4 mb-2">
-          <div class="flex items-center gap-3">
-            <div class="text-tiny text-theme-text-tertiary uppercase tracking-wider">
-              Target Metrics Across Sessions
+    <div class="border border-theme-border rounded-[var(--radius-md)] p-3 bg-theme-base mt-2">
+      <div class="flex justify-between items-start gap-4 mb-2">
+        <div class="flex items-center gap-3">
+          <Show when={loadingCount() > 0}>
+            <div class="text-tiny text-theme-text-tertiary">
+              Loading {loadingCount()} session{loadingCount() > 1 ? "s" : ""}...
             </div>
-            <Show when={loadingCount() > 0}>
-              <div class="text-tiny text-theme-text-tertiary">
-                Loading {loadingCount()} session{loadingCount() > 1 ? "s" : ""}...
-              </div>
-            </Show>
-          </div>
-          <MetricTogglePills availableMetrics={availableMetricKeys()} />
+          </Show>
         </div>
-        <div class="mb-3">
-          <FilterTogglePills filters={allFilters()} />
-        </div>
-        <div style={{ height: "220px" }}>
-          <canvas ref={canvasRef} />
-        </div>
+        <MetricTogglePills availableMetrics={availableMetricKeys()} />
       </div>
-    </Show>
+      <div class="mb-3">
+        <FilterTogglePills filters={allFilters()} />
+      </div>
+      <div style={{ height: "220px" }}>
+        <canvas ref={canvasRef} />
+      </div>
+    </div>
   );
 }
 
-export function MetricsTrendButton(props: { expanded: boolean; onToggle: () => void }) {
-  return (
-    <button
-      class="px-3 py-1.5 border border-theme-border-em rounded-[var(--radius-md)] bg-theme-surface text-label text-theme-text-secondary hover:text-theme-text-primary hover:border-theme-accent transition-colors cursor-pointer flex items-center gap-1.5"
-      onClick={props.onToggle}
-    >
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
-      </svg>
-      Metrics Trend
-      <span class="text-theme-text-tertiary text-tiny">{props.expanded ? "\u25B2" : "\u25BC"}</span>
-    </button>
-  );
-}

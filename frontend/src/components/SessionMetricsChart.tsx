@@ -166,14 +166,18 @@ export default function SessionMetricsChart(props: Props) {
   return (
     <div>
       <button
-        class="flex justify-between items-center w-full text-xs py-2.5 px-3 -mx-3 rounded-[var(--radius-md)] hover:bg-theme-hover transition-all cursor-pointer border-l-2 border-l-transparent hover:border-l-theme-accent/50"
-        classList={{ "!border-l-theme-accent bg-theme-hover/50": expanded() }}
+        class="flex justify-between items-center w-full text-xs py-2 px-0 hover:text-theme-text-primary transition-colors cursor-pointer"
+        classList={{ "text-theme-text-primary": expanded(), "text-theme-text-secondary": !expanded() }}
         onClick={toggleExpanded}
       >
-        <span class="font-bold text-theme-text-primary">Session Metrics</span>
-        <span class="px-2.5 py-1 border border-theme-border-em rounded text-label text-theme-text-secondary hover:text-theme-text-primary hover:border-theme-accent transition-colors">
-          {expanded() ? "Collapse" : "Expand"}
-        </span>
+        <span class="font-semibold border-l-2 border-theme-accent pl-2">Session Metrics</span>
+        <svg
+          class={`w-3.5 h-3.5 transition-transform duration-200 ${expanded() ? "rotate-180" : ""}`}
+          viewBox="0 0 20 20"
+          fill="currentColor"
+        >
+          <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
+        </svg>
       </button>
       <Show when={expanded()}>
         <div class="border border-theme-border rounded-[var(--radius-md)] p-3 bg-theme-base mt-2">
