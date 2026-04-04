@@ -8,6 +8,8 @@ import { UsersTab } from "../components/settings/UsersTab";
 import ScanManager from "../components/ScanManager";
 import DisplayTab from "../components/DisplayTab";
 import { useAuth } from "../components/AuthProvider";
+import { useSettingsContext } from "../components/SettingsProvider";
+import { contentWidthClass } from "../utils/format";
 
 const ALL_TABS = [
   { id: "scan", label: "Scan & Ingest" },
@@ -27,12 +29,13 @@ const TargetManagementTab: Component = () => {
 export const SettingsPage: Component = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const { isAdmin } = useAuth();
+  const ctx = useSettingsContext();
 
   const tabs = () => ALL_TABS.filter((t) => !("adminOnly" in t && t.adminOnly) || isAdmin());
   const activeTab = () => (tabs().some((t) => t.id === searchParams.tab) ? (searchParams.tab as TabId) : "scan");
 
   return (
-    <div class={`p-4 mx-auto space-y-6 ${activeTab() === "targets" ? "max-w-6xl" : "max-w-4xl"}`}>
+    <div class={`p-4 space-y-6 ${contentWidthClass(ctx.contentWidth())}`}>
       <h1 class="text-xl font-semibold tracking-tight text-theme-text-primary">Settings</h1>
 
       {/* Tab bar */}

@@ -65,7 +65,7 @@ const LoginPage: Component = () => {
           <button
             type="submit"
             disabled={submitting()}
-            class="w-full py-2 bg-theme-accent text-theme-text-primary rounded-[var(--radius-sm)] text-sm font-medium disabled:opacity-50 hover:bg-theme-accent/80 transition-colors"
+            class="w-full py-2 bg-theme-accent text-white rounded-[var(--radius-sm)] text-sm font-medium disabled:opacity-50 hover:opacity-90 transition-opacity"
           >
             {submitting() ? "Signing in..." : "Sign in"}
           </button>

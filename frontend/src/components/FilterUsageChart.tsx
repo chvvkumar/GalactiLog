@@ -1,6 +1,7 @@
 import { Component, For, Show } from "solid-js";
 import { useSettingsContext } from "./SettingsProvider";
 import { getFilterBadgeStyle } from "../utils/filterStyles";
+import { formatIntegration } from "../utils/format";
 
 const FilterUsageChart: Component<{ usage: Record<string, number> }> = (props) => {
   const { filterColorMap, filterAliasMap, filterBadgeStyle } = useSettingsContext();
@@ -17,7 +18,7 @@ const FilterUsageChart: Component<{ usage: Record<string, number> }> = (props) =
 
   return (
     <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-4 space-y-2">
-      <h3 class="text-white font-medium text-sm">Filter Usage</h3>
+      <h3 class="text-theme-text-primary font-medium text-sm">Filter Usage</h3>
       <For each={entries()}>
         {([name, seconds]) => {
           const color = getColor(name);
@@ -39,7 +40,7 @@ const FilterUsageChart: Component<{ usage: Record<string, number> }> = (props) =
                   style={{ width: `${(seconds / maxVal()) * 100}%`, "background-color": color }}
                 />
               </div>
-              <span class="w-14 text-right text-white">{(seconds / 3600).toFixed(1)}h</span>
+              <span class="w-16 text-right text-theme-text-primary">{formatIntegration(seconds)}</span>
             </div>
           );
         }}

@@ -4,12 +4,7 @@ import type { TargetAggregation } from "../types";
 import { useCatalog } from "../store/catalog";
 import FilterBadges from "./FilterBadges";
 import SessionTable from "./SessionTable";
-
-function formatIntegration(seconds: number): string {
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  return `${h.toString().padStart(2, "0")}h ${m.toString().padStart(2, "0")}m`;
-}
+import { formatIntegration } from "../utils/format";
 
 const TargetRow: Component<{
   target: TargetAggregation;

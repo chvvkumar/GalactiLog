@@ -2,12 +2,7 @@ import { Component, For, Show, createSignal, createResource } from "solid-js";
 import { api } from "../api/client";
 import type { ExportResponse, SessionOverview } from "../types";
 
-function formatHours(seconds: number): string {
-  const h = seconds / 3600;
-  const hrs = Math.floor(h);
-  const mins = Math.round((h - hrs) * 60);
-  return hrs > 0 ? `${hrs}h ${mins}m` : `${mins}m`;
-}
+import { formatIntegration } from "../utils/format";
 
 function generateTextExport(data: ExportResponse): string {
   const lines: string[] = [];
@@ -38,14 +33,14 @@ function generateTextExport(data: ExportResponse): string {
   }
 
   for (const [filter, info] of byFilter) {
-    let line = `${filter}: ${info.frames} x ${info.exposure}s (${formatHours(info.total)})`;
+    let line = `${filter}: ${info.frames} x ${info.exposure}s (${formatIntegration(info.total)})`;
     if (info.gain != null) line += ` | Gain ${info.gain}`;
     if (info.temp != null) line += ` | ${info.temp}\u00b0C`;
     lines.push(line);
   }
 
   lines.push("");
-  lines.push(`Total integration: ${formatHours(data.total_integration_seconds)}`);
+  lines.push(`Total integration: ${formatIntegration(data.total_integration_seconds)}`);
   return lines.join("\n");
 }
 
@@ -160,7 +155,7 @@ const ExportModal: Component<Props> = (props) => {
                       checked={selectedDates().has(s.session_date)}
                       onChange={() => toggleDate(s.session_date)}
                     />
-                    {s.session_date} — {formatHours(s.integration_seconds)} ({s.frame_count} frames)
+                    {s.session_date} — {formatIntegration(s.integration_seconds)} ({s.frame_count} frames)
                   </label>
                 )}
               </For>
@@ -177,7 +172,12 @@ const ExportModal: Component<Props> = (props) => {
           </Show>
 
           <Show when={exportData.loading}>
-            <div class="text-xs text-theme-text-secondary text-center py-4">Loading...</div>
+            <div class="bg-theme-elevated rounded p-3 space-y-2">
+              <div class="h-3 w-3/4 bg-theme-surface rounded animate-pulse" />
+              <div class="h-3 w-1/2 bg-theme-surface rounded animate-pulse" />
+              <div class="h-3 w-2/3 bg-theme-surface rounded animate-pulse" />
+              <div class="h-3 w-1/3 bg-theme-surface rounded animate-pulse" />
+            </div>
           </Show>
         </div>
 

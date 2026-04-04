@@ -1,6 +1,5 @@
-import { Component, Show, For, createEffect } from "solid-js";
+import { Component, Show, For } from "solid-js";
 import { useDashboardFilters } from "./DashboardFilterProvider";
-import { showToast, dismissToast } from "./Toast";
 import TargetTable from "./TargetTable";
 
 const SkeletonRow: Component = () => (
@@ -37,13 +36,6 @@ const TargetFeed: Component = () => {
   const { targetData, page, totalPages, totalCount, setPage, pageSize, setPageSize } = useDashboardFilters();
   const PAGE_SIZES = [10, 25, 50, 100, 250];
 
-  createEffect(() => {
-    if (targetData.loading) {
-      showToast("Loading targets...", "success", 10000);
-    } else {
-      dismissToast();
-    }
-  });
 
   const pageRange = () => {
     const current = page();

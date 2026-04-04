@@ -10,9 +10,7 @@ import QualityFilters from "./QualityFilters";
 import MetricFilters from "./MetricFilters";
 import FitsQueryBuilder from "./FitsQueryBuilder";
 
-function formatHours(seconds: number): string {
-  return (seconds / 3600).toFixed(1) + "h";
-}
+import { formatIntegration } from "../utils/format";
 
 const Sidebar: Component = () => {
   const { resetFilters, targetData, filters } = useDashboardFilters();
@@ -39,7 +37,7 @@ const Sidebar: Component = () => {
         {(data) => (
           <section class="flex flex-wrap gap-x-4 gap-y-1 text-sm">
             <span class="text-theme-text-secondary">
-              Integration <span class="text-theme-text-primary font-semibold">{formatHours(data().aggregates.total_integration_seconds)}</span>
+              Integration <span class="text-theme-text-primary font-semibold">{formatIntegration(data().aggregates.total_integration_seconds)}</span>
             </span>
             <span class="text-theme-text-secondary">
               Targets <span class="text-theme-text-primary font-semibold">{String(data().aggregates.target_count)}</span>

@@ -73,7 +73,22 @@ async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
   }
 
   if (!resp.ok) {
-    throw new ApiError(resp.status, `API error: ${resp.status} ${resp.statusText}`);
+    let message: string;
+    try {
+      const body = await resp.json();
+      message = typeof body.detail === "string" ? body.detail : JSON.stringify(body.detail);
+    } catch {
+      const fallback: Record<number, string> = {
+        400: "Invalid request",
+        403: "Permission denied",
+        404: "Not found",
+        409: "Conflict — resource already exists",
+        422: "Validation error",
+        500: "Server error — please try again later",
+      };
+      message = fallback[resp.status] || "Something went wrong";
+    }
+    throw new ApiError(resp.status, message);
   }
   return resp.json();
 }

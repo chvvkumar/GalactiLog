@@ -31,7 +31,7 @@ const ScanControls: Component<{
             <button
               onClick={props.onStartScan}
               disabled={props.isActive}
-              class="px-4 py-1.5 bg-theme-accent text-theme-text-primary rounded text-sm font-medium disabled:opacity-50 hover:bg-theme-accent/80 transition-colors"
+              class="px-4 py-1.5 bg-theme-accent text-white rounded text-sm font-medium disabled:opacity-50 hover:opacity-90 transition-opacity"
             >
               {props.isActive ? (props.stopping ? "Stopping..." : "Scanning...") : "Scan Directory"}
             </button>

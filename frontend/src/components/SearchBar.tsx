@@ -9,6 +9,7 @@ const SearchBar: Component = () => {
   const [query, setQuery] = createSignal("");
   const [suggestions, setSuggestions] = createSignal<TargetSearchResultFuzzy[]>([]);
   const [showSuggestions, setShowSuggestions] = createSignal(false);
+  const [activeIndex, setActiveIndex] = createSignal(-1);
 
   const fetchSuggestions = debounce(async (value: string) => {
     try {
@@ -23,6 +24,7 @@ const SearchBar: Component = () => {
 
   const onInput = (value: string) => {
     setQuery(value);
+    setActiveIndex(-1);
     if (value.length < 2) {
       setSuggestions([]);
       setShowSuggestions(false);
@@ -30,6 +32,25 @@ const SearchBar: Component = () => {
       return;
     }
     fetchSuggestions(value);
+  };
+
+  const onKeyDown = (e: KeyboardEvent) => {
+    const list = suggestions();
+    if (!showSuggestions() || list.length === 0) return;
+
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setActiveIndex((i) => (i < list.length - 1 ? i + 1 : 0));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setActiveIndex((i) => (i > 0 ? i - 1 : list.length - 1));
+    } else if (e.key === "Enter" && activeIndex() >= 0) {
+      e.preventDefault();
+      selectTarget(list[activeIndex()]);
+    } else if (e.key === "Escape") {
+      setShowSuggestions(false);
+      setActiveIndex(-1);
+    }
   };
 
   const selectTarget = (target: TargetSearchResultFuzzy) => {
@@ -45,6 +66,7 @@ const SearchBar: Component = () => {
         type="text"
         value={query()}
         onInput={(e) => onInput(e.currentTarget.value)}
+        onKeyDown={onKeyDown}
         onFocus={() => suggestions().length > 0 && setShowSuggestions(true)}
         onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
         placeholder="M31, NGC 7000..."
@@ -53,10 +75,10 @@ const SearchBar: Component = () => {
       <Show when={showSuggestions()}>
         <div class="absolute z-50 w-full mt-1 bg-theme-surface shadow-[var(--shadow-md)] border border-theme-border rounded-[var(--radius-sm)] max-h-48 overflow-y-auto">
           <For each={suggestions()}>
-            {(target) => (
+            {(target, i) => (
               <button
                 type="button"
-                class="w-full text-left px-3 py-2 hover:bg-theme-accent/20 text-theme-text-primary text-sm"
+                class={`w-full text-left px-3 py-2 text-theme-text-primary text-sm ${activeIndex() === i() ? "bg-theme-accent/20" : "hover:bg-theme-accent/20"}`}
                 onMouseDown={() => selectTarget(target)}
               >
                 <span class="font-medium">{target.primary_name}</span>

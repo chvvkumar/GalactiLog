@@ -3,9 +3,7 @@ import { api } from "../../api/client";
 import { remToPx } from "../../utils/chartConfig";
 import type { PanelStats } from "../../types";
 
-function formatHours(seconds: number): string {
-  return (seconds / 3600).toFixed(1) + "h";
-}
+import { formatIntegration } from "../../utils/format";
 
 function completionPct(seconds: number, max: number): number {
   return max > 0 ? (seconds / max) * 100 : 0;
@@ -290,7 +288,7 @@ const MosaicGrid: Component<Props> = (props) => {
                       opacity={0.85}
                       style={{ "text-shadow": "0 1px 3px rgba(0,0,0,0.8)" }}
                     >
-                      {formatHours(pos.panel.total_integration_seconds)}
+                      {formatIntegration(pos.panel.total_integration_seconds)}
                     </text>
                   </g>
                 );
@@ -309,11 +307,11 @@ const MosaicGrid: Component<Props> = (props) => {
           >
             <div class="font-medium text-theme-text-primary">{t().panel.panel_label}</div>
             <div class="text-theme-text-secondary">
-              {formatHours(t().panel.total_integration_seconds)} &middot; {t().panel.total_frames} frames
+              {formatIntegration(t().panel.total_integration_seconds)} &middot; {t().panel.total_frames} frames
             </div>
             <Show when={Object.keys(t().panel.filter_distribution).length > 0}>
               <div class="text-theme-text-secondary">
-                {Object.entries(t().panel.filter_distribution).map(([f, s]) => `${f}: ${formatHours(s)}`).join(", ")}
+                {Object.entries(t().panel.filter_distribution).map(([f, s]) => `${f}: ${formatIntegration(s)}`).join(", ")}
               </div>
             </Show>
           </div>

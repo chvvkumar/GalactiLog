@@ -83,7 +83,7 @@ const FitsQueryBuilder: Component = () => {
             placeholder="Value"
             class="flex-1 px-2 py-1.5 bg-theme-input border border-theme-border rounded-[var(--radius-sm)] text-xs text-theme-text-primary placeholder:text-theme-text-tertiary focus:ring-1 focus:ring-theme-accent focus:border-theme-accent outline-none"
           />
-          <button onClick={addRow} class="px-3 py-1.5 bg-theme-accent text-theme-text-primary rounded-[var(--radius-sm)] text-xs hover:bg-theme-accent/80 transition-colors duration-150">+</button>
+          <button onClick={addRow} class="px-3 py-1.5 bg-theme-accent text-white rounded-[var(--radius-sm)] text-xs hover:opacity-90 transition-opacity">+</button>
         </div>
       </div>
     </div>
