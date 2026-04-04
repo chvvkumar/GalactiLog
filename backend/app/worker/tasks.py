@@ -167,7 +167,8 @@ def run_scan(self, include_calibration: bool = True) -> dict:
     # Some tasks may have already completed during discovery, check now
     check_complete_sync(_redis)
 
-    # Queue duplicate detection and dark hours backfill after ingest
+    # Queue post-scan tasks after ingest
+    # (smart_rebuild_targets + detect_mosaic_panels_task are chained from check_complete_sync)
     detect_duplicate_targets.apply_async(countdown=30)
     backfill_dark_hours.apply_async(countdown=45)
 
@@ -661,8 +662,9 @@ def rebuild_targets(self) -> dict:
 
         time.sleep(0.3)  # Rate limit SIMBAD
 
-    # Phase 4: Queue duplicate detection
+    # Phase 4: Queue post-rebuild tasks
     detect_duplicate_targets.apply_async(countdown=10)
+    detect_mosaic_panels_task.apply_async(countdown=20)
 
     details = {"resolved": resolved, "failed": failed, "total": total}
     set_rebuild_complete_sync(
@@ -680,6 +682,10 @@ def rebuild_targets(self) -> dict:
     return {"status": "complete", **details}
 
 
+SMART_REBUILD_LOCK = "smart_rebuild:lock"
+SMART_REBUILD_LOCK_TTL = 300  # 5 minutes
+
+
 @celery_app.task(bind=True)
 def smart_rebuild_targets(self) -> dict:
     """Quick fix: repair target data using only local DB + SIMBAD cache.
@@ -692,6 +698,17 @@ def smart_rebuild_targets(self) -> dict:
     5. Re-derive catalog_id/common_name from cached SIMBAD data if available
     6. Stale merge candidates → clean up
     """
+    if not _redis.set(SMART_REBUILD_LOCK, "1", nx=True, ex=SMART_REBUILD_LOCK_TTL):
+        logger.info("smart_rebuild: already running, skipping")
+        return {"status": "skipped", "reason": "already running"}
+
+    try:
+        return _smart_rebuild_inner()
+    finally:
+        _redis.delete(SMART_REBUILD_LOCK)
+
+
+def _smart_rebuild_inner() -> dict:
     logger.info("smart_rebuild: starting")
     set_rebuild_running_sync(_redis, "smart", "Running quick fix...")
     stats = {}
@@ -820,8 +837,9 @@ def smart_rebuild_targets(self) -> dict:
 
         session.commit()
 
-    # Queue duplicate detection
+    # Queue post-fix tasks
     detect_duplicate_targets.apply_async(countdown=5)
+    detect_mosaic_panels_task.apply_async(countdown=15)
 
     # Build summary message
     parts = []
@@ -842,6 +860,39 @@ def smart_rebuild_targets(self) -> dict:
     })
     logger.info("smart_rebuild: done — %s", stats)
     return {"status": "complete", **stats}
+
+
+MOSAIC_DETECT_LOCK = "mosaic_detect:lock"
+MOSAIC_DETECT_LOCK_TTL = 120  # 2 minutes
+
+
+@celery_app.task(name="detect_mosaic_panels_task")
+def detect_mosaic_panels_task():
+    """Run mosaic panel detection as a background Celery task."""
+    if not _redis.set(MOSAIC_DETECT_LOCK, "1", nx=True, ex=MOSAIC_DETECT_LOCK_TTL):
+        logger.info("detect_mosaic_panels_task: already running, skipping")
+        return {"status": "skipped", "reason": "already running"}
+
+    try:
+        import asyncio
+        from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
+        from app.services.mosaic_detection import detect_mosaic_panels
+
+        async def _run():
+            engine = create_async_engine(settings.database_url, pool_pre_ping=True)
+            async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+            async with async_session() as session:
+                count = await detect_mosaic_panels(session)
+                await session.commit()
+            await engine.dispose()
+            return count
+
+        count = asyncio.run(_run())
+        logger.info("detect_mosaic_panels_task: found %d new suggestions", count)
+        return {"status": "complete", "new_suggestions": count}
+    finally:
+        _redis.delete(MOSAIC_DETECT_LOCK)
 
 
 @celery_app.task(bind=True)
@@ -970,6 +1021,11 @@ def run_data_migrations(self, from_version: int) -> dict:
             "timestamp": time.time(),
         })
         logger.info("data_migrations: %s", summary_msg)
+
+        # Queue quick fix + mosaic detection after data migrations
+        smart_rebuild_targets.apply_async(countdown=5)
+        detect_mosaic_panels_task.apply_async(countdown=30)
+
         return {"status": "complete", "from": from_version, "to": DATA_VERSION}
     finally:
         _redis.delete(DATA_MIGRATION_LOCK)

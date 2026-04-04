@@ -202,6 +202,10 @@ def check_complete_sync(r: sync_redis.Redis) -> None:
             "details": {"completed": snap.completed, "failed": snap.failed, "skipped_calibration": snap.skipped_calibration, "csv_enriched": snap.csv_enriched, "total": snap.total, "removed": snap.removed},
             "timestamp": time.time(),
         })
+        # Chain post-scan maintenance tasks
+        from app.worker.tasks import smart_rebuild_targets, detect_mosaic_panels_task
+        smart_rebuild_targets.apply_async(countdown=10)
+        detect_mosaic_panels_task.apply_async(countdown=30)
 
 
 def start_scanning_sync(r: sync_redis.Redis) -> None:
