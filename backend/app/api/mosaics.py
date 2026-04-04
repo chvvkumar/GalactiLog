@@ -3,7 +3,7 @@ from collections import defaultdict
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
-from sqlalchemy import select, func, cast, Date
+from sqlalchemy import select, func, cast, Date, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -174,46 +174,67 @@ async def get_suggestions(
         for tid, tname in (await session.execute(tq)).all():
             name_map[str(tid)] = tname
 
-    # Fetch per-panel session summaries for all suggestions in one query.
-    # Build OBJECT patterns from base name + panel number.
-    results = []
-    for r in rows:
-        sessions: list[SuggestionPanelSession] = []
+    # Build all OBJECT ILIKE patterns across every suggestion+panel,
+    # then fetch session summaries in a single query instead of N queries.
+    # Each pattern maps back to (suggestion index, panel label).
+    pattern_map: dict[str, list[tuple[int, str]]] = {}  # pattern -> [(row_idx, label)]
+    for idx, r in enumerate(rows):
         for label in r.panel_labels:
             num = label.split()[-1] if label.startswith("Panel ") else label
             obj_pattern = f"%{r.suggested_name}%{num}%"
-            sq = (
-                select(
-                    Image.raw_headers["OBJECT"].astext.label("obj"),
-                    cast(Image.capture_date, Date).label("night"),
-                    Image.filter_used,
-                    func.count(Image.id).label("frames"),
-                    func.sum(Image.exposure_time).label("integration"),
-                )
-                .where(
-                    Image.image_type == "LIGHT",
-                    Image.raw_headers["OBJECT"].astext.ilike(obj_pattern),
-                )
-                .group_by("obj", "night", Image.filter_used)
-                .order_by("obj", "night")
-            )
-            for row in (await session.execute(sq)).all():
-                sessions.append(SuggestionPanelSession(
-                    panel_label=label,
-                    object_name=row.obj,
-                    date=str(row.night) if row.night else "",
-                    frames=row.frames,
-                    integration_seconds=row.integration or 0,
-                    filter_used=row.filter_used,
-                ))
+            pattern_map.setdefault(obj_pattern, []).append((idx, label))
 
+    # Run one query with all patterns OR'd together
+    all_patterns = list(pattern_map.keys())
+    obj_col = Image.raw_headers["OBJECT"].astext
+    session_rows_by_idx: dict[int, list[SuggestionPanelSession]] = defaultdict(list)
+
+    if all_patterns:
+        sq = (
+            select(
+                obj_col.label("obj"),
+                cast(Image.capture_date, Date).label("night"),
+                Image.filter_used,
+                func.count(Image.id).label("frames"),
+                func.sum(Image.exposure_time).label("integration"),
+            )
+            .where(
+                Image.image_type == "LIGHT",
+                or_(*(obj_col.ilike(p) for p in all_patterns)),
+            )
+            .group_by("obj", "night", Image.filter_used)
+            .order_by("obj", "night")
+        )
+        all_session_rows = (await session.execute(sq)).all()
+
+        # Distribute each result row back to the suggestions whose pattern matches
+        for row in all_session_rows:
+            obj_val = row.obj or ""
+            obj_lower = obj_val.lower()
+            for pattern, mappings in pattern_map.items():
+                # Convert SQL ILIKE pattern to simple substring check
+                # Patterns are like %name%num% — check each segment between %
+                segments = [s for s in pattern.lower().split("%") if s]
+                if all(seg in obj_lower for seg in segments):
+                    for row_idx, label in mappings:
+                        session_rows_by_idx[row_idx].append(SuggestionPanelSession(
+                            panel_label=label,
+                            object_name=obj_val,
+                            date=str(row.night) if row.night else "",
+                            frames=row.frames,
+                            integration_seconds=row.integration or 0,
+                            filter_used=row.filter_used,
+                        ))
+
+    results = []
+    for idx, r in enumerate(rows):
         results.append(MosaicSuggestionResponse(
             id=str(r.id),
             suggested_name=r.suggested_name,
             target_ids=[str(t) for t in r.target_ids],
             panel_labels=r.panel_labels,
             target_names={str(t): name_map.get(str(t), "Unknown") for t in set(r.target_ids)},
-            sessions=sessions,
+            sessions=session_rows_by_idx.get(idx, []),
             status=r.status,
         ))
 
