@@ -325,6 +325,7 @@ export const api = {
     y_metric: string;
     telescope?: string;
     camera?: string;
+    filter_used?: string;
     granularity?: "frame" | "session";
     date_from?: string;
     date_to?: string;
@@ -334,10 +335,106 @@ export const api = {
     qs.set("y_metric", params.y_metric);
     if (params.telescope) qs.set("telescope", params.telescope);
     if (params.camera) qs.set("camera", params.camera);
+    if (params.filter_used) qs.set("filter_used", params.filter_used);
     if (params.granularity) qs.set("granularity", params.granularity);
     if (params.date_from) qs.set("date_from", params.date_from);
     if (params.date_to) qs.set("date_to", params.date_to);
     return fetchJson<import("../types").CorrelationResponse>(`/analysis/correlation?${qs}`);
+  },
+
+  getAnalysisFilters: () =>
+    fetchJson<string[]>("/analysis/filters"),
+
+  getDistribution: (params: {
+    metric: string;
+    telescope?: string;
+    camera?: string;
+    filter_used?: string;
+    granularity?: "frame" | "session";
+    date_from?: string;
+    date_to?: string;
+  }) => {
+    const qs = new URLSearchParams();
+    qs.set("metric", params.metric);
+    if (params.telescope) qs.set("telescope", params.telescope);
+    if (params.camera) qs.set("camera", params.camera);
+    if (params.filter_used) qs.set("filter_used", params.filter_used);
+    if (params.granularity) qs.set("granularity", params.granularity);
+    if (params.date_from) qs.set("date_from", params.date_from);
+    if (params.date_to) qs.set("date_to", params.date_to);
+    return fetchJson<import("../types").DistributionResponse>(`/analysis/distribution?${qs}`);
+  },
+
+  getBoxPlot: (params: {
+    metric: string;
+    group_by: "filter" | "equipment" | "month" | "target";
+    telescope?: string;
+    camera?: string;
+    filter_used?: string;
+    date_from?: string;
+    date_to?: string;
+  }) => {
+    const qs = new URLSearchParams();
+    qs.set("metric", params.metric);
+    qs.set("group_by", params.group_by);
+    if (params.telescope) qs.set("telescope", params.telescope);
+    if (params.camera) qs.set("camera", params.camera);
+    if (params.filter_used) qs.set("filter_used", params.filter_used);
+    if (params.date_from) qs.set("date_from", params.date_from);
+    if (params.date_to) qs.set("date_to", params.date_to);
+    return fetchJson<import("../types").BoxPlotResponse>(`/analysis/boxplot?${qs}`);
+  },
+
+  getTimeSeries: (params: {
+    metric: string;
+    telescope?: string;
+    camera?: string;
+    filter_used?: string;
+    date_from?: string;
+    date_to?: string;
+  }) => {
+    const qs = new URLSearchParams();
+    qs.set("metric", params.metric);
+    if (params.telescope) qs.set("telescope", params.telescope);
+    if (params.camera) qs.set("camera", params.camera);
+    if (params.filter_used) qs.set("filter_used", params.filter_used);
+    if (params.date_from) qs.set("date_from", params.date_from);
+    if (params.date_to) qs.set("date_to", params.date_to);
+    return fetchJson<import("../types").TimeSeriesResponse>(`/analysis/timeseries?${qs}`);
+  },
+
+  getMatrix: (params: {
+    telescope?: string;
+    camera?: string;
+    filter_used?: string;
+    date_from?: string;
+    date_to?: string;
+  }) => {
+    const qs = new URLSearchParams();
+    if (params.telescope) qs.set("telescope", params.telescope);
+    if (params.camera) qs.set("camera", params.camera);
+    if (params.filter_used) qs.set("filter_used", params.filter_used);
+    if (params.date_from) qs.set("date_from", params.date_from);
+    if (params.date_to) qs.set("date_to", params.date_to);
+    return fetchJson<import("../types").MatrixResponse>(`/analysis/matrix?${qs}`);
+  },
+
+  getCompare: (params: {
+    metric: string;
+    mode: "equipment" | "filter";
+    group_a: string;
+    group_b: string;
+    date_from?: string;
+    date_to?: string;
+  }) => {
+    const qs = new URLSearchParams();
+    qs.set("metric", params.metric);
+    qs.set("mode", params.mode);
+    qs.set("group_a", params.group_a);
+    qs.set("group_b", params.group_b);
+    if (params.date_from) qs.set("date_from", params.date_from);
+    if (params.date_to) qs.set("date_to", params.date_to);
+    return fetchJson<import("../types").CompareResponse>(`/analysis/compare?${qs}`);
   },
 
   updateTargetNotes: (targetId: string, notes: string | null) =>

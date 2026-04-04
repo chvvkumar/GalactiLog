@@ -6,11 +6,12 @@ import {
   PointElement,
   Tooltip,
   LineElement,
+  Filler,
 } from "chart.js";
 import type { CorrelationResponse } from "../../types";
 import { chartFontSize } from "../../utils/chartConfig";
 
-Chart.register(ScatterController, LinearScale, PointElement, Tooltip, LineElement);
+Chart.register(ScatterController, LinearScale, PointElement, Tooltip, LineElement, Filler);
 
 const METRIC_LABELS: Record<string, string> = {
   humidity: "Humidity (%)",
@@ -67,7 +68,6 @@ function describeCorrelation(data: CorrelationResponse): string {
   const r2 = trend.r_squared;
   const rising = trend.slope > 0;
 
-  // Strength description
   let strength: string;
   let verdict: string;
   if (r2 < 0.05) {
@@ -90,7 +90,8 @@ function describeCorrelation(data: CorrelationResponse): string {
       : `${xName} strongly improves your ${yName}. This is a key factor at your site.`;
   }
 
-  return `${strength} (R²=${r2.toFixed(2)}). ${verdict}`;
+  const statsLine = `Pearson r=${trend.pearson_r.toFixed(2)}, Spearman \u03c1=${trend.spearman_rho.toFixed(2)}`;
+  return `${strength} (R\u00b2=${r2.toFixed(2)}, ${statsLine}). ${verdict}`;
 }
 
 interface Props {
@@ -110,10 +111,13 @@ const CorrelationChart: Component<Props> = (props) => {
     const { points, trend, x_metric, y_metric, granularity } = props.data;
     const isSession = granularity === "session";
 
+    const normalPts = points.filter((p) => !p.outlier);
+    const outlierPts = points.filter((p) => p.outlier);
+
     const datasets: any[] = [
       {
         label: "Data",
-        data: points.map((p) => ({ x: p.x, y: p.y })),
+        data: normalPts.map((p) => ({ x: p.x, y: p.y })),
         backgroundColor: isSession
           ? "rgba(100, 180, 255, 0.85)"
           : "rgba(100, 180, 255, 0.55)",
@@ -126,7 +130,44 @@ const CorrelationChart: Component<Props> = (props) => {
       },
     ];
 
-    // Add trend line
+    if (outlierPts.length > 0) {
+      datasets.push({
+        label: "Outliers",
+        data: outlierPts.map((p) => ({ x: p.x, y: p.y })),
+        backgroundColor: "transparent",
+        borderColor: "rgba(255, 100, 100, 0.8)",
+        borderWidth: 2,
+        pointRadius: isSession ? 6 : 4,
+        pointHoverRadius: isSession ? 8 : 6,
+        pointStyle: "circle",
+      });
+    }
+
+    // Confidence band
+    if (trend && trend.confidence_upper.length > 0) {
+      datasets.push({
+        label: "95% CI",
+        data: trend.confidence_upper.map((p) => ({ x: p.x, y: p.y })),
+        type: "line" as const,
+        borderColor: "transparent",
+        backgroundColor: "rgba(255, 180, 80, 0.12)",
+        fill: "+1",
+        pointRadius: 0,
+        tension: 0.3,
+      });
+      datasets.push({
+        label: "_ci_lower",
+        data: [...trend.confidence_lower].reverse().map((p) => ({ x: p.x, y: p.y })),
+        type: "line" as const,
+        borderColor: "transparent",
+        backgroundColor: "transparent",
+        fill: false,
+        pointRadius: 0,
+        tension: 0.3,
+      });
+    }
+
+    // Trend line
     if (trend && points.length >= 3) {
       const xs = points.map((p) => p.x).sort((a, b) => a - b);
       const xMin = xs[0];
@@ -167,21 +208,23 @@ const CorrelationChart: Component<Props> = (props) => {
           tooltip: {
             titleFont: { size: chartFontSize.tooltipTitle() },
             bodyFont: { size: chartFontSize.tooltipBody() },
+            filter: (item) => item.dataset.label !== "95% CI" && item.dataset.label !== "_ci_lower",
             callbacks: {
               label: (ctx) => {
-                const pt = points[ctx.dataIndex];
+                const allPts = [...(props.data?.points || [])];
+                const pt = allPts.find((p) => p.x === ctx.parsed.x && p.y === ctx.parsed.y);
                 if (!pt) return `(${ctx.parsed.x}, ${ctx.parsed.y})`;
-                return `${pt.target_name || "Unknown"} (${pt.date}): ${ctx.parsed.x.toFixed(1)}, ${ctx.parsed.y.toFixed(2)}`;
+                return `${pt.target_name || "Unknown"} (${pt.date}): ${ctx.parsed.x?.toFixed(1)}, ${ctx.parsed.y?.toFixed(2)}`;
               },
             },
           },
+          legend: { display: false },
         },
       },
     });
   };
 
   createEffect(() => {
-    // Reactive dependencies
     const _ = props.data;
     renderChart();
   });
@@ -189,9 +232,9 @@ const CorrelationChart: Component<Props> = (props) => {
   onCleanup(() => chartInstance?.destroy());
 
   return (
-    <>
+    <div class="flex flex-col h-full">
       {props.title && <h3 class="text-sm font-medium text-theme-text-primary mb-2">{props.title}</h3>}
-      <div class="relative w-full h-full">
+      <div class="relative flex-1 min-h-0">
         {props.loading && !props.data && (
           <div class="absolute inset-0 flex items-center justify-center text-sm text-theme-text-secondary">
             Loading...
@@ -200,15 +243,15 @@ const CorrelationChart: Component<Props> = (props) => {
         <canvas ref={canvasRef} />
       </div>
       {props.data && props.data.points.length > 0 && (
-        <div class="text-sm text-theme-text-secondary mt-3 leading-relaxed">
+        <div class="text-sm text-theme-text-secondary mt-3 leading-relaxed shrink-0">
           {describeCorrelation(props.data)}
           <span class="opacity-60"> ({props.data.points.length} points)</span>
         </div>
       )}
-      <p class="text-xs text-theme-text-tertiary mt-3 opacity-50">
+      <p class="text-xs text-theme-text-tertiary mt-1 opacity-50 shrink-0">
         Correlations show statistical associations, not causation. Many factors affect image quality simultaneously.
       </p>
-    </>
+    </div>
   );
 };
 
