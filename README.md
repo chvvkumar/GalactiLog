@@ -99,40 +99,96 @@
 
 ## Screenshots
 
+### Catalog
+
 <p align="center">
   <em>Dashboard — target catalog with advanced filtering, filter palettes, and equipment profiles</em><br>
   <img src="images/screenshots/dashboard.png" alt="GalactiLog Dashboard" width="100%">
 </p>
 
+### Session Metrics
+
+<table align="center">
+  <tr>
+    <td align="center" width="50%">
+      <em>Target Metrics — quality trends across sessions with multi-metric charting</em><br>
+      <img src="images/screenshots/target-session-metrics.png" alt="Target Metrics" width="100%">
+    </td>
+    <td align="center" width="50%">
+      <em>Session Metrics — per-frame data table, session insights, and interactive charts</em><br>
+      <img src="images/screenshots/session-metrics.png" alt="Session Metrics" width="100%">
+    </td>
+  </tr>
+</table>
+
+### Mosaics
+
+<table align="center">
+  <tr>
+    <td align="center" width="50%">
+      <em>Mosaic browser — panel detection, keyword-based suggestions, and per-panel integration tracking</em><br>
+      <img src="images/screenshots/mosaics_tab.png" alt="Mosaics" width="100%">
+    </td>
+    <td align="center" width="50%">
+      <em>Mosaic detail — panel layout visualization with thumbnail grid and per-panel session data</em><br>
+      <img src="images/screenshots/mosaicpage_2.png" alt="Mosaic Detail (multi-panel)" width="100%">
+    </td>
+  </tr>
+  <tr>
+    <td align="center" width="50%">
+      <em>Mosaic detail — two-panel mosaic with integration summary and filter breakdown</em><br>
+      <img src="images/screenshots/mosaicpage_1.png" alt="Mosaic Detail (two-panel)" width="100%">
+    </td>
+    <td></td>
+  </tr>
+</table>
+
+### Analysis & Statistics
+
+<table align="center">
+  <tr>
+    <td align="center" width="50%">
+      <em>Analysis — correlation explorer with scatter plots, trend lines, and statistical summaries</em><br>
+      <img src="images/screenshots/analysis_tab.png" alt="Analysis" width="100%">
+    </td>
+    <td align="center" width="50%">
+      <em>Statistics — integration totals, equipment performance, filter usage, and storage breakdown</em><br>
+      <img src="images/screenshots/Statistics.png" alt="Statistics" width="100%">
+    </td>
+  </tr>
+</table>
+
 <p align="center">
-  <em>Statistics — integration totals, equipment performance, filter usage, imaging timeline, and storage breakdown</em><br>
-  <img src="images/screenshots/Statistics.png" alt="GalactiLog Statistics" width="100%">
+  <em>Imaging Timeline — monthly integration hours with dark-hour efficiency percentages</em><br>
+  <img src="images/screenshots/imaging_efficiency.png" alt="Imaging Timeline" width="100%">
 </p>
 
 <p align="center">
-  <em>Target Metrics — quality trends across sessions with multi-metric charting for HFR, eccentricity, FWHM, and more</em><br>
-  <img src="images/screenshots/target-session-metrics.png" alt="Target Metrics Across Sessions" width="100%">
+  <em>Imaging Calendar — GitHub-style activity heatmap of imaging sessions by day</em><br>
+  <img src="images/screenshots/imaging_calendar.png" alt="Imaging Calendar" width="100%">
 </p>
 
-<p align="center">
-  <em>Session Metrics — per-frame data table, session insights, and interactive metric charts</em><br>
-  <img src="images/screenshots/session-metrics.png" alt="Session Metrics" width="100%">
-</p>
+### Settings
 
-<p align="center">
-  <em>Scan &amp; Ingest — auto-scan scheduler, ingest progress, activity log, and maintenance tools</em><br>
-  <img src="images/screenshots/scan-fits-files.png" alt="Scan and Ingest Settings" width="100%">
-</p>
-
-<p align="center">
-  <em>Filter Settings — duplicate detection, filter grouping, and per-filter frame counts</em><br>
-  <img src="images/screenshots/filters-config-settings.png" alt="Filter Configuration Settings" width="100%">
-</p>
-
-<p align="center">
-  <em>Equipment Settings — duplicate detection, camera and telescope grouping with frame counts</em><br>
-  <img src="images/screenshots/equipment-config-settings.png" alt="Equipment Configuration Settings" width="100%">
-</p>
+<table align="center">
+  <tr>
+    <td align="center" width="50%">
+      <em>Scan &amp; Ingest — auto-scan scheduler, ingest progress, and maintenance tools</em><br>
+      <img src="images/screenshots/scan-fits-files.png" alt="Scan and Ingest" width="100%">
+    </td>
+    <td align="center" width="50%">
+      <em>Filter Settings — duplicate detection, filter grouping, and per-filter frame counts</em><br>
+      <img src="images/screenshots/filters-config-settings.png" alt="Filter Settings" width="100%">
+    </td>
+  </tr>
+  <tr>
+    <td align="center" width="50%">
+      <em>Equipment Settings — duplicate detection, camera and telescope grouping</em><br>
+      <img src="images/screenshots/equipment-config-settings.png" alt="Equipment Settings" width="100%">
+    </td>
+    <td></td>
+  </tr>
+</table>
 
 ## Requirements
 
