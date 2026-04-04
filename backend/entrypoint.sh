@@ -150,7 +150,12 @@ run_data_migrations.apply_async(args=[${DATA_RESULT}])
 r.close()
 " 2>&1 || echo "Warning: could not dispatch data migration task"
 else
-    echo "Data version is current."
+    echo "Data version is current — scheduling startup maintenance..."
+    python -c "
+from app.worker.tasks import smart_rebuild_targets, detect_mosaic_panels_task
+smart_rebuild_targets.apply_async(countdown=10)
+detect_mosaic_panels_task.apply_async(countdown=30)
+" 2>&1 || echo "Warning: could not dispatch startup maintenance tasks"
 fi
 
 echo "Starting services..."
