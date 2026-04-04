@@ -8,6 +8,7 @@ import {
   LineElement,
 } from "chart.js";
 import type { CorrelationResponse } from "../../types";
+import { chartFontSize } from "../../utils/chartConfig";
 
 Chart.register(ScatterController, LinearScale, PointElement, Tooltip, LineElement);
 
@@ -152,20 +153,20 @@ const CorrelationChart: Component<Props> = (props) => {
         maintainAspectRatio: false,
         scales: {
           x: {
-            title: { display: true, text: METRIC_LABELS[x_metric] || x_metric, color: "rgba(200, 210, 220, 0.8)", font: { size: 14 } },
-            ticks: { color: "rgba(200, 210, 220, 0.7)", font: { size: 12 } },
+            title: { display: true, text: METRIC_LABELS[x_metric] || x_metric, color: "rgba(200, 210, 220, 0.8)", font: { size: chartFontSize.tooltipTitle() } },
+            ticks: { color: "rgba(200, 210, 220, 0.7)", font: { size: chartFontSize.tick() } },
             grid: { color: "rgba(200, 210, 220, 0.12)" },
           },
           y: {
-            title: { display: true, text: METRIC_LABELS[y_metric] || y_metric, color: "rgba(200, 210, 220, 0.8)", font: { size: 14 } },
-            ticks: { color: "rgba(200, 210, 220, 0.7)", font: { size: 12 } },
+            title: { display: true, text: METRIC_LABELS[y_metric] || y_metric, color: "rgba(200, 210, 220, 0.8)", font: { size: chartFontSize.tooltipTitle() } },
+            ticks: { color: "rgba(200, 210, 220, 0.7)", font: { size: chartFontSize.tick() } },
             grid: { color: "rgba(200, 210, 220, 0.12)" },
           },
         },
         plugins: {
           tooltip: {
-            titleFont: { size: 13 },
-            bodyFont: { size: 13 },
+            titleFont: { size: chartFontSize.tooltipTitle() },
+            bodyFont: { size: chartFontSize.tooltipBody() },
             callbacks: {
               label: (ctx) => {
                 const pt = points[ctx.dataIndex];
