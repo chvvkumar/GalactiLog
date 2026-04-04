@@ -50,24 +50,21 @@ function generateTextExport(data: ExportResponse): string {
 }
 
 function generateCsvExport(data: ExportResponse): string {
-  const headers = ["date", "number", "duration", "filter", "gain", "sensorCooling", "meanFwhm", "meanSqm", "temperature", "darks", "flats", "bias", "bortle"];
+  const headers = ["date", "filter", "number", "duration", "gain", "sensorCooling", "bortle", "meanSqm", "meanFwhm", "temperature"];
   const lines = [headers.join(",")];
 
   for (const row of data.rows) {
     const vals = [
       row.date,
+      row.astrobin_filter_id ?? "",
       row.frames,
       row.exposure,
-      row.astrobin_filter_id ?? "",
       row.gain ?? "",
       row.sensor_temp ?? "",
-      row.fwhm ?? "",
-      row.sky_quality ?? "",
-      row.ambient_temp ?? "",
-      data.calibration.darks,
-      data.calibration.flats,
-      data.calibration.bias,
       data.bortle ?? "",
+      row.sky_quality ?? "",
+      row.fwhm ?? "",
+      row.ambient_temp ?? "",
     ];
     lines.push(vals.join(","));
   }
