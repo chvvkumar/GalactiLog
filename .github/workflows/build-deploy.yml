@@ -248,8 +248,7 @@ jobs:
                   f.write("\n\n---\n")
                   f.write(f"## Docker\n\n```\ndocker pull chvvkumar/galactilog:{tag}\n```\n\n")
                   if prev_tag:
-                      f.write(f"**Full diff:** https://github.com/chvvkumar/GalactiLog/compare/{prev_tag}...{tag}\n\n")
-                  f.write("*Release notes generated from commit messages automatically.*\n")
+                      f.write(f"**Full diff:** https://github.com/chvvkumar/GalactiLog/compare/{prev_tag}...{tag}\n")
           except (KeyError, IndexError, json.JSONDecodeError):
               sys.exit(1)
           '

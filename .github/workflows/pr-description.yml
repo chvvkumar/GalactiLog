@@ -119,8 +119,6 @@ jobs:
           pr_title = title_match.group(1).strip()
           pr_body = body_match.group(1).strip()
 
-          pr_body += "\n\n---\n*This PR description was automatically generated.*\n"
-
           with open("/tmp/pr_title.txt", "w") as f:
               f.write(pr_title)
           with open("/tmp/pr_body.txt", "w") as f:
