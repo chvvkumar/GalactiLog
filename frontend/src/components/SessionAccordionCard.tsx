@@ -241,6 +241,45 @@ const SessionAccordionCard: Component<{
                   </button>
                 </div>
                 <Show when={showSummary()}>
+                {/* Single-value metrics + Astrobin export */}
+                <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-label">
+                  <span>
+                    <span class="text-theme-text-tertiary">Integration:</span>{" "}
+                    <span class="font-bold text-metric-integration">{formatHours(detail().integration_seconds)}</span>
+                  </span>
+                  <span>
+                    <span class="text-theme-text-tertiary">Frames:</span>{" "}
+                    <span class="font-bold text-metric-frames">{detail().frame_count}</span>
+                  </span>
+                  <span>
+                    <span class="text-theme-text-tertiary">Gain / Offset:</span>{" "}
+                    <span class="font-bold text-metric-gain">
+                      {detail().gain !== null ? detail().gain : "—"} / {detail().offset !== null ? detail().offset : "—"}
+                    </span>
+                  </span>
+                  <span>
+                    <span class="text-theme-text-tertiary">Exp:</span>{" "}
+                    <span class="font-bold text-metric-gain">
+                      {detail().exposure_times.length > 0 ? detail().exposure_times.map(e => e + "s").join(", ") : "—"}
+                    </span>
+                  </span>
+                  <span>
+                    <span class="text-theme-text-tertiary">Time:</span>{" "}
+                    <span class="font-bold text-metric-time">
+                      {detail().first_frame_time ? `${formatTimeUtil(detail().first_frame_time!, settingsCtx.timezone())} → ${detail().last_frame_time ? formatTimeUtil(detail().last_frame_time!, settingsCtx.timezone()) : ""}` : "—"}
+                    </span>
+                  </span>
+                  <span class="ml-auto">
+                    <button
+                      class="text-label px-2.5 py-1 border border-theme-border-em rounded text-theme-text-secondary hover:text-theme-text-primary hover:border-theme-accent transition-colors cursor-pointer"
+                      onClick={copyAstrobinCsv}
+                    >
+                      {csvCopied() ? "Copied!" : "Copy Astrobin CSV"}
+                    </button>
+                  </span>
+                </div>
+
+                {/* Metrics table + thumbnail */}
                 <div class="grid gap-4 grid-cols-1 md:grid-cols-[1fr_200px]">
                   <div class="bg-theme-base rounded-[var(--radius-md)] overflow-x-auto">
                     <table class="w-full text-xs table-fixed" style={{ "border-collapse": "collapse" }}>
@@ -330,44 +369,6 @@ const SessionAccordionCard: Component<{
                       <ReferenceThumbnail url={detail().thumbnail_url} fill />
                     </div>
                   </div>
-                </div>
-
-                {/* Single-value metrics + Astrobin export */}
-                <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-label">
-                  <span>
-                    <span class="text-theme-text-tertiary">Integration:</span>{" "}
-                    <span class="font-bold text-metric-integration">{formatHours(detail().integration_seconds)}</span>
-                  </span>
-                  <span>
-                    <span class="text-theme-text-tertiary">Frames:</span>{" "}
-                    <span class="font-bold text-metric-frames">{detail().frame_count}</span>
-                  </span>
-                  <span>
-                    <span class="text-theme-text-tertiary">Gain / Offset:</span>{" "}
-                    <span class="font-bold text-metric-gain">
-                      {detail().gain !== null ? detail().gain : "—"} / {detail().offset !== null ? detail().offset : "—"}
-                    </span>
-                  </span>
-                  <span>
-                    <span class="text-theme-text-tertiary">Exp:</span>{" "}
-                    <span class="font-bold text-metric-gain">
-                      {detail().exposure_times.length > 0 ? detail().exposure_times.map(e => e + "s").join(", ") : "—"}
-                    </span>
-                  </span>
-                  <span>
-                    <span class="text-theme-text-tertiary">Time:</span>{" "}
-                    <span class="font-bold text-metric-time">
-                      {detail().first_frame_time ? `${formatTimeUtil(detail().first_frame_time!, settingsCtx.timezone())} → ${detail().last_frame_time ? formatTimeUtil(detail().last_frame_time!, settingsCtx.timezone()) : ""}` : "—"}
-                    </span>
-                  </span>
-                  <span class="ml-auto">
-                    <button
-                      class="text-label px-2.5 py-1 border border-theme-border-em rounded text-theme-text-secondary hover:text-theme-text-primary hover:border-theme-accent transition-colors cursor-pointer"
-                      onClick={copyAstrobinCsv}
-                    >
-                      {csvCopied() ? "Copied!" : "Copy Astrobin CSV"}
-                    </button>
-                  </span>
                 </div>
                 </Show>
 
