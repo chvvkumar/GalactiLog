@@ -33,6 +33,7 @@ class ScanStateSnapshot:
     discovered: int = 0
     removed: int = 0
     skipped_calibration: int = 0
+    new_files: int = 0
 
     def to_dict(self) -> dict:
         return {
@@ -46,6 +47,7 @@ class ScanStateSnapshot:
             "discovered": self.discovered,
             "removed": self.removed,
             "skipped_calibration": self.skipped_calibration,
+            "new_files": self.new_files,
         }
 
 
@@ -66,6 +68,7 @@ def parse_snapshot(data: dict | None) -> ScanStateSnapshot:
         discovered=int(data.get("discovered", 0)),
         removed=int(data.get("removed", 0)),
         skipped_calibration=int(data.get("skipped_calibration", 0)),
+        new_files=int(data.get("new_files", 0)),
     )
 
 
@@ -189,7 +192,8 @@ def check_complete_sync(r: sync_redis.Redis) -> None:
             "completed_at": time.time(),
         })
         r.expire(SCAN_KEY, EXPIRE_AFTER_COMPLETE)
-        msg = f"Scan complete: {snap.completed} ingested, {snap.failed} failed"
+        new_label = f" ({snap.new_files} new)" if snap.new_files else ""
+        msg = f"Scan complete: {snap.completed} ingested{new_label}, {snap.failed} failed"
         if snap.skipped_calibration > 0:
             msg += f", {snap.skipped_calibration} calibration frames skipped"
         if snap.csv_enriched > 0:
@@ -199,7 +203,7 @@ def check_complete_sync(r: sync_redis.Redis) -> None:
         append_activity_sync(r, {
             "type": "scan_complete",
             "message": msg,
-            "details": {"completed": snap.completed, "failed": snap.failed, "skipped_calibration": snap.skipped_calibration, "csv_enriched": snap.csv_enriched, "total": snap.total, "removed": snap.removed},
+            "details": {"completed": snap.completed, "failed": snap.failed, "skipped_calibration": snap.skipped_calibration, "csv_enriched": snap.csv_enriched, "total": snap.total, "removed": snap.removed, "new_files": snap.new_files},
             "timestamp": time.time(),
         })
         # Chain post-scan maintenance tasks
@@ -222,13 +226,15 @@ def start_scanning_sync(r: sync_redis.Redis) -> None:
     r.delete(SCAN_FAILED_KEY)
 
 
-def set_ingesting_sync(r: sync_redis.Redis, total: int, removed: int = 0) -> None:
+def set_ingesting_sync(r: sync_redis.Redis, total: int, removed: int = 0, new_files: int = 0) -> None:
     mapping: dict = {
         "state": "ingesting",
         "total": total,
     }
     if removed:
         mapping["removed"] = removed
+    if new_files:
+        mapping["new_files"] = new_files
     r.hset(SCAN_KEY, mapping=mapping)
 
 
