@@ -752,7 +752,9 @@ const SessionAccordionCard: Component<{
 
                 {/* Session-level custom columns */}
                 <Show when={(settingsCtx.customColumns() ?? []).filter(c => c.applies_to === "session").length > 0}>
-                  <div class="flex flex-wrap gap-4 px-3 py-2">
+                  <div class="bg-theme-base rounded-[var(--radius-md)] px-3 py-2">
+                    <div class="text-xs font-semibold text-theme-text-secondary mb-2 border-l-2 border-theme-accent pl-2">Custom Fields</div>
+                    <div class="flex flex-wrap gap-4">
                     <For each={(settingsCtx.customColumns() ?? []).filter(c => c.applies_to === "session")}>
                       {(col) => {
                         const val = () => detail().custom_values?.find(
@@ -760,7 +762,7 @@ const SessionAccordionCard: Component<{
                         );
                         return (
                           <div class="flex items-center gap-2 text-sm">
-                            <span class="text-[var(--text-secondary)]">{col.name}:</span>
+                            <span class="text-theme-text-secondary">{col.name}:</span>
                             <InlineEditCell
                               columnType={col.column_type}
                               value={val()?.value}
@@ -776,6 +778,7 @@ const SessionAccordionCard: Component<{
                         );
                       }}
                     </For>
+                    </div>
                   </div>
                 </Show>
 
