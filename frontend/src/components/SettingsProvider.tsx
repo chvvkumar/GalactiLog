@@ -1,10 +1,11 @@
-import { createContext, useContext, createEffect, type ParentComponent } from "solid-js";
+import { createContext, useContext, createEffect, createSignal, createResource, type ParentComponent } from "solid-js";
 import { useSettings, getFilterColorMap, getFilterAliasMap } from "../store/settings";
 import { useGraphSettings } from "../store/graphSettings";
-import type { SettingsResponse, GeneralSettings, FilterConfig, EquipmentConfig, DisplaySettings, GraphSettings } from "../types";
+import type { SettingsResponse, GeneralSettings, FilterConfig, EquipmentConfig, DisplaySettings, GraphSettings, CustomColumn, ColumnVisibility } from "../types";
 import type { Resource } from "solid-js";
 import type { FilterBadgeStyle } from "../utils/filterStyles";
 import { applyTheme, applyTextSize, DEFAULT_THEME_ID, DEFAULT_TEXT_SIZE } from "../themes";
+import api from "../api/client";
 
 interface SettingsContextValue {
   settings: Resource<SettingsResponse | undefined>;
@@ -23,6 +24,10 @@ interface SettingsContextValue {
   saveGraphSettings: (updates: Partial<GraphSettings>) => Promise<void>;
   timezone: () => string;
   contentWidth: () => string;
+  customColumns: Resource<CustomColumn[] | undefined>;
+  refetchCustomColumns: () => void;
+  columnVisibility: () => ColumnVisibility | undefined;
+  saveColumnVisibility: (vis: ColumnVisibility) => Promise<void>;
 }
 
 const SettingsContext = createContext<SettingsContextValue>();
@@ -30,6 +35,8 @@ const SettingsContext = createContext<SettingsContextValue>();
 export const SettingsProvider: ParentComponent = (props) => {
   const store = useSettings();
   const graphStore = useGraphSettings();
+  const [customColumns, { refetch: refetchCustomColumns }] = createResource(() => api.getCustomColumns());
+  const [columnVisibility, setColumnVisibility] = createSignal<ColumnVisibility | undefined>(undefined);
 
   graphStore.loadGraphSettings();
 
@@ -60,6 +67,13 @@ export const SettingsProvider: ParentComponent = (props) => {
     toggleMetric: graphStore.toggleMetric,
     toggleFilter: graphStore.toggleFilter,
     saveGraphSettings: graphStore.saveGraphSettings,
+    customColumns,
+    refetchCustomColumns,
+    columnVisibility,
+    saveColumnVisibility: async (vis: ColumnVisibility) => {
+      await api.updateColumnVisibility(vis);
+      setColumnVisibility(vis);
+    },
   };
 
   return (
