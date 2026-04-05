@@ -7,6 +7,7 @@ import { MergesTab } from "../components/settings/MergesTab";
 import { UsersTab } from "../components/settings/UsersTab";
 import ScanManager from "../components/ScanManager";
 import DisplayTab from "../components/DisplayTab";
+import CustomColumnsTab from "../components/CustomColumnsTab";
 import { useAuth } from "../components/AuthProvider";
 import { useSettingsContext } from "../components/SettingsProvider";
 import { contentWidthClass } from "../utils/format";
@@ -17,6 +18,7 @@ const ALL_TABS = [
   { id: "equipment", label: "Equipment" },
   { id: "display", label: "Display" },
   { id: "targets", label: "Target Management" },
+  { id: "custom-columns", label: "Custom Columns" },
   { id: "users", label: "Users", adminOnly: true },
 ] as const;
 
@@ -69,6 +71,9 @@ export const SettingsPage: Component = () => {
       </Show>
       <Show when={activeTab() === "targets"}>
         <TargetManagementTab />
+      </Show>
+      <Show when={activeTab() === "custom-columns"}>
+        <CustomColumnsTab />
       </Show>
       <Show when={activeTab() === "users" && isAdmin()}>
         <UsersTab />
