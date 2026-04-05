@@ -108,14 +108,39 @@ const SessionAccordionCard: Component<{
     const d = props.detail;
     if (!d) return;
     const header = "date,filter,number,duration,binning,gain,sensorCooling,fNumber,bortle,meanSqm,meanFwhm,temperature";
-    const rows = d.filter_details.map((f) => {
-      const duration = f.exposure_time ?? "";
-      const gain = d.gain !== null ? d.gain : "";
-      const sensorCooling = d.sensor_temp !== null ? Math.round(d.sensor_temp) : "";
-      const meanFwhm = d.median_fwhm !== null ? d.median_fwhm.toFixed(2) : "";
-      const temperature = d.median_ambient_temp !== null ? d.median_ambient_temp.toFixed(2) : "";
-      return `${d.session_date},,${f.frame_count},${duration},,${gain},${sensorCooling},,,,${meanFwhm},${temperature}`;
-    });
+
+    const median = (vals: number[]) => {
+      if (vals.length === 0) return null;
+      const s = [...vals].sort((a, b) => a - b);
+      const mid = Math.floor(s.length / 2);
+      return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
+    };
+
+    const buildRows = (filterDetails: typeof d.filter_details, gain: number | null, sensorTemp: number | null, fwhm: number | null, ambientTemp: number | null) => {
+      return filterDetails.map((f) => {
+        const duration = f.exposure_time ?? "";
+        const g = gain !== null ? gain : "";
+        const cooling = sensorTemp !== null ? Math.round(sensorTemp) : "";
+        const mFwhm = fwhm !== null ? fwhm.toFixed(2) : "";
+        const temp = ambientTemp !== null ? ambientTemp.toFixed(2) : "";
+        return `${d.session_date},,${f.frame_count},${duration},,${g},${cooling},,,,${mFwhm},${temp}`;
+      });
+    };
+
+    let rows: string[];
+    if (isMultiRig()) {
+      rows = [];
+      for (const rig of d.rigs) {
+        if (!enabledRigs().includes(rig.rig_label)) continue;
+        const temps = rig.frames.map(f => f.sensor_temp).filter((t): t is number => t !== null);
+        const fwhms = rig.frames.map(f => f.fwhm).filter((v): v is number => v !== null);
+        const ambTemps = rig.frames.map(f => f.ambient_temp).filter((v): v is number => v !== null);
+        rows.push(...buildRows(rig.filter_details, rig.gain, median(temps), median(fwhms), median(ambTemps)));
+      }
+    } else {
+      rows = buildRows(d.filter_details, d.gain, d.sensor_temp, d.median_fwhm, d.median_ambient_temp);
+    }
+
     const csv = [header, ...rows].join("\n");
     navigator.clipboard.writeText(csv).then(() => {
       setCsvCopied(true);
