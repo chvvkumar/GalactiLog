@@ -6,11 +6,13 @@ import { formatTime } from "../utils/dateTime";
 import { METRIC_DEFINITIONS, getMetricColor, getMetricDef, chartFontSize } from "../utils/chartConfig";
 import MetricTogglePills from "./MetricTogglePills";
 import FilterTogglePills from "./FilterTogglePills";
+import { rigColor } from "./RigTogglePills";
 
 Chart.register(LineController, CategoryScale, LinearScale, PointElement, LineElement, Tooltip);
 
 interface Props {
   detail: SessionDetail;
+  enabledRigs?: string[];
 }
 
 export default function SessionMetricsChart(props: Props) {
@@ -26,10 +28,13 @@ export default function SessionMetricsChart(props: Props) {
   const buildDatasets = () => {
     const enabledMetrics = graphSettings().enabled_metrics;
     const enabledFilters = graphSettings().enabled_filters;
-    const frames = [...props.detail.frames].sort(
+    const rigs = props.detail.rigs ?? [];
+    const multiRig = rigs.length > 1 && props.enabledRigs && props.enabledRigs.length > 0;
+
+    const allFrames = [...props.detail.frames].sort(
       (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
     );
-    const labels = frames.map((f) => {
+    const labels = allFrames.map((f) => {
       const d = new Date(f.timestamp);
       return formatTime(d, settingsCtx.timezone());
     });
@@ -39,41 +44,88 @@ export default function SessionMetricsChart(props: Props) {
     for (const metricKey of enabledMetrics) {
       const def = getMetricDef(metricKey);
       if (!def) continue;
-      const color = getMetricColor(def.colorVar);
       const field = def.frameField as keyof FrameRecord;
 
-      if (enabledFilters.includes("overall")) {
-        datasets.push({
-          label: def.label,
-          data: frames.map((f) => (f[field] as number | null) ?? null),
-          borderColor: color,
-          backgroundColor: `${color}33`,
-          borderWidth: 1.5,
-          pointRadius: 0,
-          pointHitRadius: 8,
-          tension: 0.3,
-          spanGaps: true,
-          yAxisID: def.yAxisId,
-        });
-      }
+      if (multiRig) {
+        for (let ri = 0; ri < rigs.length; ri++) {
+          const rig = rigs[ri];
+          if (!props.enabledRigs!.includes(rig.rig_label)) continue;
+          const color = rigColor(ri);
 
-      for (const filterName of enabledFilters) {
-        if (filterName === "overall") continue;
-        datasets.push({
-          label: `${def.label} (${filterName})`,
-          data: frames.map((f) =>
-            f.filter_used === filterName ? ((f[field] as number | null) ?? null) : null
-          ),
-          borderColor: color,
-          backgroundColor: `${color}33`,
-          borderWidth: 1.5,
-          pointRadius: 0,
-          pointHitRadius: 8,
-          tension: 0.3,
-          spanGaps: false,
-          yAxisID: def.yAxisId,
-          borderDash: [4, 2],
-        });
+          if (enabledFilters.includes("overall")) {
+            datasets.push({
+              label: `${def.label} (${rig.rig_label})`,
+              data: allFrames.map((f) =>
+                f.rig === rig.rig_label ? ((f[field] as number | null) ?? null) : null
+              ),
+              borderColor: color,
+              backgroundColor: `${color}33`,
+              borderWidth: 1.5,
+              pointRadius: 0,
+              pointHitRadius: 8,
+              tension: 0.3,
+              spanGaps: true,
+              yAxisID: def.yAxisId,
+            });
+          }
+
+          for (const filterName of enabledFilters) {
+            if (filterName === "overall") continue;
+            datasets.push({
+              label: `${def.label} (${rig.rig_label} / ${filterName})`,
+              data: allFrames.map((f) =>
+                f.rig === rig.rig_label && f.filter_used === filterName
+                  ? ((f[field] as number | null) ?? null)
+                  : null
+              ),
+              borderColor: color,
+              backgroundColor: `${color}33`,
+              borderWidth: 1.5,
+              pointRadius: 0,
+              pointHitRadius: 8,
+              tension: 0.3,
+              spanGaps: false,
+              yAxisID: def.yAxisId,
+              borderDash: [4, 2],
+            });
+          }
+        }
+      } else {
+        const color = getMetricColor(def.colorVar);
+
+        if (enabledFilters.includes("overall")) {
+          datasets.push({
+            label: def.label,
+            data: allFrames.map((f) => (f[field] as number | null) ?? null),
+            borderColor: color,
+            backgroundColor: `${color}33`,
+            borderWidth: 1.5,
+            pointRadius: 0,
+            pointHitRadius: 8,
+            tension: 0.3,
+            spanGaps: true,
+            yAxisID: def.yAxisId,
+          });
+        }
+
+        for (const filterName of enabledFilters) {
+          if (filterName === "overall") continue;
+          datasets.push({
+            label: `${def.label} (${filterName})`,
+            data: allFrames.map((f) =>
+              f.filter_used === filterName ? ((f[field] as number | null) ?? null) : null
+            ),
+            borderColor: color,
+            backgroundColor: `${color}33`,
+            borderWidth: 1.5,
+            pointRadius: 0,
+            pointHitRadius: 8,
+            tension: 0.3,
+            spanGaps: false,
+            yAxisID: def.yAxisId,
+            borderDash: [4, 2],
+          });
+        }
       }
     }
 
@@ -140,6 +192,7 @@ export default function SessionMetricsChart(props: Props) {
   createEffect(() => {
     // Track reactive dependencies
     graphSettings();
+    props.enabledRigs;
     if (pendingRAF !== null) cancelAnimationFrame(pendingRAF);
     if (expanded()) {
       pendingRAF = requestAnimationFrame(() => {
