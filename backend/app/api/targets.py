@@ -624,6 +624,13 @@ async def get_target_detail(
     session_overviews = []
     for date_key in sorted(sessions_map.keys(), reverse=True):
         sess_images = sessions_map[date_key]
+        # Count distinct rigs for this session
+        rig_set = set()
+        for img in sess_images:
+            tel = normalize_equipment(img.telescope, tel_map)
+            cam = normalize_equipment(img.camera, cam_map)
+            rig_set.add((tel, cam))
+        sess_rig_count = len(rig_set)
         sess_hfr = [i.median_hfr for i in sess_images if i.median_hfr is not None]
         sess_ecc = [i.eccentricity for i in sess_images if i.eccentricity is not None]
         sess_fwhm = [i.fwhm for i in sess_images if i.fwhm is not None]
@@ -669,6 +676,7 @@ async def get_target_detail(
             median_guiding_rms_arcsec=statistics.median(sess_guiding_rms) if sess_guiding_rms else None,
             filter_medians=sess_filter_medians,
             has_notes=date_type.fromisoformat(date_key) in note_dates if date_key != "unknown" else False,
+            rig_count=sess_rig_count,
         ))
 
     sorted_dates = sorted(sessions_map.keys())
