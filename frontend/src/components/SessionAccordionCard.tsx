@@ -177,12 +177,23 @@ const SessionAccordionCard: Component<{
     }
   };
 
-  const isOutlier = (frame: FrameRecord): boolean => {
-    if (!props.detail?.median_hfr || !frame.median_hfr) return false;
-    return frame.median_hfr > props.detail.median_hfr * 1.5;
+  const isHfrOutlier = (frame: FrameRecord, medianHfr?: number | null): boolean => {
+    const med = medianHfr ?? props.detail?.median_hfr;
+    if (!med || !frame.median_hfr) return false;
+    return frame.median_hfr > med * 1.5;
   };
 
-  const renderFrameTable = (frames: FrameRecord[]) => (
+  const isEccOutlier = (frame: FrameRecord, medianEcc?: number | null): boolean => {
+    const med = medianEcc ?? props.detail?.median_eccentricity;
+    if (!med || !frame.eccentricity) return false;
+    return frame.eccentricity > med * 1.5;
+  };
+
+  const isOutlier = (frame: FrameRecord, medianHfr?: number | null, medianEcc?: number | null): boolean => {
+    return isHfrOutlier(frame, medianHfr) || isEccOutlier(frame, medianEcc);
+  };
+
+  const renderFrameTable = (frames: FrameRecord[], medianHfr?: number | null, medianEcc?: number | null) => (
     <table class="w-full text-label">
       <thead class="sticky top-0 bg-theme-base">
         <tr class="text-theme-text-secondary border-b border-theme-border">
@@ -275,17 +286,17 @@ const SessionAccordionCard: Component<{
       <tbody>
         <For each={sortedFrames(frames)}>
           {(frame) => (
-            <tr class={`border-b border-theme-border/30 hover:bg-theme-hover transition-colors duration-100 ${isOutlier(frame) ? "bg-theme-error/20" : ""}`}>
+            <tr class={`border-b border-theme-border/30 hover:bg-theme-hover transition-colors duration-100 ${isOutlier(frame, medianHfr, medianEcc) ? "bg-theme-error/20" : ""}`}>
               <td class="py-1 px-2 text-theme-text-primary">{formatTimeUtil(frame.timestamp, settingsCtx.timezone())}</td>
               <td class="py-1 px-2 text-theme-text-primary text-center">{frame.filter_used ?? "—"}</td>
               <td class="py-1 px-2 text-theme-text-primary text-right tabular-nums">{frame.exposure_time ?? "—"}s</td>
               <Show when={visible("quality", "hfr")}>
-                <td class={`py-1 px-2 text-right tabular-nums ${isOutlier(frame) ? "text-theme-error font-bold" : "text-theme-text-primary"}`}>
+                <td class={`py-1 px-2 text-right tabular-nums ${isHfrOutlier(frame, medianHfr) ? "text-theme-error font-bold" : "text-theme-text-primary"}`}>
                   {frame.median_hfr?.toFixed(2) ?? "\u2014"}
                 </td>
               </Show>
               <Show when={visible("quality", "eccentricity")}>
-                <td class="py-1 px-2 text-theme-text-primary text-right tabular-nums">{frame.eccentricity?.toFixed(2) ?? "\u2014"}</td>
+                <td class={`py-1 px-2 text-right tabular-nums ${isEccOutlier(frame, medianEcc) ? "text-theme-error font-bold" : "text-theme-text-primary"}`}>{frame.eccentricity?.toFixed(2) ?? "\u2014"}</td>
               </Show>
               <Show when={visible("quality", "fwhm")}>
                 <td class="py-1 px-2 text-theme-text-primary text-right tabular-nums">{frame.fwhm?.toFixed(2) ?? "\u2014"}</td>
@@ -549,7 +560,7 @@ const SessionAccordionCard: Component<{
                         </For>
                       </div>
                     </div>
-                    <div class="w-[140px] h-[100px] flex-shrink-0 rounded overflow-hidden">
+                    <div class="w-[140px] h-[100px] flex-shrink-0 ml-auto rounded overflow-hidden">
                       <ReferenceThumbnail url={detail().thumbnail_url} fill />
                     </div>
                   </div>
@@ -586,7 +597,7 @@ const SessionAccordionCard: Component<{
                             </For>
                           </div>
                         </div>
-                        <div class="w-[140px] h-[100px] flex-shrink-0 rounded overflow-hidden">
+                        <div class="w-[140px] h-[100px] flex-shrink-0 ml-auto rounded overflow-hidden">
                           <ReferenceThumbnail url={rig.thumbnail_url ?? null} fill />
                         </div>
                       </div>
@@ -721,7 +732,7 @@ const SessionAccordionCard: Component<{
                     <div class="px-3 pb-3">
                     <Show when={isMultiRig()} fallback={
                       <div class="overflow-x-auto max-h-[600px] overflow-y-auto">
-                        {renderFrameTable(props.detail!.frames)}
+                        {renderFrameTable(props.detail!.frames, props.detail!.median_hfr, props.detail!.median_eccentricity)}
                       </div>
                     }>
                       <For each={props.detail!.rigs}>
@@ -735,7 +746,7 @@ const SessionAccordionCard: Component<{
                                 <span class="text-tiny text-theme-text-tertiary">{rig.frame_count} frames</span>
                               </div>
                               <div class="overflow-x-auto max-h-[600px] overflow-y-auto">
-                                {renderFrameTable(rig.frames)}
+                                {renderFrameTable(rig.frames, rig.median_hfr, rig.median_eccentricity)}
                               </div>
                             </div>
                           </Show>
