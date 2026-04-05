@@ -111,7 +111,7 @@ def _build_rig_details(
                 rig=rig_label,
             ))
 
-        # Gain/offset from first image in rig
+        # Gain/offset/thumbnail from first image in rig
         ref = rig_images[0]
         offset_val = next(
             (int(img.raw_headers.get("OFFSET", 0))
@@ -119,6 +119,12 @@ def _build_rig_details(
              if img.raw_headers and img.raw_headers.get("OFFSET") is not None),
             None,
         )
+        rig_thumb = None
+        for img in rig_images:
+            if img.thumbnail_path:
+                fn = img.thumbnail_path.split("/")[-1].split("\\")[-1]
+                rig_thumb = f"/thumbnails/{fn}"
+                break
 
         rig_details.append(RigDetail(
             rig_label=rig_label,
@@ -136,6 +142,7 @@ def _build_rig_details(
             exposure_times=sorted(set(i.exposure_time for i in rig_images if i.exposure_time is not None)),
             filter_details=rig_filter_details,
             frames=rig_frames,
+            thumbnail_url=rig_thumb,
         ))
 
     return rig_details

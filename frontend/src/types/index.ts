@@ -157,6 +157,7 @@ export interface RigDetail {
   exposure_times: number[];
   filter_details: FilterDetail[];
   frames: FrameRecord[];
+  thumbnail_url: string | null;
 }
 
 export interface FilterDetail {

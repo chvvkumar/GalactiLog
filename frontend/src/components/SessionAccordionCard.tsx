@@ -58,6 +58,7 @@ const SessionAccordionCard: Component<{
 
   const [sessionNote, setSessionNote] = createSignal(props.detail?.notes || "");
   const [showNotes, setShowNotes] = createSignal(false);
+  const [showDetails, setShowDetails] = createSignal(false);
   const [noteSaving, setNoteSaving] = createSignal(false);
   let noteTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -498,7 +499,7 @@ const SessionAccordionCard: Component<{
                   </button>
                 <Show when={showSummary()}>
                 <div class="px-3 pb-3">
-                {/* Single-value metrics + Astrobin export */}
+                {/* Headline stats row */}
                 <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-label">
                   <span>
                     <span class="text-theme-text-tertiary">Integration:</span>{" "}
@@ -512,12 +513,6 @@ const SessionAccordionCard: Component<{
                     <span class="text-theme-text-tertiary">Gain / Offset:</span>{" "}
                     <span class="font-bold text-metric-gain">
                       {detail().gain !== null ? detail().gain : "—"} / {detail().offset !== null ? detail().offset : "—"}
-                    </span>
-                  </span>
-                  <span>
-                    <span class="text-theme-text-tertiary">Exp:</span>{" "}
-                    <span class="font-bold text-metric-gain">
-                      {detail().exposure_times.length > 0 ? detail().exposure_times.map(e => e + "s").join(", ") : "—"}
                     </span>
                   </span>
                   <span>
@@ -536,117 +531,132 @@ const SessionAccordionCard: Component<{
                   </span>
                 </div>
 
-                {/* Per-rig summary (multi-rig only) */}
-                <Show when={isMultiRig()}>
-                  <div class="flex flex-wrap gap-3 mt-2 text-label">
-                    <For each={props.detail!.rigs}>
-                      {(rig, index) => (
-                        <span class="flex items-center gap-1.5">
-                          <span
-                            class="w-2 h-2 rounded-full inline-block"
-                            style={{ "background-color": rigColor(index()) }}
-                          />
-                          <span class="text-theme-text-secondary">{rig.rig_label}:</span>
-                          <span class="font-bold text-theme-text-primary">
-                            {rig.frame_count} fr · {formatIntegration(rig.integration_seconds)}
-                          </span>
-                        </span>
-                      )}
-                    </For>
-                  </div>
-                </Show>
-
-                {/* Metrics table + thumbnail */}
-                <div class="grid gap-4 grid-cols-1 md:grid-cols-[1fr_200px]">
-                  <div class="bg-theme-base rounded-[var(--radius-md)] overflow-x-auto">
-                    <table class="w-full text-xs table-fixed" style={{ "border-collapse": "collapse" }}>
-                      <colgroup>
-                        <col style={{ width: "100px" }} />
-                        <col style={{ width: "70px" }} />
-                        <col style={{ width: "70px" }} />
-                        <col style={{ width: "70px" }} />
-                        <col style={{ width: "28px" }} />
-                        <col style={{ width: "80px" }} />
-                        <col style={{ width: "50px" }} />
-                        <col style={{ width: "50px" }} />
-                        <col style={{ width: "50px" }} />
-                      </colgroup>
-                      <thead>
-                        <tr class="text-tiny text-theme-text-tertiary uppercase tracking-wider border-b border-theme-border">
-                          <th class="text-left px-3 pb-1.5 pt-2.5" colspan={4}>Metrics</th>
-                          <th class="text-left px-2 pb-1.5 pt-2.5 border-l border-theme-border" colspan={5}>Filters</th>
-                        </tr>
-                        <tr class="text-tiny text-theme-text-tertiary border-b border-theme-border">
-                          <th class="px-3 pb-1 text-left"></th>
-                          <th class="px-2 pb-1 text-right">Avg</th>
-                          <th class="px-2 pb-1 text-right">Min</th>
-                          <th class="px-2 pb-1 text-right">Max</th>
-                          <th class="px-2 pb-1 border-l border-theme-border"></th>
-                          <th class="px-2 pb-1 text-left">Frames</th>
-                          <th class="px-2 pb-1 text-right">Med. HFR</th>
-                          <th class="px-2 pb-1 text-right">Med. Ecc</th>
-                          <th class="px-2 pb-1 text-right">Exp</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {(() => {
-                          const metrics = [
-                            { label: "HFR", avg: detail().median_hfr?.toFixed(2) ?? "—", min: detail().min_hfr?.toFixed(2) ?? "—", max: detail().max_hfr?.toFixed(2) ?? "—", color: "text-metric-hfr" },
-                            { label: "Eccentricity", avg: detail().median_eccentricity?.toFixed(2) ?? "—", min: detail().min_eccentricity?.toFixed(2) ?? "—", max: detail().max_eccentricity?.toFixed(2) ?? "—", color: "text-metric-eccentricity" },
-                            { label: "FWHM", avg: detail().median_fwhm?.toFixed(2) ?? "—", min: detail().min_fwhm?.toFixed(2) ?? "—", max: detail().max_fwhm?.toFixed(2) ?? "—", color: "text-metric-fwhm" },
-                            { label: "Sensor Temp", avg: detail().sensor_temp !== null ? `${detail().sensor_temp?.toFixed(0)}°C` : "—", min: detail().sensor_temp_min !== null ? `${detail().sensor_temp_min?.toFixed(0)}°C` : "—", max: detail().sensor_temp_max !== null ? `${detail().sensor_temp_max?.toFixed(0)}°C` : "—", color: "text-metric-temp" },
-                            { label: "Guide RMS", avg: detail().median_guiding_rms !== null ? `${detail().median_guiding_rms?.toFixed(2)}"` : "—", min: detail().min_guiding_rms !== null ? `${detail().min_guiding_rms?.toFixed(2)}"` : "—", max: detail().max_guiding_rms !== null ? `${detail().max_guiding_rms?.toFixed(2)}"` : "—", color: "text-metric-guiding" },
-                          ];
-                          const filters = detail().filter_details;
-                          const maxRows = Math.max(metrics.length, filters.length);
-                          const rows = [];
-                          for (let i = 0; i < maxRows; i++) {
-                            const m = metrics[i];
-                            const f = filters[i];
-                            rows.push(
-                              <tr class="border-b border-theme-border hover:bg-theme-hover transition-colors duration-100">
-                                {m ? (
-                                  <>
-                                    <td class={`py-1.5 px-3 text-theme-text-secondary`}>{m.label}</td>
-                                    <td class={`py-1.5 px-2 text-right font-bold ${m.color}`}>{m.avg}</td>
-                                    <td class="py-1.5 px-2 text-right text-theme-text-tertiary">{m.min}</td>
-                                    <td class="py-1.5 px-2 text-right text-theme-text-tertiary">{m.max}</td>
-                                  </>
-                                ) : (
-                                  <>
-                                    <td class="py-1.5 px-3"></td>
-                                    <td class="py-1.5 px-2"></td>
-                                    <td class="py-1.5 px-2"></td>
-                                    <td class="py-1.5 px-2"></td>
-                                  </>
-                                )}
-                                {f ? (
-                                  <>
-                                    <td class="py-1.5 px-2 font-bold text-theme-text-primary border-l border-theme-border">{f.filter_name}</td>
-                                    <td class="py-1.5 px-2 text-theme-text-secondary">{f.frame_count} · {formatIntegration(f.integration_seconds)}</td>
-                                    <td class="py-1.5 px-2 text-right text-metric-hfr">{f.median_hfr?.toFixed(1) ?? "—"}</td>
-                                    <td class="py-1.5 px-2 text-right text-metric-eccentricity">{f.median_eccentricity?.toFixed(2) ?? "—"}</td>
-                                    <td class="py-1.5 px-2 text-right text-theme-text-secondary">{f.exposure_time ?? "—"}s</td>
-                                  </>
-                                ) : (
-                                  <>
-                                    <td class="py-1.5 border-l border-theme-border" colspan={5}></td>
-                                  </>
-                                )}
-                              </tr>
-                            );
-                          }
-                          return rows;
-                        })()}
-                      </tbody>
-                    </table>
-                  </div>
-                  <div class="relative h-[150px] md:h-auto">
-                    <div class="absolute inset-0 overflow-hidden">
+                {/* Per-rig overview with thumbnails */}
+                <Show when={isMultiRig()} fallback={
+                  /* Single-rig: compact one-liner + thumbnail */
+                  <div class="flex gap-3 mt-3 items-start">
+                    <div class="flex-1 space-y-1">
+                      <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-label">
+                        <span><span class="text-theme-text-tertiary">Exp:</span> <span class="font-bold text-metric-gain">{detail().exposure_times.length > 0 ? detail().exposure_times.map(e => e + "s").join(", ") : "—"}</span></span>
+                        <span><span class="text-theme-text-tertiary">HFR:</span> <span class="font-bold text-metric-hfr">{detail().median_hfr?.toFixed(2) ?? "—"}</span></span>
+                        <span><span class="text-theme-text-tertiary">Ecc:</span> <span class="font-bold text-metric-eccentricity">{detail().median_eccentricity?.toFixed(2) ?? "—"}</span></span>
+                        <span><span class="text-theme-text-tertiary">FWHM:</span> <span class="font-bold text-metric-fwhm">{detail().median_fwhm?.toFixed(2) ?? "—"}</span></span>
+                        <span><span class="text-theme-text-tertiary">RMS:</span> <span class="font-bold text-metric-guiding">{detail().median_guiding_rms !== null ? `${detail().median_guiding_rms?.toFixed(2)}"` : "—"}</span></span>
+                      </div>
+                      <div class="flex flex-wrap gap-1.5">
+                        <For each={detail().filter_details}>
+                          {(f) => (
+                            <span class="text-tiny px-1.5 py-0.5 rounded bg-theme-hover text-theme-text-secondary">
+                              <b>{f.filter_name}</b> {f.frame_count} · {f.exposure_time ?? "—"}s
+                            </span>
+                          )}
+                        </For>
+                      </div>
+                    </div>
+                    <div class="w-[140px] h-[100px] flex-shrink-0 rounded overflow-hidden">
                       <ReferenceThumbnail url={detail().thumbnail_url} fill />
                     </div>
                   </div>
-                </div>
+                }>
+                  {/* Multi-rig: per-rig rows with key metrics + thumbnail */}
+                  <For each={detail().rigs}>
+                    {(rig, index) => (
+                      <div class="flex gap-3 mt-3 items-start">
+                        <div class="flex-1">
+                          <div class="flex items-center gap-2 mb-1">
+                            <span class="w-2 h-2 rounded-full inline-block flex-shrink-0" style={{ "background-color": rigColor(index()) }} />
+                            <span class="text-xs font-semibold text-theme-text-primary">{rig.rig_label}</span>
+                            <span class="text-tiny text-theme-text-tertiary">{rig.frame_count} fr · {formatIntegration(rig.integration_seconds)}</span>
+                          </div>
+                          <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-label ml-4">
+                            <span><span class="text-theme-text-tertiary">HFR:</span> <span class="font-bold text-metric-hfr">{rig.median_hfr?.toFixed(2) ?? "—"}</span></span>
+                            <span><span class="text-theme-text-tertiary">Ecc:</span> <span class="font-bold text-metric-eccentricity">{rig.median_eccentricity?.toFixed(2) ?? "—"}</span></span>
+                            <span><span class="text-theme-text-tertiary">FWHM:</span> <span class="font-bold text-metric-fwhm">{rig.median_fwhm?.toFixed(2) ?? "—"}</span></span>
+                            <span><span class="text-theme-text-tertiary">RMS:</span> <span class="font-bold text-metric-guiding">{rig.median_guiding_rms !== null ? `${rig.median_guiding_rms?.toFixed(2)}"` : "—"}</span></span>
+                          </div>
+                          <div class="flex flex-wrap gap-1.5 mt-1 ml-4">
+                            <For each={rig.filter_details}>
+                              {(f) => (
+                                <span class="text-tiny px-1.5 py-0.5 rounded bg-theme-hover text-theme-text-secondary">
+                                  <b>{f.filter_name}</b> {f.frame_count} · {f.exposure_time ?? "—"}s
+                                </span>
+                              )}
+                            </For>
+                          </div>
+                        </div>
+                        <div class="w-[140px] h-[100px] flex-shrink-0 rounded overflow-hidden">
+                          <ReferenceThumbnail url={rig.thumbnail_url ?? null} fill />
+                        </div>
+                      </div>
+                    )}
+                  </For>
+                </Show>
+
+                {/* Expandable detail table */}
+                <Show when={showDetails()}>
+                  <div class="mt-3 overflow-x-auto">
+                    <table class="w-full text-xs" style={{ "border-collapse": "collapse" }}>
+                      <thead>
+                        <tr class="text-tiny text-theme-text-tertiary uppercase tracking-wider border-b border-theme-border">
+                          <Show when={isMultiRig()}><th class="text-left px-2 pb-1.5 pt-2.5">Rig</th></Show>
+                          <th class="text-left px-2 pb-1.5 pt-2.5">Filter</th>
+                          <th class="text-right px-2 pb-1.5 pt-2.5">Frames</th>
+                          <th class="text-right px-2 pb-1.5 pt-2.5">Integration</th>
+                          <th class="text-right px-2 pb-1.5 pt-2.5">HFR</th>
+                          <th class="text-right px-2 pb-1.5 pt-2.5">Ecc</th>
+                          <th class="text-right px-2 pb-1.5 pt-2.5">Exp</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <Show when={isMultiRig()} fallback={
+                          <For each={detail().filter_details}>
+                            {(f) => (
+                              <tr class="border-b border-theme-border/50 hover:bg-theme-hover transition-colors duration-100">
+                                <td class="py-1.5 px-2 font-bold text-theme-text-primary">{f.filter_name}</td>
+                                <td class="py-1.5 px-2 text-right text-theme-text-primary">{f.frame_count}</td>
+                                <td class="py-1.5 px-2 text-right text-theme-text-secondary">{formatIntegration(f.integration_seconds)}</td>
+                                <td class="py-1.5 px-2 text-right text-metric-hfr">{f.median_hfr?.toFixed(2) ?? "—"}</td>
+                                <td class="py-1.5 px-2 text-right text-metric-eccentricity">{f.median_eccentricity?.toFixed(2) ?? "—"}</td>
+                                <td class="py-1.5 px-2 text-right text-theme-text-secondary">{f.exposure_time ?? "—"}s</td>
+                              </tr>
+                            )}
+                          </For>
+                        }>
+                          <For each={detail().rigs}>
+                            {(rig, index) => (
+                              <For each={rig.filter_details}>
+                                {(f, fi) => (
+                                  <tr class={`border-b border-theme-border/50 hover:bg-theme-hover transition-colors duration-100 ${fi() === 0 && index() > 0 ? "border-t-2 border-t-theme-border" : ""}`}>
+                                    {fi() === 0 ? (
+                                      <td class="py-1.5 px-2 text-theme-text-secondary align-top" rowSpan={rig.filter_details.length}>
+                                        <span class="flex items-center gap-1.5">
+                                          <span class="w-2 h-2 rounded-full inline-block flex-shrink-0" style={{ "background-color": rigColor(index()) }} />
+                                          <span class="text-tiny">{rig.telescope ?? ""}</span>
+                                        </span>
+                                      </td>
+                                    ) : null}
+                                    <td class="py-1.5 px-2 font-bold text-theme-text-primary">{f.filter_name}</td>
+                                    <td class="py-1.5 px-2 text-right text-theme-text-primary">{f.frame_count}</td>
+                                    <td class="py-1.5 px-2 text-right text-theme-text-secondary">{formatIntegration(f.integration_seconds)}</td>
+                                    <td class="py-1.5 px-2 text-right text-metric-hfr">{f.median_hfr?.toFixed(2) ?? "—"}</td>
+                                    <td class="py-1.5 px-2 text-right text-metric-eccentricity">{f.median_eccentricity?.toFixed(2) ?? "—"}</td>
+                                    <td class="py-1.5 px-2 text-right text-theme-text-secondary">{f.exposure_time ?? "—"}s</td>
+                                  </tr>
+                                )}
+                              </For>
+                            )}
+                          </For>
+                        </Show>
+                      </tbody>
+                    </table>
+                  </div>
+                </Show>
+                <button
+                  class="text-label text-theme-accent hover:text-theme-text-primary transition-colors cursor-pointer mt-2"
+                  onClick={() => setShowDetails((v) => !v)}
+                >
+                  {showDetails() ? "▾ Hide Details" : "▸ Show Details"}
+                </button>
                 </div>
                 </Show>
                 </div>

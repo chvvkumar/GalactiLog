@@ -93,6 +93,7 @@ class RigDetail(BaseModel):
     exposure_times: list[float] = []
     filter_details: list[FilterDetail] = []
     frames: list["FrameRecord"] = []
+    thumbnail_url: str | None = None
 
 
 class SessionInsight(BaseModel):
