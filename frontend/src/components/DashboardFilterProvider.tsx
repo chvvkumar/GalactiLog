@@ -1,9 +1,12 @@
-import { Component, JSX, createContext, createMemo, useContext } from "solid-js";
+import { Component, JSX, createContext, createMemo, createSignal, useContext } from "solid-js";
 import { useSearchParams } from "@solidjs/router";
 import { createResource } from "solid-js";
 import { api } from "../api/client";
 import { useSettingsContext } from "./SettingsProvider";
 import type { ActiveFilters, TargetAggregationResponse } from "../types";
+
+export type SortKey = "name" | "integration" | "lastSession" | "equipment";
+export type SortDir = "asc" | "desc";
 
 interface DashboardFilterAPI {
   filters: () => ActiveFilters;
@@ -23,6 +26,9 @@ interface DashboardFilterAPI {
   totalPages: () => number;
   setPage: (page: number) => void;
   setPageSize: (size: number) => void;
+  sortKey: () => SortKey;
+  sortDir: () => SortDir;
+  toggleSort: (key: SortKey) => void;
 }
 
 const DashboardFilterContext = createContext<DashboardFilterAPI>();
@@ -99,6 +105,43 @@ const DashboardFilterProvider: Component<{ children: JSX.Element }> = (props) =>
 
   const filters = createMemo(() => deriveFilters(searchParams));
 
+  // Sort state — persisted to localStorage
+  let initialSort: { key: SortKey; dir: SortDir } = { key: "integration", dir: "desc" };
+  try {
+    const stored = localStorage.getItem("dashboard_sort");
+    if (stored) initialSort = JSON.parse(stored);
+  } catch { /* ignore corrupt localStorage */ }
+
+  const [sortKey, setSortKey] = createSignal<SortKey>(initialSort.key);
+  const [sortDir, setSortDir] = createSignal<SortDir>(initialSort.dir);
+
+  const persistSort = (key: SortKey, dir: SortDir) => {
+    localStorage.setItem("dashboard_sort", JSON.stringify({ key, dir }));
+  };
+
+  const toggleSort = (key: SortKey) => {
+    if (sortKey() === key) {
+      const newDir = sortDir() === "asc" ? "desc" : "asc";
+      setSortDir(newDir);
+      persistSort(key, newDir);
+    } else {
+      const newDir = key === "name" ? "asc" : "desc";
+      setSortKey(key);
+      setSortDir(newDir);
+      persistSort(key, newDir);
+    }
+    // Reset to page 1 when sort changes
+    setSearchParams({ page: undefined }, { replace: true });
+  };
+
+  // Map frontend sort keys to backend API values
+  const apiSortBy = createMemo(() => {
+    const key = sortKey();
+    // "equipment" has no backend sort — fall back to integration
+    if (key === "equipment") return "integration";
+    return key;
+  });
+
   const currentPage = createMemo(() => {
     const raw = searchParams.page;
     const p = parseInt(typeof raw === "string" ? raw : "1");
@@ -109,11 +152,14 @@ const DashboardFilterProvider: Component<{ children: JSX.Element }> = (props) =>
     return settingsCtx.settings()?.general.default_page_size ?? 50;
   });
 
-  // Resource key combines filters + pagination so changes to either trigger a refetch
-  const fetchKey = createMemo(() => ({ filters: filters(), page: currentPage(), pageSize: currentPageSize() }));
+  // Resource key combines filters + pagination + sort so changes to any trigger a refetch
+  const fetchKey = createMemo(() => ({
+    filters: filters(), page: currentPage(), pageSize: currentPageSize(),
+    sortBy: apiSortBy(), sortDir: sortDir(),
+  }));
 
   const [targetData, { refetch: refetchTargets }] = createResource(fetchKey, (k) =>
-    api.getTargets(k.filters, k.page, k.pageSize)
+    api.getTargets(k.filters, k.page, k.pageSize, k.sortBy, k.sortDir)
   );
 
   const set = (updates: Record<string, string | undefined>) => {
@@ -237,6 +283,9 @@ const DashboardFilterProvider: Component<{ children: JSX.Element }> = (props) =>
     },
     setPage,
     setPageSize,
+    sortKey,
+    sortDir,
+    toggleSort,
   };
 
   return (

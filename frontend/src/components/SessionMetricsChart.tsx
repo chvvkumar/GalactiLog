@@ -6,11 +6,14 @@ import { formatTime } from "../utils/dateTime";
 import { METRIC_DEFINITIONS, getMetricColor, getMetricDef, chartFontSize } from "../utils/chartConfig";
 import MetricTogglePills from "./MetricTogglePills";
 import FilterTogglePills from "./FilterTogglePills";
+import RigTogglePills, { rigColor } from "./RigTogglePills";
 
 Chart.register(LineController, CategoryScale, LinearScale, PointElement, LineElement, Tooltip);
 
 interface Props {
   detail: SessionDetail;
+  enabledRigs?: string[];
+  onToggleRig?: (rig: string) => void;
 }
 
 export default function SessionMetricsChart(props: Props) {
@@ -26,10 +29,13 @@ export default function SessionMetricsChart(props: Props) {
   const buildDatasets = () => {
     const enabledMetrics = graphSettings().enabled_metrics;
     const enabledFilters = graphSettings().enabled_filters;
-    const frames = [...props.detail.frames].sort(
+    const rigs = props.detail.rigs ?? [];
+    const multiRig = rigs.length > 1 && props.enabledRigs && props.enabledRigs.length > 0;
+
+    const allFrames = [...props.detail.frames].sort(
       (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
     );
-    const labels = frames.map((f) => {
+    const labels = allFrames.map((f) => {
       const d = new Date(f.timestamp);
       return formatTime(d, settingsCtx.timezone());
     });
@@ -39,41 +45,88 @@ export default function SessionMetricsChart(props: Props) {
     for (const metricKey of enabledMetrics) {
       const def = getMetricDef(metricKey);
       if (!def) continue;
-      const color = getMetricColor(def.colorVar);
       const field = def.frameField as keyof FrameRecord;
 
-      if (enabledFilters.includes("overall")) {
-        datasets.push({
-          label: def.label,
-          data: frames.map((f) => (f[field] as number | null) ?? null),
-          borderColor: color,
-          backgroundColor: `${color}33`,
-          borderWidth: 1.5,
-          pointRadius: 0,
-          pointHitRadius: 8,
-          tension: 0.3,
-          spanGaps: true,
-          yAxisID: def.yAxisId,
-        });
-      }
+      if (multiRig) {
+        for (let ri = 0; ri < rigs.length; ri++) {
+          const rig = rigs[ri];
+          if (!props.enabledRigs!.includes(rig.rig_label)) continue;
+          const color = rigColor(ri);
 
-      for (const filterName of enabledFilters) {
-        if (filterName === "overall") continue;
-        datasets.push({
-          label: `${def.label} (${filterName})`,
-          data: frames.map((f) =>
-            f.filter_used === filterName ? ((f[field] as number | null) ?? null) : null
-          ),
-          borderColor: color,
-          backgroundColor: `${color}33`,
-          borderWidth: 1.5,
-          pointRadius: 0,
-          pointHitRadius: 8,
-          tension: 0.3,
-          spanGaps: false,
-          yAxisID: def.yAxisId,
-          borderDash: [4, 2],
-        });
+          if (enabledFilters.includes("overall")) {
+            datasets.push({
+              label: `${def.label} (${rig.rig_label})`,
+              data: allFrames.map((f) =>
+                f.rig === rig.rig_label ? ((f[field] as number | null) ?? null) : null
+              ),
+              borderColor: color,
+              backgroundColor: `${color}33`,
+              borderWidth: 1.5,
+              pointRadius: 0,
+              pointHitRadius: 8,
+              tension: 0.3,
+              spanGaps: true,
+              yAxisID: def.yAxisId,
+            });
+          }
+
+          for (const filterName of enabledFilters) {
+            if (filterName === "overall") continue;
+            datasets.push({
+              label: `${def.label} (${rig.rig_label} / ${filterName})`,
+              data: allFrames.map((f) =>
+                f.rig === rig.rig_label && f.filter_used === filterName
+                  ? ((f[field] as number | null) ?? null)
+                  : null
+              ),
+              borderColor: color,
+              backgroundColor: `${color}33`,
+              borderWidth: 1.5,
+              pointRadius: 0,
+              pointHitRadius: 8,
+              tension: 0.3,
+              spanGaps: false,
+              yAxisID: def.yAxisId,
+              borderDash: [4, 2],
+            });
+          }
+        }
+      } else {
+        const color = getMetricColor(def.colorVar);
+
+        if (enabledFilters.includes("overall")) {
+          datasets.push({
+            label: def.label,
+            data: allFrames.map((f) => (f[field] as number | null) ?? null),
+            borderColor: color,
+            backgroundColor: `${color}33`,
+            borderWidth: 1.5,
+            pointRadius: 0,
+            pointHitRadius: 8,
+            tension: 0.3,
+            spanGaps: true,
+            yAxisID: def.yAxisId,
+          });
+        }
+
+        for (const filterName of enabledFilters) {
+          if (filterName === "overall") continue;
+          datasets.push({
+            label: `${def.label} (${filterName})`,
+            data: allFrames.map((f) =>
+              f.filter_used === filterName ? ((f[field] as number | null) ?? null) : null
+            ),
+            borderColor: color,
+            backgroundColor: `${color}33`,
+            borderWidth: 1.5,
+            pointRadius: 0,
+            pointHitRadius: 8,
+            tension: 0.3,
+            spanGaps: false,
+            yAxisID: def.yAxisId,
+            borderDash: [4, 2],
+          });
+        }
       }
     }
 
@@ -140,12 +193,29 @@ export default function SessionMetricsChart(props: Props) {
   createEffect(() => {
     // Track reactive dependencies
     graphSettings();
+    props.enabledRigs;
     if (pendingRAF !== null) cancelAnimationFrame(pendingRAF);
     if (expanded()) {
+      // <Show> unmounts the canvas when collapsed, so the old chartInstance
+      // is stale. Destroy it so a fresh chart is created on the new canvas.
+      if (chartInstance) {
+        chartInstance.destroy();
+        chartInstance = null;
+      }
       pendingRAF = requestAnimationFrame(() => {
         pendingRAF = null;
+        if (!canvasRef) {
+          setTimeout(() => buildChart(), 0);
+          return;
+        }
         buildChart();
       });
+    } else {
+      // Collapsed — clean up the chart instance
+      if (chartInstance) {
+        chartInstance.destroy();
+        chartInstance = null;
+      }
     }
   });
 
@@ -165,8 +235,9 @@ export default function SessionMetricsChart(props: Props) {
 
   return (
     <div>
+      <div class="bg-theme-base rounded-[var(--radius-md)]">
       <button
-        class="flex justify-between items-center w-full text-xs py-2 px-0 hover:text-theme-text-primary transition-colors cursor-pointer"
+        class="flex justify-between items-center w-full text-xs py-2 px-3 hover:bg-theme-hover rounded-[var(--radius-md)] hover:text-theme-text-primary transition-colors cursor-pointer"
         classList={{ "text-theme-text-primary": expanded(), "text-theme-text-secondary": !expanded() }}
         onClick={toggleExpanded}
       >
@@ -180,7 +251,7 @@ export default function SessionMetricsChart(props: Props) {
         </svg>
       </button>
       <Show when={expanded()}>
-        <div class="border border-theme-border rounded-[var(--radius-md)] p-3 bg-theme-base mt-2">
+        <div class="p-3">
           <div class="flex justify-between items-start gap-4 mb-2">
             <div class="text-tiny text-theme-text-tertiary uppercase tracking-wider">Metrics</div>
             <MetricTogglePills />
@@ -188,11 +259,21 @@ export default function SessionMetricsChart(props: Props) {
           <div class="mb-3">
             <FilterTogglePills filters={filters()} />
           </div>
+          <Show when={(props.detail.rigs?.length ?? 0) > 1 && props.enabledRigs && props.onToggleRig}>
+            <div class="mb-3">
+              <RigTogglePills
+                rigs={props.detail.rigs.map(r => r.rig_label)}
+                enabledRigs={props.enabledRigs!}
+                onToggle={props.onToggleRig!}
+              />
+            </div>
+          </Show>
           <div style={{ height: "200px" }}>
             <canvas ref={canvasRef} />
           </div>
         </div>
       </Show>
+      </div>
     </div>
   );
 }

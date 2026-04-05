@@ -163,7 +163,7 @@ def run_scan(self, include_calibration: bool = True) -> dict:
         return {"status": "complete", "new_files_queued": 0, "already_known": cataloged, "removed": removed}
 
     # Transition to ingesting with final total — ingest tasks are already running
-    set_ingesting_sync(_redis, total=total_queued, removed=removed)
+    set_ingesting_sync(_redis, total=total_queued, removed=removed, new_files=len(new_files))
     # Some tasks may have already completed during discovery, check now
     check_complete_sync(_redis)
 
