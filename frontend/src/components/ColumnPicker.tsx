@@ -33,7 +33,8 @@ export default function ColumnPicker(props: Props) {
 
       <Show when={open()}>
         <div
-          class="absolute right-0 top-full mt-1 z-50 bg-[var(--bg-primary)] border border-[var(--border)] rounded-lg shadow-lg p-3 min-w-[200px]"
+          class="absolute right-0 top-full mt-1 z-50 bg-theme-elevated border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-md)] p-3 min-w-[200px]"
+          style={{ "backdrop-filter": "none", "background-color": "var(--color-bg-elevated)" }}
           onClick={(e) => e.stopPropagation()}
         >
           <div class="text-xs font-semibold text-[var(--text-secondary)] mb-2">Built-in</div>
