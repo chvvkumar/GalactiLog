@@ -1,6 +1,7 @@
+import uuid
 from enum import Enum
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select, func as sa_func
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,6 +17,7 @@ from app.schemas.settings import (
     DiscoveredItem, DiscoveredResponse,
     DisplaySettings, default_display_settings,
     GraphSettings, default_graph_settings,
+    ColumnVisibility,
 )
 
 router = APIRouter(prefix="/settings", tags=["settings"])
@@ -75,7 +77,8 @@ def _row_to_response(row: UserSettings) -> SettingsResponse:
     }
     equipment = EquipmentConfig(cameras=eq_cameras, telescopes=eq_telescopes)
 
-    display = DisplaySettings(**row.display) if row.display else default_display_settings()
+    display_data = {k: v for k, v in (row.display or {}).items() if k != "column_visibility_per_user"}
+    display = DisplaySettings(**display_data) if display_data else default_display_settings()
     graph = GraphSettings(**row.graph) if row.graph else default_graph_settings()
 
     return SettingsResponse(
@@ -387,3 +390,37 @@ async def suggest_equipment(session: AsyncSession = Depends(get_session), user: 
     ]
 
     return SuggestionsResponse(suggestions=all_suggestions)
+
+
+# ---------------------------------------------------------------------------
+# Column visibility endpoints
+# ---------------------------------------------------------------------------
+
+@router.get("/column-visibility/{user_id}")
+async def get_column_visibility(
+    user_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    if user.id != user_id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    row = await _get_or_create_settings(session)
+    all_vis = (row.display or {}).get("column_visibility_per_user", {})
+    user_vis = all_vis.get(str(user_id), {})
+    return user_vis
+
+
+@router.put("/column-visibility")
+async def update_column_visibility(
+    payload: ColumnVisibility,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    row = await _get_or_create_settings(session)
+    display = dict(row.display) if row.display else {}
+    per_user = display.get("column_visibility_per_user", {})
+    per_user[str(user.id)] = payload.model_dump()
+    display["column_visibility_per_user"] = per_user
+    row.display = display
+    await session.commit()
+    return {"ok": True}
