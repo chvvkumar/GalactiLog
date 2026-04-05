@@ -54,7 +54,7 @@ const SessionAccordionCard: Component<{
   const [showFrames, setShowFrames] = createSignal(false);
   const [sortColumn, setSortColumn] = createSignal<keyof FrameRecord>("timestamp");
   const [sortAsc, setSortAsc] = createSignal(true);
-  const [csvCopied, setCsvCopied] = createSignal(false);
+  const [csvCopiedRig, setCsvCopiedRig] = createSignal<string | null>(null);
 
   const [sessionNote, setSessionNote] = createSignal(props.detail?.notes || "");
   const [showNotes, setShowNotes] = createSignal(false);
@@ -105,7 +105,7 @@ const SessionAccordionCard: Component<{
     }, 1000);
   };
 
-  const copyAstrobinCsv = () => {
+  const copyAstrobinCsv = (rigLabel?: string) => {
     const d = props.detail;
     if (!d) return;
     const header = "date,filter,number,duration,binning,gain,sensorCooling,fNumber,bortle,meanSqm,meanFwhm,temperature";
@@ -129,23 +129,21 @@ const SessionAccordionCard: Component<{
     };
 
     let rows: string[];
-    if (isMultiRig()) {
-      rows = [];
-      for (const rig of d.rigs) {
-        if (!enabledRigs().includes(rig.rig_label)) continue;
-        const temps = rig.frames.map(f => f.sensor_temp).filter((t): t is number => t !== null);
-        const fwhms = rig.frames.map(f => f.fwhm).filter((v): v is number => v !== null);
-        const ambTemps = rig.frames.map(f => f.ambient_temp).filter((v): v is number => v !== null);
-        rows.push(...buildRows(rig.filter_details, rig.gain, median(temps), median(fwhms), median(ambTemps)));
-      }
+    const targetRig = rigLabel ? d.rigs.find(r => r.rig_label === rigLabel) : null;
+    if (targetRig) {
+      const temps = targetRig.frames.map(f => f.sensor_temp).filter((t): t is number => t !== null);
+      const fwhms = targetRig.frames.map(f => f.fwhm).filter((v): v is number => v !== null);
+      const ambTemps = targetRig.frames.map(f => f.ambient_temp).filter((v): v is number => v !== null);
+      rows = buildRows(targetRig.filter_details, targetRig.gain, median(temps), median(fwhms), median(ambTemps));
     } else {
       rows = buildRows(d.filter_details, d.gain, d.sensor_temp, d.median_fwhm, d.median_ambient_temp);
     }
 
     const csv = [header, ...rows].join("\n");
+    const key = rigLabel ?? "__all__";
     navigator.clipboard.writeText(csv).then(() => {
-      setCsvCopied(true);
-      setTimeout(() => setCsvCopied(false), 2000);
+      setCsvCopiedRig(key);
+      setTimeout(() => setCsvCopiedRig(null), 2000);
     });
   };
 
@@ -521,14 +519,6 @@ const SessionAccordionCard: Component<{
                       {detail().first_frame_time ? `${formatTimeUtil(detail().first_frame_time!, settingsCtx.timezone())} → ${detail().last_frame_time ? formatTimeUtil(detail().last_frame_time!, settingsCtx.timezone()) : ""}` : "—"}
                     </span>
                   </span>
-                  <span class="ml-auto">
-                    <button
-                      class="text-label px-2.5 py-1 border border-theme-border-em rounded text-theme-text-secondary hover:text-theme-text-primary hover:border-theme-accent transition-colors cursor-pointer"
-                      onClick={copyAstrobinCsv}
-                    >
-                      {csvCopied() ? "Copied!" : "Copy Astrobin CSV"}
-                    </button>
-                  </span>
                 </div>
 
                 {/* Per-rig overview with thumbnails */}
@@ -542,6 +532,12 @@ const SessionAccordionCard: Component<{
                         <span><span class="text-theme-text-tertiary">Ecc:</span> <span class="font-bold text-metric-eccentricity">{detail().median_eccentricity?.toFixed(2) ?? "—"}</span></span>
                         <span><span class="text-theme-text-tertiary">FWHM:</span> <span class="font-bold text-metric-fwhm">{detail().median_fwhm?.toFixed(2) ?? "—"}</span></span>
                         <span><span class="text-theme-text-tertiary">RMS:</span> <span class="font-bold text-metric-guiding">{detail().median_guiding_rms !== null ? `${detail().median_guiding_rms?.toFixed(2)}"` : "—"}</span></span>
+                        <button
+                          class="text-tiny px-1.5 py-0.5 border border-theme-border rounded text-theme-text-tertiary hover:text-theme-text-primary hover:border-theme-accent transition-colors cursor-pointer"
+                          onClick={() => copyAstrobinCsv()}
+                        >
+                          {csvCopiedRig() === "__all__" ? "Copied!" : "Astrobin CSV"}
+                        </button>
                       </div>
                       <div class="flex flex-wrap gap-1.5">
                         <For each={detail().filter_details}>
@@ -567,6 +563,12 @@ const SessionAccordionCard: Component<{
                             <span class="w-2 h-2 rounded-full inline-block flex-shrink-0" style={{ "background-color": rigColor(index()) }} />
                             <span class="text-xs font-semibold text-theme-text-primary">{rig.rig_label}</span>
                             <span class="text-tiny text-theme-text-tertiary">{rig.frame_count} fr · {formatIntegration(rig.integration_seconds)}</span>
+                            <button
+                              class="text-tiny px-1.5 py-0.5 border border-theme-border rounded text-theme-text-tertiary hover:text-theme-text-primary hover:border-theme-accent transition-colors cursor-pointer"
+                              onClick={() => copyAstrobinCsv(rig.rig_label)}
+                            >
+                              {csvCopiedRig() === rig.rig_label ? "Copied!" : "Astrobin CSV"}
+                            </button>
                           </div>
                           <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-label ml-4">
                             <span><span class="text-theme-text-tertiary">HFR:</span> <span class="font-bold text-metric-hfr">{rig.median_hfr?.toFixed(2) ?? "—"}</span></span>
