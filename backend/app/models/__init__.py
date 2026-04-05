@@ -14,5 +14,6 @@ from .session_note import SessionNote
 from .mosaic import Mosaic
 from .mosaic_panel import MosaicPanel
 from .mosaic_suggestion import MosaicSuggestion
+from .custom_column import CustomColumn, CustomColumnValue, ColumnType, AppliesTo
 
-__all__ = ["Base", "Target", "Image", "UserSettings", "SETTINGS_ROW_ID", "MergeCandidate", "SimbadCache", "User", "UserRole", "RefreshToken", "AppMetadata", "OpenNGCEntry", "VizierCache", "SiteDarkHours", "SessionNote", "Mosaic", "MosaicPanel", "MosaicSuggestion"]
+__all__ = ["Base", "Target", "Image", "UserSettings", "SETTINGS_ROW_ID", "MergeCandidate", "SimbadCache", "User", "UserRole", "RefreshToken", "AppMetadata", "OpenNGCEntry", "VizierCache", "SiteDarkHours", "SessionNote", "Mosaic", "MosaicPanel", "MosaicSuggestion", "CustomColumn", "CustomColumnValue", "ColumnType", "AppliesTo"]

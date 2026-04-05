@@ -60,6 +60,7 @@ class SessionOverview(BaseModel):
     filter_medians: list[FilterMedian] = []
     has_notes: bool = False
     rig_count: int = 1
+    custom_values: dict[str, str] | None = None
 
 
 class FrameHighlight(BaseModel):
@@ -154,6 +155,7 @@ class TargetAggregation(BaseModel):
     total_sessions: int | None = None
     mosaic_id: str | None = None
     mosaic_name: str | None = None
+    custom_values: dict[str, str] | None = None
 
 
 class AggregateStats(BaseModel):
@@ -241,6 +243,7 @@ class SessionDetailResponse(BaseModel):
     median_cloud_cover: float | None = None
     notes: str | None = None
     rigs: list[RigDetail] = []
+    custom_values: list[dict] | None = None
 
 
 class EquipmentOption(BaseModel):

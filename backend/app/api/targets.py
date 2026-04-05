@@ -628,6 +628,25 @@ async def get_target_detail(
         if f:
             filters_set.add(f)
 
+    # Fetch session-level custom values for session header display
+    from app.models.custom_column import CustomColumn, CustomColumnValue, AppliesTo
+    session_custom_map: dict[str, dict[str, str]] = {}  # date_key -> {slug: value}
+    if target_obj:
+        cv_q = (
+            select(CustomColumnValue.session_date, CustomColumn.slug, CustomColumnValue.value)
+            .join(CustomColumn)
+            .where(
+                CustomColumnValue.target_id == target_obj.id,
+                CustomColumn.applies_to == AppliesTo.session,
+                CustomColumnValue.session_date.isnot(None),
+            )
+        )
+        for sd, slug, val in (await session.execute(cv_q)).all():
+            dk = str(sd)
+            if dk not in session_custom_map:
+                session_custom_map[dk] = {}
+            session_custom_map[dk][slug] = val
+
     session_overviews = []
     for date_key in sorted(sessions_map.keys(), reverse=True):
         sess_images = sessions_map[date_key]
@@ -684,6 +703,7 @@ async def get_target_detail(
             filter_medians=sess_filter_medians,
             has_notes=date_type.fromisoformat(date_key) in note_dates if date_key != "unknown" else False,
             rig_count=sess_rig_count,
+            custom_values=session_custom_map.get(date_key),
         ))
 
     sorted_dates = sorted(sessions_map.keys())
@@ -765,6 +785,7 @@ async def list_targets_aggregated(
     sort_dir: str = Query("desc", pattern="^(asc|desc)$"),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=250),
+    include_custom: bool = Query(False),
     user: User = Depends(get_current_user),
 ):
     """Return targets with aggregated session data, filtered by query params."""
@@ -1076,6 +1097,24 @@ async def list_targets_aggregated(
     mosaic_map = {str(r[0]): (str(r[1]), r[2]) for r in panel_rows}
 
     # ---------------------------------------------------------------
+    # Phase 4c: Custom column values (target-level)
+    # ---------------------------------------------------------------
+    custom_values_map: dict[str, dict[str, str]] = {}
+    if include_custom:
+        from app.models.custom_column import CustomColumn, CustomColumnValue, AppliesTo
+        cv_q = (
+            select(CustomColumnValue.target_id, CustomColumn.slug, CustomColumnValue.value)
+            .join(CustomColumn)
+            .where(CustomColumn.applies_to == AppliesTo.target)
+        )
+        cv_rows = (await session.execute(cv_q)).all()
+        for tid, slug, val in cv_rows:
+            tid_str = str(tid)
+            if tid_str not in custom_values_map:
+                custom_values_map[tid_str] = {}
+            custom_values_map[tid_str][slug] = val
+
+    # ---------------------------------------------------------------
     # Phase 5: Assemble the response
     # ---------------------------------------------------------------
     target_list = []
@@ -1112,6 +1151,7 @@ async def list_targets_aggregated(
             total_sessions=total_session_count if matched_session_count is not None else None,
             mosaic_id=mosaic_map.get(basics["target_key"], (None, None))[0],
             mosaic_name=mosaic_map.get(basics["target_key"], (None, None))[1],
+            custom_values=custom_values_map.get(basics["target_key"]) if include_custom else None,
         ))
 
     return TargetAggregationResponse(
@@ -1466,6 +1506,32 @@ async def get_session_detail(
         )
         session_note = (await session.execute(note_q)).scalar_one_or_none()
 
+    # Fetch custom column values for this session (session + rig level)
+    from app.models.custom_column import CustomColumn, CustomColumnValue, AppliesTo
+    custom_values_list = None
+    if resolved_target_id:
+        cv_q = (
+            select(CustomColumn.slug, CustomColumnValue.session_date,
+                   CustomColumnValue.rig_label, CustomColumnValue.value)
+            .join(CustomColumn)
+            .where(
+                CustomColumnValue.target_id == resolved_target_id,
+                CustomColumn.applies_to.in_([AppliesTo.session, AppliesTo.rig]),
+                CustomColumnValue.session_date == date_type.fromisoformat(date),
+            )
+        )
+        cv_rows = (await session.execute(cv_q)).all()
+        if cv_rows:
+            custom_values_list = [
+                {
+                    "column_slug": slug,
+                    "session_date": str(sd) if sd else None,
+                    "rig_label": rl,
+                    "value": val,
+                }
+                for slug, sd, rl, val in cv_rows
+            ]
+
     return SessionDetailResponse(
         target_name=target_name,
         session_date=date,
@@ -1508,6 +1574,7 @@ async def get_session_detail(
         median_cloud_cover=statistics.median(cloud_cover_values) if cloud_cover_values else None,
         notes=session_note,
         rigs=rig_details,
+        custom_values=custom_values_list,
     )
 
 
