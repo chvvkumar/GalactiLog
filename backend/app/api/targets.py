@@ -1486,6 +1486,32 @@ async def get_session_detail(
         )
         session_note = (await session.execute(note_q)).scalar_one_or_none()
 
+    # Fetch custom column values for this session (session + rig level)
+    from app.models.custom_column import CustomColumn, CustomColumnValue, AppliesTo
+    custom_values_list = None
+    if resolved_target_id:
+        cv_q = (
+            select(CustomColumn.slug, CustomColumnValue.session_date,
+                   CustomColumnValue.rig_label, CustomColumnValue.value)
+            .join(CustomColumn)
+            .where(
+                CustomColumnValue.target_id == resolved_target_id,
+                CustomColumn.applies_to.in_([AppliesTo.session, AppliesTo.rig]),
+                CustomColumnValue.session_date == date_type.fromisoformat(date),
+            )
+        )
+        cv_rows = (await session.execute(cv_q)).all()
+        if cv_rows:
+            custom_values_list = [
+                {
+                    "column_slug": slug,
+                    "session_date": str(sd) if sd else None,
+                    "rig_label": rl,
+                    "value": val,
+                }
+                for slug, sd, rl, val in cv_rows
+            ]
+
     return SessionDetailResponse(
         target_name=target_name,
         session_date=date,
@@ -1528,6 +1554,7 @@ async def get_session_detail(
         median_cloud_cover=statistics.median(cloud_cover_values) if cloud_cover_values else None,
         notes=session_note,
         rigs=rig_details,
+        custom_values=custom_values_list,
     )
 
 
