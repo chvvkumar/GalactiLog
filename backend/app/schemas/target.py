@@ -59,6 +59,7 @@ class SessionOverview(BaseModel):
     median_guiding_rms_arcsec: float | None = None
     filter_medians: list[FilterMedian] = []
     has_notes: bool = False
+    rig_count: int = 1
 
 
 class FrameHighlight(BaseModel):
@@ -74,6 +75,24 @@ class FilterDetail(BaseModel):
     median_hfr: float | None = None
     median_eccentricity: float | None = None
     exposure_time: float | None = None
+
+
+class RigDetail(BaseModel):
+    rig_label: str
+    telescope: str | None = None
+    camera: str | None = None
+    frame_count: int
+    integration_seconds: float
+    median_hfr: float | None = None
+    median_eccentricity: float | None = None
+    median_fwhm: float | None = None
+    median_guiding_rms: float | None = None
+    median_detected_stars: float | None = None
+    gain: int | None = None
+    offset: int | None = None
+    exposure_times: list[float] = []
+    filter_details: list[FilterDetail] = []
+    frames: list["FrameRecord"] = []
 
 
 class SessionInsight(BaseModel):
@@ -115,6 +134,10 @@ class FrameRecord(BaseModel):
     wind_gust: float | None = None
     cloud_cover: float | None = None
     sky_quality: float | None = None
+    rig: str | None = None
+
+
+RigDetail.model_rebuild()
 
 
 class TargetAggregation(BaseModel):
@@ -216,6 +239,7 @@ class SessionDetailResponse(BaseModel):
     median_humidity: float | None = None
     median_cloud_cover: float | None = None
     notes: str | None = None
+    rigs: list[RigDetail] = []
 
 
 class EquipmentOption(BaseModel):
