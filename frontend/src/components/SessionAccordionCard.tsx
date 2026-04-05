@@ -461,7 +461,7 @@ const SessionAccordionCard: Component<{
             <td class="py-3 px-2 text-right" onClick={(e) => e.stopPropagation()}>
               <InlineEditCell
                 columnType={col.column_type}
-                value={props.detail?.custom_values?.find(cv => cv.column_slug === col.slug && !cv.rig_label)?.value}
+                value={props.session.custom_values?.[col.slug]}
                 dropdownOptions={col.dropdown_options}
                 onSave={(v) => api.setCustomValue({
                   column_id: col.id,

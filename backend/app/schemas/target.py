@@ -60,6 +60,7 @@ class SessionOverview(BaseModel):
     filter_medians: list[FilterMedian] = []
     has_notes: bool = False
     rig_count: int = 1
+    custom_values: dict[str, str] | None = None
 
 
 class FrameHighlight(BaseModel):

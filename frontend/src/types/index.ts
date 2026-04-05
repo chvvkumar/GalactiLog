@@ -112,6 +112,7 @@ export interface SessionOverview {
   filter_medians: FilterMedian[];
   has_notes: boolean;
   rig_count: number;
+  custom_values?: Record<string, string> | null;
 }
 
 export interface TargetDetailResponse {

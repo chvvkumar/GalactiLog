@@ -628,6 +628,25 @@ async def get_target_detail(
         if f:
             filters_set.add(f)
 
+    # Fetch session-level custom values for session header display
+    from app.models.custom_column import CustomColumn, CustomColumnValue, AppliesTo
+    session_custom_map: dict[str, dict[str, str]] = {}  # date_key -> {slug: value}
+    if target_obj:
+        cv_q = (
+            select(CustomColumnValue.session_date, CustomColumn.slug, CustomColumnValue.value)
+            .join(CustomColumn)
+            .where(
+                CustomColumnValue.target_id == target_obj.id,
+                CustomColumn.applies_to == AppliesTo.session,
+                CustomColumnValue.session_date.isnot(None),
+            )
+        )
+        for sd, slug, val in (await session.execute(cv_q)).all():
+            dk = str(sd)
+            if dk not in session_custom_map:
+                session_custom_map[dk] = {}
+            session_custom_map[dk][slug] = val
+
     session_overviews = []
     for date_key in sorted(sessions_map.keys(), reverse=True):
         sess_images = sessions_map[date_key]
@@ -684,6 +703,7 @@ async def get_target_detail(
             filter_medians=sess_filter_medians,
             has_notes=date_type.fromisoformat(date_key) in note_dates if date_key != "unknown" else False,
             rig_count=sess_rig_count,
+            custom_values=session_custom_map.get(date_key),
         ))
 
     sorted_dates = sorted(sessions_map.keys())
