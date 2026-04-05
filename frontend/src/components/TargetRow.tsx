@@ -81,7 +81,7 @@ const TargetRow: Component<{
         <For each={targetCustomColumns()}>
           {(col) => (
             <Show when={isColumnVisible(vis(), "dashboard", "custom", col.slug)}>
-              <td class="py-2.5 px-3 text-right">
+              <td class="py-2.5 px-3 text-right" onClick={(e) => e.stopPropagation()}>
                 <InlineEditCell
                   columnType={col.column_type}
                   value={props.target.custom_values?.[col.slug]}
