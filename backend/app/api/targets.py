@@ -1361,7 +1361,10 @@ async def get_session_detail(
             wind_gust=img.wind_gust,
             cloud_cover=img.cloud_cover,
             sky_quality=img.sky_quality,
+            rig=f"{normalize_equipment(img.telescope, tel_map) or 'Unknown'} / {normalize_equipment(img.camera, cam_map) or 'Unknown'}",
         ))
+
+    rig_details = _build_rig_details(images, filter_map, cam_map, tel_map)
 
     is_best_hfr = False
     if median_hfr is not None:
@@ -1437,6 +1440,7 @@ async def get_session_detail(
         median_humidity=statistics.median(humidity_values) if humidity_values else None,
         median_cloud_cover=statistics.median(cloud_cover_values) if cloud_cover_values else None,
         notes=session_note,
+        rigs=rig_details,
     )
 
 
