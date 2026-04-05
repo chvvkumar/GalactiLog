@@ -14,15 +14,16 @@ function generateTextExport(data: ExportResponse): string {
   lines.push(`Dates: ${data.dates.join(", ")}`);
   lines.push("");
 
-  // Aggregate by filter across all dates
-  const byFilter = new Map<string, { frames: number; exposure: number; total: number; gain: number | null; temp: number | null }>();
+  // Aggregate by (filter, exposure) across all dates
+  const byFilterExp = new Map<string, { frames: number; exposure: number; total: number; gain: number | null; temp: number | null }>();
   for (const row of data.rows) {
-    const existing = byFilter.get(row.filter_name);
+    const key = `${row.filter_name}|${row.exposure}`;
+    const existing = byFilterExp.get(key);
     if (existing) {
       existing.frames += row.frames;
       existing.total += row.total_seconds;
     } else {
-      byFilter.set(row.filter_name, {
+      byFilterExp.set(key, {
         frames: row.frames,
         exposure: row.exposure,
         total: row.total_seconds,
@@ -32,7 +33,8 @@ function generateTextExport(data: ExportResponse): string {
     }
   }
 
-  for (const [filter, info] of byFilter) {
+  for (const [key, info] of byFilterExp) {
+    const filter = key.split("|")[0];
     let line = `${filter}: ${info.frames} x ${info.exposure}s (${formatIntegration(info.total)})`;
     if (info.gain != null) line += ` | Gain ${info.gain}`;
     if (info.temp != null) line += ` | ${info.temp}\u00b0C`;
