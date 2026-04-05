@@ -664,7 +664,12 @@ const SessionAccordionCard: Component<{
 
                 {/* Session Metrics Chart */}
                 <div class="border-t border-theme-border/50 pt-3">
-                  <SessionMetricsChart detail={detail()} />
+                  <Show when={isMultiRig() && !showSummary()}>
+                    <div class="mb-2">
+                      <RigTogglePills rigs={rigLabels()} enabledRigs={enabledRigs()} onToggle={toggleRig} />
+                    </div>
+                  </Show>
+                  <SessionMetricsChart detail={detail()} enabledRigs={enabledRigs()} />
                 </div>
 
                 {/* Row 4: Per-Frame Table (collapsed) */}
