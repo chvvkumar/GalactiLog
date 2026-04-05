@@ -1,4 +1,4 @@
-import { createSignal, For, Show } from "solid-js";
+import { createSignal, createEffect, onCleanup, For, Show } from "solid-js";
 import type { CustomColumn, ColumnVisibility } from "../types";
 import { isColumnVisible } from "../utils/displaySettings";
 
@@ -18,12 +18,25 @@ interface Props {
 
 export default function ColumnPicker(props: Props) {
   const [open, setOpen] = createSignal(false);
+  let containerRef: HTMLDivElement | undefined;
+
+  // Close on click outside
+  createEffect(() => {
+    if (!open()) return;
+    const handler = (e: MouseEvent) => {
+      if (containerRef && !containerRef.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    onCleanup(() => document.removeEventListener("mousedown", handler));
+  });
 
   return (
-    <div class="relative inline-block">
+    <div class="relative inline-block" ref={containerRef}>
       <button
-        onClick={() => setOpen(!open())}
-        class="p-1 rounded hover:bg-[var(--bg-secondary)] text-[var(--text-secondary)]"
+        onClick={(e) => { e.stopPropagation(); setOpen(!open()); }}
+        class="p-1 rounded hover:bg-theme-hover text-theme-text-secondary"
         title="Configure columns"
       >
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -37,10 +50,10 @@ export default function ColumnPicker(props: Props) {
           style={{ "backdrop-filter": "none", "background-color": "var(--color-bg-elevated)" }}
           onClick={(e) => e.stopPropagation()}
         >
-          <div class="text-xs font-semibold text-[var(--text-secondary)] mb-2">Built-in</div>
+          <div class="text-xs font-semibold text-theme-text-secondary mb-2">Built-in</div>
           <For each={props.builtinColumns}>
             {(col) => (
-              <label class="flex items-center gap-2 py-0.5 text-sm">
+              <label class="flex items-center gap-2 py-0.5 text-sm cursor-pointer">
                 <input
                   type="checkbox"
                   checked={col.alwaysVisible || isColumnVisible(props.visibility, props.table, "builtin", col.key)}
@@ -53,10 +66,10 @@ export default function ColumnPicker(props: Props) {
           </For>
 
           <Show when={props.customColumns.length > 0}>
-            <div class="text-xs font-semibold text-[var(--text-secondary)] mt-3 mb-2">Custom</div>
+            <div class="text-xs font-semibold text-theme-text-secondary mt-3 mb-2">Custom</div>
             <For each={props.customColumns}>
               {(col) => (
-                <label class="flex items-center gap-2 py-0.5 text-sm">
+                <label class="flex items-center gap-2 py-0.5 text-sm cursor-pointer">
                   <input
                     type="checkbox"
                     checked={isColumnVisible(props.visibility, props.table, "custom", col.slug)}
@@ -67,13 +80,6 @@ export default function ColumnPicker(props: Props) {
               )}
             </For>
           </Show>
-
-          <button
-            onClick={() => setOpen(false)}
-            class="mt-2 text-xs text-[var(--text-secondary)] hover:underline w-full text-right"
-          >
-            Close
-          </button>
         </div>
       </Show>
     </div>
