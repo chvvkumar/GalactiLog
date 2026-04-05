@@ -1,6 +1,7 @@
-import { createSignal, createResource, For, Show } from "solid-js";
+import { createSignal, For, Show } from "solid-js";
 import { api } from "../api/client";
 import type { CustomColumn } from "../types";
+import { useSettingsContext } from "./SettingsProvider";
 
 function OptionsList(props: { options: string[]; onChange: (opts: string[]) => void }) {
   const [draft, setDraft] = createSignal("");
@@ -59,7 +60,9 @@ function OptionsList(props: { options: string[]; onChange: (opts: string[]) => v
 }
 
 export default function CustomColumnsTab() {
-  const [columns, { refetch }] = createResource(() => api.getCustomColumns());
+  const ctx = useSettingsContext();
+  const columns = ctx.customColumns;
+  const refetch = ctx.refetchCustomColumns;
   const [newName, setNewName] = createSignal("");
   const [newType, setNewType] = createSignal<"boolean" | "text" | "dropdown">("boolean");
   const [newAppliesTo, setNewAppliesTo] = createSignal<"target" | "session" | "rig">("target");
