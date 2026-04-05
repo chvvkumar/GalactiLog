@@ -9,10 +9,10 @@ const RawHeaderAccordion: Component<{ headers: Record<string, unknown> | null }>
   };
 
   return (
-    <div class="border-t border-theme-border/50 pt-3">
+    <div class="bg-theme-base rounded-[var(--radius-md)]">
       <button
         onClick={() => setOpen((v) => !v)}
-        class="flex justify-between items-center w-full text-xs py-2 px-3 rounded-[var(--radius-md)] bg-theme-base hover:bg-theme-hover hover:text-theme-text-primary transition-colors cursor-pointer"
+        class="flex justify-between items-center w-full text-xs py-2 px-3 hover:bg-theme-hover rounded-[var(--radius-md)] hover:text-theme-text-primary transition-colors cursor-pointer"
         classList={{ "text-theme-text-primary": open(), "text-theme-text-secondary": !open() }}
       >
         <span class="font-semibold border-l-2 border-theme-accent pl-2">
@@ -27,9 +27,9 @@ const RawHeaderAccordion: Component<{ headers: Record<string, unknown> | null }>
         </svg>
       </button>
       <Show when={open()}>
-        <div class="mt-2 max-h-64 overflow-y-auto">
+        <div class="px-3 pb-3 max-h-64 overflow-y-auto">
           <table class="w-full text-xs">
-            <thead class="sticky top-0 bg-theme-surface">
+            <thead class="sticky top-0 bg-theme-base">
               <tr class="text-theme-text-secondary">
                 <th class="text-left py-1 px-2 font-normal">Key</th>
                 <th class="text-left py-1 px-2 font-normal">Value</th>

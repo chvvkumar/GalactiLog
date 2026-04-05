@@ -481,9 +481,9 @@ const SessionAccordionCard: Component<{
             {(detail) => (
               <div class="space-y-3 pt-3">
                 {/* Session Summary (collapsible) */}
-                <div>
+                <div class="bg-theme-base rounded-[var(--radius-md)]">
                   <button
-                    class="flex justify-between items-center w-full text-xs py-2 px-3 rounded-[var(--radius-md)] bg-theme-base hover:bg-theme-hover hover:text-theme-text-primary transition-colors cursor-pointer"
+                    class="flex justify-between items-center w-full text-xs py-2 px-3 hover:bg-theme-hover rounded-[var(--radius-md)] hover:text-theme-text-primary transition-colors cursor-pointer"
                     classList={{ "text-theme-text-primary": showSummary(), "text-theme-text-secondary": !showSummary() }}
                     onClick={() => setShowSummary((v) => !v)}
                   >
@@ -496,8 +496,8 @@ const SessionAccordionCard: Component<{
                       <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
                     </svg>
                   </button>
-                </div>
                 <Show when={showSummary()}>
+                <div class="px-3 pb-3">
                 {/* Single-value metrics + Astrobin export */}
                 <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-label">
                   <span>
@@ -647,13 +647,15 @@ const SessionAccordionCard: Component<{
                     </div>
                   </div>
                 </div>
+                </div>
                 </Show>
+                </div>
 
                 {/* Session Insights */}
                 <Show when={detail().insights.length > 0}>
-                  <div class="border-t border-theme-border/50 pt-3">
+                  <div class="bg-theme-base rounded-[var(--radius-md)]">
                     <button
-                      class="flex justify-between items-center w-full text-xs py-2 px-3 rounded-[var(--radius-md)] bg-theme-base hover:bg-theme-hover hover:text-theme-text-primary transition-colors cursor-pointer"
+                      class="flex justify-between items-center w-full text-xs py-2 px-3 hover:bg-theme-hover rounded-[var(--radius-md)] hover:text-theme-text-primary transition-colors cursor-pointer"
                       classList={{ "text-theme-text-primary": showInsights(), "text-theme-text-secondary": !showInsights() }}
                       onClick={() => setShowInsights((v) => !v)}
                     >
@@ -669,7 +671,7 @@ const SessionAccordionCard: Component<{
                       </svg>
                     </button>
                     <Show when={showInsights()}>
-                      <div class="bg-theme-base rounded-[var(--radius-md)] p-3 space-y-1 mt-2">
+                      <div class="px-3 pb-3 space-y-1">
                         <For each={detail().insights}>
                           {(insight) => (
                             <div class={`text-xs ${INSIGHT_STYLES[insight.level]}`}>
@@ -683,14 +685,12 @@ const SessionAccordionCard: Component<{
                 </Show>
 
                 {/* Session Metrics Chart */}
-                <div class="border-t border-theme-border/50 pt-3">
-                  <SessionMetricsChart detail={detail()} enabledRigs={enabledRigs()} onToggleRig={toggleRig} />
-                </div>
+                <SessionMetricsChart detail={detail()} enabledRigs={enabledRigs()} onToggleRig={toggleRig} />
 
                 {/* Row 4: Per-Frame Table (collapsed) */}
-                <div class="border-t border-theme-border/50 pt-3">
+                <div class="bg-theme-base rounded-[var(--radius-md)]">
                   <button
-                    class="flex justify-between items-center w-full text-xs py-2 px-3 rounded-[var(--radius-md)] bg-theme-base hover:bg-theme-hover hover:text-theme-text-primary transition-colors cursor-pointer"
+                    class="flex justify-between items-center w-full text-xs py-2 px-3 hover:bg-theme-hover rounded-[var(--radius-md)] hover:text-theme-text-primary transition-colors cursor-pointer"
                     classList={{ "text-theme-text-primary": showFrames(), "text-theme-text-secondary": !showFrames() }}
                     onClick={() => setShowFrames(!showFrames())}
                   >
@@ -706,22 +706,23 @@ const SessionAccordionCard: Component<{
                     </svg>
                   </button>
                   <Show when={showFrames()}>
+                    <div class="px-3 pb-3">
                     <Show when={isMultiRig()} fallback={
-                      <div class="bg-theme-base rounded-[var(--radius-md)] overflow-x-auto max-h-[600px] overflow-y-auto mt-2">
+                      <div class="overflow-x-auto max-h-[600px] overflow-y-auto">
                         {renderFrameTable(props.detail!.frames)}
                       </div>
                     }>
                       <For each={props.detail!.rigs}>
                         {(rig, index) => (
                           <Show when={enabledRigs().includes(rig.rig_label)}>
-                            <div class="mt-2">
+                            <div class="mt-2 first:mt-0">
                               <div class="flex items-center gap-2 mb-1">
                                 <span class="w-2 h-2 rounded-full inline-block"
                                   style={{ "background-color": rigColor(index()) }} />
                                 <span class="text-xs font-semibold text-theme-text-primary">{rig.rig_label}</span>
                                 <span class="text-tiny text-theme-text-tertiary">{rig.frame_count} frames</span>
                               </div>
-                              <div class="bg-theme-base rounded-[var(--radius-md)] overflow-x-auto max-h-[600px] overflow-y-auto">
+                              <div class="overflow-x-auto max-h-[600px] overflow-y-auto">
                                 {renderFrameTable(rig.frames)}
                               </div>
                             </div>
@@ -729,18 +730,17 @@ const SessionAccordionCard: Component<{
                         )}
                       </For>
                     </Show>
+                    </div>
                   </Show>
                 </div>
 
                 {/* Row 5: FITS Headers */}
-                <div class="border-t border-theme-border/50 pt-3">
-                  <RawHeaderAccordion headers={detail().raw_reference_header} />
-                </div>
+                <RawHeaderAccordion headers={detail().raw_reference_header} />
 
                 {/* Session Notes */}
-                <div class="border-t border-theme-border/50 pt-3">
+                <div class="bg-theme-base rounded-[var(--radius-md)]">
                   <button
-                    class="flex justify-between items-center w-full text-xs py-2 px-3 rounded-[var(--radius-md)] bg-theme-base hover:bg-theme-hover hover:text-theme-text-primary transition-colors cursor-pointer"
+                    class="flex justify-between items-center w-full text-xs py-2 px-3 hover:bg-theme-hover rounded-[var(--radius-md)] hover:text-theme-text-primary transition-colors cursor-pointer"
                     classList={{ "text-theme-text-primary": showNotes(), "text-theme-text-secondary": !showNotes() }}
                     onClick={() => setShowNotes((v) => !v)}
                   >
@@ -764,16 +764,18 @@ const SessionAccordionCard: Component<{
                     </div>
                   </button>
                   <Show when={showNotes()}>
-                    <textarea
-                      class="w-full bg-theme-elevated border border-theme-border rounded px-3 py-2 text-sm text-theme-text-primary placeholder-theme-text-secondary resize-y min-h-[50px] mt-2"
-                      placeholder="Add notes for this session..."
-                      value={sessionNote()}
-                      onInput={(e) => {
-                        const val = e.currentTarget.value;
-                        setSessionNote(val);
-                        saveSessionNote(val);
-                      }}
-                    />
+                    <div class="px-3 pb-3">
+                      <textarea
+                        class="w-full bg-theme-elevated border border-theme-border rounded px-3 py-2 text-sm text-theme-text-primary placeholder-theme-text-secondary resize-y min-h-[50px]"
+                        placeholder="Add notes for this session..."
+                        value={sessionNote()}
+                        onInput={(e) => {
+                          const val = e.currentTarget.value;
+                          setSessionNote(val);
+                          saveSessionNote(val);
+                        }}
+                      />
+                    </div>
                   </Show>
                 </div>
               </div>

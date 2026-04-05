@@ -1413,6 +1413,42 @@ async def get_session_detail(
         last_frame=images[-1],
     )
 
+    # Per-rig insights for multi-rig sessions
+    if len(rig_details) > 1:
+        for rd in rig_details:
+            rig_hfr = [f.median_hfr for f in rd.frames if f.median_hfr is not None]
+            rig_ecc = [f.eccentricity for f in rd.frames if f.eccentricity is not None]
+            rig_median_hfr = statistics.median(rig_hfr) if rig_hfr else None
+            rig_median_ecc = statistics.median(rig_ecc) if rig_ecc else None
+            prefix = f"[{rd.rig_label}] "
+            if rig_median_hfr is not None and target_avg_hfr is not None:
+                if rig_median_hfr <= target_avg_hfr:
+                    insights.append(SessionInsight(
+                        level="good",
+                        message=f"{prefix}Good HFR (median {rig_median_hfr:.2f} vs target avg {target_avg_hfr:.2f})",
+                    ))
+                elif rig_median_hfr > target_avg_hfr * 1.3:
+                    insights.append(SessionInsight(
+                        level="warning",
+                        message=f"{prefix}Poor HFR (median {rig_median_hfr:.2f} vs target avg {target_avg_hfr:.2f})",
+                    ))
+            if rig_median_hfr is not None and len(rig_hfr) > 2:
+                threshold = rig_median_hfr * 1.5
+                outlier_count = sum(1 for v in rig_hfr if v > threshold)
+                if outlier_count > 0:
+                    insights.append(SessionInsight(
+                        level="warning",
+                        message=f"{prefix}{outlier_count} frame{'s' if outlier_count > 1 else ''} with HFR outlier{'s' if outlier_count > 1 else ''} (> {threshold:.1f})",
+                    ))
+            if rig_median_ecc is not None and len(rig_ecc) > 2:
+                threshold = rig_median_ecc * 1.5
+                outlier_count = sum(1 for v in rig_ecc if v > threshold)
+                if outlier_count > 0:
+                    insights.append(SessionInsight(
+                        level="warning",
+                        message=f"{prefix}{outlier_count} frame{'s' if outlier_count > 1 else ''} with eccentricity outlier{'s' if outlier_count > 1 else ''} (> {threshold:.2f})",
+                    ))
+
     # Fetch session note
     session_note = None
     resolved_target_id = target_obj.id if target_obj else None

@@ -196,8 +196,14 @@ export default function SessionMetricsChart(props: Props) {
     props.enabledRigs;
     if (pendingRAF !== null) cancelAnimationFrame(pendingRAF);
     if (expanded()) {
+      // Use setTimeout to ensure <Show> has mounted the canvas DOM node
       pendingRAF = requestAnimationFrame(() => {
         pendingRAF = null;
+        if (!canvasRef) {
+          // Canvas not yet in DOM — retry after next frame
+          setTimeout(() => buildChart(), 0);
+          return;
+        }
         buildChart();
       });
     }
@@ -219,8 +225,9 @@ export default function SessionMetricsChart(props: Props) {
 
   return (
     <div>
+      <div class="bg-theme-base rounded-[var(--radius-md)]">
       <button
-        class="flex justify-between items-center w-full text-xs py-2 px-3 rounded-[var(--radius-md)] bg-theme-base hover:bg-theme-hover hover:text-theme-text-primary transition-colors cursor-pointer"
+        class="flex justify-between items-center w-full text-xs py-2 px-3 hover:bg-theme-hover rounded-[var(--radius-md)] hover:text-theme-text-primary transition-colors cursor-pointer"
         classList={{ "text-theme-text-primary": expanded(), "text-theme-text-secondary": !expanded() }}
         onClick={toggleExpanded}
       >
@@ -234,7 +241,7 @@ export default function SessionMetricsChart(props: Props) {
         </svg>
       </button>
       <Show when={expanded()}>
-        <div class="border border-theme-border rounded-[var(--radius-md)] p-3 bg-theme-base mt-2">
+        <div class="p-3">
           <div class="flex justify-between items-start gap-4 mb-2">
             <div class="text-tiny text-theme-text-tertiary uppercase tracking-wider">Metrics</div>
             <MetricTogglePills />
@@ -256,6 +263,7 @@ export default function SessionMetricsChart(props: Props) {
           </div>
         </div>
       </Show>
+      </div>
     </div>
   );
 }
