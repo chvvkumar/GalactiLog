@@ -7,10 +7,12 @@ import FilterBadges from "./FilterBadges";
 import SessionMetricsChart from "./SessionMetricsChart";
 import { rigColor } from "./RigTogglePills";
 import { useSettingsContext } from "./SettingsProvider";
-import { isFieldVisible } from "../utils/displaySettings";
+import { isFieldVisible, isColumnVisible } from "../utils/displaySettings";
+import InlineEditCell from "./InlineEditCell";
 import { formatTime as formatTimeUtil, timezoneLabel } from "../utils/dateTime";
 
 import { formatIntegration } from "../utils/format";
+import { showToast } from "./Toast";
 
 const INSIGHT_STYLES: Record<string, string> = {
   good: "text-theme-success",
@@ -99,6 +101,9 @@ const SessionAccordionCard: Component<{
       setNoteSaving(true);
       try {
         await api.updateSessionNotes(props.targetId!, props.session.session_date, text || null);
+        showToast("Session notes saved");
+      } catch {
+        showToast("Failed to save session notes", "error");
       } finally {
         setNoteSaving(false);
       }
@@ -490,6 +495,48 @@ const SessionAccordionCard: Component<{
           <Show when={props.detail}>
             {(detail) => (
               <div class="space-y-3 pt-3">
+                {/* Session Notes */}
+                <div class="bg-theme-base rounded-[var(--radius-md)]">
+                  <button
+                    class="flex justify-between items-center w-full text-xs py-2 px-3 hover:bg-theme-hover rounded-[var(--radius-md)] hover:text-theme-text-primary transition-colors cursor-pointer"
+                    classList={{ "text-theme-text-primary": showNotes(), "text-theme-text-secondary": !showNotes() }}
+                    onClick={() => setShowNotes((v) => !v)}
+                  >
+                    <span class="font-semibold border-l-2 border-theme-accent pl-2">
+                      Session Notes
+                      <Show when={sessionNote()}>
+                        <span class="text-theme-text-tertiary font-normal ml-2">has content</span>
+                      </Show>
+                    </span>
+                    <div class="flex items-center gap-2">
+                      <Show when={noteSaving()}>
+                        <span class="text-theme-text-tertiary font-normal">Saving...</span>
+                      </Show>
+                      <svg
+                        class={`w-3.5 h-3.5 transition-transform duration-200 ${showNotes() ? "rotate-180" : ""}`}
+                        viewBox="0 0 20 20"
+                        fill="currentColor"
+                      >
+                        <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
+                      </svg>
+                    </div>
+                  </button>
+                  <Show when={showNotes()}>
+                    <div class="px-3 pb-3">
+                      <textarea
+                        class="w-full bg-theme-elevated border border-theme-border rounded px-3 py-2 text-sm text-theme-text-primary placeholder-theme-text-secondary resize-y min-h-[50px]"
+                        placeholder="Add notes for this session..."
+                        value={sessionNote()}
+                        onInput={(e) => {
+                          const val = e.currentTarget.value;
+                          setSessionNote(val);
+                          saveSessionNote(val);
+                        }}
+                      />
+                    </div>
+                  </Show>
+                </div>
+
                 {/* Session Summary (collapsible) */}
                 <div class="bg-theme-base rounded-[var(--radius-md)]">
                   <button
@@ -596,6 +643,35 @@ const SessionAccordionCard: Component<{
                               )}
                             </For>
                           </div>
+                          {/* Rig-level custom columns */}
+                          <Show when={(settingsCtx.customColumns() ?? []).filter(c => c.applies_to === "rig").length > 0}>
+                            <div class="flex flex-wrap gap-4 mt-1 ml-4">
+                              <For each={(settingsCtx.customColumns() ?? []).filter(c => c.applies_to === "rig")}>
+                                {(col) => {
+                                  const val = () => detail().custom_values?.find(
+                                    (cv) => cv.column_slug === col.slug && cv.rig_label === rig.rig_label
+                                  );
+                                  return (
+                                    <div class="flex items-center gap-2 text-xs">
+                                      <span class="text-[var(--text-secondary)]">{col.name}:</span>
+                                      <InlineEditCell
+                                        columnType={col.column_type}
+                                        value={val()?.value}
+                                        dropdownOptions={col.dropdown_options}
+                                        onSave={(v) => api.setCustomValue({
+                                          column_id: col.id,
+                                          target_id: props.targetId!,
+                                          session_date: detail().session_date,
+                                          rig_label: rig.rig_label,
+                                          value: v,
+                                        })}
+                                      />
+                                    </div>
+                                  );
+                                }}
+                              </For>
+                            </div>
+                          </Show>
                         </div>
                         <div class="w-[140px] h-[100px] flex-shrink-0 ml-auto rounded overflow-hidden">
                           <ReferenceThumbnail url={rig.thumbnail_url ?? null} fill />
@@ -673,6 +749,35 @@ const SessionAccordionCard: Component<{
                 </div>
                 </Show>
                 </div>
+
+                {/* Session-level custom columns */}
+                <Show when={(settingsCtx.customColumns() ?? []).filter(c => c.applies_to === "session").length > 0}>
+                  <div class="flex flex-wrap gap-4 px-3 py-2">
+                    <For each={(settingsCtx.customColumns() ?? []).filter(c => c.applies_to === "session")}>
+                      {(col) => {
+                        const val = () => detail().custom_values?.find(
+                          (cv) => cv.column_slug === col.slug && !cv.rig_label
+                        );
+                        return (
+                          <div class="flex items-center gap-2 text-sm">
+                            <span class="text-[var(--text-secondary)]">{col.name}:</span>
+                            <InlineEditCell
+                              columnType={col.column_type}
+                              value={val()?.value}
+                              dropdownOptions={col.dropdown_options}
+                              onSave={(v) => api.setCustomValue({
+                                column_id: col.id,
+                                target_id: props.targetId!,
+                                session_date: detail().session_date,
+                                value: v,
+                              })}
+                            />
+                          </div>
+                        );
+                      }}
+                    </For>
+                  </div>
+                </Show>
 
                 {/* Session Insights */}
                 <Show when={detail().insights.length > 0}>
@@ -760,47 +865,6 @@ const SessionAccordionCard: Component<{
                 {/* Row 5: FITS Headers */}
                 <RawHeaderAccordion headers={detail().raw_reference_header} />
 
-                {/* Session Notes */}
-                <div class="bg-theme-base rounded-[var(--radius-md)]">
-                  <button
-                    class="flex justify-between items-center w-full text-xs py-2 px-3 hover:bg-theme-hover rounded-[var(--radius-md)] hover:text-theme-text-primary transition-colors cursor-pointer"
-                    classList={{ "text-theme-text-primary": showNotes(), "text-theme-text-secondary": !showNotes() }}
-                    onClick={() => setShowNotes((v) => !v)}
-                  >
-                    <span class="font-semibold border-l-2 border-theme-accent pl-2">
-                      Session Notes
-                      <Show when={sessionNote()}>
-                        <span class="text-theme-text-tertiary font-normal ml-2">has content</span>
-                      </Show>
-                    </span>
-                    <div class="flex items-center gap-2">
-                      <Show when={noteSaving()}>
-                        <span class="text-theme-text-tertiary font-normal">Saving...</span>
-                      </Show>
-                      <svg
-                        class={`w-3.5 h-3.5 transition-transform duration-200 ${showNotes() ? "rotate-180" : ""}`}
-                        viewBox="0 0 20 20"
-                        fill="currentColor"
-                      >
-                        <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
-                      </svg>
-                    </div>
-                  </button>
-                  <Show when={showNotes()}>
-                    <div class="px-3 pb-3">
-                      <textarea
-                        class="w-full bg-theme-elevated border border-theme-border rounded px-3 py-2 text-sm text-theme-text-primary placeholder-theme-text-secondary resize-y min-h-[50px]"
-                        placeholder="Add notes for this session..."
-                        value={sessionNote()}
-                        onInput={(e) => {
-                          const val = e.currentTarget.value;
-                          setSessionNote(val);
-                          saveSessionNote(val);
-                        }}
-                      />
-                    </div>
-                  </Show>
-                </div>
               </div>
             )}
           </Show>
