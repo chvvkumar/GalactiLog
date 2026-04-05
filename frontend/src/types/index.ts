@@ -81,6 +81,7 @@ export interface SessionDetail {
   median_humidity: number | null;
   median_cloud_cover: number | null;
   notes: string | null;
+  rigs: RigDetail[];
 }
 
 // === Target Detail (Deep Dive Page) ===
@@ -108,6 +109,7 @@ export interface SessionOverview {
   median_guiding_rms_arcsec: number | null;
   filter_medians: FilterMedian[];
   has_notes: boolean;
+  rig_count: number;
 }
 
 export interface TargetDetailResponse {
@@ -137,6 +139,24 @@ export interface TargetDetailResponse {
   avg_guiding_rms_arcsec: number | null;
   avg_detected_stars: number | null;
   notes: string | null;
+}
+
+export interface RigDetail {
+  rig_label: string;
+  telescope: string | null;
+  camera: string | null;
+  frame_count: number;
+  integration_seconds: number;
+  median_hfr: number | null;
+  median_eccentricity: number | null;
+  median_fwhm: number | null;
+  median_guiding_rms: number | null;
+  median_detected_stars: number | null;
+  gain: number | null;
+  offset: number | null;
+  exposure_times: number[];
+  filter_details: FilterDetail[];
+  frames: FrameRecord[];
 }
 
 export interface FilterDetail {
@@ -187,6 +207,7 @@ export interface FrameRecord {
   wind_gust: number | null;
   cloud_cover: number | null;
   sky_quality: number | null;
+  rig: string | null;
 }
 
 // === Equipment ===
