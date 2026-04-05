@@ -5,7 +5,7 @@ import ReferenceThumbnail from "./ReferenceThumbnail";
 import RawHeaderAccordion from "./RawHeaderAccordion";
 import FilterBadges from "./FilterBadges";
 import SessionMetricsChart from "./SessionMetricsChart";
-import RigTogglePills, { rigColor } from "./RigTogglePills";
+import { rigColor } from "./RigTogglePills";
 import { useSettingsContext } from "./SettingsProvider";
 import { isFieldVisible } from "../utils/displaySettings";
 import { formatTime as formatTimeUtil, timezoneLabel } from "../utils/dateTime";
@@ -538,26 +538,21 @@ const SessionAccordionCard: Component<{
 
                 {/* Per-rig summary (multi-rig only) */}
                 <Show when={isMultiRig()}>
-                  <div class="mt-2">
-                    <RigTogglePills rigs={rigLabels()} enabledRigs={enabledRigs()} onToggle={toggleRig} />
-                    <div class="flex flex-wrap gap-3 mt-2 text-label">
-                      <For each={props.detail!.rigs}>
-                        {(rig, index) => (
-                          <Show when={enabledRigs().includes(rig.rig_label)}>
-                            <span class="flex items-center gap-1.5">
-                              <span
-                                class="w-2 h-2 rounded-full inline-block"
-                                style={{ "background-color": rigColor(index()) }}
-                              />
-                              <span class="text-theme-text-secondary">{rig.rig_label}:</span>
-                              <span class="font-bold text-theme-text-primary">
-                                {rig.frame_count} fr · {formatIntegration(rig.integration_seconds)}
-                              </span>
-                            </span>
-                          </Show>
-                        )}
-                      </For>
-                    </div>
+                  <div class="flex flex-wrap gap-3 mt-2 text-label">
+                    <For each={props.detail!.rigs}>
+                      {(rig, index) => (
+                        <span class="flex items-center gap-1.5">
+                          <span
+                            class="w-2 h-2 rounded-full inline-block"
+                            style={{ "background-color": rigColor(index()) }}
+                          />
+                          <span class="text-theme-text-secondary">{rig.rig_label}:</span>
+                          <span class="font-bold text-theme-text-primary">
+                            {rig.frame_count} fr · {formatIntegration(rig.integration_seconds)}
+                          </span>
+                        </span>
+                      )}
+                    </For>
                   </div>
                 </Show>
 
@@ -689,12 +684,7 @@ const SessionAccordionCard: Component<{
 
                 {/* Session Metrics Chart */}
                 <div class="border-t border-theme-border/50 pt-3">
-                  <Show when={isMultiRig() && !showSummary()}>
-                    <div class="mb-2">
-                      <RigTogglePills rigs={rigLabels()} enabledRigs={enabledRigs()} onToggle={toggleRig} />
-                    </div>
-                  </Show>
-                  <SessionMetricsChart detail={detail()} enabledRigs={enabledRigs()} />
+                  <SessionMetricsChart detail={detail()} enabledRigs={enabledRigs()} onToggleRig={toggleRig} />
                 </div>
 
                 {/* Row 4: Per-Frame Table (collapsed) */}

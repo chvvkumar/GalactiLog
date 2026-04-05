@@ -6,13 +6,14 @@ import { formatTime } from "../utils/dateTime";
 import { METRIC_DEFINITIONS, getMetricColor, getMetricDef, chartFontSize } from "../utils/chartConfig";
 import MetricTogglePills from "./MetricTogglePills";
 import FilterTogglePills from "./FilterTogglePills";
-import { rigColor } from "./RigTogglePills";
+import RigTogglePills, { rigColor } from "./RigTogglePills";
 
 Chart.register(LineController, CategoryScale, LinearScale, PointElement, LineElement, Tooltip);
 
 interface Props {
   detail: SessionDetail;
   enabledRigs?: string[];
+  onToggleRig?: (rig: string) => void;
 }
 
 export default function SessionMetricsChart(props: Props) {
@@ -241,6 +242,15 @@ export default function SessionMetricsChart(props: Props) {
           <div class="mb-3">
             <FilterTogglePills filters={filters()} />
           </div>
+          <Show when={(props.detail.rigs?.length ?? 0) > 1 && props.enabledRigs && props.onToggleRig}>
+            <div class="mb-3">
+              <RigTogglePills
+                rigs={props.detail.rigs.map(r => r.rig_label)}
+                enabledRigs={props.enabledRigs!}
+                onToggle={props.onToggleRig!}
+              />
+            </div>
+          </Show>
           <div style={{ height: "200px" }}>
             <canvas ref={canvasRef} />
           </div>
