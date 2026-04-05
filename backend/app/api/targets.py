@@ -20,11 +20,126 @@ from app.schemas.target import (
     TargetAggregationResponse, TargetAggregation, SessionSummary,
     AggregateStats, EquipmentResponse, SessionDetailResponse,
     TargetDetailResponse, SessionOverview, FilterDetail, FilterMedian, SessionInsight, FrameRecord,
-    TargetSearchResultFuzzy, ObjectTypeCount, NotesUpdate,
+    TargetSearchResultFuzzy, ObjectTypeCount, NotesUpdate, RigDetail,
 )
 from app.schemas.export import ExportResponse, ExportFilterRow, ExportEquipment, ExportCalibration
 
 router = APIRouter(prefix="/targets", tags=["targets"])
+
+
+def _build_rig_details(
+    images: list,
+    filter_map: dict,
+    cam_map: dict,
+    tel_map: dict,
+) -> list:
+    """Group images by normalized (telescope, camera) and return per-rig stats."""
+    rig_buckets: dict[tuple[str | None, str | None], list] = defaultdict(list)
+    for img in images:
+        tel = normalize_equipment(img.telescope, tel_map)
+        cam = normalize_equipment(img.camera, cam_map)
+        rig_buckets[(tel, cam)].append(img)
+
+    rig_details = []
+    for (tel, cam), rig_images in sorted(rig_buckets.items(), key=lambda x: (x[0][0] or "", x[0][1] or "")):
+        rig_label = f"{tel or 'Unknown'} / {cam or 'Unknown'}"
+        rig_exp = sum(i.exposure_time or 0 for i in rig_images)
+        rig_hfr = [i.median_hfr for i in rig_images if i.median_hfr is not None]
+        rig_ecc = [i.eccentricity for i in rig_images if i.eccentricity is not None]
+        rig_fwhm = [i.fwhm for i in rig_images if i.fwhm is not None]
+        rig_guiding = [i.guiding_rms_arcsec for i in rig_images if i.guiding_rms_arcsec is not None]
+        rig_stars = [i.detected_stars for i in rig_images if i.detected_stars is not None]
+
+        # Per-filter breakdown within this rig
+        rig_filter_groups: dict[str, list] = defaultdict(list)
+        for img in rig_images:
+            f = normalize_filter(img.filter_used, filter_map)
+            if f:
+                rig_filter_groups[f].append(img)
+
+        rig_filter_details = []
+        for fname, fimages in sorted(rig_filter_groups.items()):
+            f_hfr = [i.median_hfr for i in fimages if i.median_hfr is not None]
+            f_ecc = [i.eccentricity for i in fimages if i.eccentricity is not None]
+            f_exp = sum(i.exposure_time or 0 for i in fimages)
+            rig_filter_details.append(FilterDetail(
+                filter_name=fname,
+                frame_count=len(fimages),
+                integration_seconds=f_exp,
+                median_hfr=statistics.median(f_hfr) if f_hfr else None,
+                median_eccentricity=statistics.median(f_ecc) if f_ecc else None,
+                exposure_time=fimages[0].exposure_time,
+            ))
+
+        # Build frame records for this rig
+        rig_frames = []
+        for img in sorted(rig_images, key=lambda i: i.capture_date or datetime.min):
+            rig_frames.append(FrameRecord(
+                timestamp=img.capture_date.isoformat() if img.capture_date else "",
+                filter_used=normalize_filter(img.filter_used, filter_map),
+                exposure_time=img.exposure_time,
+                median_hfr=img.median_hfr,
+                eccentricity=img.eccentricity,
+                sensor_temp=img.sensor_temp,
+                gain=img.camera_gain,
+                file_name=img.file_name,
+                hfr_stdev=img.hfr_stdev,
+                fwhm=img.fwhm,
+                detected_stars=img.detected_stars,
+                guiding_rms_arcsec=img.guiding_rms_arcsec,
+                guiding_rms_ra_arcsec=img.guiding_rms_ra_arcsec,
+                guiding_rms_dec_arcsec=img.guiding_rms_dec_arcsec,
+                adu_stdev=img.adu_stdev,
+                adu_mean=img.adu_mean,
+                adu_median=img.adu_median,
+                adu_min=img.adu_min,
+                adu_max=img.adu_max,
+                focuser_position=img.focuser_position,
+                focuser_temp=img.focuser_temp,
+                rotator_position=img.rotator_position,
+                pier_side=img.pier_side,
+                airmass=img.airmass,
+                ambient_temp=img.ambient_temp,
+                dew_point=img.dew_point,
+                humidity=img.humidity,
+                pressure=img.pressure,
+                wind_speed=img.wind_speed,
+                wind_direction=img.wind_direction,
+                wind_gust=img.wind_gust,
+                cloud_cover=img.cloud_cover,
+                sky_quality=img.sky_quality,
+                rig=rig_label,
+            ))
+
+        # Gain/offset from first image in rig
+        ref = rig_images[0]
+        offset_val = next(
+            (int(img.raw_headers.get("OFFSET", 0))
+             for img in rig_images
+             if img.raw_headers and img.raw_headers.get("OFFSET") is not None),
+            None,
+        )
+
+        rig_details.append(RigDetail(
+            rig_label=rig_label,
+            telescope=tel,
+            camera=cam,
+            frame_count=len(rig_images),
+            integration_seconds=rig_exp,
+            median_hfr=statistics.median(rig_hfr) if rig_hfr else None,
+            median_eccentricity=statistics.median(rig_ecc) if rig_ecc else None,
+            median_fwhm=statistics.median(rig_fwhm) if rig_fwhm else None,
+            median_guiding_rms=statistics.median(rig_guiding) if rig_guiding else None,
+            median_detected_stars=statistics.median(rig_stars) if rig_stars else None,
+            gain=ref.camera_gain,
+            offset=offset_val,
+            exposure_times=sorted(set(i.exposure_time for i in rig_images if i.exposure_time is not None)),
+            filter_details=rig_filter_details,
+            frames=rig_frames,
+        ))
+
+    return rig_details
+
 
 # ---------------------------------------------------------------------------
 # SIMBAD object type → human-readable category mapping
