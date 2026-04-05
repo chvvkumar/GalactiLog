@@ -5,6 +5,7 @@ import ReferenceThumbnail from "./ReferenceThumbnail";
 import RawHeaderAccordion from "./RawHeaderAccordion";
 import FilterBadges from "./FilterBadges";
 import SessionMetricsChart from "./SessionMetricsChart";
+import { rigColor } from "./RigTogglePills";
 import { useSettingsContext } from "./SettingsProvider";
 import { isFieldVisible } from "../utils/displaySettings";
 import { formatTime as formatTimeUtil, timezoneLabel } from "../utils/dateTime";
@@ -53,12 +54,36 @@ const SessionAccordionCard: Component<{
   const [showFrames, setShowFrames] = createSignal(false);
   const [sortColumn, setSortColumn] = createSignal<keyof FrameRecord>("timestamp");
   const [sortAsc, setSortAsc] = createSignal(true);
-  const [csvCopied, setCsvCopied] = createSignal(false);
+  const [csvCopiedRig, setCsvCopiedRig] = createSignal<string | null>(null);
 
   const [sessionNote, setSessionNote] = createSignal(props.detail?.notes || "");
   const [showNotes, setShowNotes] = createSignal(false);
+  const [showDetails, setShowDetails] = createSignal(false);
   const [noteSaving, setNoteSaving] = createSignal(false);
   let noteTimer: ReturnType<typeof setTimeout> | undefined;
+
+  const [enabledRigs, setEnabledRigs] = createSignal<string[]>([]);
+
+  // Initialize enabledRigs when detail loads
+  createEffect(() => {
+    const d = props.detail;
+    if (d && d.rigs.length > 0 && enabledRigs().length === 0) {
+      setEnabledRigs(d.rigs.map(r => r.rig_label));
+    }
+  });
+
+  const toggleRig = (rig: string) => {
+    setEnabledRigs((prev) => {
+      if (prev.includes(rig)) {
+        if (prev.length <= 1) return prev;
+        return prev.filter((r) => r !== rig);
+      }
+      return [...prev, rig];
+    });
+  };
+
+  const isMultiRig = () => (props.detail?.rigs.length ?? 0) > 1;
+  const rigLabels = () => props.detail?.rigs.map(r => r.rig_label) ?? [];
 
   // Sync when detail loads
   createEffect(() => {
@@ -80,22 +105,45 @@ const SessionAccordionCard: Component<{
     }, 1000);
   };
 
-  const copyAstrobinCsv = () => {
+  const copyAstrobinCsv = (rigLabel?: string) => {
     const d = props.detail;
     if (!d) return;
     const header = "date,filter,number,duration,binning,gain,sensorCooling,fNumber,bortle,meanSqm,meanFwhm,temperature";
-    const rows = d.filter_details.map((f) => {
-      const duration = f.exposure_time ?? "";
-      const gain = d.gain !== null ? d.gain : "";
-      const sensorCooling = d.sensor_temp !== null ? Math.round(d.sensor_temp) : "";
-      const meanFwhm = d.median_fwhm !== null ? d.median_fwhm.toFixed(2) : "";
-      const temperature = d.median_ambient_temp !== null ? d.median_ambient_temp.toFixed(2) : "";
-      return `${d.session_date},,${f.frame_count},${duration},,${gain},${sensorCooling},,,,${meanFwhm},${temperature}`;
-    });
+
+    const median = (vals: number[]) => {
+      if (vals.length === 0) return null;
+      const s = [...vals].sort((a, b) => a - b);
+      const mid = Math.floor(s.length / 2);
+      return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
+    };
+
+    const buildRows = (filterDetails: typeof d.filter_details, gain: number | null, sensorTemp: number | null, fwhm: number | null, ambientTemp: number | null) => {
+      return filterDetails.map((f) => {
+        const duration = f.exposure_time ?? "";
+        const g = gain !== null ? gain : "";
+        const cooling = sensorTemp !== null ? Math.round(sensorTemp) : "";
+        const mFwhm = fwhm !== null ? fwhm.toFixed(2) : "";
+        const temp = ambientTemp !== null ? ambientTemp.toFixed(2) : "";
+        return `${d.session_date},,${f.frame_count},${duration},,${g},${cooling},,,,${mFwhm},${temp}`;
+      });
+    };
+
+    let rows: string[];
+    const targetRig = rigLabel ? d.rigs.find(r => r.rig_label === rigLabel) : null;
+    if (targetRig) {
+      const temps = targetRig.frames.map(f => f.sensor_temp).filter((t): t is number => t !== null);
+      const fwhms = targetRig.frames.map(f => f.fwhm).filter((v): v is number => v !== null);
+      const ambTemps = targetRig.frames.map(f => f.ambient_temp).filter((v): v is number => v !== null);
+      rows = buildRows(targetRig.filter_details, targetRig.gain, median(temps), median(fwhms), median(ambTemps));
+    } else {
+      rows = buildRows(d.filter_details, d.gain, d.sensor_temp, d.median_fwhm, d.median_ambient_temp);
+    }
+
     const csv = [header, ...rows].join("\n");
+    const key = rigLabel ?? "__all__";
     navigator.clipboard.writeText(csv).then(() => {
-      setCsvCopied(true);
-      setTimeout(() => setCsvCopied(false), 2000);
+      setCsvCopiedRig(key);
+      setTimeout(() => setCsvCopiedRig(null), 2000);
     });
   };
 
@@ -105,11 +153,11 @@ const SessionAccordionCard: Component<{
     }
   });
 
-  const sortedFrames = () => {
-    if (!props.detail) return [];
+  const sortedFrames = (inputFrames?: FrameRecord[]) => {
+    const frames = inputFrames ?? props.detail?.frames ?? [];
     const col = sortColumn();
     const asc = sortAsc();
-    return [...props.detail.frames].sort((a, b) => {
+    return [...frames].sort((a, b) => {
       const va = a[col];
       const vb = b[col];
       if (va === null || va === undefined) return 1;
@@ -129,10 +177,224 @@ const SessionAccordionCard: Component<{
     }
   };
 
-  const isOutlier = (frame: FrameRecord): boolean => {
-    if (!props.detail?.median_hfr || !frame.median_hfr) return false;
-    return frame.median_hfr > props.detail.median_hfr * 1.5;
+  const isHfrOutlier = (frame: FrameRecord, medianHfr?: number | null): boolean => {
+    const med = medianHfr ?? props.detail?.median_hfr;
+    if (!med || !frame.median_hfr) return false;
+    return frame.median_hfr > med * 1.5;
   };
+
+  const isEccOutlier = (frame: FrameRecord, medianEcc?: number | null): boolean => {
+    const med = medianEcc ?? props.detail?.median_eccentricity;
+    if (!med || !frame.eccentricity) return false;
+    return frame.eccentricity > med * 1.5;
+  };
+
+  const isOutlier = (frame: FrameRecord, medianHfr?: number | null, medianEcc?: number | null): boolean => {
+    return isHfrOutlier(frame, medianHfr) || isEccOutlier(frame, medianEcc);
+  };
+
+  const renderFrameTable = (frames: FrameRecord[], medianHfr?: number | null, medianEcc?: number | null) => (
+    <table class="w-full text-label">
+      <thead class="sticky top-0 bg-theme-base">
+        <tr class="text-theme-text-secondary border-b border-theme-border">
+          <SortHeader label={`Time (${timezoneLabel(settingsCtx.timezone())})`} column="timestamp" current={sortColumn()} asc={sortAsc()} onSort={toggleSort} />
+          <SortHeader label="Filter" column="filter_used" current={sortColumn()} asc={sortAsc()} onSort={toggleSort} align="center" />
+          <SortHeader label="Exp" column="exposure_time" current={sortColumn()} asc={sortAsc()} onSort={toggleSort} align="right" />
+          <Show when={visible("quality", "hfr")}>
+            <SortHeader label="HFR" column="median_hfr" current={sortColumn()} asc={sortAsc()} onSort={toggleSort} align="right" />
+          </Show>
+          <Show when={visible("quality", "eccentricity")}>
+            <SortHeader label="Ecc" column="eccentricity" current={sortColumn()} asc={sortAsc()} onSort={toggleSort} align="right" />
+          </Show>
+          <Show when={visible("quality", "fwhm")}>
+            <SortHeader label="FWHM" column="fwhm" current={sortColumn()} asc={sortAsc()} onSort={toggleSort} align="right" />
+          </Show>
+          <Show when={visible("quality", "detected_stars")}>
+            <SortHeader label="Stars" column="detected_stars" current={sortColumn()} asc={sortAsc()} onSort={toggleSort} align="right" />
+          </Show>
+          <Show when={visible("guiding", "rms_total")}>
+            <SortHeader label="RMS" column="guiding_rms_arcsec" current={sortColumn()} asc={sortAsc()} onSort={toggleSort} align="right" />
+          </Show>
+          <Show when={visible("guiding", "rms_ra")}>
+            <SortHeader label="RMS RA" column="guiding_rms_ra_arcsec" current={sortColumn()} asc={sortAsc()} onSort={toggleSort} align="right" />
+          </Show>
+          <Show when={visible("guiding", "rms_dec")}>
+            <SortHeader label="RMS Dec" column="guiding_rms_dec_arcsec" current={sortColumn()} asc={sortAsc()} onSort={toggleSort} align="right" />
+          </Show>
+          <Show when={visible("adu", "mean")}>
+            <SortHeader label="ADU Mean" column="adu_mean" current={sortColumn()} asc={sortAsc()} onSort={toggleSort} align="right" />
+          </Show>
+          <Show when={visible("adu", "median")}>
+            <SortHeader label="ADU Med" column="adu_median" current={sortColumn()} asc={sortAsc()} onSort={toggleSort} align="right" />
+          </Show>
+          <Show when={visible("adu", "stdev")}>
+            <SortHeader label="ADU σ" column="adu_stdev" current={sortColumn()} asc={sortAsc()} onSort={toggleSort} align="right" />
+          </Show>
+          <Show when={visible("adu", "min")}>
+            <SortHeader label="ADU Min" column="adu_min" current={sortColumn()} asc={sortAsc()} onSort={toggleSort} align="right" />
+          </Show>
+          <Show when={visible("adu", "max")}>
+            <SortHeader label="ADU Max" column="adu_max" current={sortColumn()} asc={sortAsc()} onSort={toggleSort} align="right" />
+          </Show>
+          <Show when={visible("focuser", "position")}>
+            <SortHeader label="Focus" column="focuser_position" current={sortColumn()} asc={sortAsc()} onSort={toggleSort} align="right" />
+          </Show>
+          <Show when={visible("focuser", "temp")}>
+            <SortHeader label="Focus Temp" column="focuser_temp" current={sortColumn()} asc={sortAsc()} onSort={toggleSort} align="right" />
+          </Show>
+          <Show when={visible("weather", "ambient_temp")}>
+            <SortHeader label="Amb Temp" column="ambient_temp" current={sortColumn()} asc={sortAsc()} onSort={toggleSort} align="right" />
+          </Show>
+          <Show when={visible("weather", "dew_point")}>
+            <SortHeader label="Dew Pt" column="dew_point" current={sortColumn()} asc={sortAsc()} onSort={toggleSort} align="right" />
+          </Show>
+          <Show when={visible("weather", "humidity")}>
+            <SortHeader label="Humidity" column="humidity" current={sortColumn()} asc={sortAsc()} onSort={toggleSort} align="right" />
+          </Show>
+          <Show when={visible("weather", "pressure")}>
+            <SortHeader label="Pressure" column="pressure" current={sortColumn()} asc={sortAsc()} onSort={toggleSort} align="right" />
+          </Show>
+          <Show when={visible("weather", "wind_speed")}>
+            <SortHeader label="Wind" column="wind_speed" current={sortColumn()} asc={sortAsc()} onSort={toggleSort} align="right" />
+          </Show>
+          <Show when={visible("weather", "wind_direction")}>
+            <SortHeader label="Wind Dir" column="wind_direction" current={sortColumn()} asc={sortAsc()} onSort={toggleSort} align="right" />
+          </Show>
+          <Show when={visible("weather", "wind_gust")}>
+            <SortHeader label="Gust" column="wind_gust" current={sortColumn()} asc={sortAsc()} onSort={toggleSort} align="right" />
+          </Show>
+          <Show when={visible("weather", "cloud_cover")}>
+            <SortHeader label="Clouds" column="cloud_cover" current={sortColumn()} asc={sortAsc()} onSort={toggleSort} align="right" />
+          </Show>
+          <Show when={visible("weather", "sky_quality")}>
+            <SortHeader label="SQM" column="sky_quality" current={sortColumn()} asc={sortAsc()} onSort={toggleSort} align="right" />
+          </Show>
+          <Show when={visible("mount", "airmass")}>
+            <SortHeader label="Airmass" column="airmass" current={sortColumn()} asc={sortAsc()} onSort={toggleSort} align="right" />
+          </Show>
+          <Show when={visible("mount", "pier_side")}>
+            <SortHeader label="Pier" column="pier_side" current={sortColumn()} asc={sortAsc()} onSort={toggleSort} align="center" />
+          </Show>
+          <Show when={visible("mount", "rotator_position")}>
+            <SortHeader label="Rotator" column="rotator_position" current={sortColumn()} asc={sortAsc()} onSort={toggleSort} align="right" />
+          </Show>
+          <SortHeader label="Temp" column="sensor_temp" current={sortColumn()} asc={sortAsc()} onSort={toggleSort} align="right" />
+          <SortHeader label="Gain" column="gain" current={sortColumn()} asc={sortAsc()} onSort={toggleSort} align="right" />
+          <th class="text-right py-1.5 px-2 font-normal">File</th>
+        </tr>
+      </thead>
+      <tbody>
+        <For each={sortedFrames(frames)}>
+          {(frame) => (
+            <tr class={`border-b border-theme-border/30 hover:bg-theme-hover transition-colors duration-100 ${isOutlier(frame, medianHfr, medianEcc) ? "bg-theme-error/20" : ""}`}>
+              <td class="py-1 px-2 text-theme-text-primary">{formatTimeUtil(frame.timestamp, settingsCtx.timezone())}</td>
+              <td class="py-1 px-2 text-theme-text-primary text-center">{frame.filter_used ?? "—"}</td>
+              <td class="py-1 px-2 text-theme-text-primary text-right tabular-nums">{frame.exposure_time ?? "—"}s</td>
+              <Show when={visible("quality", "hfr")}>
+                <td class={`py-1 px-2 text-right tabular-nums ${isHfrOutlier(frame, medianHfr) ? "text-theme-error font-bold" : "text-theme-text-primary"}`}>
+                  {frame.median_hfr?.toFixed(2) ?? "\u2014"}
+                </td>
+              </Show>
+              <Show when={visible("quality", "eccentricity")}>
+                <td class={`py-1 px-2 text-right tabular-nums ${isEccOutlier(frame, medianEcc) ? "text-theme-error font-bold" : "text-theme-text-primary"}`}>{frame.eccentricity?.toFixed(2) ?? "\u2014"}</td>
+              </Show>
+              <Show when={visible("quality", "fwhm")}>
+                <td class="py-1 px-2 text-theme-text-primary text-right tabular-nums">{frame.fwhm?.toFixed(2) ?? "\u2014"}</td>
+              </Show>
+              <Show when={visible("quality", "detected_stars")}>
+                <td class="py-1 px-2 text-theme-text-primary text-right tabular-nums">{frame.detected_stars ?? "\u2014"}</td>
+              </Show>
+              <Show when={visible("guiding", "rms_total")}>
+                <td class="py-1 px-2 text-theme-text-primary text-right">
+                  {frame.guiding_rms_arcsec !== null ? `${frame.guiding_rms_arcsec?.toFixed(2)}"` : "\u2014"}
+                </td>
+              </Show>
+              <Show when={visible("guiding", "rms_ra")}>
+                <td class="py-1 px-2 text-theme-text-primary text-right">
+                  {frame.guiding_rms_ra_arcsec !== null ? `${frame.guiding_rms_ra_arcsec?.toFixed(2)}"` : "\u2014"}
+                </td>
+              </Show>
+              <Show when={visible("guiding", "rms_dec")}>
+                <td class="py-1 px-2 text-theme-text-primary text-right">
+                  {frame.guiding_rms_dec_arcsec !== null ? `${frame.guiding_rms_dec_arcsec?.toFixed(2)}"` : "\u2014"}
+                </td>
+              </Show>
+              <Show when={visible("adu", "mean")}>
+                <td class="py-1 px-2 text-theme-text-primary text-right tabular-nums">{frame.adu_mean?.toFixed(2) ?? "\u2014"}</td>
+              </Show>
+              <Show when={visible("adu", "median")}>
+                <td class="py-1 px-2 text-theme-text-primary text-right tabular-nums">{frame.adu_median?.toFixed(2) ?? "\u2014"}</td>
+              </Show>
+              <Show when={visible("adu", "stdev")}>
+                <td class="py-1 px-2 text-theme-text-primary text-right tabular-nums">{frame.adu_stdev?.toFixed(2) ?? "\u2014"}</td>
+              </Show>
+              <Show when={visible("adu", "min")}>
+                <td class="py-1 px-2 text-theme-text-primary text-right tabular-nums">{frame.adu_min ?? "\u2014"}</td>
+              </Show>
+              <Show when={visible("adu", "max")}>
+                <td class="py-1 px-2 text-theme-text-primary text-right tabular-nums">{frame.adu_max ?? "\u2014"}</td>
+              </Show>
+              <Show when={visible("focuser", "position")}>
+                <td class="py-1 px-2 text-theme-text-primary text-right tabular-nums">{frame.focuser_position ?? "\u2014"}</td>
+              </Show>
+              <Show when={visible("focuser", "temp")}>
+                <td class="py-1 px-2 text-theme-text-primary text-right">
+                  {frame.focuser_temp !== null ? `${frame.focuser_temp?.toFixed(1)}\u00b0` : "\u2014"}
+                </td>
+              </Show>
+              <Show when={visible("weather", "ambient_temp")}>
+                <td class="py-1 px-2 text-theme-text-primary text-right">
+                  {frame.ambient_temp !== null ? `${frame.ambient_temp?.toFixed(1)}\u00b0` : "\u2014"}
+                </td>
+              </Show>
+              <Show when={visible("weather", "dew_point")}>
+                <td class="py-1 px-2 text-theme-text-primary text-right">
+                  {frame.dew_point !== null ? `${frame.dew_point?.toFixed(1)}\u00b0` : "\u2014"}
+                </td>
+              </Show>
+              <Show when={visible("weather", "humidity")}>
+                <td class="py-1 px-2 text-theme-text-primary text-right">
+                  {frame.humidity !== null ? `${frame.humidity?.toFixed(1)}%` : "\u2014"}
+                </td>
+              </Show>
+              <Show when={visible("weather", "pressure")}>
+                <td class="py-1 px-2 text-theme-text-primary text-right tabular-nums">{frame.pressure?.toFixed(2) ?? "\u2014"}</td>
+              </Show>
+              <Show when={visible("weather", "wind_speed")}>
+                <td class="py-1 px-2 text-theme-text-primary text-right tabular-nums">{frame.wind_speed?.toFixed(1) ?? "\u2014"}</td>
+              </Show>
+              <Show when={visible("weather", "wind_direction")}>
+                <td class="py-1 px-2 text-theme-text-primary text-right tabular-nums">{frame.wind_direction?.toFixed(1) ?? "\u2014"}</td>
+              </Show>
+              <Show when={visible("weather", "wind_gust")}>
+                <td class="py-1 px-2 text-theme-text-primary text-right tabular-nums">{frame.wind_gust?.toFixed(1) ?? "\u2014"}</td>
+              </Show>
+              <Show when={visible("weather", "cloud_cover")}>
+                <td class="py-1 px-2 text-theme-text-primary text-right">
+                  {frame.cloud_cover !== null ? `${frame.cloud_cover?.toFixed(1)}%` : "\u2014"}
+                </td>
+              </Show>
+              <Show when={visible("weather", "sky_quality")}>
+                <td class="py-1 px-2 text-theme-text-primary text-right tabular-nums">{frame.sky_quality?.toFixed(2) ?? "\u2014"}</td>
+              </Show>
+              <Show when={visible("mount", "airmass")}>
+                <td class="py-1 px-2 text-theme-text-primary text-right tabular-nums">{frame.airmass?.toFixed(2) ?? "\u2014"}</td>
+              </Show>
+              <Show when={visible("mount", "pier_side")}>
+                <td class="py-1 px-2 text-theme-text-primary text-center">{frame.pier_side ?? "\u2014"}</td>
+              </Show>
+              <Show when={visible("mount", "rotator_position")}>
+                <td class="py-1 px-2 text-theme-text-primary text-right tabular-nums">{frame.rotator_position?.toFixed(2) ?? "\u2014"}</td>
+              </Show>
+              <td class="py-1 px-2 text-theme-text-primary text-right tabular-nums">{frame.sensor_temp?.toFixed(0) ?? "—"}°C</td>
+              <td class="py-1 px-2 text-theme-text-primary text-right tabular-nums">{frame.gain ?? "—"}</td>
+              <td class="py-1 px-2 text-theme-text-secondary text-right truncate max-w-[150px]">{frame.file_name}</td>
+            </tr>
+          )}
+        </For>
+      </tbody>
+    </table>
+  );
 
   return (
     <>
@@ -158,7 +420,15 @@ const SessionAccordionCard: Component<{
           <div class="flex flex-col sm:flex-row sm:items-center gap-0.5 sm:gap-0">
             <span class="font-bold text-theme-text-primary text-sm">{props.session.session_date}</span>
             <span class="text-theme-text-secondary sm:ml-3 text-xs sm:text-sm">
-              {props.session.camera ?? ""} · {props.session.telescope ?? ""}
+              {props.session.rig_count > 1 ? (
+                <span class="inline-flex items-center gap-1">
+                  <span class="px-1.5 py-0.5 rounded bg-theme-accent/20 text-theme-accent text-tiny font-semibold">
+                    {props.session.rig_count} rigs
+                  </span>
+                </span>
+              ) : (
+                <>{props.session.camera ?? ""} · {props.session.telescope ?? ""}</>
+              )}
             </span>
           </div>
         </td>
@@ -221,9 +491,9 @@ const SessionAccordionCard: Component<{
             {(detail) => (
               <div class="space-y-3 pt-3">
                 {/* Session Summary (collapsible) */}
-                <div>
+                <div class="bg-theme-base rounded-[var(--radius-md)]">
                   <button
-                    class="flex justify-between items-center w-full text-xs py-2 px-0 hover:text-theme-text-primary transition-colors cursor-pointer"
+                    class="flex justify-between items-center w-full text-xs py-2 px-3 hover:bg-theme-hover rounded-[var(--radius-md)] hover:text-theme-text-primary transition-colors cursor-pointer"
                     classList={{ "text-theme-text-primary": showSummary(), "text-theme-text-secondary": !showSummary() }}
                     onClick={() => setShowSummary((v) => !v)}
                   >
@@ -236,9 +506,9 @@ const SessionAccordionCard: Component<{
                       <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
                     </svg>
                   </button>
-                </div>
                 <Show when={showSummary()}>
-                {/* Single-value metrics + Astrobin export */}
+                <div class="px-3 pb-3">
+                {/* Headline stats row */}
                 <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-label">
                   <span>
                     <span class="text-theme-text-tertiary">Integration:</span>{" "}
@@ -255,125 +525,160 @@ const SessionAccordionCard: Component<{
                     </span>
                   </span>
                   <span>
-                    <span class="text-theme-text-tertiary">Exp:</span>{" "}
-                    <span class="font-bold text-metric-gain">
-                      {detail().exposure_times.length > 0 ? detail().exposure_times.map(e => e + "s").join(", ") : "—"}
-                    </span>
-                  </span>
-                  <span>
                     <span class="text-theme-text-tertiary">Time:</span>{" "}
                     <span class="font-bold text-metric-time">
                       {detail().first_frame_time ? `${formatTimeUtil(detail().first_frame_time!, settingsCtx.timezone())} → ${detail().last_frame_time ? formatTimeUtil(detail().last_frame_time!, settingsCtx.timezone()) : ""}` : "—"}
                     </span>
                   </span>
-                  <span class="ml-auto">
-                    <button
-                      class="text-label px-2.5 py-1 border border-theme-border-em rounded text-theme-text-secondary hover:text-theme-text-primary hover:border-theme-accent transition-colors cursor-pointer"
-                      onClick={copyAstrobinCsv}
-                    >
-                      {csvCopied() ? "Copied!" : "Copy Astrobin CSV"}
-                    </button>
-                  </span>
                 </div>
 
-                {/* Metrics table + thumbnail */}
-                <div class="grid gap-4 grid-cols-1 md:grid-cols-[1fr_200px]">
-                  <div class="bg-theme-base rounded-[var(--radius-md)] overflow-x-auto">
-                    <table class="w-full text-xs table-fixed" style={{ "border-collapse": "collapse" }}>
-                      <colgroup>
-                        <col style={{ width: "100px" }} />
-                        <col style={{ width: "70px" }} />
-                        <col style={{ width: "70px" }} />
-                        <col style={{ width: "70px" }} />
-                        <col style={{ width: "28px" }} />
-                        <col style={{ width: "80px" }} />
-                        <col style={{ width: "50px" }} />
-                        <col style={{ width: "50px" }} />
-                        <col style={{ width: "50px" }} />
-                      </colgroup>
-                      <thead>
-                        <tr class="text-tiny text-theme-text-tertiary uppercase tracking-wider border-b border-theme-border">
-                          <th class="text-left px-3 pb-1.5 pt-2.5" colspan={4}>Metrics</th>
-                          <th class="text-left px-2 pb-1.5 pt-2.5 border-l border-theme-border" colspan={5}>Filters</th>
-                        </tr>
-                        <tr class="text-tiny text-theme-text-tertiary border-b border-theme-border">
-                          <th class="px-3 pb-1 text-left"></th>
-                          <th class="px-2 pb-1 text-right">Avg</th>
-                          <th class="px-2 pb-1 text-right">Min</th>
-                          <th class="px-2 pb-1 text-right">Max</th>
-                          <th class="px-2 pb-1 border-l border-theme-border"></th>
-                          <th class="px-2 pb-1 text-left">Frames</th>
-                          <th class="px-2 pb-1 text-right">Med. HFR</th>
-                          <th class="px-2 pb-1 text-right">Med. Ecc</th>
-                          <th class="px-2 pb-1 text-right">Exp</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {(() => {
-                          const metrics = [
-                            { label: "HFR", avg: detail().median_hfr?.toFixed(2) ?? "—", min: detail().min_hfr?.toFixed(2) ?? "—", max: detail().max_hfr?.toFixed(2) ?? "—", color: "text-metric-hfr" },
-                            { label: "Eccentricity", avg: detail().median_eccentricity?.toFixed(2) ?? "—", min: detail().min_eccentricity?.toFixed(2) ?? "—", max: detail().max_eccentricity?.toFixed(2) ?? "—", color: "text-metric-eccentricity" },
-                            { label: "FWHM", avg: detail().median_fwhm?.toFixed(2) ?? "—", min: detail().min_fwhm?.toFixed(2) ?? "—", max: detail().max_fwhm?.toFixed(2) ?? "—", color: "text-metric-fwhm" },
-                            { label: "Sensor Temp", avg: detail().sensor_temp !== null ? `${detail().sensor_temp?.toFixed(0)}°C` : "—", min: detail().sensor_temp_min !== null ? `${detail().sensor_temp_min?.toFixed(0)}°C` : "—", max: detail().sensor_temp_max !== null ? `${detail().sensor_temp_max?.toFixed(0)}°C` : "—", color: "text-metric-temp" },
-                            { label: "Guide RMS", avg: detail().median_guiding_rms !== null ? `${detail().median_guiding_rms?.toFixed(2)}"` : "—", min: detail().min_guiding_rms !== null ? `${detail().min_guiding_rms?.toFixed(2)}"` : "—", max: detail().max_guiding_rms !== null ? `${detail().max_guiding_rms?.toFixed(2)}"` : "—", color: "text-metric-guiding" },
-                          ];
-                          const filters = detail().filter_details;
-                          const maxRows = Math.max(metrics.length, filters.length);
-                          const rows = [];
-                          for (let i = 0; i < maxRows; i++) {
-                            const m = metrics[i];
-                            const f = filters[i];
-                            rows.push(
-                              <tr class="border-b border-theme-border hover:bg-theme-hover transition-colors duration-100">
-                                {m ? (
-                                  <>
-                                    <td class={`py-1.5 px-3 text-theme-text-secondary`}>{m.label}</td>
-                                    <td class={`py-1.5 px-2 text-right font-bold ${m.color}`}>{m.avg}</td>
-                                    <td class="py-1.5 px-2 text-right text-theme-text-tertiary">{m.min}</td>
-                                    <td class="py-1.5 px-2 text-right text-theme-text-tertiary">{m.max}</td>
-                                  </>
-                                ) : (
-                                  <>
-                                    <td class="py-1.5 px-3"></td>
-                                    <td class="py-1.5 px-2"></td>
-                                    <td class="py-1.5 px-2"></td>
-                                    <td class="py-1.5 px-2"></td>
-                                  </>
-                                )}
-                                {f ? (
-                                  <>
-                                    <td class="py-1.5 px-2 font-bold text-theme-text-primary border-l border-theme-border">{f.filter_name}</td>
-                                    <td class="py-1.5 px-2 text-theme-text-secondary">{f.frame_count} · {formatIntegration(f.integration_seconds)}</td>
-                                    <td class="py-1.5 px-2 text-right text-metric-hfr">{f.median_hfr?.toFixed(1) ?? "—"}</td>
-                                    <td class="py-1.5 px-2 text-right text-metric-eccentricity">{f.median_eccentricity?.toFixed(2) ?? "—"}</td>
-                                    <td class="py-1.5 px-2 text-right text-theme-text-secondary">{f.exposure_time ?? "—"}s</td>
-                                  </>
-                                ) : (
-                                  <>
-                                    <td class="py-1.5 border-l border-theme-border" colspan={5}></td>
-                                  </>
-                                )}
-                              </tr>
-                            );
-                          }
-                          return rows;
-                        })()}
-                      </tbody>
-                    </table>
-                  </div>
-                  <div class="relative h-[150px] md:h-auto">
-                    <div class="absolute inset-0 overflow-hidden">
+                {/* Per-rig overview with thumbnails */}
+                <Show when={isMultiRig()} fallback={
+                  /* Single-rig: compact one-liner + thumbnail */
+                  <div class="flex gap-3 mt-3 items-start">
+                    <div class="flex-1 space-y-1">
+                      <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-label">
+                        <span><span class="text-theme-text-tertiary">Exp:</span> <span class="font-bold text-metric-gain">{detail().exposure_times.length > 0 ? detail().exposure_times.map(e => e + "s").join(", ") : "—"}</span></span>
+                        <span><span class="text-theme-text-tertiary">HFR:</span> <span class="font-bold text-metric-hfr">{detail().median_hfr?.toFixed(2) ?? "—"}</span></span>
+                        <span><span class="text-theme-text-tertiary">Ecc:</span> <span class="font-bold text-metric-eccentricity">{detail().median_eccentricity?.toFixed(2) ?? "—"}</span></span>
+                        <span><span class="text-theme-text-tertiary">FWHM:</span> <span class="font-bold text-metric-fwhm">{detail().median_fwhm?.toFixed(2) ?? "—"}</span></span>
+                        <span><span class="text-theme-text-tertiary">RMS:</span> <span class="font-bold text-metric-guiding">{detail().median_guiding_rms !== null ? `${detail().median_guiding_rms?.toFixed(2)}"` : "—"}</span></span>
+                        <button
+                          class="text-tiny px-1.5 py-0.5 border border-theme-border rounded text-theme-text-tertiary hover:text-theme-text-primary hover:border-theme-accent transition-colors cursor-pointer"
+                          onClick={() => copyAstrobinCsv()}
+                        >
+                          {csvCopiedRig() === "__all__" ? "Copied!" : "Astrobin CSV"}
+                        </button>
+                      </div>
+                      <div class="flex flex-wrap gap-1.5">
+                        <For each={detail().filter_details}>
+                          {(f) => (
+                            <span class="text-tiny px-1.5 py-0.5 rounded bg-theme-hover text-theme-text-secondary">
+                              <b>{f.filter_name}</b> {f.frame_count} · {f.exposure_time ?? "—"}s
+                            </span>
+                          )}
+                        </For>
+                      </div>
+                    </div>
+                    <div class="w-[140px] h-[100px] flex-shrink-0 ml-auto rounded overflow-hidden">
                       <ReferenceThumbnail url={detail().thumbnail_url} fill />
                     </div>
                   </div>
+                }>
+                  {/* Multi-rig: per-rig rows with key metrics + thumbnail */}
+                  <For each={detail().rigs}>
+                    {(rig, index) => (
+                      <div class="flex gap-3 mt-3 items-start">
+                        <div class="flex-1">
+                          <div class="flex items-center gap-2 mb-1">
+                            <span class="w-2 h-2 rounded-full inline-block flex-shrink-0" style={{ "background-color": rigColor(index()) }} />
+                            <span class="text-xs font-semibold text-theme-text-primary">{rig.rig_label}</span>
+                            <span class="text-tiny text-theme-text-tertiary">{rig.frame_count} fr · {formatIntegration(rig.integration_seconds)}</span>
+                            <button
+                              class="text-tiny px-1.5 py-0.5 border border-theme-border rounded text-theme-text-tertiary hover:text-theme-text-primary hover:border-theme-accent transition-colors cursor-pointer"
+                              onClick={() => copyAstrobinCsv(rig.rig_label)}
+                            >
+                              {csvCopiedRig() === rig.rig_label ? "Copied!" : "Astrobin CSV"}
+                            </button>
+                          </div>
+                          <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-label ml-4">
+                            <span><span class="text-theme-text-tertiary">HFR:</span> <span class="font-bold text-metric-hfr">{rig.median_hfr?.toFixed(2) ?? "—"}</span></span>
+                            <span><span class="text-theme-text-tertiary">Ecc:</span> <span class="font-bold text-metric-eccentricity">{rig.median_eccentricity?.toFixed(2) ?? "—"}</span></span>
+                            <span><span class="text-theme-text-tertiary">FWHM:</span> <span class="font-bold text-metric-fwhm">{rig.median_fwhm?.toFixed(2) ?? "—"}</span></span>
+                            <span><span class="text-theme-text-tertiary">RMS:</span> <span class="font-bold text-metric-guiding">{rig.median_guiding_rms !== null ? `${rig.median_guiding_rms?.toFixed(2)}"` : "—"}</span></span>
+                          </div>
+                          <div class="flex flex-wrap gap-1.5 mt-1 ml-4">
+                            <For each={rig.filter_details}>
+                              {(f) => (
+                                <span class="text-tiny px-1.5 py-0.5 rounded bg-theme-hover text-theme-text-secondary">
+                                  <b>{f.filter_name}</b> {f.frame_count} · {f.exposure_time ?? "—"}s
+                                </span>
+                              )}
+                            </For>
+                          </div>
+                        </div>
+                        <div class="w-[140px] h-[100px] flex-shrink-0 ml-auto rounded overflow-hidden">
+                          <ReferenceThumbnail url={rig.thumbnail_url ?? null} fill />
+                        </div>
+                      </div>
+                    )}
+                  </For>
+                </Show>
+
+                {/* Expandable detail table */}
+                <Show when={showDetails()}>
+                  <div class="mt-3 overflow-x-auto">
+                    <table class="w-full text-xs" style={{ "border-collapse": "collapse" }}>
+                      <thead>
+                        <tr class="text-tiny text-theme-text-tertiary uppercase tracking-wider border-b border-theme-border">
+                          <Show when={isMultiRig()}><th class="text-left px-2 pb-1.5 pt-2.5">Rig</th></Show>
+                          <th class="text-left px-2 pb-1.5 pt-2.5">Filter</th>
+                          <th class="text-right px-2 pb-1.5 pt-2.5">Frames</th>
+                          <th class="text-right px-2 pb-1.5 pt-2.5">Integration</th>
+                          <th class="text-right px-2 pb-1.5 pt-2.5">HFR</th>
+                          <th class="text-right px-2 pb-1.5 pt-2.5">Ecc</th>
+                          <th class="text-right px-2 pb-1.5 pt-2.5">Exp</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <Show when={isMultiRig()} fallback={
+                          <For each={detail().filter_details}>
+                            {(f) => (
+                              <tr class="border-b border-theme-border/50 hover:bg-theme-hover transition-colors duration-100">
+                                <td class="py-1.5 px-2 font-bold text-theme-text-primary">{f.filter_name}</td>
+                                <td class="py-1.5 px-2 text-right text-theme-text-primary">{f.frame_count}</td>
+                                <td class="py-1.5 px-2 text-right text-theme-text-secondary">{formatIntegration(f.integration_seconds)}</td>
+                                <td class="py-1.5 px-2 text-right text-metric-hfr">{f.median_hfr?.toFixed(2) ?? "—"}</td>
+                                <td class="py-1.5 px-2 text-right text-metric-eccentricity">{f.median_eccentricity?.toFixed(2) ?? "—"}</td>
+                                <td class="py-1.5 px-2 text-right text-theme-text-secondary">{f.exposure_time ?? "—"}s</td>
+                              </tr>
+                            )}
+                          </For>
+                        }>
+                          <For each={detail().rigs}>
+                            {(rig, index) => (
+                              <For each={rig.filter_details}>
+                                {(f, fi) => (
+                                  <tr class={`border-b border-theme-border/50 hover:bg-theme-hover transition-colors duration-100 ${fi() === 0 && index() > 0 ? "border-t-2 border-t-theme-border" : ""}`}>
+                                    {fi() === 0 ? (
+                                      <td class="py-1.5 px-2 text-theme-text-secondary align-top" rowSpan={rig.filter_details.length}>
+                                        <span class="flex items-center gap-1.5">
+                                          <span class="w-2 h-2 rounded-full inline-block flex-shrink-0" style={{ "background-color": rigColor(index()) }} />
+                                          <span class="text-tiny">{rig.telescope ?? ""}</span>
+                                        </span>
+                                      </td>
+                                    ) : null}
+                                    <td class="py-1.5 px-2 font-bold text-theme-text-primary">{f.filter_name}</td>
+                                    <td class="py-1.5 px-2 text-right text-theme-text-primary">{f.frame_count}</td>
+                                    <td class="py-1.5 px-2 text-right text-theme-text-secondary">{formatIntegration(f.integration_seconds)}</td>
+                                    <td class="py-1.5 px-2 text-right text-metric-hfr">{f.median_hfr?.toFixed(2) ?? "—"}</td>
+                                    <td class="py-1.5 px-2 text-right text-metric-eccentricity">{f.median_eccentricity?.toFixed(2) ?? "—"}</td>
+                                    <td class="py-1.5 px-2 text-right text-theme-text-secondary">{f.exposure_time ?? "—"}s</td>
+                                  </tr>
+                                )}
+                              </For>
+                            )}
+                          </For>
+                        </Show>
+                      </tbody>
+                    </table>
+                  </div>
+                </Show>
+                <button
+                  class="text-label text-theme-accent hover:text-theme-text-primary transition-colors cursor-pointer mt-2"
+                  onClick={() => setShowDetails((v) => !v)}
+                >
+                  {showDetails() ? "▾ Hide Details" : "▸ Show Details"}
+                </button>
                 </div>
                 </Show>
+                </div>
 
                 {/* Session Insights */}
                 <Show when={detail().insights.length > 0}>
-                  <div class="border-t border-theme-border/50 pt-3">
+                  <div class="bg-theme-base rounded-[var(--radius-md)]">
                     <button
-                      class="flex justify-between items-center w-full text-xs py-2 px-0 hover:text-theme-text-primary transition-colors cursor-pointer"
+                      class="flex justify-between items-center w-full text-xs py-2 px-3 hover:bg-theme-hover rounded-[var(--radius-md)] hover:text-theme-text-primary transition-colors cursor-pointer"
                       classList={{ "text-theme-text-primary": showInsights(), "text-theme-text-secondary": !showInsights() }}
                       onClick={() => setShowInsights((v) => !v)}
                     >
@@ -389,7 +694,7 @@ const SessionAccordionCard: Component<{
                       </svg>
                     </button>
                     <Show when={showInsights()}>
-                      <div class="bg-theme-base rounded-[var(--radius-md)] p-3 space-y-1 mt-2">
+                      <div class="px-3 pb-3 space-y-1">
                         <For each={detail().insights}>
                           {(insight) => (
                             <div class={`text-xs ${INSIGHT_STYLES[insight.level]}`}>
@@ -403,19 +708,17 @@ const SessionAccordionCard: Component<{
                 </Show>
 
                 {/* Session Metrics Chart */}
-                <div class="border-t border-theme-border/50 pt-3">
-                  <SessionMetricsChart detail={detail()} />
-                </div>
+                <SessionMetricsChart detail={detail()} enabledRigs={enabledRigs()} onToggleRig={toggleRig} />
 
                 {/* Row 4: Per-Frame Table (collapsed) */}
-                <div class="border-t border-theme-border/50 pt-3">
+                <div class="bg-theme-base rounded-[var(--radius-md)]">
                   <button
-                    class="flex justify-between items-center w-full text-xs py-2 px-0 hover:text-theme-text-primary transition-colors cursor-pointer"
+                    class="flex justify-between items-center w-full text-xs py-2 px-3 hover:bg-theme-hover rounded-[var(--radius-md)] hover:text-theme-text-primary transition-colors cursor-pointer"
                     classList={{ "text-theme-text-primary": showFrames(), "text-theme-text-secondary": !showFrames() }}
                     onClick={() => setShowFrames(!showFrames())}
                   >
                     <span class="font-semibold border-l-2 border-theme-accent pl-2">
-                      Per-Frame Data <span class="text-theme-text-tertiary font-normal">({detail().frames.length} frames)</span>
+                      Per-Frame Data <span class="text-theme-text-tertiary font-normal">({detail().frames.length} frames{isMultiRig() ? ` · ${enabledRigs().length} rigs` : ""})</span>
                     </span>
                     <svg
                       class={`w-3.5 h-3.5 transition-transform duration-200 ${showFrames() ? "rotate-180" : ""}`}
@@ -426,220 +729,41 @@ const SessionAccordionCard: Component<{
                     </svg>
                   </button>
                   <Show when={showFrames()}>
-                    <div class="bg-theme-base rounded-[var(--radius-md)] overflow-x-auto max-h-[600px] overflow-y-auto mt-2">
-                      <table class="w-full text-label">
-                        <thead class="sticky top-0 bg-theme-base">
-                          <tr class="text-theme-text-secondary border-b border-theme-border">
-                            <SortHeader label={`Time (${timezoneLabel(settingsCtx.timezone())})`} column="timestamp" current={sortColumn()} asc={sortAsc()} onSort={toggleSort} />
-                            <SortHeader label="Filter" column="filter_used" current={sortColumn()} asc={sortAsc()} onSort={toggleSort} align="center" />
-                            <SortHeader label="Exp" column="exposure_time" current={sortColumn()} asc={sortAsc()} onSort={toggleSort} align="right" />
-                            <Show when={visible("quality", "hfr")}>
-                              <SortHeader label="HFR" column="median_hfr" current={sortColumn()} asc={sortAsc()} onSort={toggleSort} align="right" />
-                            </Show>
-                            <Show when={visible("quality", "eccentricity")}>
-                              <SortHeader label="Ecc" column="eccentricity" current={sortColumn()} asc={sortAsc()} onSort={toggleSort} align="right" />
-                            </Show>
-                            <Show when={visible("quality", "fwhm")}>
-                              <SortHeader label="FWHM" column="fwhm" current={sortColumn()} asc={sortAsc()} onSort={toggleSort} align="right" />
-                            </Show>
-                            <Show when={visible("quality", "detected_stars")}>
-                              <SortHeader label="Stars" column="detected_stars" current={sortColumn()} asc={sortAsc()} onSort={toggleSort} align="right" />
-                            </Show>
-                            <Show when={visible("guiding", "rms_total")}>
-                              <SortHeader label="RMS" column="guiding_rms_arcsec" current={sortColumn()} asc={sortAsc()} onSort={toggleSort} align="right" />
-                            </Show>
-                            <Show when={visible("guiding", "rms_ra")}>
-                              <SortHeader label="RMS RA" column="guiding_rms_ra_arcsec" current={sortColumn()} asc={sortAsc()} onSort={toggleSort} align="right" />
-                            </Show>
-                            <Show when={visible("guiding", "rms_dec")}>
-                              <SortHeader label="RMS Dec" column="guiding_rms_dec_arcsec" current={sortColumn()} asc={sortAsc()} onSort={toggleSort} align="right" />
-                            </Show>
-                            <Show when={visible("adu", "mean")}>
-                              <SortHeader label="ADU Mean" column="adu_mean" current={sortColumn()} asc={sortAsc()} onSort={toggleSort} align="right" />
-                            </Show>
-                            <Show when={visible("adu", "median")}>
-                              <SortHeader label="ADU Med" column="adu_median" current={sortColumn()} asc={sortAsc()} onSort={toggleSort} align="right" />
-                            </Show>
-                            <Show when={visible("adu", "stdev")}>
-                              <SortHeader label="ADU σ" column="adu_stdev" current={sortColumn()} asc={sortAsc()} onSort={toggleSort} align="right" />
-                            </Show>
-                            <Show when={visible("adu", "min")}>
-                              <SortHeader label="ADU Min" column="adu_min" current={sortColumn()} asc={sortAsc()} onSort={toggleSort} align="right" />
-                            </Show>
-                            <Show when={visible("adu", "max")}>
-                              <SortHeader label="ADU Max" column="adu_max" current={sortColumn()} asc={sortAsc()} onSort={toggleSort} align="right" />
-                            </Show>
-                            <Show when={visible("focuser", "position")}>
-                              <SortHeader label="Focus" column="focuser_position" current={sortColumn()} asc={sortAsc()} onSort={toggleSort} align="right" />
-                            </Show>
-                            <Show when={visible("focuser", "temp")}>
-                              <SortHeader label="Focus Temp" column="focuser_temp" current={sortColumn()} asc={sortAsc()} onSort={toggleSort} align="right" />
-                            </Show>
-                            <Show when={visible("weather", "ambient_temp")}>
-                              <SortHeader label="Amb Temp" column="ambient_temp" current={sortColumn()} asc={sortAsc()} onSort={toggleSort} align="right" />
-                            </Show>
-                            <Show when={visible("weather", "dew_point")}>
-                              <SortHeader label="Dew Pt" column="dew_point" current={sortColumn()} asc={sortAsc()} onSort={toggleSort} align="right" />
-                            </Show>
-                            <Show when={visible("weather", "humidity")}>
-                              <SortHeader label="Humidity" column="humidity" current={sortColumn()} asc={sortAsc()} onSort={toggleSort} align="right" />
-                            </Show>
-                            <Show when={visible("weather", "pressure")}>
-                              <SortHeader label="Pressure" column="pressure" current={sortColumn()} asc={sortAsc()} onSort={toggleSort} align="right" />
-                            </Show>
-                            <Show when={visible("weather", "wind_speed")}>
-                              <SortHeader label="Wind" column="wind_speed" current={sortColumn()} asc={sortAsc()} onSort={toggleSort} align="right" />
-                            </Show>
-                            <Show when={visible("weather", "wind_direction")}>
-                              <SortHeader label="Wind Dir" column="wind_direction" current={sortColumn()} asc={sortAsc()} onSort={toggleSort} align="right" />
-                            </Show>
-                            <Show when={visible("weather", "wind_gust")}>
-                              <SortHeader label="Gust" column="wind_gust" current={sortColumn()} asc={sortAsc()} onSort={toggleSort} align="right" />
-                            </Show>
-                            <Show when={visible("weather", "cloud_cover")}>
-                              <SortHeader label="Clouds" column="cloud_cover" current={sortColumn()} asc={sortAsc()} onSort={toggleSort} align="right" />
-                            </Show>
-                            <Show when={visible("weather", "sky_quality")}>
-                              <SortHeader label="SQM" column="sky_quality" current={sortColumn()} asc={sortAsc()} onSort={toggleSort} align="right" />
-                            </Show>
-                            <Show when={visible("mount", "airmass")}>
-                              <SortHeader label="Airmass" column="airmass" current={sortColumn()} asc={sortAsc()} onSort={toggleSort} align="right" />
-                            </Show>
-                            <Show when={visible("mount", "pier_side")}>
-                              <SortHeader label="Pier" column="pier_side" current={sortColumn()} asc={sortAsc()} onSort={toggleSort} align="center" />
-                            </Show>
-                            <Show when={visible("mount", "rotator_position")}>
-                              <SortHeader label="Rotator" column="rotator_position" current={sortColumn()} asc={sortAsc()} onSort={toggleSort} align="right" />
-                            </Show>
-                            <SortHeader label="Temp" column="sensor_temp" current={sortColumn()} asc={sortAsc()} onSort={toggleSort} align="right" />
-                            <SortHeader label="Gain" column="gain" current={sortColumn()} asc={sortAsc()} onSort={toggleSort} align="right" />
-                            <th class="text-right py-1.5 px-2 font-normal">File</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          <For each={sortedFrames()}>
-                            {(frame) => (
-                              <tr class={`border-b border-theme-border/30 hover:bg-theme-hover transition-colors duration-100 ${isOutlier(frame) ? "bg-theme-error/20" : ""}`}>
-                                <td class="py-1 px-2 text-theme-text-primary">{formatTimeUtil(frame.timestamp, settingsCtx.timezone())}</td>
-                                <td class="py-1 px-2 text-theme-text-primary text-center">{frame.filter_used ?? "—"}</td>
-                                <td class="py-1 px-2 text-theme-text-primary text-right tabular-nums">{frame.exposure_time ?? "—"}s</td>
-                                <Show when={visible("quality", "hfr")}>
-                                  <td class={`py-1 px-2 text-right tabular-nums ${isOutlier(frame) ? "text-theme-error font-bold" : "text-theme-text-primary"}`}>
-                                    {frame.median_hfr?.toFixed(2) ?? "\u2014"}
-                                  </td>
-                                </Show>
-                                <Show when={visible("quality", "eccentricity")}>
-                                  <td class="py-1 px-2 text-theme-text-primary text-right tabular-nums">{frame.eccentricity?.toFixed(2) ?? "\u2014"}</td>
-                                </Show>
-                                <Show when={visible("quality", "fwhm")}>
-                                  <td class="py-1 px-2 text-theme-text-primary text-right tabular-nums">{frame.fwhm?.toFixed(2) ?? "\u2014"}</td>
-                                </Show>
-                                <Show when={visible("quality", "detected_stars")}>
-                                  <td class="py-1 px-2 text-theme-text-primary text-right tabular-nums">{frame.detected_stars ?? "\u2014"}</td>
-                                </Show>
-                                <Show when={visible("guiding", "rms_total")}>
-                                  <td class="py-1 px-2 text-theme-text-primary text-right">
-                                    {frame.guiding_rms_arcsec !== null ? `${frame.guiding_rms_arcsec?.toFixed(2)}"` : "\u2014"}
-                                  </td>
-                                </Show>
-                                <Show when={visible("guiding", "rms_ra")}>
-                                  <td class="py-1 px-2 text-theme-text-primary text-right">
-                                    {frame.guiding_rms_ra_arcsec !== null ? `${frame.guiding_rms_ra_arcsec?.toFixed(2)}"` : "\u2014"}
-                                  </td>
-                                </Show>
-                                <Show when={visible("guiding", "rms_dec")}>
-                                  <td class="py-1 px-2 text-theme-text-primary text-right">
-                                    {frame.guiding_rms_dec_arcsec !== null ? `${frame.guiding_rms_dec_arcsec?.toFixed(2)}"` : "\u2014"}
-                                  </td>
-                                </Show>
-                                <Show when={visible("adu", "mean")}>
-                                  <td class="py-1 px-2 text-theme-text-primary text-right tabular-nums">{frame.adu_mean?.toFixed(2) ?? "\u2014"}</td>
-                                </Show>
-                                <Show when={visible("adu", "median")}>
-                                  <td class="py-1 px-2 text-theme-text-primary text-right tabular-nums">{frame.adu_median?.toFixed(2) ?? "\u2014"}</td>
-                                </Show>
-                                <Show when={visible("adu", "stdev")}>
-                                  <td class="py-1 px-2 text-theme-text-primary text-right tabular-nums">{frame.adu_stdev?.toFixed(2) ?? "\u2014"}</td>
-                                </Show>
-                                <Show when={visible("adu", "min")}>
-                                  <td class="py-1 px-2 text-theme-text-primary text-right tabular-nums">{frame.adu_min ?? "\u2014"}</td>
-                                </Show>
-                                <Show when={visible("adu", "max")}>
-                                  <td class="py-1 px-2 text-theme-text-primary text-right tabular-nums">{frame.adu_max ?? "\u2014"}</td>
-                                </Show>
-                                <Show when={visible("focuser", "position")}>
-                                  <td class="py-1 px-2 text-theme-text-primary text-right tabular-nums">{frame.focuser_position ?? "\u2014"}</td>
-                                </Show>
-                                <Show when={visible("focuser", "temp")}>
-                                  <td class="py-1 px-2 text-theme-text-primary text-right">
-                                    {frame.focuser_temp !== null ? `${frame.focuser_temp?.toFixed(1)}\u00b0` : "\u2014"}
-                                  </td>
-                                </Show>
-                                <Show when={visible("weather", "ambient_temp")}>
-                                  <td class="py-1 px-2 text-theme-text-primary text-right">
-                                    {frame.ambient_temp !== null ? `${frame.ambient_temp?.toFixed(1)}\u00b0` : "\u2014"}
-                                  </td>
-                                </Show>
-                                <Show when={visible("weather", "dew_point")}>
-                                  <td class="py-1 px-2 text-theme-text-primary text-right">
-                                    {frame.dew_point !== null ? `${frame.dew_point?.toFixed(1)}\u00b0` : "\u2014"}
-                                  </td>
-                                </Show>
-                                <Show when={visible("weather", "humidity")}>
-                                  <td class="py-1 px-2 text-theme-text-primary text-right">
-                                    {frame.humidity !== null ? `${frame.humidity?.toFixed(1)}%` : "\u2014"}
-                                  </td>
-                                </Show>
-                                <Show when={visible("weather", "pressure")}>
-                                  <td class="py-1 px-2 text-theme-text-primary text-right tabular-nums">{frame.pressure?.toFixed(2) ?? "\u2014"}</td>
-                                </Show>
-                                <Show when={visible("weather", "wind_speed")}>
-                                  <td class="py-1 px-2 text-theme-text-primary text-right tabular-nums">{frame.wind_speed?.toFixed(1) ?? "\u2014"}</td>
-                                </Show>
-                                <Show when={visible("weather", "wind_direction")}>
-                                  <td class="py-1 px-2 text-theme-text-primary text-right tabular-nums">{frame.wind_direction?.toFixed(1) ?? "\u2014"}</td>
-                                </Show>
-                                <Show when={visible("weather", "wind_gust")}>
-                                  <td class="py-1 px-2 text-theme-text-primary text-right tabular-nums">{frame.wind_gust?.toFixed(1) ?? "\u2014"}</td>
-                                </Show>
-                                <Show when={visible("weather", "cloud_cover")}>
-                                  <td class="py-1 px-2 text-theme-text-primary text-right">
-                                    {frame.cloud_cover !== null ? `${frame.cloud_cover?.toFixed(1)}%` : "\u2014"}
-                                  </td>
-                                </Show>
-                                <Show when={visible("weather", "sky_quality")}>
-                                  <td class="py-1 px-2 text-theme-text-primary text-right tabular-nums">{frame.sky_quality?.toFixed(2) ?? "\u2014"}</td>
-                                </Show>
-                                <Show when={visible("mount", "airmass")}>
-                                  <td class="py-1 px-2 text-theme-text-primary text-right tabular-nums">{frame.airmass?.toFixed(2) ?? "\u2014"}</td>
-                                </Show>
-                                <Show when={visible("mount", "pier_side")}>
-                                  <td class="py-1 px-2 text-theme-text-primary text-center">{frame.pier_side ?? "\u2014"}</td>
-                                </Show>
-                                <Show when={visible("mount", "rotator_position")}>
-                                  <td class="py-1 px-2 text-theme-text-primary text-right tabular-nums">{frame.rotator_position?.toFixed(2) ?? "\u2014"}</td>
-                                </Show>
-                                <td class="py-1 px-2 text-theme-text-primary text-right tabular-nums">{frame.sensor_temp?.toFixed(0) ?? "—"}°C</td>
-                                <td class="py-1 px-2 text-theme-text-primary text-right tabular-nums">{frame.gain ?? "—"}</td>
-                                <td class="py-1 px-2 text-theme-text-secondary text-right truncate max-w-[150px]">{frame.file_name}</td>
-                              </tr>
-                            )}
-                          </For>
-                        </tbody>
-                      </table>
+                    <div class="px-3 pb-3">
+                    <Show when={isMultiRig()} fallback={
+                      <div class="overflow-x-auto max-h-[600px] overflow-y-auto">
+                        {renderFrameTable(props.detail!.frames, props.detail!.median_hfr, props.detail!.median_eccentricity)}
+                      </div>
+                    }>
+                      <For each={props.detail!.rigs}>
+                        {(rig, index) => (
+                          <Show when={enabledRigs().includes(rig.rig_label)}>
+                            <div class="mt-2 first:mt-0">
+                              <div class="flex items-center gap-2 mb-1">
+                                <span class="w-2 h-2 rounded-full inline-block"
+                                  style={{ "background-color": rigColor(index()) }} />
+                                <span class="text-xs font-semibold text-theme-text-primary">{rig.rig_label}</span>
+                                <span class="text-tiny text-theme-text-tertiary">{rig.frame_count} frames</span>
+                              </div>
+                              <div class="overflow-x-auto max-h-[600px] overflow-y-auto">
+                                {renderFrameTable(rig.frames, rig.median_hfr, rig.median_eccentricity)}
+                              </div>
+                            </div>
+                          </Show>
+                        )}
+                      </For>
+                    </Show>
                     </div>
                   </Show>
                 </div>
 
                 {/* Row 5: FITS Headers */}
-                <div class="border-t border-theme-border/50 pt-3">
-                  <RawHeaderAccordion headers={detail().raw_reference_header} />
-                </div>
+                <RawHeaderAccordion headers={detail().raw_reference_header} />
 
                 {/* Session Notes */}
-                <div class="border-t border-theme-border/50 pt-3">
+                <div class="bg-theme-base rounded-[var(--radius-md)]">
                   <button
-                    class="flex justify-between items-center w-full text-xs py-2 px-0 hover:text-theme-text-primary transition-colors cursor-pointer"
+                    class="flex justify-between items-center w-full text-xs py-2 px-3 hover:bg-theme-hover rounded-[var(--radius-md)] hover:text-theme-text-primary transition-colors cursor-pointer"
                     classList={{ "text-theme-text-primary": showNotes(), "text-theme-text-secondary": !showNotes() }}
                     onClick={() => setShowNotes((v) => !v)}
                   >
@@ -663,16 +787,18 @@ const SessionAccordionCard: Component<{
                     </div>
                   </button>
                   <Show when={showNotes()}>
-                    <textarea
-                      class="w-full bg-theme-elevated border border-theme-border rounded px-3 py-2 text-sm text-theme-text-primary placeholder-theme-text-secondary resize-y min-h-[50px] mt-2"
-                      placeholder="Add notes for this session..."
-                      value={sessionNote()}
-                      onInput={(e) => {
-                        const val = e.currentTarget.value;
-                        setSessionNote(val);
-                        saveSessionNote(val);
-                      }}
-                    />
+                    <div class="px-3 pb-3">
+                      <textarea
+                        class="w-full bg-theme-elevated border border-theme-border rounded px-3 py-2 text-sm text-theme-text-primary placeholder-theme-text-secondary resize-y min-h-[50px]"
+                        placeholder="Add notes for this session..."
+                        value={sessionNote()}
+                        onInput={(e) => {
+                          const val = e.currentTarget.value;
+                          setSessionNote(val);
+                          saveSessionNote(val);
+                        }}
+                      />
+                    </div>
                   </Show>
                 </div>
               </div>

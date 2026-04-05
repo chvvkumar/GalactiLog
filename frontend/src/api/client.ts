@@ -93,10 +93,12 @@ async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
   return resp.json();
 }
 
-function buildTargetQuery(filters: ActiveFilters, page?: number, pageSize?: number): string {
+function buildTargetQuery(filters: ActiveFilters, page?: number, pageSize?: number, sortBy?: string, sortDir?: string): string {
   const params = new URLSearchParams();
   if (page != null) params.set("page", String(page));
   if (pageSize != null) params.set("page_size", String(pageSize));
+  if (sortBy) params.set("sort_by", sortBy);
+  if (sortDir) params.set("sort_dir", sortDir);
   if (filters.searchQuery) params.set("search", filters.searchQuery);
   if (filters.camera) params.set("camera", filters.camera);
   if (filters.telescope) params.set("telescope", filters.telescope);
@@ -158,8 +160,8 @@ export const api = {
   deleteUser: (id: string) =>
     fetchJson<void>(`/auth/users/${id}`, { method: "DELETE" }),
 
-  getTargets: (filters: ActiveFilters, page?: number, pageSize?: number) =>
-    fetchJson<TargetAggregationResponse>(`/targets?${buildTargetQuery(filters, page, pageSize)}`),
+  getTargets: (filters: ActiveFilters, page?: number, pageSize?: number, sortBy?: string, sortDir?: string) =>
+    fetchJson<TargetAggregationResponse>(`/targets?${buildTargetQuery(filters, page, pageSize, sortBy, sortDir)}`),
 
   getSessionDetail: (targetId: string, date: string) =>
     fetchJson<SessionDetail>(`/targets/${encodeURIComponent(decodeURIComponent(targetId))}/sessions/${date}`),

@@ -6,6 +6,7 @@ import { formatTime } from "../utils/dateTime";
 import { METRIC_DEFINITIONS, getMetricColor, getMetricDef, chartFontSize } from "../utils/chartConfig";
 import MetricTogglePills from "./MetricTogglePills";
 import FilterTogglePills from "./FilterTogglePills";
+import { rigColor } from "./RigTogglePills";
 
 Chart.register(LineController, CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Filler);
 
@@ -45,6 +46,21 @@ export default function TargetMetricsChart(props: Props) {
     }
     return [...filterSet].sort();
   });
+
+  const allRigs = createMemo(() => {
+    const rigSet = new Set<string>();
+    for (const date of props.selectedDates) {
+      const detail = props.sessionDetails[date];
+      if (detail) {
+        for (const frame of detail.frames) {
+          if (frame.rig) rigSet.add(frame.rig);
+        }
+      }
+    }
+    return [...rigSet].sort();
+  });
+
+  const isMultiRig = () => allRigs().length > 1;
 
   /** Build arrays of labels + per-metric data, with gaps between sessions */
   const chartFrameData = createMemo(() => {
@@ -129,42 +145,88 @@ export default function TargetMetricsChart(props: Props) {
     for (const metricKey of enabledMetrics) {
       const def = getMetricDef(metricKey);
       if (!def) continue;
-      const color = getMetricColor(def.colorVar);
       const field = def.frameField as keyof FrameRecord;
+      const metricColor = getMetricColor(def.colorVar);
 
-      if (enabledFilters.includes("overall")) {
-        datasets.push({
-          label: def.label,
-          data: framesByIndex.map((f) => f ? ((f[field] as number | null) ?? null) : null),
-          borderColor: color,
-          backgroundColor: `${color}33`,
-          borderWidth: 1.5,
-          pointRadius: 0,
-          pointHitRadius: 8,
-          tension: 0.3,
-          spanGaps: false,
-          yAxisID: def.yAxisId,
-        });
-      }
+      if (isMultiRig()) {
+        const rigs = allRigs();
+        for (let ri = 0; ri < rigs.length; ri++) {
+          const rig = rigs[ri];
+          const color = rigColor(ri);
 
-      for (const filterName of enabledFilters) {
-        if (filterName === "overall") continue;
-        const fColor = filterColorMap()[filterName] ?? color;
-        datasets.push({
-          label: `${def.label} (${filterName})`,
-          data: framesByIndex.map((f) =>
-            f && f.filter_used === filterName ? ((f[field] as number | null) ?? null) : null
-          ),
-          borderColor: fColor,
-          backgroundColor: `${fColor}33`,
-          borderWidth: 1.5,
-          pointRadius: 0,
-          pointHitRadius: 8,
-          tension: 0.3,
-          spanGaps: false,
-          yAxisID: def.yAxisId,
-          borderDash: [4, 2],
-        });
+          if (enabledFilters.includes("overall")) {
+            datasets.push({
+              label: `${def.label} (${rig})`,
+              data: framesByIndex.map((f) =>
+                f && f.rig === rig ? ((f[field] as number | null) ?? null) : null
+              ),
+              borderColor: color,
+              backgroundColor: `${color}33`,
+              borderWidth: 1.5,
+              pointRadius: 0,
+              pointHitRadius: 8,
+              tension: 0.3,
+              spanGaps: false,
+              yAxisID: def.yAxisId,
+            });
+          }
+
+          for (const filterName of enabledFilters) {
+            if (filterName === "overall") continue;
+            datasets.push({
+              label: `${def.label} (${rig} / ${filterName})`,
+              data: framesByIndex.map((f) =>
+                f && f.rig === rig && f.filter_used === filterName
+                  ? ((f[field] as number | null) ?? null)
+                  : null
+              ),
+              borderColor: color,
+              backgroundColor: `${color}33`,
+              borderWidth: 1.5,
+              pointRadius: 0,
+              pointHitRadius: 8,
+              tension: 0.3,
+              spanGaps: false,
+              yAxisID: def.yAxisId,
+              borderDash: [4, 2],
+            });
+          }
+        }
+      } else {
+        if (enabledFilters.includes("overall")) {
+          datasets.push({
+            label: def.label,
+            data: framesByIndex.map((f) => f ? ((f[field] as number | null) ?? null) : null),
+            borderColor: metricColor,
+            backgroundColor: `${metricColor}33`,
+            borderWidth: 1.5,
+            pointRadius: 0,
+            pointHitRadius: 8,
+            tension: 0.3,
+            spanGaps: false,
+            yAxisID: def.yAxisId,
+          });
+        }
+
+        for (const filterName of enabledFilters) {
+          if (filterName === "overall") continue;
+          const fColor = filterColorMap()[filterName] ?? metricColor;
+          datasets.push({
+            label: `${def.label} (${filterName})`,
+            data: framesByIndex.map((f) =>
+              f && f.filter_used === filterName ? ((f[field] as number | null) ?? null) : null
+            ),
+            borderColor: fColor,
+            backgroundColor: `${fColor}33`,
+            borderWidth: 1.5,
+            pointRadius: 0,
+            pointHitRadius: 8,
+            tension: 0.3,
+            spanGaps: false,
+            yAxisID: def.yAxisId,
+            borderDash: [4, 2],
+          });
+        }
       }
     }
 

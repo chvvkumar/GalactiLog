@@ -307,36 +307,57 @@ jobs:
             gh release delete "$TAG" --yes --cleanup-tag
           done
 
-      - name: Clean up old Docker Hub dev images
-        if: github.ref == 'refs/heads/dev'
+      - name: Clean up old Docker Hub images
+        if: github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main'
         env:
           DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
           DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
         run: |
-          KEEP=2
-          REPO="chvvkumar/galactilog"
+          python3 << 'PYEOF'
+          import json, re, time
+          from urllib.request import Request, urlopen
+          from urllib.parse import quote
 
-          # Get Docker Hub token
-          TOKEN=$(curl -s -X POST "https://hub.docker.com/v2/users/login/" \
-            -H "Content-Type: application/json" \
-            -d "{\"username\":\"${DOCKER_USERNAME}\",\"password\":\"${DOCKER_PASSWORD}\"}" \
-            | python3 -c "import sys,json; print(json.load(sys.stdin)['token'])")
+          REPO = "chvvkumar/galactilog"
+          KEEP_RC = 2
+          KEEP_STABLE = 5
+          BRANCH = "${{ github.ref_name }}"
 
-          # List all rc tags from Docker Hub, keep newest KEEP, delete the rest
-          OLD_TAGS=$(curl -s "https://hub.docker.com/v2/repositories/${REPO}/tags/?page_size=100" \
-            -H "Authorization: Bearer ${TOKEN}" \
-            | python3 -c "
-          import sys, json, re
-          data = json.load(sys.stdin)
-          tags = [t['name'] for t in data['results']]
-          rc_tags = [t for t in tags if re.match(r'^\d+\.\d+\.\d+-rc\.\d+$', t)]
-          rc_tags.sort(key=lambda t: list(map(int, re.findall(r'\d+', t))), reverse=True)
-          for t in rc_tags[${KEEP}:]:
-              print(t)
-          ")
+          # Authenticate
+          login_req = Request("https://hub.docker.com/v2/users/login/",
+              data=json.dumps({"username": "${{ secrets.DOCKER_USERNAME }}", "password": "${{ secrets.DOCKER_PASSWORD }}"}).encode(),
+              headers={"Content-Type": "application/json"})
+          token = json.loads(urlopen(login_req).read())["token"]
+          headers = {"Authorization": f"Bearer {token}"}
 
-          for TAG in $OLD_TAGS; do
-            echo "Deleting Docker Hub tag: $TAG"
-            curl -s -X DELETE "https://hub.docker.com/v2/repositories/${REPO}/tags/${TAG}/" \
-              -H "Authorization: Bearer ${TOKEN}"
-          done
+          # Fetch all tags
+          req = Request(f"https://hub.docker.com/v2/repositories/{REPO}/tags/?page_size=100", headers=headers)
+          tags = [t["name"] for t in json.loads(urlopen(req).read())["results"]]
+
+          to_delete = []
+
+          if BRANCH == "dev":
+              # Clean up old RC tags, keep newest KEEP_RC
+              rc_tags = [t for t in tags if re.match(r"^\d+\.\d+\.\d+-rc\.\d+$", t)]
+              rc_tags.sort(key=lambda t: list(map(int, re.findall(r"\d+", t))), reverse=True)
+              to_delete = rc_tags[KEEP_RC:]
+
+          elif BRANCH == "main":
+              # Clean up old stable tags, keep newest KEEP_STABLE
+              stable_tags = [t for t in tags if re.match(r"^\d+\.\d+\.\d+$", t)]
+              stable_tags.sort(key=lambda t: list(map(int, t.split("."))), reverse=True)
+              to_delete = stable_tags[KEEP_STABLE:]
+
+          if not to_delete:
+              print("Nothing to clean up")
+          else:
+              for tag in to_delete:
+                  req = Request(f"https://hub.docker.com/v2/repositories/{REPO}/tags/{quote(tag)}/",
+                      headers=headers, method="DELETE")
+                  try:
+                      urlopen(req)
+                      print(f"Deleted: {tag}")
+                  except Exception as e:
+                      print(f"Failed to delete {tag}: {e}")
+                  time.sleep(0.5)
+          PYEOF
