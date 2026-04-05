@@ -158,7 +158,15 @@ const SessionAccordionCard: Component<{
           <div class="flex flex-col sm:flex-row sm:items-center gap-0.5 sm:gap-0">
             <span class="font-bold text-theme-text-primary text-sm">{props.session.session_date}</span>
             <span class="text-theme-text-secondary sm:ml-3 text-xs sm:text-sm">
-              {props.session.camera ?? ""} · {props.session.telescope ?? ""}
+              {props.session.rig_count > 1 ? (
+                <span class="inline-flex items-center gap-1">
+                  <span class="px-1.5 py-0.5 rounded bg-theme-accent/20 text-theme-accent text-tiny font-semibold">
+                    {props.session.rig_count} rigs
+                  </span>
+                </span>
+              ) : (
+                <>{props.session.camera ?? ""} · {props.session.telescope ?? ""}</>
+              )}
             </span>
           </div>
         </td>
