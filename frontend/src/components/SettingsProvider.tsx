@@ -6,6 +6,7 @@ import type { Resource } from "solid-js";
 import type { FilterBadgeStyle } from "../utils/filterStyles";
 import { applyTheme, applyTextSize, DEFAULT_THEME_ID, DEFAULT_TEXT_SIZE } from "../themes";
 import { api } from "../api/client";
+import { useAuth } from "./AuthProvider";
 
 interface SettingsContextValue {
   settings: Resource<SettingsResponse | undefined>;
@@ -35,10 +36,19 @@ const SettingsContext = createContext<SettingsContextValue>();
 export const SettingsProvider: ParentComponent = (props) => {
   const store = useSettings();
   const graphStore = useGraphSettings();
+  const auth = useAuth();
   const [customColumns, { refetch: refetchCustomColumns }] = createResource(() => api.getCustomColumns());
   const [columnVisibility, setColumnVisibility] = createSignal<ColumnVisibility | undefined>(undefined);
 
   graphStore.loadGraphSettings();
+
+  // Load column visibility when user is authenticated
+  createEffect(() => {
+    const u = auth.user();
+    if (u?.id) {
+      api.getColumnVisibility(u.id).then(setColumnVisibility).catch(() => {});
+    }
+  });
 
   createEffect(() => {
     const themeId = store.settings()?.general.theme ?? DEFAULT_THEME_ID;

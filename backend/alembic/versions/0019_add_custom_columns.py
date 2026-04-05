@@ -23,12 +23,12 @@ def upgrade() -> None:
     if not _table_exists("custom_columns"):
         column_type_enum = sa.Enum(
             "boolean", "text", "dropdown",
-            name="custom_column_type",
+            name="column_type_enum",
             create_type=True,
         )
         applies_to_enum = sa.Enum(
             "target", "session", "rig",
-            name="custom_column_applies_to",
+            name="applies_to_enum",
             create_type=True,
         )
         op.create_table(
@@ -100,5 +100,5 @@ def downgrade() -> None:
     op.drop_index("ix_custom_column_values_target", table_name="custom_column_values")
     op.drop_table("custom_column_values")
     op.drop_table("custom_columns")
-    op.execute(sa.text("DROP TYPE IF EXISTS custom_column_type"))
-    op.execute(sa.text("DROP TYPE IF EXISTS custom_column_applies_to"))
+    op.execute(sa.text("DROP TYPE IF EXISTS column_type_enum"))
+    op.execute(sa.text("DROP TYPE IF EXISTS applies_to_enum"))

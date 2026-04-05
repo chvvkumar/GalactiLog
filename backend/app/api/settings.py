@@ -267,7 +267,12 @@ async def update_display(
     user: User = Depends(require_admin),
 ):
     row = await _get_or_create_settings(session)
-    row.display = payload.model_dump()
+    existing = dict(row.display) if row.display else {}
+    updated = payload.model_dump()
+    # Preserve per-user column visibility when updating display settings
+    if "column_visibility_per_user" in existing:
+        updated["column_visibility_per_user"] = existing["column_visibility_per_user"]
+    row.display = updated
     await session.commit()
     return _row_to_response(row)
 
