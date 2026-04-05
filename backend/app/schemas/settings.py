@@ -46,6 +46,17 @@ class DisplaySettings(BaseModel):
     mount: MetricGroupSettings
 
 
+class TableColumnVisibility(BaseModel):
+    builtin: dict[str, bool] = {}
+    custom: dict[str, bool] = {}
+
+
+class ColumnVisibility(BaseModel):
+    dashboard: TableColumnVisibility = TableColumnVisibility()
+    session_table: TableColumnVisibility = TableColumnVisibility()
+    session_detail: TableColumnVisibility = TableColumnVisibility()
+
+
 class GraphSettings(BaseModel):
     enabled_metrics: list[str] = Field(
         default_factory=lambda: ["hfr", "eccentricity", "fwhm", "guiding_rms"]
