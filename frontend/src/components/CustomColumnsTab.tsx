@@ -61,13 +61,13 @@ export default function CustomColumnsTab() {
   return (
     <div class="space-y-6">
       <h3 class="text-lg font-semibold">Custom Columns</h3>
-      <p class="text-sm text-[var(--text-secondary)]">
+      <p class="text-sm text-theme-text-secondary">
         Define custom columns that appear in the dashboard and session tables.
         All users share the same column definitions and values.
       </p>
 
       {/* Create Form */}
-      <div class="rounded-lg border border-[var(--border)] p-4 space-y-3">
+      <div class="rounded-lg border border-theme-border p-4 space-y-3">
         <h4 class="font-medium">Add Column</h4>
         <div class="flex flex-wrap gap-3 items-end">
           <div>
@@ -76,7 +76,7 @@ export default function CustomColumnsTab() {
               type="text"
               value={newName()}
               onInput={(e) => setNewName(e.currentTarget.value)}
-              class="px-2 py-1 rounded border border-[var(--border)] bg-[var(--bg-secondary)] text-sm"
+              class="px-2 py-1 rounded border border-theme-border bg-theme-input text-theme-text-primary text-sm"
               placeholder="e.g. Processed"
             />
           </div>
@@ -85,7 +85,7 @@ export default function CustomColumnsTab() {
             <select
               value={newType()}
               onChange={(e) => setNewType(e.currentTarget.value as any)}
-              class="px-2 py-1 rounded border border-[var(--border)] bg-[var(--bg-secondary)] text-sm"
+              class="px-2 py-1 rounded border border-theme-border bg-theme-input text-theme-text-primary text-sm"
             >
               <option value="boolean">Boolean</option>
               <option value="text">Text</option>
@@ -97,7 +97,7 @@ export default function CustomColumnsTab() {
             <select
               value={newAppliesTo()}
               onChange={(e) => setNewAppliesTo(e.currentTarget.value as any)}
-              class="px-2 py-1 rounded border border-[var(--border)] bg-[var(--bg-secondary)] text-sm"
+              class="px-2 py-1 rounded border border-theme-border bg-theme-input text-theme-text-primary text-sm"
             >
               <option value="target">Target</option>
               <option value="session">Session</option>
@@ -111,14 +111,14 @@ export default function CustomColumnsTab() {
                 type="text"
                 value={newOptions()}
                 onInput={(e) => setNewOptions(e.currentTarget.value)}
-                class="px-2 py-1 rounded border border-[var(--border)] bg-[var(--bg-secondary)] text-sm"
+                class="px-2 py-1 rounded border border-theme-border bg-theme-input text-theme-text-primary text-sm"
                 placeholder="e.g. Pending, Done, Failed"
               />
             </div>
           </Show>
           <button
             onClick={handleCreate}
-            class="px-3 py-1 rounded bg-[var(--accent)] text-white text-sm hover:opacity-90"
+            class="px-3 py-1 rounded bg-theme-accent text-white text-sm hover:opacity-90"
           >
             Add
           </button>
@@ -126,10 +126,10 @@ export default function CustomColumnsTab() {
       </div>
 
       {/* Existing Columns */}
-      <Show when={columns()?.length} fallback={<p class="text-sm text-[var(--text-secondary)]">No custom columns defined yet.</p>}>
+      <Show when={columns()?.length} fallback={<p class="text-sm text-theme-text-secondary">No custom columns defined yet.</p>}>
         <table class="w-full text-sm">
           <thead>
-            <tr class="border-b border-[var(--border)] text-left text-[var(--text-secondary)]">
+            <tr class="border-b border-theme-border text-left text-theme-text-secondary">
               <th class="py-2 px-2">Order</th>
               <th class="py-2 px-2">Name</th>
               <th class="py-2 px-2">Type</th>
@@ -141,11 +141,11 @@ export default function CustomColumnsTab() {
           <tbody>
             <For each={columns()}>
               {(col) => (
-                <tr class="border-b border-[var(--border)]">
+                <tr class="border-b border-theme-border">
                   <td class="py-2 px-2">
                     <div class="flex gap-1">
-                      <button onClick={() => moveColumn(col, -1)} class="text-xs hover:text-[var(--accent)]" title="Move up">^</button>
-                      <button onClick={() => moveColumn(col, 1)} class="text-xs hover:text-[var(--accent)]" title="Move down">v</button>
+                      <button onClick={() => moveColumn(col, -1)} class="text-xs hover:text-theme-accent" title="Move up">^</button>
+                      <button onClick={() => moveColumn(col, 1)} class="text-xs hover:text-theme-accent" title="Move down">v</button>
                     </div>
                   </td>
                   <td class="py-2 px-2">
@@ -154,7 +154,7 @@ export default function CustomColumnsTab() {
                         type="text"
                         value={editName()}
                         onInput={(e) => setEditName(e.currentTarget.value)}
-                        class="px-1 py-0.5 rounded border border-[var(--border)] bg-[var(--bg-secondary)] text-sm w-full"
+                        class="px-1 py-0.5 rounded border border-theme-border bg-theme-input text-theme-text-primary text-sm w-full"
                       />
                     </Show>
                   </td>
@@ -166,7 +166,7 @@ export default function CustomColumnsTab() {
                         type="text"
                         value={editOptions()}
                         onInput={(e) => setEditOptions(e.currentTarget.value)}
-                        class="px-1 py-0.5 rounded border border-[var(--border)] bg-[var(--bg-secondary)] text-sm w-full"
+                        class="px-1 py-0.5 rounded border border-theme-border bg-theme-input text-theme-text-primary text-sm w-full"
                       />
                     </Show>
                   </td>
@@ -175,11 +175,11 @@ export default function CustomColumnsTab() {
                       <Show
                         when={editingId() === col.id}
                         fallback={
-                          <button onClick={() => startEdit(col)} class="text-xs text-[var(--accent)] hover:underline">Edit</button>
+                          <button onClick={() => startEdit(col)} class="text-xs text-theme-accent hover:underline">Edit</button>
                         }
                       >
                         <button onClick={() => handleSaveEdit(col)} class="text-xs text-green-500 hover:underline">Save</button>
-                        <button onClick={() => setEditingId(null)} class="text-xs text-[var(--text-secondary)] hover:underline">Cancel</button>
+                        <button onClick={() => setEditingId(null)} class="text-xs text-theme-text-secondary hover:underline">Cancel</button>
                       </Show>
                       <button onClick={() => handleDelete(col.id)} class="text-xs text-red-500 hover:underline">Delete</button>
                     </div>

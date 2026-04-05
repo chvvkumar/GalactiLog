@@ -44,7 +44,7 @@ export default function InlineEditCell(props: Props) {
       <select
         value={props.value ?? ""}
         onChange={(e) => props.onSave(e.currentTarget.value)}
-        class="px-1 py-0.5 rounded border border-[var(--border)] bg-transparent text-sm"
+        class="px-1 py-0.5 rounded border border-theme-border bg-theme-input text-theme-text-primary text-sm"
       >
         <option value="">-</option>
         <For each={props.dropdownOptions ?? []}>
@@ -61,7 +61,7 @@ export default function InlineEditCell(props: Props) {
       fallback={
         <span
           onClick={startEdit}
-          class="cursor-pointer min-w-[2rem] inline-block hover:bg-[var(--bg-secondary)] rounded px-1"
+          class="cursor-pointer min-w-[2rem] inline-block hover:bg-theme-hover rounded px-1"
           title="Click to edit"
         >
           {props.value || "-"}
@@ -74,7 +74,7 @@ export default function InlineEditCell(props: Props) {
         onInput={(e) => setDraft(e.currentTarget.value)}
         onBlur={save}
         onKeyDown={handleKeyDown}
-        class="px-1 py-0.5 rounded border border-[var(--border)] bg-transparent text-sm w-full"
+        class="px-1 py-0.5 rounded border border-theme-border bg-theme-input text-theme-text-primary text-sm w-full"
         autofocus
       />
     </Show>
