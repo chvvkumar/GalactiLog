@@ -2,15 +2,71 @@ import { createSignal, createResource, For, Show } from "solid-js";
 import { api } from "../api/client";
 import type { CustomColumn } from "../types";
 
+function OptionsList(props: { options: string[]; onChange: (opts: string[]) => void }) {
+  const [draft, setDraft] = createSignal("");
+
+  function addOption() {
+    const val = draft().trim();
+    if (!val || props.options.includes(val)) return;
+    props.onChange([...props.options, val]);
+    setDraft("");
+  }
+
+  function removeOption(index: number) {
+    props.onChange(props.options.filter((_, i) => i !== index));
+  }
+
+  function handleKeyDown(e: KeyboardEvent) {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      addOption();
+    }
+  }
+
+  return (
+    <div class="space-y-1.5">
+      <div class="flex flex-wrap gap-1.5">
+        <For each={props.options}>
+          {(opt, i) => (
+            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-theme-elevated border border-theme-border text-sm">
+              {opt}
+              <button
+                onClick={() => removeOption(i())}
+                class="text-theme-text-tertiary hover:text-red-400 text-xs leading-none"
+                title="Remove"
+              >x</button>
+            </span>
+          )}
+        </For>
+      </div>
+      <div class="flex gap-1.5">
+        <input
+          type="text"
+          value={draft()}
+          onInput={(e) => setDraft(e.currentTarget.value)}
+          onKeyDown={handleKeyDown}
+          class="px-2 py-1 rounded border border-theme-border bg-theme-input text-theme-text-primary text-sm flex-1"
+          placeholder="Type an option and press Enter"
+        />
+        <button
+          onClick={addOption}
+          class="px-2 py-1 rounded border border-theme-border text-theme-text-secondary hover:text-theme-accent text-sm"
+          title="Add option"
+        >+</button>
+      </div>
+    </div>
+  );
+}
+
 export default function CustomColumnsTab() {
   const [columns, { refetch }] = createResource(() => api.getCustomColumns());
   const [newName, setNewName] = createSignal("");
   const [newType, setNewType] = createSignal<"boolean" | "text" | "dropdown">("boolean");
   const [newAppliesTo, setNewAppliesTo] = createSignal<"target" | "session" | "rig">("target");
-  const [newOptions, setNewOptions] = createSignal("");
+  const [newOptions, setNewOptions] = createSignal<string[]>([]);
   const [editingId, setEditingId] = createSignal<string | null>(null);
   const [editName, setEditName] = createSignal("");
-  const [editOptions, setEditOptions] = createSignal("");
+  const [editOptions, setEditOptions] = createSignal<string[]>([]);
 
   async function handleCreate() {
     const name = newName().trim();
@@ -21,11 +77,11 @@ export default function CustomColumnsTab() {
       applies_to: newAppliesTo(),
     };
     if (newType() === "dropdown") {
-      body.dropdown_options = newOptions().split(",").map((s) => s.trim()).filter(Boolean);
+      body.dropdown_options = newOptions();
     }
     await api.createCustomColumn(body);
     setNewName("");
-    setNewOptions("");
+    setNewOptions([]);
     refetch();
   }
 
@@ -38,7 +94,7 @@ export default function CustomColumnsTab() {
   function startEdit(col: CustomColumn) {
     setEditingId(col.id);
     setEditName(col.name);
-    setEditOptions(col.dropdown_options?.join(", ") ?? "");
+    setEditOptions(col.dropdown_options ?? []);
   }
 
   async function handleSaveEdit(col: CustomColumn) {
@@ -46,7 +102,7 @@ export default function CustomColumnsTab() {
     const name = editName().trim();
     if (name && name !== col.name) updates.name = name;
     if (col.column_type === "dropdown") {
-      updates.dropdown_options = editOptions().split(",").map((s) => s.trim()).filter(Boolean);
+      updates.dropdown_options = editOptions();
     }
     await api.updateCustomColumn(col.id, updates);
     setEditingId(null);
@@ -104,18 +160,6 @@ export default function CustomColumnsTab() {
               <option value="rig">Rig</option>
             </select>
           </div>
-          <Show when={newType() === "dropdown"}>
-            <div>
-              <label class="block text-xs mb-1">Options (comma-separated)</label>
-              <input
-                type="text"
-                value={newOptions()}
-                onInput={(e) => setNewOptions(e.currentTarget.value)}
-                class="px-2 py-1 rounded border border-theme-border bg-theme-input text-theme-text-primary text-sm"
-                placeholder="e.g. Pending, Done, Failed"
-              />
-            </div>
-          </Show>
           <button
             onClick={handleCreate}
             class="px-3 py-1 rounded bg-theme-accent text-white text-sm hover:opacity-90"
@@ -123,6 +167,12 @@ export default function CustomColumnsTab() {
             Add
           </button>
         </div>
+        <Show when={newType() === "dropdown"}>
+          <div>
+            <label class="block text-xs mb-1">Dropdown Options</label>
+            <OptionsList options={newOptions()} onChange={setNewOptions} />
+          </div>
+        </Show>
       </div>
 
       {/* Existing Columns */}
@@ -161,13 +211,21 @@ export default function CustomColumnsTab() {
                   <td class="py-2 px-2 capitalize">{col.column_type}</td>
                   <td class="py-2 px-2 capitalize">{col.applies_to}</td>
                   <td class="py-2 px-2">
-                    <Show when={editingId() === col.id && col.column_type === "dropdown"} fallback={col.dropdown_options?.join(", ") ?? "-"}>
-                      <input
-                        type="text"
-                        value={editOptions()}
-                        onInput={(e) => setEditOptions(e.currentTarget.value)}
-                        class="px-1 py-0.5 rounded border border-theme-border bg-theme-input text-theme-text-primary text-sm w-full"
-                      />
+                    <Show when={editingId() === col.id && col.column_type === "dropdown"}
+                      fallback={
+                        <div class="flex flex-wrap gap-1">
+                          <For each={col.dropdown_options ?? []}>
+                            {(opt) => (
+                              <span class="px-1.5 py-0.5 rounded bg-theme-elevated border border-theme-border text-xs">{opt}</span>
+                            )}
+                          </For>
+                          <Show when={!col.dropdown_options?.length}>
+                            <span class="text-theme-text-tertiary">-</span>
+                          </Show>
+                        </div>
+                      }
+                    >
+                      <OptionsList options={editOptions()} onChange={setEditOptions} />
                     </Show>
                   </td>
                   <td class="py-2 px-2">
