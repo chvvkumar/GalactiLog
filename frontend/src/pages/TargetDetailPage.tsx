@@ -27,7 +27,8 @@ function formatSize(major: number | null, minor: number | null): string {
 const TargetDetailPage: Component = () => {
   const params = useParams<{ targetId: string }>();
   const [searchParams] = useSearchParams();
-  const { displaySettings, graphSettings, saveGraphSettings, timezone, contentWidth } = useSettingsContext();
+  const ctx = useSettingsContext();
+  const { displaySettings, graphSettings, saveGraphSettings, timezone, contentWidth } = ctx;
   const tzLabel = () => timezoneLabel(timezone());
   const visible = (group: Parameters<typeof isFieldVisible>[1], field: string) =>
     isFieldVisible(displaySettings(), group, field);
@@ -385,6 +386,11 @@ const TargetDetailPage: Component = () => {
                     <Show when={visible("guiding", "rms_total")}>
                       <th class="py-2 px-2 text-right font-medium">Guide RMS</th>
                     </Show>
+                    <For each={(ctx.customColumns() ?? []).filter(c => c.applies_to === "session")}>
+                      {(col) => (
+                        <th class="py-2 px-2 text-right font-medium">{col.name}</th>
+                      )}
+                    </For>
                     <th class="py-2 px-2 text-right font-medium">Filters</th>
                     <th class="py-2 px-2"></th>
                   </tr>

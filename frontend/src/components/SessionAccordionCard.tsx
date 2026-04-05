@@ -456,6 +456,23 @@ const SessionAccordionCard: Component<{
             {props.session.median_guiding_rms_arcsec !== null ? `${props.session.median_guiding_rms_arcsec?.toFixed(2)}"` : "—"}
           </td>
         </Show>
+        <For each={(settingsCtx.customColumns() ?? []).filter(c => c.applies_to === "session")}>
+          {(col) => (
+            <td class="py-3 px-2 text-right" onClick={(e) => e.stopPropagation()}>
+              <InlineEditCell
+                columnType={col.column_type}
+                value={props.detail?.custom_values?.find(cv => cv.column_slug === col.slug && !cv.rig_label)?.value}
+                dropdownOptions={col.dropdown_options}
+                onSave={(v) => api.setCustomValue({
+                  column_id: col.id,
+                  target_id: props.targetId!,
+                  session_date: props.session.session_date,
+                  value: v,
+                })}
+              />
+            </td>
+          )}
+        </For>
         <td class="py-3 px-2">
           <div class="flex justify-end">
             <FilterBadges distribution={Object.fromEntries(props.session.filters_used.map(f => [f, 0]))} compact nowrap />
@@ -533,35 +550,6 @@ const SessionAccordionCard: Component<{
                           saveSessionNote(val);
                         }}
                       />
-                      {/* Custom Attributes */}
-                      <Show when={(settingsCtx.customColumns() ?? []).filter(c => c.applies_to === "session").length > 0}>
-                        <div class="flex flex-wrap gap-4 mt-2 pt-2 border-t border-theme-border">
-                          <span class="text-xs font-semibold text-theme-text-secondary">Custom Attributes:</span>
-                          <For each={(settingsCtx.customColumns() ?? []).filter(c => c.applies_to === "session")}>
-                            {(col) => {
-                              const val = () => detail().custom_values?.find(
-                                (cv) => cv.column_slug === col.slug && !cv.rig_label
-                              );
-                              return (
-                                <div class="flex items-center gap-2 text-sm">
-                                  <span class="text-theme-text-secondary">{col.name}:</span>
-                                  <InlineEditCell
-                                    columnType={col.column_type}
-                                    value={val()?.value}
-                                    dropdownOptions={col.dropdown_options}
-                                    onSave={(v) => api.setCustomValue({
-                                      column_id: col.id,
-                                      target_id: props.targetId!,
-                                      session_date: detail().session_date,
-                                      value: v,
-                                    })}
-                                  />
-                                </div>
-                              );
-                            }}
-                          </For>
-                        </div>
-                      </Show>
                     </div>
                   </Show>
                 </div>
