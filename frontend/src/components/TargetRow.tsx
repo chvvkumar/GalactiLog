@@ -1,16 +1,23 @@
-import { Component, Show, createMemo } from "solid-js";
+import { Component, Show, For, createMemo } from "solid-js";
 import { A, useNavigate } from "@solidjs/router";
 import type { TargetAggregation } from "../types";
 import { useCatalog } from "../store/catalog";
+import { useSettingsContext } from "./SettingsProvider";
+import { isColumnVisible } from "../utils/displaySettings";
+import InlineEditCell from "./InlineEditCell";
 import FilterBadges from "./FilterBadges";
 import SessionTable from "./SessionTable";
 import { formatIntegration } from "../utils/format";
+import api from "../api/client";
 
 const TargetRow: Component<{
   target: TargetAggregation;
 }> = (props) => {
   const { expandedTargets, toggleExpanded } = useCatalog();
   const navigate = useNavigate();
+  const ctx = useSettingsContext();
+  const vis = () => ctx.columnVisibility();
+  const targetCustomColumns = () => (ctx.customColumns() ?? []).filter(c => c.applies_to === "target");
 
   const isOpen = () => expandedTargets().has(props.target.target_id);
 
@@ -48,19 +55,47 @@ const TargetRow: Component<{
             )}
           </span>
         </td>
-        <td class="py-2.5 px-3 font-mono text-theme-text-secondary text-xs">
-          {props.target.target_id === "obj:__uncategorized__" ? "" : props.target.primary_name}
-        </td>
-        <td class="py-2.5 px-3">
-          <FilterBadges distribution={props.target.filter_distribution} compact />
-        </td>
-        <td class="py-2.5 px-3 text-theme-text-primary text-xs">
-          {formatIntegration(props.target.total_integration_seconds)}
-        </td>
-        <td class="py-2.5 px-3 text-theme-accent text-xs">
-          {props.target.equipment.join(" \u00b7 ")}
-        </td>
-        <td class="py-2.5 px-3 text-theme-accent text-xs">{lastSession()}</td>
+        <Show when={isColumnVisible(vis(), "dashboard", "builtin", "designation")}>
+          <td class="py-2.5 px-3 font-mono text-theme-text-secondary text-xs">
+            {props.target.target_id === "obj:__uncategorized__" ? "" : props.target.primary_name}
+          </td>
+        </Show>
+        <Show when={isColumnVisible(vis(), "dashboard", "builtin", "palette")}>
+          <td class="py-2.5 px-3">
+            <FilterBadges distribution={props.target.filter_distribution} compact />
+          </td>
+        </Show>
+        <Show when={isColumnVisible(vis(), "dashboard", "builtin", "integration")}>
+          <td class="py-2.5 px-3 text-theme-text-primary text-xs">
+            {formatIntegration(props.target.total_integration_seconds)}
+          </td>
+        </Show>
+        <Show when={isColumnVisible(vis(), "dashboard", "builtin", "equipment")}>
+          <td class="py-2.5 px-3 text-theme-accent text-xs">
+            {props.target.equipment.join(" \u00b7 ")}
+          </td>
+        </Show>
+        <Show when={isColumnVisible(vis(), "dashboard", "builtin", "last_session")}>
+          <td class="py-2.5 px-3 text-theme-accent text-xs">{lastSession()}</td>
+        </Show>
+        <For each={targetCustomColumns()}>
+          {(col) => (
+            <Show when={isColumnVisible(vis(), "dashboard", "custom", col.slug)}>
+              <td class="py-2.5 px-3 text-right">
+                <InlineEditCell
+                  columnType={col.column_type}
+                  value={props.target.custom_values?.[col.slug]}
+                  dropdownOptions={col.dropdown_options}
+                  onSave={(val) => api.setCustomValue({
+                    column_id: col.id,
+                    target_id: props.target.target_id,
+                    value: val,
+                  })}
+                />
+              </td>
+            </Show>
+          )}
+        </For>
         <td class="py-2.5 px-3">
           <button
             class="px-2.5 py-1 border border-theme-border-em rounded text-label text-theme-text-secondary hover:text-theme-text-primary hover:border-theme-accent transition-colors"
@@ -81,7 +116,7 @@ const TargetRow: Component<{
         class="md:hidden border-b border-theme-border cursor-pointer hover:bg-theme-hover transition-colors duration-150"
         onClick={() => navigate(`/targets/${encodeURIComponent(props.target.target_id)}?view=sessions`)}
       >
-        <td colspan="7" class="p-3">
+        <td colspan="99" class="p-3">
           <div class="space-y-1.5">
             <div class="flex items-start justify-between gap-2">
               <span class={`font-bold text-sm hover:text-theme-accent transition-colors inline-flex items-center gap-1.5 ${
@@ -129,7 +164,7 @@ const TargetRow: Component<{
       {/* Expanded session table (both layouts) */}
       <Show when={isOpen()}>
         <tr class="bg-theme-surface">
-          <td colspan="7" class="px-3 py-2">
+          <td colspan="99" class="px-3 py-2">
             <SessionTable
               sessions={props.target.sessions}
               onDeepDive={(date) => {
