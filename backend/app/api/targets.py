@@ -765,6 +765,7 @@ async def list_targets_aggregated(
     sort_dir: str = Query("desc", pattern="^(asc|desc)$"),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=250),
+    include_custom: bool = Query(False),
     user: User = Depends(get_current_user),
 ):
     """Return targets with aggregated session data, filtered by query params."""
@@ -1076,6 +1077,24 @@ async def list_targets_aggregated(
     mosaic_map = {str(r[0]): (str(r[1]), r[2]) for r in panel_rows}
 
     # ---------------------------------------------------------------
+    # Phase 4c: Custom column values (target-level)
+    # ---------------------------------------------------------------
+    custom_values_map: dict[str, dict[str, str]] = {}
+    if include_custom:
+        from app.models.custom_column import CustomColumn, CustomColumnValue, AppliesTo
+        cv_q = (
+            select(CustomColumnValue.target_id, CustomColumn.slug, CustomColumnValue.value)
+            .join(CustomColumn)
+            .where(CustomColumn.applies_to == AppliesTo.target)
+        )
+        cv_rows = (await session.execute(cv_q)).all()
+        for tid, slug, val in cv_rows:
+            tid_str = str(tid)
+            if tid_str not in custom_values_map:
+                custom_values_map[tid_str] = {}
+            custom_values_map[tid_str][slug] = val
+
+    # ---------------------------------------------------------------
     # Phase 5: Assemble the response
     # ---------------------------------------------------------------
     target_list = []
@@ -1112,6 +1131,7 @@ async def list_targets_aggregated(
             total_sessions=total_session_count if matched_session_count is not None else None,
             mosaic_id=mosaic_map.get(basics["target_key"], (None, None))[0],
             mosaic_name=mosaic_map.get(basics["target_key"], (None, None))[1],
+            custom_values=custom_values_map.get(basics["target_key"]) if include_custom else None,
         ))
 
     return TargetAggregationResponse(
