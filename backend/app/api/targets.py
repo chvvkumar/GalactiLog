@@ -50,15 +50,15 @@ def _build_rig_details(
         rig_guiding = [i.guiding_rms_arcsec for i in rig_images if i.guiding_rms_arcsec is not None]
         rig_stars = [i.detected_stars for i in rig_images if i.detected_stars is not None]
 
-        # Per-filter breakdown within this rig
-        rig_filter_groups: dict[str, list] = defaultdict(list)
+        # Per-filter breakdown within this rig (group by filter + exposure)
+        rig_filter_groups: dict[tuple[str, float | None], list] = defaultdict(list)
         for img in rig_images:
             f = normalize_filter(img.filter_used, filter_map)
             if f:
-                rig_filter_groups[f].append(img)
+                rig_filter_groups[(f, img.exposure_time)].append(img)
 
         rig_filter_details = []
-        for fname, fimages in sorted(rig_filter_groups.items()):
+        for (fname, exp), fimages in sorted(rig_filter_groups.items(), key=lambda x: (x[0][0], x[0][1] or 0)):
             f_hfr = [i.median_hfr for i in fimages if i.median_hfr is not None]
             f_ecc = [i.eccentricity for i in fimages if i.eccentricity is not None]
             f_exp = sum(i.exposure_time or 0 for i in fimages)
@@ -68,7 +68,7 @@ def _build_rig_details(
                 integration_seconds=f_exp,
                 median_hfr=statistics.median(f_hfr) if f_hfr else None,
                 median_eccentricity=statistics.median(f_ecc) if f_ecc else None,
-                exposure_time=fimages[0].exposure_time,
+                exposure_time=exp,
             ))
 
         # Build frame records for this rig
@@ -438,9 +438,9 @@ async def export_target(
     if sessions:
         selected_dates = set(sessions.split(","))
 
-    # Group by (date, filter)
+    # Group by (date, filter, exposure_time)
     import statistics as stats_mod
-    groups: dict[tuple[str, str], list] = defaultdict(list)
+    groups: dict[tuple[str, str, float], list] = defaultdict(list)
     equip_set: set[tuple] = set()
 
     for img in images:
@@ -448,17 +448,17 @@ async def export_target(
         if selected_dates and date_key not in selected_dates:
             continue
         filter_name = img.filter_used or "Unknown"
-        groups[(date_key, filter_name)].append(img)
+        exp = img.exposure_time or 0
+        groups[(date_key, filter_name, exp)].append(img)
         equip_set.add((img.telescope, img.camera))
 
     rows = []
     all_dates = set()
     total_seconds = 0.0
 
-    for (date_key, filter_name), imgs in sorted(groups.items()):
+    for (date_key, filter_name, exposure), imgs in sorted(groups.items()):
         all_dates.add(date_key)
         frame_count = len(imgs)
-        exposure = imgs[0].exposure_time or 0
         integration = sum(i.exposure_time or 0 for i in imgs)
         total_seconds += integration
 
@@ -1336,14 +1336,14 @@ async def get_session_detail(
     median_hfr = statistics.median(hfr_values) if hfr_values else None
     median_ecc = statistics.median(ecc_values) if ecc_values else None
 
-    filter_groups: dict[str, list] = defaultdict(list)
+    filter_groups: dict[tuple[str, float | None], list] = defaultdict(list)
     for img in images:
         f = normalize_filter(img.filter_used, filter_map)
         if f:
-            filter_groups[f].append(img)
+            filter_groups[(f, img.exposure_time)].append(img)
 
     filter_details = []
-    for fname, fimages in sorted(filter_groups.items()):
+    for (fname, exp), fimages in sorted(filter_groups.items(), key=lambda x: (x[0][0], x[0][1] or 0)):
         f_hfr = [i.median_hfr for i in fimages if i.median_hfr is not None]
         f_ecc = [i.eccentricity for i in fimages if i.eccentricity is not None]
         f_exp = sum(i.exposure_time or 0 for i in fimages)
@@ -1353,7 +1353,7 @@ async def get_session_detail(
             integration_seconds=f_exp,
             median_hfr=statistics.median(f_hfr) if f_hfr else None,
             median_eccentricity=statistics.median(f_ecc) if f_ecc else None,
-            exposure_time=fimages[0].exposure_time,
+            exposure_time=exp,
         ))
 
     frames = []

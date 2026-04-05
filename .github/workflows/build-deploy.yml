@@ -312,20 +312,21 @@ jobs:
         env:
           DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
           DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+          BRANCH: ${{ github.ref_name }}
         run: |
           python3 << 'PYEOF'
-          import json, re, time
+          import json, os, re, time
           from urllib.request import Request, urlopen
           from urllib.parse import quote
 
           REPO = "chvvkumar/galactilog"
           KEEP_RC = 2
           KEEP_STABLE = 5
-          BRANCH = "${{ github.ref_name }}"
+          BRANCH = os.environ["BRANCH"]
 
-          # Authenticate
+          # Authenticate using env vars (avoids shell interpolation issues)
           login_req = Request("https://hub.docker.com/v2/users/login/",
-              data=json.dumps({"username": "${{ secrets.DOCKER_USERNAME }}", "password": "${{ secrets.DOCKER_PASSWORD }}"}).encode(),
+              data=json.dumps({"username": os.environ["DOCKER_USERNAME"], "password": os.environ["DOCKER_PASSWORD"]}).encode(),
               headers={"Content-Type": "application/json"})
           token = json.loads(urlopen(login_req).read())["token"]
           headers = {"Authorization": f"Bearer {token}"}
