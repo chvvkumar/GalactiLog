@@ -1,4 +1,4 @@
-import { createSignal, Show, For } from "solid-js";
+import { createSignal, Show, For, createEffect } from "solid-js";
 
 interface Props {
   columnType: "boolean" | "text" | "dropdown";
@@ -10,40 +10,54 @@ interface Props {
 export default function InlineEditCell(props: Props) {
   const [editing, setEditing] = createSignal(false);
   const [draft, setDraft] = createSignal("");
+  const [localValue, setLocalValue] = createSignal(props.value);
+
+  // Sync from props when external data changes (e.g. refetch)
+  createEffect(() => {
+    setLocalValue(props.value);
+  });
+
+  function save(val: string) {
+    setLocalValue(val);
+    props.onSave(val);
+  }
 
   function startEdit() {
-    setDraft(props.value ?? "");
+    setDraft(localValue() ?? "");
     setEditing(true);
   }
 
-  function save() {
-    props.onSave(draft());
+  function saveText() {
+    save(draft());
     setEditing(false);
   }
 
   function handleKeyDown(e: KeyboardEvent) {
-    if (e.key === "Enter") save();
+    if (e.key === "Enter") saveText();
     if (e.key === "Escape") setEditing(false);
   }
 
-  // Boolean: simple checkbox, no edit mode needed
+  // Boolean: simple checkbox
   if (props.columnType === "boolean") {
     return (
       <input
         type="checkbox"
-        checked={props.value === "true"}
-        onChange={(e) => props.onSave(e.currentTarget.checked ? "true" : "false")}
+        checked={localValue() === "true"}
+        onChange={(e) => save(e.currentTarget.checked ? "true" : "false")}
         class="cursor-pointer"
       />
     );
   }
 
-  // Dropdown: always shows select
+  // Dropdown: select
   if (props.columnType === "dropdown") {
     return (
       <select
-        value={props.value ?? ""}
-        onChange={(e) => props.onSave(e.currentTarget.value)}
+        value={localValue() ?? ""}
+        onChange={(e) => {
+          const val = e.currentTarget.value;
+          if (val) save(val);
+        }}
         class="px-1 py-0.5 rounded border border-theme-border bg-theme-input text-theme-text-primary text-sm"
       >
         <option value="">-</option>
@@ -64,7 +78,7 @@ export default function InlineEditCell(props: Props) {
           class="cursor-pointer min-w-[2rem] inline-block hover:bg-theme-hover rounded px-1"
           title="Click to edit"
         >
-          {props.value || "-"}
+          {localValue() || "-"}
         </span>
       }
     >
@@ -72,7 +86,7 @@ export default function InlineEditCell(props: Props) {
         type="text"
         value={draft()}
         onInput={(e) => setDraft(e.currentTarget.value)}
-        onBlur={save}
+        onBlur={saveText}
         onKeyDown={handleKeyDown}
         class="px-1 py-0.5 rounded border border-theme-border bg-theme-input text-theme-text-primary text-sm w-full"
         autofocus
