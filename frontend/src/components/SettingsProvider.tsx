@@ -5,7 +5,7 @@ import type { SettingsResponse, GeneralSettings, FilterConfig, EquipmentConfig, 
 import type { Resource } from "solid-js";
 import type { FilterBadgeStyle } from "../utils/filterStyles";
 import { applyTheme, applyTextSize, DEFAULT_THEME_ID, DEFAULT_TEXT_SIZE } from "../themes";
-import api from "../api/client";
+import { api } from "../api/client";
 
 interface SettingsContextValue {
   settings: Resource<SettingsResponse | undefined>;

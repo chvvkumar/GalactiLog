@@ -8,7 +8,7 @@ import InlineEditCell from "./InlineEditCell";
 import FilterBadges from "./FilterBadges";
 import SessionTable from "./SessionTable";
 import { formatIntegration } from "../utils/format";
-import api from "../api/client";
+import { api } from "../api/client";
 
 const TargetRow: Component<{
   target: TargetAggregation;

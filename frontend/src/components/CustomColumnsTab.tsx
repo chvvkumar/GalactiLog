@@ -1,5 +1,5 @@
 import { createSignal, createResource, For, Show } from "solid-js";
-import api from "../api/client";
+import { api } from "../api/client";
 import type { CustomColumn } from "../types";
 
 export default function CustomColumnsTab() {
