@@ -533,6 +533,35 @@ const SessionAccordionCard: Component<{
                           saveSessionNote(val);
                         }}
                       />
+                      {/* Custom Attributes */}
+                      <Show when={(settingsCtx.customColumns() ?? []).filter(c => c.applies_to === "session").length > 0}>
+                        <div class="flex flex-wrap gap-4 mt-2 pt-2 border-t border-theme-border">
+                          <span class="text-xs font-semibold text-theme-text-secondary">Custom Attributes:</span>
+                          <For each={(settingsCtx.customColumns() ?? []).filter(c => c.applies_to === "session")}>
+                            {(col) => {
+                              const val = () => detail().custom_values?.find(
+                                (cv) => cv.column_slug === col.slug && !cv.rig_label
+                              );
+                              return (
+                                <div class="flex items-center gap-2 text-sm">
+                                  <span class="text-theme-text-secondary">{col.name}:</span>
+                                  <InlineEditCell
+                                    columnType={col.column_type}
+                                    value={val()?.value}
+                                    dropdownOptions={col.dropdown_options}
+                                    onSave={(v) => api.setCustomValue({
+                                      column_id: col.id,
+                                      target_id: props.targetId!,
+                                      session_date: detail().session_date,
+                                      value: v,
+                                    })}
+                                  />
+                                </div>
+                              );
+                            }}
+                          </For>
+                        </div>
+                      </Show>
                     </div>
                   </Show>
                 </div>
@@ -749,38 +778,6 @@ const SessionAccordionCard: Component<{
                 </div>
                 </Show>
                 </div>
-
-                {/* Session-level custom columns */}
-                <Show when={(settingsCtx.customColumns() ?? []).filter(c => c.applies_to === "session").length > 0}>
-                  <div class="bg-theme-base rounded-[var(--radius-md)] px-3 py-2">
-                    <div class="text-xs font-semibold text-theme-text-secondary mb-2 border-l-2 border-theme-accent pl-2">Custom Fields</div>
-                    <div class="flex flex-wrap gap-4">
-                    <For each={(settingsCtx.customColumns() ?? []).filter(c => c.applies_to === "session")}>
-                      {(col) => {
-                        const val = () => detail().custom_values?.find(
-                          (cv) => cv.column_slug === col.slug && !cv.rig_label
-                        );
-                        return (
-                          <div class="flex items-center gap-2 text-sm">
-                            <span class="text-theme-text-secondary">{col.name}:</span>
-                            <InlineEditCell
-                              columnType={col.column_type}
-                              value={val()?.value}
-                              dropdownOptions={col.dropdown_options}
-                              onSave={(v) => api.setCustomValue({
-                                column_id: col.id,
-                                target_id: props.targetId!,
-                                session_date: detail().session_date,
-                                value: v,
-                              })}
-                            />
-                          </div>
-                        );
-                      }}
-                    </For>
-                    </div>
-                  </div>
-                </Show>
 
                 {/* Session Insights */}
                 <Show when={detail().insights.length > 0}>
