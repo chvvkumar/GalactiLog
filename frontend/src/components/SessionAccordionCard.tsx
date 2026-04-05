@@ -483,7 +483,7 @@ const SessionAccordionCard: Component<{
                 {/* Session Summary (collapsible) */}
                 <div>
                   <button
-                    class="flex justify-between items-center w-full text-xs py-2 px-0 hover:text-theme-text-primary transition-colors cursor-pointer"
+                    class="flex justify-between items-center w-full text-xs py-2 px-3 rounded-[var(--radius-md)] bg-theme-base hover:bg-theme-hover hover:text-theme-text-primary transition-colors cursor-pointer"
                     classList={{ "text-theme-text-primary": showSummary(), "text-theme-text-secondary": !showSummary() }}
                     onClick={() => setShowSummary((v) => !v)}
                   >
@@ -653,7 +653,7 @@ const SessionAccordionCard: Component<{
                 <Show when={detail().insights.length > 0}>
                   <div class="border-t border-theme-border/50 pt-3">
                     <button
-                      class="flex justify-between items-center w-full text-xs py-2 px-0 hover:text-theme-text-primary transition-colors cursor-pointer"
+                      class="flex justify-between items-center w-full text-xs py-2 px-3 rounded-[var(--radius-md)] bg-theme-base hover:bg-theme-hover hover:text-theme-text-primary transition-colors cursor-pointer"
                       classList={{ "text-theme-text-primary": showInsights(), "text-theme-text-secondary": !showInsights() }}
                       onClick={() => setShowInsights((v) => !v)}
                     >
@@ -690,7 +690,7 @@ const SessionAccordionCard: Component<{
                 {/* Row 4: Per-Frame Table (collapsed) */}
                 <div class="border-t border-theme-border/50 pt-3">
                   <button
-                    class="flex justify-between items-center w-full text-xs py-2 px-0 hover:text-theme-text-primary transition-colors cursor-pointer"
+                    class="flex justify-between items-center w-full text-xs py-2 px-3 rounded-[var(--radius-md)] bg-theme-base hover:bg-theme-hover hover:text-theme-text-primary transition-colors cursor-pointer"
                     classList={{ "text-theme-text-primary": showFrames(), "text-theme-text-secondary": !showFrames() }}
                     onClick={() => setShowFrames(!showFrames())}
                   >
@@ -740,7 +740,7 @@ const SessionAccordionCard: Component<{
                 {/* Session Notes */}
                 <div class="border-t border-theme-border/50 pt-3">
                   <button
-                    class="flex justify-between items-center w-full text-xs py-2 px-0 hover:text-theme-text-primary transition-colors cursor-pointer"
+                    class="flex justify-between items-center w-full text-xs py-2 px-3 rounded-[var(--radius-md)] bg-theme-base hover:bg-theme-hover hover:text-theme-text-primary transition-colors cursor-pointer"
                     classList={{ "text-theme-text-primary": showNotes(), "text-theme-text-secondary": !showNotes() }}
                     onClick={() => setShowNotes((v) => !v)}
                   >

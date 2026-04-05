@@ -220,7 +220,7 @@ export default function SessionMetricsChart(props: Props) {
   return (
     <div>
       <button
-        class="flex justify-between items-center w-full text-xs py-2 px-0 hover:text-theme-text-primary transition-colors cursor-pointer"
+        class="flex justify-between items-center w-full text-xs py-2 px-3 rounded-[var(--radius-md)] bg-theme-base hover:bg-theme-hover hover:text-theme-text-primary transition-colors cursor-pointer"
         classList={{ "text-theme-text-primary": expanded(), "text-theme-text-secondary": !expanded() }}
         onClick={toggleExpanded}
       >
