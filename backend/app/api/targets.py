@@ -705,6 +705,19 @@ async def get_target_detail(
     )
 
 
+def _sort_clause(sort_by: str, sort_dir: str) -> str:
+    """Build SQL ORDER BY clause for target pagination."""
+    col_map = {
+        "integration": "total_integration",
+        "lastSession": "last_session_date",
+        "name": "primary_name",
+    }
+    col = col_map.get(sort_by, "total_integration")
+    direction = "ASC" if sort_dir == "asc" else "DESC"
+    nulls = "NULLS LAST" if direction == "DESC" else "NULLS FIRST"
+    return f"{col} {direction} {nulls}"
+
+
 # --- 3. Aggregation (THIRD — after fixed paths, before path params) ---
 
 @router.get("", response_model=TargetAggregationResponse)
@@ -741,6 +754,8 @@ async def list_targets_aggregated(
     humidity_max: float | None = Query(None),
     airmass_min: float | None = Query(None),
     airmass_max: float | None = Query(None),
+    sort_by: str = Query("integration", pattern="^(integration|lastSession|name)$"),
+    sort_dir: str = Query("desc", pattern="^(asc|desc)$"),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=250),
     user: User = Depends(get_current_user),
@@ -889,7 +904,8 @@ async def list_targets_aggregated(
                coalesce(min(t.primary_name), min(i.raw_headers->>'OBJECT'), 'Uncategorized') AS primary_name,
                sum(coalesce(i.exposure_time, 0)) AS total_integration,
                count(i.id) AS total_frames,
-               count(distinct CAST(i.capture_date AS DATE)) AS session_count
+               count(distinct CAST(i.capture_date AS DATE)) AS session_count,
+               max(CAST(i.capture_date AS DATE)) AS last_session_date
         FROM images i LEFT JOIN targets t ON i.resolved_target_id = t.id
         WHERE {where_sql}
         GROUP BY {gk}
@@ -906,7 +922,7 @@ async def list_targets_aggregated(
         WHERE {where_sql}
     ),
     page AS (
-        SELECT * FROM grouped ORDER BY total_integration DESC
+        SELECT * FROM grouped ORDER BY {_sort_clause(sort_by, sort_dir)}
         LIMIT :page_size OFFSET :page_offset
     )
     SELECT (SELECT target_count FROM agg) AS agg_target_count,
