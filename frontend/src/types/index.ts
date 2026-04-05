@@ -21,6 +21,7 @@ export interface TargetAggregation {
   total_sessions?: number | null;
   mosaic_id: string | null;
   mosaic_name: string | null;
+  custom_values?: Record<string, string> | null;
 }
 
 export interface AggregateStats {
@@ -82,6 +83,7 @@ export interface SessionDetail {
   median_cloud_cover: number | null;
   notes: string | null;
   rigs: RigDetail[];
+  custom_values?: CustomColumnValue[] | null;
 }
 
 // === Target Detail (Deep Dive Page) ===
@@ -766,4 +768,36 @@ export interface MosaicSuggestionResponse {
   target_names: Record<string, string>;
   sessions: SuggestionPanelSession[];
   status: string;
+}
+
+// Custom Columns
+
+export interface CustomColumn {
+  id: string;
+  name: string;
+  slug: string;
+  column_type: "boolean" | "text" | "dropdown";
+  applies_to: "target" | "session" | "rig";
+  dropdown_options: string[] | null;
+  display_order: number;
+  created_by: string;
+  created_at: string;
+}
+
+export interface CustomColumnValue {
+  column_slug: string;
+  session_date: string | null;
+  rig_label: string | null;
+  value: string;
+}
+
+export interface TableColumnVisibility {
+  builtin: Record<string, boolean>;
+  custom: Record<string, boolean>;
+}
+
+export interface ColumnVisibility {
+  dashboard: TableColumnVisibility;
+  session_table: TableColumnVisibility;
+  session_detail: TableColumnVisibility;
 }
