@@ -196,16 +196,26 @@ export default function SessionMetricsChart(props: Props) {
     props.enabledRigs;
     if (pendingRAF !== null) cancelAnimationFrame(pendingRAF);
     if (expanded()) {
-      // Use setTimeout to ensure <Show> has mounted the canvas DOM node
+      // <Show> unmounts the canvas when collapsed, so the old chartInstance
+      // is stale. Destroy it so a fresh chart is created on the new canvas.
+      if (chartInstance) {
+        chartInstance.destroy();
+        chartInstance = null;
+      }
       pendingRAF = requestAnimationFrame(() => {
         pendingRAF = null;
         if (!canvasRef) {
-          // Canvas not yet in DOM — retry after next frame
           setTimeout(() => buildChart(), 0);
           return;
         }
         buildChart();
       });
+    } else {
+      // Collapsed — clean up the chart instance
+      if (chartInstance) {
+        chartInstance.destroy();
+        chartInstance = null;
+      }
     }
   });
 
