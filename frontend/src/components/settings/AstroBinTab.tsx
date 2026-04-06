@@ -9,16 +9,24 @@ export default function AstroBinTab() {
     api.getDiscovered("filters").then((r) => r.items)
   );
 
-  // Merge configured canonical filter names with discovered raw filter names
+  // Build list: filter groups (canonical names) + ungrouped discovered filters
   const allFilterNames = createMemo(() => {
+    const filters = ctx.settings()?.filters || {};
     const names = new Set<string>();
-    // Configured canonical filters
-    for (const name of Object.keys(ctx.settings()?.filters || {})) {
-      names.add(name);
+    // All aliases mapped to their group name
+    const aliasToGroup = new Map<string, string>();
+    for (const [group, config] of Object.entries(filters)) {
+      names.add(group);
+      aliasToGroup.set(group.toLowerCase(), group);
+      for (const alias of config.aliases || []) {
+        aliasToGroup.set(alias.toLowerCase(), group);
+      }
     }
-    // Discovered raw filters from image data
+    // Add discovered filters only if not part of any group
     for (const item of discovered() || []) {
-      names.add(item.name);
+      if (!aliasToGroup.has(item.name.toLowerCase())) {
+        names.add(item.name);
+      }
     }
     return [...names].sort((a, b) => a.localeCompare(b));
   });
