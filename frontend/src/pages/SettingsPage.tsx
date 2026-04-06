@@ -7,6 +7,7 @@ import { MergesTab } from "../components/settings/MergesTab";
 import { UsersTab } from "../components/settings/UsersTab";
 import ScanManager from "../components/ScanManager";
 import DisplayTab from "../components/DisplayTab";
+import AstroBinTab from "../components/settings/AstroBinTab";
 import CustomColumnsTab from "../components/CustomColumnsTab";
 import { useAuth } from "../components/AuthProvider";
 import { useSettingsContext } from "../components/SettingsProvider";
@@ -17,6 +18,7 @@ const ALL_TABS = [
   { id: "filters", label: "Filters" },
   { id: "equipment", label: "Equipment" },
   { id: "display", label: "Display" },
+  { id: "astrobin", label: "AstroBin" },
   { id: "targets", label: "Target Management" },
   { id: "custom-columns", label: "Custom Columns" },
   { id: "users", label: "Users", adminOnly: true },
@@ -68,6 +70,9 @@ export const SettingsPage: Component = () => {
       </Show>
       <Show when={activeTab() === "display"}>
         <DisplayTab />
+      </Show>
+      <Show when={activeTab() === "astrobin"}>
+        <AstroBinTab />
       </Show>
       <Show when={activeTab() === "targets"}>
         <TargetManagementTab />

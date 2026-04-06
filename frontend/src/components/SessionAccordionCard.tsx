@@ -122,14 +122,24 @@ const SessionAccordionCard: Component<{
       return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
     };
 
+    const aliasMap = settingsCtx.filterAliasMap();
+    const abFilterIds = settingsCtx.settings()?.general.astrobin_filter_ids ?? {};
+    const bortle = settingsCtx.settings()?.general.astrobin_bortle ?? "";
+
+    const lookupAbId = (filterName: string) => {
+      const canonical = aliasMap[filterName] ?? filterName;
+      return abFilterIds[canonical] ?? abFilterIds[filterName] ?? "";
+    };
+
     const buildRows = (filterDetails: typeof d.filter_details, gain: number | null, sensorTemp: number | null, fwhm: number | null, ambientTemp: number | null) => {
       return filterDetails.map((f) => {
         const duration = f.exposure_time ?? "";
+        const filterId = lookupAbId(f.filter_name);
         const g = gain !== null ? gain : "";
         const cooling = sensorTemp !== null ? Math.round(sensorTemp) : "";
         const mFwhm = fwhm !== null ? fwhm.toFixed(2) : "";
         const temp = ambientTemp !== null ? ambientTemp.toFixed(2) : "";
-        return `${d.session_date},,${f.frame_count},${duration},,${g},${cooling},,,,${mFwhm},${temp}`;
+        return `${d.session_date},${filterId},${f.frame_count},${duration},,${g},${cooling},,${bortle},,${mFwhm},${temp}`;
       });
     };
 
