@@ -122,14 +122,24 @@ const SessionAccordionCard: Component<{
       return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
     };
 
+    const aliasMap = settingsCtx.filterAliasMap();
+    const abFilterIds = settingsCtx.settings()?.general.astrobin_filter_ids ?? {};
+    const bortle = settingsCtx.settings()?.general.astrobin_bortle ?? "";
+
+    const lookupAbId = (filterName: string) => {
+      const canonical = aliasMap[filterName] ?? filterName;
+      return abFilterIds[canonical] ?? abFilterIds[filterName] ?? "";
+    };
+
     const buildRows = (filterDetails: typeof d.filter_details, gain: number | null, sensorTemp: number | null, fwhm: number | null, ambientTemp: number | null) => {
       return filterDetails.map((f) => {
         const duration = f.exposure_time ?? "";
+        const filterId = lookupAbId(f.filter_name);
         const g = gain !== null ? gain : "";
         const cooling = sensorTemp !== null ? Math.round(sensorTemp) : "";
         const mFwhm = fwhm !== null ? fwhm.toFixed(2) : "";
         const temp = ambientTemp !== null ? ambientTemp.toFixed(2) : "";
-        return `${d.session_date},,${f.frame_count},${duration},,${g},${cooling},,,,${mFwhm},${temp}`;
+        return `${d.session_date},${filterId},${f.frame_count},${duration},,${g},${cooling},,${bortle},,${mFwhm},${temp}`;
       });
     };
 
@@ -285,7 +295,7 @@ const SessionAccordionCard: Component<{
           </Show>
           <SortHeader label="Temp" column="sensor_temp" current={sortColumn()} asc={sortAsc()} onSort={toggleSort} align="right" />
           <SortHeader label="Gain" column="gain" current={sortColumn()} asc={sortAsc()} onSort={toggleSort} align="right" />
-          <th class="text-right py-1.5 px-2 font-normal">File</th>
+          <th class="text-left py-1.5 px-2 font-normal">File</th>
         </tr>
       </thead>
       <tbody>
@@ -296,12 +306,12 @@ const SessionAccordionCard: Component<{
               <td class="py-1 px-2 text-theme-text-primary text-center">{frame.filter_used ?? "—"}</td>
               <td class="py-1 px-2 text-theme-text-primary text-right tabular-nums">{frame.exposure_time ?? "—"}s</td>
               <Show when={visible("quality", "hfr")}>
-                <td class={`py-1 px-2 text-right tabular-nums ${isHfrOutlier(frame, medianHfr) ? "text-theme-error font-bold" : "text-theme-text-primary"}`}>
+                <td class={`py-1 px-2 text-right tabular-nums ${isHfrOutlier(frame, medianHfr) ? "text-theme-error" : "text-theme-text-primary"}`}>
                   {frame.median_hfr?.toFixed(2) ?? "\u2014"}
                 </td>
               </Show>
               <Show when={visible("quality", "eccentricity")}>
-                <td class={`py-1 px-2 text-right tabular-nums ${isEccOutlier(frame, medianEcc) ? "text-theme-error font-bold" : "text-theme-text-primary"}`}>{frame.eccentricity?.toFixed(2) ?? "\u2014"}</td>
+                <td class={`py-1 px-2 text-right tabular-nums ${isEccOutlier(frame, medianEcc) ? "text-theme-error" : "text-theme-text-primary"}`}>{frame.eccentricity?.toFixed(2) ?? "\u2014"}</td>
               </Show>
               <Show when={visible("quality", "fwhm")}>
                 <td class="py-1 px-2 text-theme-text-primary text-right tabular-nums">{frame.fwhm?.toFixed(2) ?? "\u2014"}</td>
@@ -393,7 +403,7 @@ const SessionAccordionCard: Component<{
               </Show>
               <td class="py-1 px-2 text-theme-text-primary text-right tabular-nums">{frame.sensor_temp?.toFixed(0) ?? "—"}°C</td>
               <td class="py-1 px-2 text-theme-text-primary text-right tabular-nums">{frame.gain ?? "—"}</td>
-              <td class="py-1 px-2 text-theme-text-secondary text-right truncate max-w-[150px]">{frame.file_name}</td>
+              <td class="py-1 px-2 text-theme-text-secondary text-left">{frame.file_name}</td>
             </tr>
           )}
         </For>
@@ -718,7 +728,7 @@ const SessionAccordionCard: Component<{
                           <For each={detail().filter_details}>
                             {(f) => (
                               <tr class="border-b border-theme-border/50 hover:bg-theme-hover transition-colors duration-100">
-                                <td class="py-1.5 px-2 font-bold text-theme-text-primary">{f.filter_name}</td>
+                                <td class="py-1.5 px-2 text-theme-text-primary">{f.filter_name}</td>
                                 <td class="py-1.5 px-2 text-right text-theme-text-primary">{f.frame_count}</td>
                                 <td class="py-1.5 px-2 text-right text-theme-text-secondary">{formatIntegration(f.integration_seconds)}</td>
                                 <td class="py-1.5 px-2 text-right text-metric-hfr">{f.median_hfr?.toFixed(2) ?? "—"}</td>
@@ -741,7 +751,7 @@ const SessionAccordionCard: Component<{
                                         </span>
                                       </td>
                                     ) : null}
-                                    <td class="py-1.5 px-2 font-bold text-theme-text-primary">{f.filter_name}</td>
+                                    <td class="py-1.5 px-2 text-theme-text-primary">{f.filter_name}</td>
                                     <td class="py-1.5 px-2 text-right text-theme-text-primary">{f.frame_count}</td>
                                     <td class="py-1.5 px-2 text-right text-theme-text-secondary">{formatIntegration(f.integration_seconds)}</td>
                                     <td class="py-1.5 px-2 text-right text-metric-hfr">{f.median_hfr?.toFixed(2) ?? "—"}</td>

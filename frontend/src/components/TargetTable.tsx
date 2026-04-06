@@ -44,8 +44,8 @@ const TargetTable: Component<{ targets: TargetAggregation[] }> = (props) => {
     return sortDir() === "asc" ? " \u2191" : " \u2193";
   };
 
-  const headerClass = (key: SortKey) =>
-    `text-left py-2 px-3 text-label font-medium uppercase tracking-wider text-theme-text-tertiary cursor-pointer select-none hover:text-theme-text-primary transition-colors whitespace-nowrap${sortKey() === key ? " border-b-2 border-theme-accent" : ""}`;
+  const headerClass = (key: SortKey, align: "left" | "right" = "left") =>
+    `text-${align} py-2 px-3 text-label font-medium uppercase tracking-wider text-theme-text-tertiary cursor-pointer select-none hover:text-theme-text-primary transition-colors whitespace-nowrap${sortKey() === key ? " border-b-2 border-theme-accent" : ""}`;
   const plainHeaderClass = "text-left py-2 px-3 text-label font-medium uppercase tracking-wider text-theme-text-tertiary whitespace-nowrap";
 
   const vis = () => ctx.columnVisibility();
@@ -74,7 +74,7 @@ const TargetTable: Component<{ targets: TargetAggregation[] }> = (props) => {
             <th class={plainHeaderClass}>Palette</th>
           </Show>
           <Show when={isColumnVisible(vis(), "dashboard", "builtin", "integration")}>
-            <th class={headerClass("integration")} onClick={() => toggleSort("integration")}>
+            <th class={headerClass("integration", "right")} onClick={() => toggleSort("integration")}>
               Integration Time{arrow("integration")}
             </th>
           </Show>
@@ -84,7 +84,7 @@ const TargetTable: Component<{ targets: TargetAggregation[] }> = (props) => {
             </th>
           </Show>
           <Show when={isColumnVisible(vis(), "dashboard", "builtin", "last_session")}>
-            <th class={headerClass("lastSession")} onClick={() => toggleSort("lastSession")}>
+            <th class={headerClass("lastSession", "right")} onClick={() => toggleSort("lastSession")}>
               Last Session ({tzLabel()}){arrow("lastSession")}
             </th>
           </Show>

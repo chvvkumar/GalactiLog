@@ -47,7 +47,7 @@ function generateTextExport(data: ExportResponse): string {
 }
 
 function generateCsvExport(data: ExportResponse): string {
-  const headers = ["date", "filter", "number", "duration", "gain", "sensorCooling", "bortle", "meanSqm", "meanFwhm", "temperature"];
+  const headers = ["date", "filter", "number", "duration", "binning", "gain", "sensorCooling", "fNumber", "bortle", "meanSqm", "meanFwhm", "temperature"];
   const lines = [headers.join(",")];
 
   for (const row of data.rows) {
@@ -56,8 +56,10 @@ function generateCsvExport(data: ExportResponse): string {
       row.astrobin_filter_id ?? "",
       row.frames,
       row.exposure,
+      "",  // binning
       row.gain ?? "",
       row.sensor_temp ?? "",
+      "",  // fNumber
       data.bortle ?? "",
       row.sky_quality ?? "",
       row.fwhm ?? "",
