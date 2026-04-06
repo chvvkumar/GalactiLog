@@ -187,7 +187,7 @@ const MosaicDetailPage: Component = () => {
                   <For each={sortedPanels()}>
                     {(panel) => (
                       <tr class="border-t border-theme-border hover:bg-theme-elevated/50">
-                        <td class="px-3 py-2 text-theme-text-primary font-medium">{panel.panel_label}</td>
+                        <td class="px-3 py-2 text-theme-text-primary">{panel.panel_label}</td>
                         <td class="px-3 py-2 text-theme-text-primary">{panel.target_name}</td>
                         <td class="px-3 py-2 text-right text-theme-text-primary">{formatIntegration(panel.total_integration_seconds)}</td>
                         <td class="px-3 py-2 text-right text-theme-text-secondary">{panel.total_frames}</td>

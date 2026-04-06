@@ -38,7 +38,7 @@ const TargetRow: Component<{
         class="border-b border-theme-border cursor-pointer hover:bg-theme-hover transition-colors duration-150 hidden md:table-row"
         onClick={() => navigate(`/targets/${encodeURIComponent(props.target.target_id)}?view=sessions`)}
       >
-        <td class={`py-2.5 px-3 font-bold hover:text-theme-accent transition-colors ${
+        <td class={`py-2.5 px-3 hover:text-theme-accent transition-colors ${
           props.target.target_id === "obj:__uncategorized__"
             ? "text-theme-text-tertiary italic"
             : "text-theme-text-primary"
@@ -66,7 +66,7 @@ const TargetRow: Component<{
           </td>
         </Show>
         <Show when={isColumnVisible(vis(), "dashboard", "builtin", "integration")}>
-          <td class="py-2.5 px-3 text-theme-text-primary text-xs">
+          <td class="py-2.5 px-3 text-theme-text-primary text-xs text-right">
             {formatIntegration(props.target.total_integration_seconds)}
           </td>
         </Show>
@@ -76,7 +76,7 @@ const TargetRow: Component<{
           </td>
         </Show>
         <Show when={isColumnVisible(vis(), "dashboard", "builtin", "last_session")}>
-          <td class="py-2.5 px-3 text-theme-accent text-xs">{lastSession()}</td>
+          <td class="py-2.5 px-3 text-theme-accent text-xs text-right">{lastSession()}</td>
         </Show>
         <For each={targetCustomColumns()}>
           {(col) => (
@@ -119,7 +119,7 @@ const TargetRow: Component<{
         <td colspan="99" class="p-3">
           <div class="space-y-1.5">
             <div class="flex items-start justify-between gap-2">
-              <span class={`font-bold text-sm hover:text-theme-accent transition-colors inline-flex items-center gap-1.5 ${
+              <span class={`text-sm hover:text-theme-accent transition-colors inline-flex items-center gap-1.5 ${
                 props.target.target_id === "obj:__uncategorized__"
                   ? "text-theme-text-tertiary italic"
                   : "text-theme-text-primary"
