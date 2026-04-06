@@ -3,7 +3,7 @@ import { useSettingsContext } from "./SettingsProvider";
 import { useAuth } from "./AuthProvider";
 import { showToast } from "./Toast";
 import type { DisplaySettings, MetricGroupSettings } from "../types";
-import { THEMES, TEXT_SIZES, type ThemeMeta } from "../themes";
+import { THEMES_SORTED, TEXT_SIZES, type ThemeMeta } from "../themes";
 import { FILTER_STYLE_OPTIONS, getFilterBadgeStyle, type FilterBadgeStyle } from "../utils/filterStyles";
 import { timezoneLabel } from "../utils/dateTime";
 
@@ -183,11 +183,11 @@ export default function DisplayTab() {
   return (
     <div class="space-y-4">
       {/* Theme */}
-      <Show when={THEMES.length > 1}>
+      <Show when={THEMES_SORTED.length > 1}>
         <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-4 space-y-3">
           <h3 class="text-theme-text-primary font-medium">Theme</h3>
           <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <For each={THEMES}>
+            <For each={THEMES_SORTED}>
               {(theme: ThemeMeta) => (
                 <button
                   type="button"
