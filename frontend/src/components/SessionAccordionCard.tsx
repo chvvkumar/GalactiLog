@@ -139,7 +139,7 @@ const SessionAccordionCard: Component<{
         const cooling = sensorTemp !== null ? Math.round(sensorTemp) : "";
         const mFwhm = fwhm !== null ? fwhm.toFixed(2) : "";
         const temp = ambientTemp !== null ? ambientTemp.toFixed(2) : "";
-        return `${d.session_date},${filterId},${f.frame_count},${duration},,${g},${cooling},,${bortle},,,${mFwhm},${temp}`;
+        return `${d.session_date},${filterId},${f.frame_count},${duration},,${g},${cooling},,${bortle},,${mFwhm},${temp}`;
       });
     };
 
