@@ -22,6 +22,9 @@ import type {
   GraphSettings,
   AuthUser,
   LoginResponse,
+  CustomColumn,
+  CustomColumnValue,
+  ColumnVisibility,
 } from "../types";
 
 const API_BASE = import.meta.env.VITE_API_URL || "/api";
@@ -125,6 +128,7 @@ function buildTargetQuery(filters: ActiveFilters, page?: number, pageSize?: numb
     if (range.min != null) params.set(`${metric}_min`, String(range.min));
     if (range.max != null) params.set(`${metric}_max`, String(range.max));
   }
+  params.set("include_custom", "true");
   return params.toString();
 }
 
@@ -517,4 +521,56 @@ export const api = {
 
   dismissMosaicSuggestion: (id: string) =>
     fetchJson<{ status: string }>(`/mosaics/suggestions/${id}/dismiss`, { method: "POST" }),
+
+  // Custom Columns
+  getCustomColumns: () =>
+    fetchJson<CustomColumn[]>("/custom-columns"),
+
+  createCustomColumn: (body: {
+    name: string;
+    column_type: string;
+    applies_to: string;
+    dropdown_options?: string[];
+  }) =>
+    fetchJson<CustomColumn>("/custom-columns", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  updateCustomColumn: (id: string, body: {
+    name?: string;
+    dropdown_options?: string[];
+    display_order?: number;
+  }) =>
+    fetchJson<CustomColumn>(`/custom-columns/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }),
+
+  deleteCustomColumn: (id: string) =>
+    fetchJson<void>(`/custom-columns/${id}`, { method: "DELETE" }),
+
+  getCustomValues: (targetId: string) =>
+    fetchJson<CustomColumnValue[]>(`/custom-columns/values/${targetId}`),
+
+  setCustomValue: (body: {
+    column_id: string;
+    target_id: string;
+    session_date?: string | null;
+    rig_label?: string | null;
+    value: string;
+  }) =>
+    fetchJson<void>("/custom-columns/values", {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+
+  getColumnVisibility: (userId: string) =>
+    fetchJson<ColumnVisibility>(`/settings/column-visibility/${userId}`),
+
+  updateColumnVisibility: (body: ColumnVisibility) =>
+    fetchJson<void>("/settings/column-visibility", {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
 };
