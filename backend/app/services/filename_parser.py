@@ -108,7 +108,8 @@ PANEL_PIER_RE = re.compile(
 )
 
 # Angle/degree values: 93.74deg
-DEGREE_RE = re.compile(r"^\d+\.?\d*deg$", re.IGNORECASE)
+# Angle/degree values: 93.74deg, bare "deg"
+DEGREE_RE = re.compile(r"^(?:\d+\.?\d*)?deg$", re.IGNORECASE)
 
 # Sky Quality: SQA55, SQM20.5
 SKY_QUALITY_RE = re.compile(r"^SQ[AM]\d+\.?\d*$", re.IGNORECASE)
