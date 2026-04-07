@@ -161,8 +161,8 @@ export const UnresolvedFilesTab: Component = () => {
                 {methodLabel(c)}
               </span>
               <Show when={hasCalibrationPath(c.file_paths)}>
-                <span class="text-xs text-theme-warning bg-theme-warning/10 border border-theme-warning/30 rounded px-1.5 py-0.5" title="File paths contain calibration directories (DARK/FLAT/BIAS) but FITS headers say LIGHT — possible mislabeled frames">
-                  Possible calibration
+                <span class="text-xs text-theme-warning bg-theme-warning/10 border border-theme-warning/30 rounded px-1.5 py-0.5" title="Path contains DARK/FLAT/BIAS directory but FITS IMAGETYP header says LIGHT">
+                  Header mismatch
                 </span>
               </Show>
               <Show when={c.suggested_target_name}>
