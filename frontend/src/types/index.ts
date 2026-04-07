@@ -238,6 +238,7 @@ export interface ActiveFilters {
   fitsQueries: { key: string; operator: string; value: string }[];
   qualityFilters: { hfrMin?: number; hfrMax?: number };
   metricFilters: Record<string, { min?: number; max?: number }>;
+  customColumnFilters: { slug: string; value: string }[];
 }
 
 // === Scan (unchanged) ===
