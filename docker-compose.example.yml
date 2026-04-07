@@ -1,128 +1,89 @@
 # =============================================================================
-# GalactiLog Docker Compose Configuration
+# GalactiLog — Docker Compose
 # =============================================================================
-# Copy this file to docker-compose.yml:
-#   cp docker-compose.example.yml docker-compose.yml
+# 1. Copy this file:      cp docker-compose.example.yml docker-compose.yml
+# 2. Edit lines marked:   <-- CHANGE
+# 3. Start:               docker compose up -d
+# 4. Open:                http://localhost:8080
 #
-# HOW VARIABLES WORK:
-# This file uses ${VAR:-default} syntax to reference variables from your .env
-# file. Docker Compose automatically loads the .env file from the same directory.
-#
-#   ${GALACTILOG_POSTGRES_USER:-galactilog}  — uses GALACTILOG_POSTGRES_USER from .env, or "galactilog" if not set
-#   ${GALACTILOG_FITS_HOST_PATH:-./sample_fits}  — uses the .env value, or ./sample_fits
-#
-# The `env_file: .env` directive on the app service passes ALL variables from
-# .env into the container as environment variables. The `environment:` block
-# below overrides specific variables (like GALACTILOG_DATABASE_URL) to use the
-# docker-internal hostnames (e.g., "postgres" instead of "localhost").
-#
-# In short:
-#   .env           → defines your values (paths, credentials, settings)
-#   docker-compose → consumes those values for volume mounts and service config
-#   env_file       → passes all .env variables into the app container
-#   environment:   → overrides specific variables with container-aware values
+# Database migrations run automatically on first start.
+# Log in with the admin credentials you set below.
 # =============================================================================
 
 services:
-  # ---------------------------------------------------------------------------
-  # PostgreSQL — application database
-  # ---------------------------------------------------------------------------
-  # Stores all target, session, image metadata, user accounts, and refresh tokens.
-  # Data is persisted via the volume mount below.
   postgres:
     image: postgres:16-alpine
+    restart: unless-stopped
     environment:
-      # These come from .env. They configure the postgres container's init script
-      # which creates the database and user on first start.
-      POSTGRES_USER: ${GALACTILOG_POSTGRES_USER:-galactilog}
-      POSTGRES_PASSWORD: ${GALACTILOG_POSTGRES_PASSWORD:-galactilog}
-      POSTGRES_DB: ${GALACTILOG_POSTGRES_DB:-galactilog_catalog}
+      POSTGRES_USER: galactilog
+      POSTGRES_PASSWORD: galactilog
+      POSTGRES_DB: galactilog_catalog
     volumes:
-      # Database storage. When GALACTILOG_POSTGRES_DATA_HOST_PATH is set in .env,
-      # a bind mount is used (recommended for production — easy to back up and locate).
-      # When not set, falls back to the "postgres_data" named volume.
-      - ${GALACTILOG_POSTGRES_DATA_HOST_PATH:-postgres_data}:/var/lib/postgresql/data
-    ports:
-      # Exposed for local development tools (pgAdmin, psql, etc.).
-      # Remove or comment out in production if external access is not needed.
-      - "5432:5432"
+      - postgres_data:/var/lib/postgresql/data
+      # To use a host directory instead of a Docker volume, comment the line
+      # above and uncomment below (the directory will be created automatically):
+      # - /path/to/postgres/data:/var/lib/postgresql/data       # <-- CHANGE path
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${GALACTILOG_POSTGRES_USER:-galactilog}"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
       timeout: 3s
       retries: 5
 
-  # ---------------------------------------------------------------------------
-  # Redis — task queue broker and caching
-  # ---------------------------------------------------------------------------
-  # Used by Celery for background task management (FITS scanning, thumbnail
-  # generation) and for rate limiting / account lockout tracking.
   redis:
     image: redis:7-alpine
-    ports:
-      # Exposed for local development and debugging.
-      # Remove or comment out in production if external access is not needed.
-      - "6379:6379"
+    restart: unless-stopped
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 3s
       retries: 5
 
-  # ---------------------------------------------------------------------------
-  # App — GalactiLog application (frontend + backend + worker)
-  # ---------------------------------------------------------------------------
-  # Single container running nginx (frontend), FastAPI (backend), Celery (worker),
-  # and Celery Beat (scheduler), managed by Supervisor.
   app:
     image: chvvkumar/galactilog:latest
+    restart: unless-stopped
     ports:
-      # Web UI port. Access GalactiLog at http://localhost:8080
-      # Change the left side to use a different host port (e.g., "9090:80").
-      - "8080:80"
-
-    # Load all variables from .env into the container environment.
-    # This is how GALACTILOG_ADMIN_PASSWORD, GALACTILOG_HTTPS, GALACTILOG_JWT_SECRET,
-    # and other app settings reach the application without listing each one here.
-    env_file: .env
-
-    # Override specific variables with container-aware values.
-    # These take precedence over the same variables in .env because
-    # `environment:` has higher priority than `env_file:` in Docker Compose.
+      - "8080:80"                                                # <-- CHANGE host port if needed
     environment:
-      # Database URL built from .env credentials, using the docker-internal
-      # hostname "postgres" (the service name above) instead of localhost.
-      GALACTILOG_DATABASE_URL: postgresql+asyncpg://${GALACTILOG_POSTGRES_USER:-galactilog}:${GALACTILOG_POSTGRES_PASSWORD:-galactilog}@postgres:5432/${GALACTILOG_POSTGRES_DB:-galactilog_catalog}
-
-      # Redis URL using the docker-internal hostname "redis".
+      # Database — must match the postgres service credentials above
+      GALACTILOG_DATABASE_URL: postgresql+asyncpg://galactilog:galactilog@postgres:5432/galactilog_catalog
       GALACTILOG_REDIS_URL: redis://redis:6379/0
 
-      # Container-internal paths for FITS data and thumbnails.
-      # These must match the right side of the volume mounts below.
+      # Container-internal paths (don't change these)
       GALACTILOG_FITS_DATA_PATH: /app/data/fits
       GALACTILOG_THUMBNAILS_PATH: /app/data/thumbnails
 
+      # Admin account — created automatically on first start
+      GALACTILOG_ADMIN_USERNAME: admin
+      GALACTILOG_ADMIN_PASSWORD: changeme123                     # <-- CHANGE (min 8 characters)
+
+      # Set to false if accessing over plain HTTP (no HTTPS / LAN access)
+      GALACTILOG_HTTPS: "false"
+
+      # Optional: persistent sessions across container restarts
+      # Generate with: openssl rand -hex 32
+      # GALACTILOG_JWT_SECRET: ""
+
+      # Optional: read-only viewer account (created on first start alongside admin)
+      # GALACTILOG_VIEWER_USERNAME: viewer
+      # GALACTILOG_VIEWER_PASSWORD: ""
     volumes:
-      # Thumbnail storage. When GALACTILOG_THUMBNAILS_HOST_PATH is set in .env,
-      # a bind mount is used. Otherwise falls back to the "thumbnails_data" named volume.
-      - ${GALACTILOG_THUMBNAILS_HOST_PATH:-thumbnails_data}:/app/data/thumbnails
-
-      # FITS data directory (read-only). The :ro flag prevents the container
-      # from modifying your original FITS files.
-      # When GALACTILOG_FITS_HOST_PATH is set in .env, that host directory is mounted.
-      # Otherwise falls back to ./sample_fits for testing.
-      - ${GALACTILOG_FITS_HOST_PATH:-./sample_fits}:/app/data/fits:ro
-
+      - /path/to/your/fits/files:/app/data/fits:ro               # <-- CHANGE to your FITS directory
+      - thumbnails_data:/app/data/thumbnails
+      # To use a host directory for thumbnails instead of a Docker volume,
+      # comment the line above and uncomment below:
+      # - /path/to/thumbnails:/app/data/thumbnails               # <-- CHANGE path
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8000/api/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
 
-# Named volumes used as fallbacks when host paths are not set in .env.
-# When GALACTILOG_POSTGRES_DATA_HOST_PATH / GALACTILOG_THUMBNAILS_HOST_PATH are
-# defined, Docker uses bind mounts instead and these named volumes are not created.
-# For production, always set host paths in .env for predictable data locations.
 volumes:
   postgres_data:
   thumbnails_data:
