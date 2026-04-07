@@ -238,6 +238,7 @@ export interface ActiveFilters {
   fitsQueries: { key: string; operator: string; value: string }[];
   qualityFilters: { hfrMin?: number; hfrMax?: number };
   metricFilters: Record<string, { min?: number; max?: number }>;
+  customColumnFilters: { slug: string; value: string }[];
 }
 
 // === Scan (unchanged) ===
@@ -266,6 +267,10 @@ export interface ScanStatus {
   discovered: number;
   started_at: number | null;
   completed_at: number | null;
+  new_files: number;
+  changed_files: number;
+  removed: number;
+  skipped_calibration: number;
   failed_files?: FailedFile[];
 }
 
@@ -298,6 +303,8 @@ export interface DbSummary {
   cached_negative: number;
   cached_vizier: number;
   cached_vizier_negative: number;
+  cached_sesame: number;
+  cached_sesame_negative: number;
   pending_merges: number;
   csv_enriched: number;
 }

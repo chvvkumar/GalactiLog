@@ -786,10 +786,32 @@ async def list_targets_aggregated(
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=250),
     include_custom: bool = Query(False),
+    custom_filters: str | None = Query(None),
     user: User = Depends(get_current_user),
 ):
     """Return targets with aggregated session data, filtered by query params."""
     filter_map, cam_map, tel_map = await load_alias_maps(session)
+
+    # ---------------------------------------------------------------
+    # Parse custom column filters
+    # ---------------------------------------------------------------
+    cc_filter_entries: list[dict] = []
+    cc_columns_by_slug: dict[str, dict] = {}
+    if custom_filters:
+        import json as _json
+        try:
+            cc_filter_entries = _json.loads(custom_filters)
+        except (ValueError, TypeError):
+            cc_filter_entries = []
+
+        if cc_filter_entries:
+            from app.models.custom_column import CustomColumn
+            cc_q = select(CustomColumn.id, CustomColumn.slug, CustomColumn.column_type, CustomColumn.applies_to)
+            cc_rows = (await session.execute(cc_q)).all()
+            cc_columns_by_slug = {
+                r.slug: {"id": str(r.id), "column_type": r.column_type, "applies_to": r.applies_to}
+                for r in cc_rows
+            }
 
     # ---------------------------------------------------------------
     # Phases 1-3: Raw SQL for grouped + aggregates + pagination
@@ -799,6 +821,51 @@ async def list_targets_aggregated(
         "(i.resolved_target_id IS NULL OR t.merged_into_id IS NULL)",
     ]
     params: dict = {}
+
+    # Generate EXISTS subqueries for custom column filters
+    has_cc_session_filters = False
+    for idx, entry in enumerate(cc_filter_entries):
+        slug = entry.get("slug", "")
+        value = entry.get("value", "")
+        col_meta = cc_columns_by_slug.get(slug)
+        if not col_meta or not value:
+            continue
+
+        col_id_param = f"cc_col_{idx}"
+        val_param = f"cc_val_{idx}"
+        params[col_id_param] = col_meta["id"]
+
+        applies_to = col_meta["applies_to"]
+        col_type = col_meta["column_type"]
+
+        if col_type == "text":
+            escaped_val = value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            params[val_param] = f"%{escaped_val}%"
+            match_expr = f"cv.value ILIKE :{val_param}"
+        else:
+            params[val_param] = value
+            match_expr = f"cv.value = :{val_param}"
+
+        if applies_to == "target":
+            where_parts.append(f"""EXISTS (
+                SELECT 1 FROM custom_column_values cv
+                WHERE cv.target_id = t.id AND cv.column_id = CAST(:{col_id_param} AS uuid)
+                AND {match_expr}
+            )""")
+        elif applies_to == "session":
+            has_cc_session_filters = True
+            where_parts.append(f"""EXISTS (
+                SELECT 1 FROM custom_column_values cv
+                WHERE cv.target_id = t.id AND cv.column_id = CAST(:{col_id_param} AS uuid)
+                AND cv.session_date IS NOT NULL AND {match_expr}
+            )""")
+        elif applies_to == "rig":
+            has_cc_session_filters = True
+            where_parts.append(f"""EXISTS (
+                SELECT 1 FROM custom_column_values cv
+                WHERE cv.target_id = t.id AND cv.column_id = CAST(:{col_id_param} AS uuid)
+                AND cv.rig_label IS NOT NULL AND {match_expr}
+            )""")
 
     if camera:
         cam_variants = expand_canonical(camera, cam_map)
@@ -1127,6 +1194,54 @@ async def list_targets_aggregated(
         )
         total_session_count = basics["session_count"]
         matched_session_count = len(sessions_list) if has_metric_filters else None
+
+        # Count sessions matching custom column session/rig filters
+        if has_cc_session_filters and not tk.startswith("obj:"):
+            cc_matched_dates: set[str] | None = None
+            for idx, entry in enumerate(cc_filter_entries):
+                slug = entry.get("slug", "")
+                value = entry.get("value", "")
+                col_meta = cc_columns_by_slug.get(slug)
+                if not col_meta or not value:
+                    continue
+                if col_meta["applies_to"] not in ("session", "rig"):
+                    continue
+
+                col_id = col_meta["id"]
+                col_type = col_meta["column_type"]
+
+                # Query matching session dates for this target + column
+                from app.models.custom_column import CustomColumnValue
+                import uuid as _uuid
+                target_uuid = _uuid.UUID(basics["target_key"])
+                cv_q = select(func.cast(CustomColumnValue.session_date, String)).where(
+                    CustomColumnValue.target_id == target_uuid,
+                    CustomColumnValue.column_id == _uuid.UUID(col_id),
+                    CustomColumnValue.session_date.isnot(None),
+                )
+                if col_type == "text":
+                    escaped = value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+                    cv_q = cv_q.where(CustomColumnValue.value.ilike(f"%{escaped}%"))
+                else:
+                    cv_q = cv_q.where(CustomColumnValue.value == value)
+
+                cv_rows = (await session.execute(cv_q)).all()
+                matching_dates = {str(r[0]) for r in cv_rows}
+
+                if cc_matched_dates is None:
+                    cc_matched_dates = matching_dates
+                else:
+                    cc_matched_dates &= matching_dates
+
+            if cc_matched_dates is not None:
+                session_dates_for_target = set(sessions_detail.get(tk, {}).keys())
+                if matched_session_count is not None:
+                    # Intersect with metric-filtered sessions
+                    metric_dates = {s["session_date"] for s in sessions_list}
+                    cc_matched_dates &= metric_dates
+                    matched_session_count = len(cc_matched_dates)
+                else:
+                    matched_session_count = len(cc_matched_dates & session_dates_for_target)
 
         sessions = [
             SessionSummary(

@@ -122,7 +122,7 @@ const NavBar: Component = () => {
 
       {/* Mobile dropdown menu */}
       <Show when={menuOpen()}>
-        <div class="absolute top-full left-0 right-0 bg-theme-surface border-b border-theme-border shadow-[var(--shadow-md)] lg:hidden z-40">
+        <div class="absolute top-full left-0 right-0 glass-popover bg-theme-surface border-b border-theme-border shadow-[var(--shadow-md)] lg:hidden z-40">
           <nav class="flex flex-col p-4 gap-2">
             <A
               href="/"

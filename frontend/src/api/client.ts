@@ -128,6 +128,9 @@ function buildTargetQuery(filters: ActiveFilters, page?: number, pageSize?: numb
     if (range.min != null) params.set(`${metric}_min`, String(range.min));
     if (range.max != null) params.set(`${metric}_max`, String(range.max));
   }
+  if (filters.customColumnFilters.length > 0) {
+    params.set("custom_filters", JSON.stringify(filters.customColumnFilters));
+  }
   params.set("include_custom", "true");
   return params.toString();
 }
@@ -229,6 +232,9 @@ export const api = {
 
   smartRebuildTargets: () =>
     fetchJson<{ status: string; message: string }>("/scan/smart-rebuild-targets", { method: "POST" }),
+
+  retryUnresolved: () =>
+    fetchJson<{ status: string; message: string }>("/scan/retry-unresolved", { method: "POST" }),
 
   getRebuildStatus: () =>
     fetchJson<import("../types").RebuildStatus>("/scan/rebuild-status"),

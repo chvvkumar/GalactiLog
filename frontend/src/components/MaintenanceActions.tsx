@@ -34,6 +34,14 @@ const MaintenanceActions: Component<{
             {props.rebuildRunning && props.rebuildMode === "smart" ? "Running..." : "Re-match"}
           </button>
           <button
+            onClick={() => runAction(api.retryUnresolved)}
+            disabled={anyDisabled()}
+            title="Clears SIMBAD negative cache and SESAME cache, then re-resolves unresolved targets through SIMBAD and SESAME (NED + VizieR). Existing targets are not affected."
+            class="px-3 py-1.5 border border-theme-border-em text-theme-text-secondary rounded text-sm disabled:opacity-50 hover:text-theme-text-primary hover:border-theme-accent transition-colors"
+          >
+            {props.rebuildRunning && props.rebuildMode === "retry" ? "Running..." : "Retry Unresolved"}
+          </button>
+          <button
             onClick={() => props.onRegenThumbnails()}
             disabled={anyDisabled()}
             title="Re-creates all thumbnails using current stretch settings. Does not affect database records."
@@ -44,7 +52,7 @@ const MaintenanceActions: Component<{
           <button
             onClick={() => setShowFullConfirm(true)}
             disabled={anyDisabled()}
-            title="Deletes all targets and re-resolves from FITS headers via SIMBAD. Cached results make repeat runs fast."
+            title="Deletes all targets and re-resolves from FITS headers via SIMBAD, SESAME (NED + VizieR), and VizieR enrichment. Cached results make repeat runs fast."
             class="px-3 py-1.5 border border-theme-error/50 text-theme-error rounded text-sm disabled:opacity-50 hover:bg-theme-error/20 hover:text-theme-error transition-colors"
           >
             {props.rebuildRunning && props.rebuildMode === "full" ? "Running..." : "Full Rebuild"}
@@ -57,9 +65,10 @@ const MaintenanceActions: Component<{
           <p class="text-sm text-theme-error font-medium">Are you sure?</p>
           <p class="text-xs text-theme-error/70">
             This will delete all target records, merge history, and suggested merges.
-            All targets will be re-resolved from scratch using SIMBAD. Fast if results
-            are cached from a previous run. First run may take 30 minutes or more
-            depending on the number of unique targets and SIMBAD response times.
+            All targets will be re-resolved from scratch using SIMBAD with SESAME
+            (NED + VizieR) fallback. Fast if results are cached from a previous run.
+            First run may take 30 minutes or more depending on the number of unique
+            targets and external service response times.
           </p>
           <div class="flex gap-2 pt-1">
             <button

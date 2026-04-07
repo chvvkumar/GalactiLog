@@ -11,6 +11,10 @@ const defaultStatus: ScanStatus = {
   discovered: 0,
   started_at: null,
   completed_at: null,
+  new_files: 0,
+  changed_files: 0,
+  removed: 0,
+  skipped_calibration: 0,
 };
 
 const [scanStatus, setScanStatus] = createSignal<ScanStatus>({ ...defaultStatus });

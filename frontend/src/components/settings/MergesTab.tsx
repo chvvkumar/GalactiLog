@@ -38,6 +38,7 @@ export const MergesTab: Component = () => {
       );
       showToast(`Merged "${candidate.source_name}" into "${candidate.suggested_target_name}"`);
       await refresh();
+      window.dispatchEvent(new Event("merges-changed"));
     } catch {
       showToast("Merge failed", "error");
     }
@@ -47,6 +48,7 @@ export const MergesTab: Component = () => {
     try {
       await api.dismissMergeCandidate(candidate.id);
       setCandidates((prev) => prev.filter((c) => c.id !== candidate.id));
+      window.dispatchEvent(new Event("merges-changed"));
     } catch {
       showToast("Dismiss failed", "error");
     }
@@ -58,6 +60,7 @@ export const MergesTab: Component = () => {
       await api.revertMergeCandidate(candidate.id);
       showToast(`Reverted merge of "${candidate.source_name}"`);
       await refresh();
+      window.dispatchEvent(new Event("merges-changed"));
     } catch {
       showToast("Revert failed", "error");
     }

@@ -16,6 +16,7 @@ from app.services.simbad import (
     resolve_target_name_cached,
     _PANEL_RE,
 )
+from app.services.sesame import resolve_sesame_cached
 from app.services.openngc import enrich_target_from_openngc
 from app.services.vizier import enrich_target_from_vizier
 
@@ -138,6 +139,11 @@ def resolve_target(
     # Resolve via SIMBAD (uses persistent DB cache)
     result = resolve_target_name_cached(object_name, session)
     session.commit()  # Persist cache entry
+
+    # Fallback: try SESAME (queries NED + VizieR) when SIMBAD fails
+    if result is None:
+        result = resolve_sesame_cached(object_name, session)
+        session.commit()
 
     if result is None:
         if redis:

@@ -53,11 +53,19 @@ export interface ThemeTokens {
   "filter-b": string;
 }
 
+export interface GlassOrb {
+  color: string;   // e.g. "rgba(79,70,229,0.30)"
+  x: string;       // CSS position, e.g. "-5%"
+  y: string;
+  size: string;    // e.g. "40%"
+}
+
 export interface GlassConfig {
   blur: string;
   saturate: string;
   gradientFrom: string;
   gradientTo: string;
+  orbs?: GlassOrb[];
 }
 
 export interface ThemeMeta {
@@ -81,18 +89,23 @@ export const THEMES: ThemeMeta[] = [
       saturate: "1.8",
       gradientFrom: "#020617",
       gradientTo: "#0c1a2e",
+      orbs: [
+        { color: "rgba(79, 70, 229, 0.40)", x: "-5%", y: "-10%", size: "45%" },
+        { color: "rgba(22, 78, 99, 0.35)",  x: "65%", y: "10%",  size: "40%" },
+        { color: "rgba(88, 28, 135, 0.35)", x: "10%", y: "55%",  size: "50%" },
+      ],
     },
     tokens: {
-      "bg-base": "#020617",
-      "bg-surface": "rgba(30, 41, 59, 0.40)",
-      "bg-elevated": "rgba(40, 52, 72, 0.50)",
-      "bg-hover": "rgba(255, 255, 255, 0.05)",
-      "bg-input": "rgba(15, 23, 42, 0.70)",
-      "border-default": "rgba(255, 255, 255, 0.10)",
-      "border-emphasis": "rgba(255, 255, 255, 0.14)",
+      "bg-base": "transparent",
+      "bg-surface": "rgba(15, 23, 42, 0.35)",
+      "bg-elevated": "rgba(30, 41, 59, 0.40)",
+      "bg-hover": "rgba(255, 255, 255, 0.06)",
+      "bg-input": "rgba(15, 23, 42, 0.55)",
+      "border-default": "rgba(255, 255, 255, 0.12)",
+      "border-emphasis": "rgba(255, 255, 255, 0.18)",
       "text-primary": "#f8fafc",
       "text-secondary": "#cbd5e1",
-      "text-tertiary": "#94a3b8",
+      "text-tertiary": "#9cb0c8",
       "accent": "#38bdf8",
       "accent-hover": "#7dd3fc",
       "success": "#4ade80",
@@ -132,18 +145,23 @@ export const THEMES: ThemeMeta[] = [
       saturate: "1.6",
       gradientFrom: "#060b18",
       gradientTo: "#0a1628",
+      orbs: [
+        { color: "rgba(30, 58, 138, 0.35)",  x: "-5%", y: "-10%", size: "42%" },
+        { color: "rgba(15, 40, 80, 0.30)",   x: "60%", y: "5%",   size: "38%" },
+        { color: "rgba(49, 46, 129, 0.30)",  x: "15%", y: "55%",  size: "48%" },
+      ],
     },
     tokens: {
-      "bg-base": "#060b18",
-      "bg-surface": "rgba(16, 28, 56, 0.45)",
-      "bg-elevated": "rgba(22, 38, 72, 0.55)",
-      "bg-hover": "rgba(30, 48, 88, 0.40)",
-      "bg-input": "rgba(10, 18, 40, 0.75)",
+      "bg-base": "transparent",
+      "bg-surface": "rgba(16, 28, 56, 0.30)",
+      "bg-elevated": "rgba(22, 38, 72, 0.38)",
+      "bg-hover": "rgba(30, 48, 88, 0.25)",
+      "bg-input": "rgba(10, 18, 40, 0.55)",
       "border-default": "rgba(100, 160, 255, 0.12)",
       "border-emphasis": "rgba(100, 160, 255, 0.20)",
       "text-primary": "#f0f4ff",
       "text-secondary": "#8aa4cc",
-      "text-tertiary": "#5a7499",
+      "text-tertiary": "#7a96b8",
       "accent": "#22d3ee",
       "accent-hover": "#67e8f9",
       "success": "#34d399",
@@ -183,18 +201,23 @@ export const THEMES: ThemeMeta[] = [
       saturate: "1.8",
       gradientFrom: "#120a04",
       gradientTo: "#1a0810",
+      orbs: [
+        { color: "rgba(180, 83, 9, 0.35)",   x: "-5%", y: "-10%", size: "42%" },
+        { color: "rgba(159, 18, 57, 0.28)",  x: "60%", y: "10%",  size: "36%" },
+        { color: "rgba(120, 53, 15, 0.30)",  x: "15%", y: "55%",  size: "48%" },
+      ],
     },
     tokens: {
-      "bg-base": "#0c0804",
-      "bg-surface": "rgba(32, 18, 8, 0.55)",
-      "bg-elevated": "rgba(48, 28, 12, 0.65)",
-      "bg-hover": "rgba(40, 22, 10, 0.45)",
-      "bg-input": "rgba(22, 12, 6, 0.75)",
+      "bg-base": "transparent",
+      "bg-surface": "rgba(32, 18, 8, 0.32)",
+      "bg-elevated": "rgba(48, 28, 12, 0.40)",
+      "bg-hover": "rgba(40, 22, 10, 0.25)",
+      "bg-input": "rgba(22, 12, 6, 0.55)",
       "border-default": "rgba(251, 191, 36, 0.18)",
       "border-emphasis": "rgba(251, 191, 36, 0.24)",
       "text-primary": "#f5f0e8",
       "text-secondary": "#bba882",
-      "text-tertiary": "#a08a68",
+      "text-tertiary": "#b09878",
       "accent": "#f59e0b",
       "accent-hover": "#fbbf24",
       "success": "#4ade80",
@@ -610,6 +633,44 @@ export function getThemeById(id: string): ThemeMeta {
   return THEMES.find((t) => t.id === id) ?? THEMES[0];
 }
 
+const GLASS_ORBS_ID = "gl-glass-orbs";
+
+function applyGlassOrbs(orbs: GlassOrb[] | undefined): void {
+  const existing = document.getElementById(GLASS_ORBS_ID);
+  if (!orbs || orbs.length === 0) {
+    existing?.remove();
+    return;
+  }
+  const container = existing ?? document.createElement("div");
+  container.id = GLASS_ORBS_ID;
+  container.innerHTML = "";
+  Object.assign(container.style, {
+    position: "fixed",
+    inset: "0",
+    overflow: "hidden",
+    pointerEvents: "none",
+    zIndex: "0",
+  });
+  for (const orb of orbs) {
+    const el = document.createElement("div");
+    Object.assign(el.style, {
+      position: "absolute",
+      left: orb.x,
+      top: orb.y,
+      width: orb.size,
+      height: orb.size,
+      background: orb.color,
+      borderRadius: "50%",
+      filter: "blur(120px)",
+      mixBlendMode: "screen",
+    });
+    container.appendChild(el);
+  }
+  if (!existing) {
+    document.body.prepend(container);
+  }
+}
+
 export function applyTheme(themeId: string): void {
   const theme = getThemeById(themeId);
   const root = document.documentElement;
@@ -622,12 +683,14 @@ export function applyTheme(themeId: string): void {
     root.style.setProperty("--glass-gradient-from", theme.glass.gradientFrom);
     root.style.setProperty("--glass-gradient-to", theme.glass.gradientTo);
     root.setAttribute("data-theme-style", "glass");
+    applyGlassOrbs(theme.glass.orbs);
   } else {
     root.style.setProperty("--glass-blur", "0px");
     root.style.setProperty("--glass-saturate", "1");
     root.style.removeProperty("--glass-gradient-from");
     root.style.removeProperty("--glass-gradient-to");
     root.setAttribute("data-theme-style", "solid");
+    applyGlassOrbs(undefined);
   }
 }
 
