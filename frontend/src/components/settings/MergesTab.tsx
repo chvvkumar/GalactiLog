@@ -2,6 +2,7 @@ import { Component, For, Show, createSignal, onMount } from "solid-js";
 import { api } from "../../api/client";
 import { showToast } from "../Toast";
 import { useAuth } from "../AuthProvider";
+import { UnresolvedFilesTab } from "./UnresolvedFilesTab";
 import type { MergeCandidateResponse } from "../../types";
 
 export const MergesTab: Component = () => {
@@ -9,7 +10,8 @@ export const MergesTab: Component = () => {
   const [candidates, setCandidates] = createSignal<MergeCandidateResponse[]>([]);
   const [accepted, setAccepted] = createSignal<MergeCandidateResponse[]>([]);
   const [detecting, setDetecting] = createSignal(false);
-  const [view, setView] = createSignal<"suggestions" | "merged">("suggestions");
+  const [view, setView] = createSignal<"suggestions" | "merged" | "unresolved">("suggestions");
+  const [unresolvedCount, setUnresolvedCount] = createSignal(0);
   const [confirmMergeId, setConfirmMergeId] = createSignal<string | null>(null);
   const [confirmRevertId, setConfirmRevertId] = createSignal<string | null>(null);
 
@@ -26,7 +28,10 @@ export const MergesTab: Component = () => {
     }
   };
 
-  onMount(refresh);
+  onMount(() => {
+    refresh();
+    api.getFilenameCandidateCount().then((r) => setUnresolvedCount(r.count)).catch(() => {});
+  });
 
   const handleMerge = async (candidate: MergeCandidateResponse) => {
     setConfirmMergeId(null);
@@ -110,6 +115,14 @@ export const MergesTab: Component = () => {
             }`}
           >
             Merged ({accepted().length})
+          </button>
+          <button
+            onClick={() => setView("unresolved")}
+            class={`px-3 py-1.5 text-sm rounded-[var(--radius-sm)] transition-colors ${
+              view() === "unresolved" ? "bg-theme-accent text-white" : "border border-theme-border text-theme-text-secondary hover:text-theme-text-primary"
+            }`}
+          >
+            Unresolved Files ({unresolvedCount()})
           </button>
         </div>
 
@@ -225,6 +238,10 @@ export const MergesTab: Component = () => {
               </For>
             </div>
           </Show>
+        </Show>
+
+        <Show when={view() === "unresolved"}>
+          <UnresolvedFilesTab />
         </Show>
       </div>
     </div>
