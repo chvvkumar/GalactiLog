@@ -42,7 +42,7 @@ export const UnresolvedFilesTab: Component = () => {
   const [pending, setPending] = createSignal<FilenameCandidateResponse[]>([]);
   const [accepted, setAccepted] = createSignal<FilenameCandidateResponse[]>([]);
   const [detecting, setDetecting] = createSignal(false);
-  const [expandedId, setExpandedId] = createSignal<string | null>(null);
+  const [expandedIds, setExpandedIds] = createSignal<Set<string>>(new Set());
   const [confirmId, setConfirmId] = createSignal<string | null>(null);
   const [confirmRevertId, setConfirmRevertId] = createSignal<string | null>(null);
   const [filter, setFilter] = createSignal<"all" | "has_suggestion" | "no_suggestion">("all");
@@ -119,7 +119,12 @@ export const UnresolvedFilesTab: Component = () => {
   };
 
   const toggleExpand = (id: string) => {
-    setExpandedId((prev) => (prev === id ? null : id));
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   };
 
   /** Render a single candidate row (used in both pending and accepted sections). */
@@ -129,7 +134,7 @@ export const UnresolvedFilesTab: Component = () => {
   }> = (props) => {
     const c = props.c;
     const dir = createMemo(() => commonDir(c.file_paths));
-    const isExpanded = () => expandedId() === c.id;
+    const isExpanded = () => expandedIds().has(c.id);
 
     return (
       <div
