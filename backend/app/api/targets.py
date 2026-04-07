@@ -786,10 +786,32 @@ async def list_targets_aggregated(
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=250),
     include_custom: bool = Query(False),
+    custom_filters: str | None = Query(None),
     user: User = Depends(get_current_user),
 ):
     """Return targets with aggregated session data, filtered by query params."""
     filter_map, cam_map, tel_map = await load_alias_maps(session)
+
+    # ---------------------------------------------------------------
+    # Parse custom column filters
+    # ---------------------------------------------------------------
+    cc_filter_entries: list[dict] = []
+    cc_columns_by_slug: dict[str, dict] = {}
+    if custom_filters:
+        import json as _json
+        try:
+            cc_filter_entries = _json.loads(custom_filters)
+        except (ValueError, TypeError):
+            cc_filter_entries = []
+
+        if cc_filter_entries:
+            from app.models.custom_column import CustomColumn
+            cc_q = select(CustomColumn.id, CustomColumn.slug, CustomColumn.column_type, CustomColumn.applies_to)
+            cc_rows = (await session.execute(cc_q)).all()
+            cc_columns_by_slug = {
+                r.slug: {"id": str(r.id), "column_type": r.column_type, "applies_to": r.applies_to}
+                for r in cc_rows
+            }
 
     # ---------------------------------------------------------------
     # Phases 1-3: Raw SQL for grouped + aggregates + pagination
@@ -799,6 +821,51 @@ async def list_targets_aggregated(
         "(i.resolved_target_id IS NULL OR t.merged_into_id IS NULL)",
     ]
     params: dict = {}
+
+    # Generate EXISTS subqueries for custom column filters
+    has_cc_session_filters = False
+    for idx, entry in enumerate(cc_filter_entries):
+        slug = entry.get("slug", "")
+        value = entry.get("value", "")
+        col_meta = cc_columns_by_slug.get(slug)
+        if not col_meta or not value:
+            continue
+
+        col_id_param = f"cc_col_{idx}"
+        val_param = f"cc_val_{idx}"
+        params[col_id_param] = col_meta["id"]
+
+        applies_to = col_meta["applies_to"]
+        col_type = col_meta["column_type"]
+
+        if col_type == "text":
+            escaped_val = value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            params[val_param] = f"%{escaped_val}%"
+            match_expr = f"cv.value ILIKE :{val_param}"
+        else:
+            params[val_param] = value
+            match_expr = f"cv.value = :{val_param}"
+
+        if applies_to == "target":
+            where_parts.append(f"""EXISTS (
+                SELECT 1 FROM custom_column_values cv
+                WHERE cv.target_id = t.id AND cv.column_id = CAST(:{col_id_param} AS uuid)
+                AND {match_expr}
+            )""")
+        elif applies_to == "session":
+            has_cc_session_filters = True
+            where_parts.append(f"""EXISTS (
+                SELECT 1 FROM custom_column_values cv
+                WHERE cv.target_id = t.id AND cv.column_id = CAST(:{col_id_param} AS uuid)
+                AND cv.session_date IS NOT NULL AND {match_expr}
+            )""")
+        elif applies_to == "rig":
+            has_cc_session_filters = True
+            where_parts.append(f"""EXISTS (
+                SELECT 1 FROM custom_column_values cv
+                WHERE cv.target_id = t.id AND cv.column_id = CAST(:{col_id_param} AS uuid)
+                AND cv.rig_label IS NOT NULL AND {match_expr}
+            )""")
 
     if camera:
         cam_variants = expand_canonical(camera, cam_map)
