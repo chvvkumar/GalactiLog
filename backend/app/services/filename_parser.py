@@ -249,20 +249,79 @@ def _tokenize(name: str) -> list[str]:
     return tokens
 
 
-# Directory-based target patterns (e.g., N.I.N.A.'s "Target_NGC 2264")
-_TARGET_DIR_RE = re.compile(r"^Target[_\s]+(.+)$", re.IGNORECASE)
+# Prefixed directory patterns: Target_NGC 2264, Object_M31
+_PREFIXED_DIR_RE = re.compile(
+    r"^(?:Target|Object)[_\s]+(.+)$", re.IGNORECASE
+)
+
+# Directory components that are definitely NOT target names
+_NOISE_DIR_RE = re.compile(
+    r"^(?:"
+    r"LIGHT|DARK|FLAT|BIAS|DARKFLAT|FLATDARK"  # frame types
+    r"|Date[_\s].*"  # Date_ prefixed dirs
+    r"|Angle[_\s].*"  # Angle_ prefixed dirs
+    r"|Filter[_\s].*"  # Filter_ prefixed dirs
+    r"|\d{4}"  # bare year (2024, 2025, 2026)
+    r"|\d{4}-\d{2}-\d{2}"  # ISO date
+    r"|\d{8}"  # YYYYMMDD
+    r"|fits|data|images?|captures?|subs?|masters?"  # generic folder names
+    r"|app|home|mnt|media|volumes?"  # system mount points
+    r")$",
+    re.IGNORECASE,
+)
+
+
+def _is_noise_dir(dirname: str) -> bool:
+    """Return True if this directory name is noise (not a target)."""
+    if _NOISE_DIR_RE.match(dirname):
+        return True
+    # Camera model as directory name
+    if CAMERA_RE.match(dirname):
+        return True
+    # Multi-word camera names with spaces (e.g., "ZWO ASI2600MM Pro")
+    space_tokens = dirname.split()
+    if len(space_tokens) > 1 and any(CAMERA_RE.match(t) for t in space_tokens):
+        return True
+    return False
 
 
 def _extract_target_from_path(filepath: Path) -> str | None:
     """Check directory components for target name patterns.
 
-    N.I.N.A. default folder structure: .../Target_<name>/...
-    Some users also use the target name as a plain directory name.
+    Scans all directory components looking for target names. Uses two
+    strategies:
+
+    1. **Prefixed directories** -- ``Target_NGC 2264``, ``Object_M31``
+       are extracted directly (highest confidence).
+    2. **Plain directory names** -- any directory component that isn't
+       a known noise pattern (date, frame type, camera, etc.) is
+       treated as a potential target. The deepest (most specific) match
+       wins.
+
+    Returns the best target name found, or None.
     """
-    for part in filepath.parts:
-        m = _TARGET_DIR_RE.match(part)
+    # Exclude the filename itself and the root/drive
+    dirs = filepath.parent.parts
+
+    # First pass: look for prefixed directories (most reliable)
+    for part in dirs:
+        m = _PREFIXED_DIR_RE.match(part)
         if m:
             return m.group(1).strip()
+
+    # Second pass: find the deepest non-noise directory component
+    # Iterate in reverse (deepest first) to find the most specific match
+    for part in reversed(dirs):
+        if not part or len(part) < 2:
+            continue
+        if _is_noise_dir(part):
+            continue
+        # Skip purely numeric dirs and common path roots
+        if part.replace("-", "").replace(".", "").isdigit():
+            continue
+        # This looks like it could be a target name
+        return part
+
     return None
 
 

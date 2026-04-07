@@ -69,37 +69,67 @@ def test_extract_target(filename: str, expected: str | None):
 
 
 class TestPathBasedExtraction:
-    """Test extraction from directory components (N.I.N.A. folder structure)."""
+    """Test extraction from directory components."""
 
-    def test_nina_target_dir(self):
+    def test_nina_target_prefix(self):
         """N.I.N.A. default folder structure with Target_ prefix."""
         p = Path("/app/data/fits/2026/Date_2026-02-09/LIGHT/ZWO ASI2600MM Pro/Target_NGC 2264/Angle_93.74/Ha_ZWO ASI2600MM Pro_SQA55_93.74deg_600.00s_110G_50Of_1.60HFR_0002.fits")
         assert extract_target_from_filename(p) == "NGC 2264"
 
-    def test_nina_target_dir_messier(self):
+    def test_target_prefix_messier(self):
         p = Path("/data/Target_M31/Light/Ha_300s_0001.fits")
         assert extract_target_from_filename(p) == "M31"
 
-    def test_nina_target_dir_multiword(self):
+    def test_target_prefix_multiword(self):
         p = Path("/data/Target_North America Nebula/Light/Ha_300s_0001.fits")
         assert extract_target_from_filename(p) == "North America Nebula"
 
-    def test_path_target_takes_precedence(self):
-        """Path-based target should win over filename-based extraction."""
+    def test_object_prefix(self):
+        """Object_ prefix also works."""
+        p = Path("/data/Object_IC 1396/Light/Ha_300s_0001.fits")
+        assert extract_target_from_filename(p) == "IC 1396"
+
+    def test_prefixed_dir_takes_precedence_over_filename(self):
+        """Prefixed dir should win over filename-based extraction."""
         p = Path("/data/Target_NGC 7000/M31_Light_Ha_300s_0001.fits")
         assert extract_target_from_filename(p) == "NGC 7000"
 
-    def test_no_target_dir_falls_back_to_filename(self):
-        """Without Target_ dir, should fall back to filename parsing."""
-        p = Path("/data/some_folder/M42_Light_Ha_300s_0001.fits")
+    def test_plain_target_dir(self):
+        """Plain directory name used as target (no prefix)."""
+        p = Path("/data/M42/Light/Ha_300s_0001.fits")
         assert extract_target_from_filename(p) == "M42"
 
-    def test_nina_compact_gain_offset_sqm(self):
-        """N.I.N.A. filename with compact gain/offset and SQA."""
-        p = Path("/data/Ha_ZWO ASI2600MM Pro_SQA55_93.74deg_600.00s_110G_50Of_1.60HFR_0002.fits")
-        assert extract_target_from_filename(p) is None  # no target in filename alone
+    def test_plain_target_dir_multiword(self):
+        """Multi-word target as plain directory."""
+        p = Path("/data/Horsehead Nebula/Light/Ha_300s_0001.fits")
+        assert extract_target_from_filename(p) == "Horsehead Nebula"
 
-    def test_nina_full_path_with_compact_tokens(self):
-        """Full N.I.N.A. path with Target_ dir and compact tokens in filename."""
-        p = Path("/app/data/fits/2026/Date_2026-02-09/LIGHT/ZWO ASI2600MM Pro/Target_NGC 2264/Angle_93.74/Ha_ZWO ASI2600MM Pro_SQA55_93.74deg_600.00s_110G_50Of_1.60HFR_0002.fits")
-        assert extract_target_from_filename(p) == "NGC 2264"
+    def test_deepest_non_noise_dir_wins(self):
+        """Deepest non-noise directory is the most specific target."""
+        p = Path("/data/2026/NGC7000/LIGHT/Ha_300s_0001.fits")
+        assert extract_target_from_filename(p) == "NGC7000"
+
+    def test_noise_dirs_skipped(self):
+        """Frame types, dates, cameras are not mistaken for targets."""
+        p = Path("/app/data/fits/2026/Date_2026-02-09/LIGHT/ZWO ASI2600MM Pro/M33/Ha_300s_0001.fits")
+        assert extract_target_from_filename(p) == "M33"
+
+    def test_no_target_anywhere_falls_back_to_filename(self):
+        """If all dirs are noise, fall back to filename parsing."""
+        p = Path("/data/2026/LIGHT/M42_Light_Ha_300s_0001.fits")
+        assert extract_target_from_filename(p) == "M42"
+
+    def test_no_target_at_all(self):
+        """No target in path or filename."""
+        p = Path("/data/LIGHT/Ha_300s_0001.fits")
+        assert extract_target_from_filename(p) is None
+
+    def test_nina_compact_tokens_no_target(self):
+        """N.I.N.A. filename with compact tokens but no target dir."""
+        p = Path("/data/Ha_ZWO ASI2600MM Pro_SQA55_93.74deg_600.00s_110G_50Of_1.60HFR_0002.fits")
+        assert extract_target_from_filename(p) is None
+
+    def test_target_at_any_level(self):
+        """Target can be at any level in the path hierarchy."""
+        p = Path("/volumes/astro/IC 434/2026/01/LIGHT/Ha_300s_0001.fits")
+        assert extract_target_from_filename(p) == "IC 434"
