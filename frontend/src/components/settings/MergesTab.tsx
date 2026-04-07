@@ -89,7 +89,7 @@ export const MergesTab: Component = () => {
       <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-4 space-y-3">
         <div class="flex justify-between items-center">
           <h3 class="text-theme-text-primary font-medium">Target Merges</h3>
-          <Show when={isAdmin()}>
+          <Show when={isAdmin() && view() !== "unresolved"}>
             <button
               onClick={handleDetect}
               disabled={detecting()}

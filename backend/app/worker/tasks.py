@@ -1259,6 +1259,13 @@ def detect_filename_targets():
     from app.services.filename_resolver import resolve_filename_candidate
 
     with Session(_sync_engine) as db:
+        # Clear all pending candidates — re-detect from scratch with latest parser
+        from sqlalchemy import delete as sa_delete
+        db.execute(
+            sa_delete(FilenameCandidate).where(FilenameCandidate.status == "pending")
+        )
+        db.commit()
+
         # Find images with no resolved target and no OBJECT header
         unresolved_query = (
             sa_select(Image.id, Image.file_path)
@@ -1277,10 +1284,10 @@ def detect_filename_targets():
         if not unresolved:
             return {"candidates_found": 0}
 
-        # Get image_ids already tracked by pending/accepted candidates
+        # Get image_ids already tracked by accepted candidates (don't re-process these)
         existing_candidates = db.execute(
-            sa_select(FilenameCandidate.image_ids, FilenameCandidate.extracted_name)
-            .where(FilenameCandidate.status.in_(["pending", "accepted"]))
+            sa_select(FilenameCandidate.image_ids)
+            .where(FilenameCandidate.status == "accepted")
         ).all()
         tracked_image_ids = set()
         for row in existing_candidates:

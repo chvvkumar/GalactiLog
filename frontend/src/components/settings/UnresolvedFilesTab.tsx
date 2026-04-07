@@ -311,22 +311,11 @@ export const UnresolvedFilesTab: Component = () => {
 
       {/* ── Resolved Section ── */}
       <div class="space-y-3">
-        <div class="flex items-center justify-between gap-3 flex-wrap">
-          <div class="flex items-center gap-3">
-            <h4 class="text-theme-text-primary text-sm font-medium">Resolved</h4>
-            <span class="text-xs text-theme-text-secondary tabular-nums">
-              {accepted().length} resolved
-            </span>
-          </div>
-          <Show when={isAdmin()}>
-            <button
-              onClick={handleDetect}
-              disabled={detecting()}
-              class="px-3 py-1.5 border border-theme-border-em text-theme-text-secondary rounded text-sm disabled:opacity-50 hover:text-theme-text-primary hover:border-theme-accent transition-colors"
-            >
-              {detecting() ? "Detecting..." : "Run Detection"}
-            </button>
-          </Show>
+        <div class="flex items-center gap-3">
+          <h4 class="text-theme-text-primary text-sm font-medium">Resolved</h4>
+          <span class="text-xs text-theme-text-secondary tabular-nums">
+            {accepted().length} resolved
+          </span>
         </div>
 
         <Show

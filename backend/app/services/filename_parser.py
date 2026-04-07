@@ -39,7 +39,7 @@ FRAME_TYPES_RE = re.compile(
 # LP / dual-band filter tokens (lowercased for lookup)
 LP_FILTER_TOKENS = {
     "l-pro", "l-enhance", "l-extreme", "l-ultimate",
-    "dualband", "hoo", "sho",
+    "dualband", "duoband", "hoo", "sho",
 }
 
 # Multi-char filter tokens (lowercased)
@@ -86,6 +86,15 @@ CAMERA_RE = re.compile(
     r"|Canon\w*|Nikon\w*|Sony\w*|EOS\w*|DSLR"
     r"|Atik\w*|FLI\w*|SBIG\w*|Moravian\w*|PlayerOne\w*"
     r"|ZWO|Pro)$",
+    re.IGNORECASE,
+)
+
+# Telescope/optics names and related tokens
+TELESCOPE_RE = re.compile(
+    r"^(?:Askar\w*|Redcat\w*|RASA\d*|EdgeHD\w*|SCT\w*|APO\w*"
+    r"|Takahashi\w*|WO\w*|Sharpstar\w*|Esprit\w*"
+    r"|\d+\.?\d*x"  # focal reducer/barlow: 0.8x, 2x
+    r")$",
     re.IGNORECASE,
 )
 
@@ -146,6 +155,8 @@ def _is_noise_token(token: str) -> bool:
     if BINNING_RE.match(token):
         return True
     if CAMERA_RE.match(token):
+        return True
+    if TELESCOPE_RE.match(token):
         return True
     if HFR_FWHM_RE.match(token):
         return True
@@ -264,6 +275,7 @@ _NOISE_DIR_RE = re.compile(
     r"|\d{4}"  # bare year (2024, 2025, 2026)
     r"|\d{4}-\d{2}-\d{2}"  # ISO date
     r"|\d{8}"  # YYYYMMDD
+    r"|Target_?"  # bare Target_ dir (empty target name)
     r"|fits|data|images?|captures?|subs?|masters?"  # generic folder names
     r"|app|home|mnt|media|volumes?"  # system mount points
     r")$",
@@ -278,9 +290,16 @@ def _is_noise_dir(dirname: str) -> bool:
     # Camera model as directory name
     if CAMERA_RE.match(dirname):
         return True
-    # Multi-word camera names with spaces (e.g., "ZWO ASI2600MM Pro")
+    # Telescope/optics as directory name
+    if TELESCOPE_RE.match(dirname):
+        return True
+    # Multi-word camera/telescope names with spaces (e.g., "ZWO ASI2600MM Pro")
     space_tokens = dirname.split()
-    if len(space_tokens) > 1 and any(CAMERA_RE.match(t) for t in space_tokens):
+    if len(space_tokens) > 1 and any(CAMERA_RE.match(t) or TELESCOPE_RE.match(t) for t in space_tokens):
+        return True
+    # Filter names as directory names (N.I.N.A. uses Ha, Sii, Oiii as subdirs)
+    low = dirname.lower()
+    if low in FILTER_TOKENS or low in LP_FILTER_TOKENS:
         return True
     return False
 
@@ -307,7 +326,9 @@ def _extract_target_from_path(filepath: Path) -> str | None:
     for part in dirs:
         m = _PREFIXED_DIR_RE.match(part)
         if m:
-            return m.group(1).strip()
+            name = m.group(1).strip()
+            if name:  # skip empty Target_ dirs
+                return name
 
     # Second pass: find the deepest non-noise directory component
     # Iterate in reverse (deepest first) to find the most specific match
