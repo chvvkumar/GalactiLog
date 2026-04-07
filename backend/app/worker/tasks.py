@@ -1306,10 +1306,18 @@ def detect_filename_targets():
             if row[0]:
                 tracked_image_ids.update(row[0])
 
+        # Calibration directory names — skip files whose path contains these
+        # even if the FITS header says LIGHT (common N.I.N.A. mislabel)
+        _CALIB_DIRS = {"dark", "darks", "flat", "flats", "bias", "darkflat", "flatdark"}
+
         # Group by extracted name
         groups: dict[str | None, list[tuple]] = {}  # key -> [(image_id, file_path)]
         for image_id, file_path in unresolved:
             if image_id in tracked_image_ids:
+                continue
+            # Skip files whose path clearly indicates calibration frames
+            path_parts = {p.lower() for p in Path(file_path).parts}
+            if path_parts & _CALIB_DIRS:
                 continue
             extracted = extract_target_from_filename(Path(file_path), db_noise=db_noise)
             # For "no guess" files, key by parent directory
