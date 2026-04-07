@@ -379,6 +379,9 @@ export const api = {
       method: "POST",
     }),
 
+  getTaskStatus: (taskId: string) =>
+    fetchJson<{ task_id: string; state: string; result: any }>(`/tasks/${taskId}/status`),
+
   getCorrelation: (params: {
     x_metric: string;
     y_metric: string;
