@@ -301,7 +301,7 @@ async def trigger_smart_rebuild(user: User = Depends(require_admin)):
                 detail="A scan is already running. Wait for it to complete first.",
             )
 
-        smart_rebuild_targets.delay()
+        smart_rebuild_targets.delay(manual=True)
         return {"status": "accepted", "message": "Smart rebuild queued as background task"}
 
 

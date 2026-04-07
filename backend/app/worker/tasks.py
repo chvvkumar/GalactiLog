@@ -163,7 +163,7 @@ def run_scan(self, include_calibration: bool = True) -> dict:
         return {"status": "complete", "new_files_queued": 0, "already_known": cataloged, "removed": removed}
 
     # Transition to ingesting with final total — ingest tasks are already running
-    set_ingesting_sync(_redis, total=total_queued, removed=removed, new_files=len(new_files))
+    set_ingesting_sync(_redis, total=total_queued, removed=removed, new_files=len(new_files), changed_files=len(changed_files))
     # Some tasks may have already completed during discovery, check now
     check_complete_sync(_redis)
 
@@ -687,7 +687,7 @@ SMART_REBUILD_LOCK_TTL = 300  # 5 minutes
 
 
 @celery_app.task(bind=True)
-def smart_rebuild_targets(self) -> dict:
+def smart_rebuild_targets(self, manual: bool = False) -> dict:
     """Quick fix: repair target data using only local DB + SIMBAD cache.
 
     No SIMBAD network calls. Fixes:
@@ -703,12 +703,12 @@ def smart_rebuild_targets(self) -> dict:
         return {"status": "skipped", "reason": "already running"}
 
     try:
-        return _smart_rebuild_inner()
+        return _smart_rebuild_inner(manual=manual)
     finally:
         _redis.delete(SMART_REBUILD_LOCK)
 
 
-def _smart_rebuild_inner() -> dict:
+def _smart_rebuild_inner(manual: bool = False) -> dict:
     logger.info("smart_rebuild: starting")
     set_rebuild_running_sync(_redis, "smart", "Running quick fix...")
     stats = {}
@@ -852,12 +852,13 @@ def _smart_rebuild_inner() -> dict:
     message = "; ".join(parts) if parts else "No issues found"
 
     set_rebuild_complete_sync(_redis, message, stats)
-    append_activity_sync(_redis, {
-        "type": "rebuild_complete",
-        "message": f"Quick Fix: {stats['linked_unresolved']} linked, {stats['redirected_merged']} redirected, {stats['aliases_updated']} aliases updated",
-        "details": stats,
-        "timestamp": time.time(),
-    })
+    if manual:
+        append_activity_sync(_redis, {
+            "type": "rebuild_complete",
+            "message": f"Quick Fix: {message}",
+            "details": stats,
+            "timestamp": time.time(),
+        })
     logger.info("smart_rebuild: done — %s", stats)
     return {"status": "complete", **stats}
 

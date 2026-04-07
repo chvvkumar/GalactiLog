@@ -34,6 +34,7 @@ class ScanStateSnapshot:
     removed: int = 0
     skipped_calibration: int = 0
     new_files: int = 0
+    changed_files: int = 0
 
     def to_dict(self) -> dict:
         return {
@@ -48,6 +49,7 @@ class ScanStateSnapshot:
             "removed": self.removed,
             "skipped_calibration": self.skipped_calibration,
             "new_files": self.new_files,
+            "changed_files": self.changed_files,
         }
 
 
@@ -69,6 +71,7 @@ def parse_snapshot(data: dict | None) -> ScanStateSnapshot:
         removed=int(data.get("removed", 0)),
         skipped_calibration=int(data.get("skipped_calibration", 0)),
         new_files=int(data.get("new_files", 0)),
+        changed_files=int(data.get("changed_files", 0)),
     )
 
 
@@ -192,18 +195,22 @@ def check_complete_sync(r: sync_redis.Redis) -> None:
             "completed_at": time.time(),
         })
         r.expire(SCAN_KEY, EXPIRE_AFTER_COMPLETE)
-        new_label = f" ({snap.new_files} new)" if snap.new_files else ""
-        msg = f"Scan complete: {snap.completed} ingested{new_label}, {snap.failed} failed"
-        if snap.skipped_calibration > 0:
-            msg += f", {snap.skipped_calibration} calibration frames skipped"
-        if snap.csv_enriched > 0:
-            msg += f", {snap.csv_enriched} CSV enriched"
-        if snap.removed > 0:
-            msg += f", {snap.removed} deleted files purged from catalog"
+        parts = []
+        if snap.new_files:
+            parts.append(f"{snap.new_files} new file{'s' if snap.new_files != 1 else ''} added")
+        if snap.changed_files:
+            parts.append(f"{snap.changed_files} changed file{'s' if snap.changed_files != 1 else ''} re-ingested")
+        if snap.failed:
+            parts.append(f"{snap.failed} failed")
+        if snap.csv_enriched:
+            parts.append(f"{snap.csv_enriched} CSV enriched")
+        if snap.removed:
+            parts.append(f"{snap.removed} deleted file{'s' if snap.removed != 1 else ''} purged")
+        msg = "Scan complete: " + (", ".join(parts) if parts else "no changes")
         append_activity_sync(r, {
             "type": "scan_complete",
             "message": msg,
-            "details": {"completed": snap.completed, "failed": snap.failed, "skipped_calibration": snap.skipped_calibration, "csv_enriched": snap.csv_enriched, "total": snap.total, "removed": snap.removed, "new_files": snap.new_files},
+            "details": {"completed": snap.completed, "failed": snap.failed, "skipped_calibration": snap.skipped_calibration, "csv_enriched": snap.csv_enriched, "total": snap.total, "removed": snap.removed, "new_files": snap.new_files, "changed_files": snap.changed_files},
             "timestamp": time.time(),
         })
         # Chain post-scan maintenance tasks
@@ -226,7 +233,7 @@ def start_scanning_sync(r: sync_redis.Redis) -> None:
     r.delete(SCAN_FAILED_KEY)
 
 
-def set_ingesting_sync(r: sync_redis.Redis, total: int, removed: int = 0, new_files: int = 0) -> None:
+def set_ingesting_sync(r: sync_redis.Redis, total: int, removed: int = 0, new_files: int = 0, changed_files: int = 0) -> None:
     mapping: dict = {
         "state": "ingesting",
         "total": total,
@@ -235,6 +242,8 @@ def set_ingesting_sync(r: sync_redis.Redis, total: int, removed: int = 0, new_fi
         mapping["removed"] = removed
     if new_files:
         mapping["new_files"] = new_files
+    if changed_files:
+        mapping["changed_files"] = changed_files
     r.hset(SCAN_KEY, mapping=mapping)
 
 

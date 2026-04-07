@@ -83,15 +83,11 @@ try:
             'timestamp': time.time(),
         }
     else:
-        entry = {
-            'type': 'migration_ok',
-            'message': 'Database schema up to date',
-            'details': {},
-            'timestamp': time.time(),
-        }
+        entry = None  # No need to log when schema is already up to date
 
-    r.lpush('scan:activity', json.dumps(entry))
-    r.ltrim('scan:activity', 0, 19)
+    if entry is not None:
+        r.lpush('scan:activity', json.dumps(entry))
+        r.ltrim('scan:activity', 0, 19)
     r.close()
 except Exception as e:
     print(f'Warning: could not post migration activity: {e}', file=sys.stderr)
