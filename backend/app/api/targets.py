@@ -1195,6 +1195,54 @@ async def list_targets_aggregated(
         total_session_count = basics["session_count"]
         matched_session_count = len(sessions_list) if has_metric_filters else None
 
+        # Count sessions matching custom column session/rig filters
+        if has_cc_session_filters and not tk.startswith("obj:"):
+            cc_matched_dates: set[str] | None = None
+            for idx, entry in enumerate(cc_filter_entries):
+                slug = entry.get("slug", "")
+                value = entry.get("value", "")
+                col_meta = cc_columns_by_slug.get(slug)
+                if not col_meta or not value:
+                    continue
+                if col_meta["applies_to"] not in ("session", "rig"):
+                    continue
+
+                col_id = col_meta["id"]
+                col_type = col_meta["column_type"]
+
+                # Query matching session dates for this target + column
+                from app.models.custom_column import CustomColumnValue
+                import uuid as _uuid
+                target_uuid = _uuid.UUID(basics["target_key"])
+                cv_q = select(func.cast(CustomColumnValue.session_date, String)).where(
+                    CustomColumnValue.target_id == target_uuid,
+                    CustomColumnValue.column_id == _uuid.UUID(col_id),
+                    CustomColumnValue.session_date.isnot(None),
+                )
+                if col_type == "text":
+                    escaped = value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+                    cv_q = cv_q.where(CustomColumnValue.value.ilike(f"%{escaped}%"))
+                else:
+                    cv_q = cv_q.where(CustomColumnValue.value == value)
+
+                cv_rows = (await session.execute(cv_q)).all()
+                matching_dates = {str(r[0]) for r in cv_rows}
+
+                if cc_matched_dates is None:
+                    cc_matched_dates = matching_dates
+                else:
+                    cc_matched_dates &= matching_dates
+
+            if cc_matched_dates is not None:
+                session_dates_for_target = set(sessions_detail.get(tk, {}).keys())
+                if matched_session_count is not None:
+                    # Intersect with metric-filtered sessions
+                    metric_dates = {s["session_date"] for s in sessions_list}
+                    cc_matched_dates &= metric_dates
+                    matched_session_count = len(cc_matched_dates)
+                else:
+                    matched_session_count = len(cc_matched_dates & session_dates_for_target)
+
         sessions = [
             SessionSummary(
                 session_date=s["session_date"],
