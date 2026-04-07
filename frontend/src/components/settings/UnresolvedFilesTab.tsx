@@ -154,7 +154,7 @@ export const UnresolvedFilesTab: Component = () => {
                   </div>
                   <div class="flex items-center gap-2">
                     <Show when={isAdmin()}>
-                      <Show when={c.suggested_target_id}>
+                      <Show when={c.suggested_target_id || c.method === "simbad_new"}>
                         <button
                           onClick={() => setConfirmId(c.id)}
                           class="px-2 py-1 text-xs border border-theme-accent/50 text-theme-accent rounded-[var(--radius-sm)] hover:bg-theme-accent/10 transition-colors"

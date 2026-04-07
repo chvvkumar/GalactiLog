@@ -22,7 +22,7 @@ class FilenameCandidate(Base):
     confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
     file_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    file_paths: Mapped[dict] = mapped_column(JSONB, nullable=False, default=list)
+    file_paths: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
     image_ids: Mapped[list] = mapped_column(
         ARRAY(UUID(as_uuid=True)), nullable=False, default=list
     )

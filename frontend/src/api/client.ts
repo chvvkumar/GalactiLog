@@ -356,7 +356,7 @@ export const api = {
     fetchJson<{ count: number }>("/filename-resolution/candidates/count"),
 
   acceptFilenameCandidate: (id: string, targetId?: string, createNew = false) =>
-    fetchJson<{ status: string; assigned_count: number }>(`/filename-resolution/candidates/${id}/accept`, {
+    fetchJson<{ status: string }>(`/filename-resolution/candidates/${id}/accept`, {
       method: "POST",
       body: JSON.stringify({
         ...(targetId ? { target_id: targetId } : {}),

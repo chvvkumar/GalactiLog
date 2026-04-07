@@ -149,6 +149,8 @@ async def dismiss_candidate(
     candidate = await session.get(FilenameCandidate, candidate_id)
     if not candidate:
         raise HTTPException(status_code=404, detail="Candidate not found")
+    if candidate.status != "pending":
+        raise HTTPException(status_code=400, detail=f"Candidate is already {candidate.status}")
 
     now = datetime.now(timezone.utc)
     candidate.status = "dismissed"
