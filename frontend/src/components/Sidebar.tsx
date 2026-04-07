@@ -9,6 +9,7 @@ import HardwareSelects from "./HardwareSelects";
 import QualityFilters from "./QualityFilters";
 import MetricFilters from "./MetricFilters";
 import FitsQueryBuilder from "./FitsQueryBuilder";
+import CustomColumnFilters from "./CustomColumnFilters";
 
 import { formatIntegration } from "../utils/format";
 
@@ -60,6 +61,7 @@ const Sidebar: Component = () => {
       <CollapsibleSection id="quality" label="Quality (HFR)"><QualityFilters /></CollapsibleSection>
       <CollapsibleSection id="metrics" label="Metrics"><MetricFilters /></CollapsibleSection>
       <CollapsibleSection id="fits-query" label="FITS Header Query"><FitsQueryBuilder /></CollapsibleSection>
+      <CollapsibleSection id="custom-columns" label="Custom Columns"><CustomColumnFilters /></CollapsibleSection>
       <button
         onClick={resetFilters}
         class="w-full py-2 text-xs text-theme-text-secondary hover:text-theme-text-primary bg-theme-elevated hover:bg-theme-border-em rounded-[var(--radius-sm)] transition-colors"
