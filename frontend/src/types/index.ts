@@ -266,6 +266,10 @@ export interface ScanStatus {
   discovered: number;
   started_at: number | null;
   completed_at: number | null;
+  new_files: number;
+  changed_files: number;
+  removed: number;
+  skipped_calibration: number;
   failed_files?: FailedFile[];
 }
 

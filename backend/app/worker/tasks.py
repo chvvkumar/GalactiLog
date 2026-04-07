@@ -36,6 +36,7 @@ from app.services.scan_state import (
     set_rebuild_running_sync, set_rebuild_progress_sync, set_rebuild_complete_sync,
     set_discovered_sync, is_cancel_requested_sync, clear_cancel_sync, set_cancelled_sync,
     append_activity_sync, check_complete_sync,
+    add_skipped_path_sync, get_skipped_paths_sync, clear_skipped_paths_sync,
 )
 
 _redis = get_sync_redis()
@@ -60,6 +61,13 @@ def run_scan(self, include_calibration: bool = True) -> dict:
         rows = result.all()
         known_paths = {row[0] for row in rows}
         known_file_stats = {row[0]: (row[1], row[2]) for row in rows}
+
+    # Include previously skipped calibration paths so they aren't re-queued
+    if not include_calibration:
+        known_paths |= get_skipped_paths_sync(_redis)
+    else:
+        # Calibration now included — clear the skip cache so they get ingested
+        clear_skipped_paths_sync(_redis)
 
     fits_root = Path(settings.fits_data_path)
 
@@ -212,7 +220,7 @@ def auto_scan_tick():
     # Dispatch scan
     _redis.set("autoscan:last_run", str(now))
     logger.info("Auto-scan triggered (interval=%dm)", interval_minutes)
-    include_cal = (row.general or {}).get("include_calibration", True)
+    include_cal = (row.general or {}).get("include_calibration", False)
     run_scan.delay(include_calibration=include_cal)
 
 
@@ -256,6 +264,7 @@ def _do_ingest(fits_path: str, include_calibration: bool = True) -> dict:
     if is_calibration and not include_calibration:
         increment_completed_sync(_redis)
         increment_skipped_calibration_sync(_redis)
+        add_skipped_path_sync(_redis, str(path))
         return {"file": str(path), "status": "skipped_calibration"}
 
     # Step 2: Generate thumbnail (skip calibration frames)
@@ -679,6 +688,85 @@ def rebuild_targets(self) -> dict:
         "timestamp": time.time(),
     })
     logger.info("rebuild_targets: done — resolved=%d, failed=%d", resolved, failed)
+    return {"status": "complete", **details}
+
+
+@celery_app.task(bind=True)
+def retry_unresolved(self) -> dict:
+    """Clear SIMBAD negative cache and SESAME cache, then re-resolve unresolved targets.
+
+    Unlike Full Rebuild, this only touches unresolved images — existing targets are untouched.
+    Useful after adding SESAME fallback or when upstream resolvers have new data.
+    """
+    logger.info("retry_unresolved: starting")
+    set_rebuild_running_sync(_redis, "retry", "Clearing caches...")
+
+    # Phase 1: Clear negative caches so names get a fresh shot
+    with Session(_sync_engine) as session:
+        session.execute(text("DELETE FROM simbad_cache WHERE main_id IS NULL"))
+        session.execute(text("DELETE FROM sesame_cache"))
+        session.commit()
+    _redis.delete("target_resolver:negative")
+    logger.info("retry_unresolved: cleared SIMBAD negatives and SESAME cache")
+
+    # Phase 2: Get distinct OBJECT names from unresolved LIGHT frames
+    with Session(_sync_engine) as session:
+        result = session.execute(text("""
+            SELECT raw_headers->>'OBJECT' AS obj, COUNT(*) AS cnt
+            FROM images
+            WHERE image_type = 'LIGHT'
+              AND resolved_target_id IS NULL
+              AND raw_headers->>'OBJECT' IS NOT NULL
+              AND raw_headers->>'OBJECT' != ''
+            GROUP BY raw_headers->>'OBJECT'
+            ORDER BY cnt DESC
+        """))
+        object_names = result.all()
+
+    total = len(object_names)
+    logger.info("retry_unresolved: found %d unresolved object names", total)
+    set_rebuild_progress_sync(_redis, f"Retrying 0/{total} unresolved names...")
+
+    resolved = 0
+    failed = 0
+
+    # Phase 3: Resolve each and link images
+    for i, (obj_name, img_count) in enumerate(object_names):
+        with Session(_sync_engine) as session:
+            target_id = resolve_target(obj_name, session, redis=_redis)
+
+        if target_id:
+            with Session(_sync_engine) as session:
+                session.execute(text("""
+                    UPDATE images
+                    SET resolved_target_id = :tid
+                    WHERE resolved_target_id IS NULL
+                      AND raw_headers->>'OBJECT' = :obj_name
+                """), {"tid": target_id, "obj_name": obj_name})
+                session.commit()
+            resolved += 1
+            logger.info("retry_unresolved: %s -> %s (%d images)", obj_name, target_id, img_count)
+        else:
+            failed += 1
+
+        if (i + 1) % 5 == 0 or i + 1 == total:
+            set_rebuild_progress_sync(_redis, f"Retrying {i + 1}/{total} unresolved names...")
+
+        time.sleep(0.3)  # Rate limit external services
+
+    details = {"resolved": resolved, "failed": failed, "total": total}
+    set_rebuild_complete_sync(
+        _redis,
+        f"Retry: {resolved} resolved, {failed} still unresolved out of {total} names",
+        details,
+    )
+    append_activity_sync(_redis, {
+        "type": "rebuild_complete",
+        "message": f"Retry Unresolved: {resolved} resolved, {failed} still unresolved out of {total} names",
+        "details": details,
+        "timestamp": time.time(),
+    })
+    logger.info("retry_unresolved: done — resolved=%d, failed=%d", resolved, failed)
     return {"status": "complete", **details}
 
 

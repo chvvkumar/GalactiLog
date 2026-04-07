@@ -230,6 +230,9 @@ export const api = {
   smartRebuildTargets: () =>
     fetchJson<{ status: string; message: string }>("/scan/smart-rebuild-targets", { method: "POST" }),
 
+  retryUnresolved: () =>
+    fetchJson<{ status: string; message: string }>("/scan/retry-unresolved", { method: "POST" }),
+
   getRebuildStatus: () =>
     fetchJson<import("../types").RebuildStatus>("/scan/rebuild-status"),
 

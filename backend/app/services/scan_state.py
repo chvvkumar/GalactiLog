@@ -17,6 +17,7 @@ SCAN_FAILED_KEY = "scan:failed_files"
 SCAN_CANCEL_KEY = "scan:cancel"
 SCAN_ACTIVITY_KEY = "scan:activity"
 SCAN_ACTIVITY_MAX = 20
+SCAN_SKIPPED_PATHS_KEY = "scan:skipped_paths"
 EXPIRE_AFTER_COMPLETE = 86400  # 24 hours
 STALE_TIMEOUT = 300  # 5 minutes with no progress → consider stuck
 
@@ -196,8 +197,11 @@ def check_complete_sync(r: sync_redis.Redis) -> None:
         })
         r.expire(SCAN_KEY, EXPIRE_AFTER_COMPLETE)
         parts = []
-        if snap.new_files:
-            parts.append(f"{snap.new_files} new file{'s' if snap.new_files != 1 else ''} added")
+        actual_new = max(0, snap.new_files - snap.skipped_calibration)
+        if actual_new:
+            parts.append(f"{actual_new} new file{'s' if actual_new != 1 else ''} added")
+        if snap.skipped_calibration:
+            parts.append(f"{snap.skipped_calibration} calibration frame{'s' if snap.skipped_calibration != 1 else ''} skipped")
         if snap.changed_files:
             parts.append(f"{snap.changed_files} changed file{'s' if snap.changed_files != 1 else ''} re-ingested")
         if snap.failed:
@@ -225,6 +229,11 @@ def start_scanning_sync(r: sync_redis.Redis) -> None:
         "total": 0,
         "completed": 0,
         "failed": 0,
+        "new_files": 0,
+        "changed_files": 0,
+        "removed": 0,
+        "csv_enriched": 0,
+        "skipped_calibration": 0,
         "started_at": time.time(),
         "completed_at": "",
     })
@@ -234,21 +243,32 @@ def start_scanning_sync(r: sync_redis.Redis) -> None:
 
 
 def set_ingesting_sync(r: sync_redis.Redis, total: int, removed: int = 0, new_files: int = 0, changed_files: int = 0) -> None:
-    mapping: dict = {
+    r.hset(SCAN_KEY, mapping={
         "state": "ingesting",
         "total": total,
-    }
-    if removed:
-        mapping["removed"] = removed
-    if new_files:
-        mapping["new_files"] = new_files
-    if changed_files:
-        mapping["changed_files"] = changed_files
-    r.hset(SCAN_KEY, mapping=mapping)
+        "removed": removed,
+        "new_files": new_files,
+        "changed_files": changed_files,
+    })
 
 
 def increment_csv_enriched_sync(r: sync_redis.Redis) -> None:
     r.hincrby(SCAN_KEY, "csv_enriched", 1)
+
+
+def add_skipped_path_sync(r: sync_redis.Redis, path: str) -> None:
+    """Track a calibration/skipped file path so it's excluded from future scans."""
+    r.sadd(SCAN_SKIPPED_PATHS_KEY, path)
+
+
+def get_skipped_paths_sync(r: sync_redis.Redis) -> set[str]:
+    """Return all previously skipped file paths."""
+    return {p.decode() if isinstance(p, bytes) else p for p in r.smembers(SCAN_SKIPPED_PATHS_KEY)}
+
+
+def clear_skipped_paths_sync(r: sync_redis.Redis) -> None:
+    """Clear skipped paths cache (e.g. when include_calibration setting changes)."""
+    r.delete(SCAN_SKIPPED_PATHS_KEY)
 
 
 def set_idle_sync(r: sync_redis.Redis) -> None:

@@ -31,10 +31,11 @@ async def _query_sesame_raw(
     Returns dict with main_id, ra, dec, object_type, aliases, resolver
     or None if no match.
     """
-    url = f"{SESAME_URL}/-ox/{resolvers}"
+    encoded_name = object_name.replace(" ", "+")
+    url = f"{SESAME_URL}/-ox/{resolvers}?{encoded_name}"
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.get(url, params={"": object_name})
+            resp = await client.get(url)
             resp.raise_for_status()
 
         root = ET.fromstring(resp.text)

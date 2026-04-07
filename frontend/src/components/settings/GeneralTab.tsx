@@ -21,7 +21,7 @@ export const GeneralTab: Component = () => {
     auto_scan_interval: 240,
     thumbnail_width: 800,
     default_page_size: 50,
-    include_calibration: true,
+    include_calibration: false,
     filter_style: "solid",
     theme: "default-dark",
     text_size: "medium",

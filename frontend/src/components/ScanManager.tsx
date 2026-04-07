@@ -45,6 +45,11 @@ const ScanManager: Component = () => {
     if (s === "complete" || s === "idle") refreshDbSummary();
   });
 
+  // Refresh when merges change (dismiss/merge/revert on targets tab)
+  const onMergesChanged = () => refreshDbSummary();
+  window.addEventListener("merges-changed", onMergesChanged);
+  onCleanup(() => window.removeEventListener("merges-changed", onMergesChanged));
+
   // --- Frame filter sync ---
   createEffect(() => {
     const s = settings();
