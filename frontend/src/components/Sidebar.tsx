@@ -27,7 +27,8 @@ const Sidebar: Component = () => {
       f.dateRange.end ||
       f.fitsQueries.length > 0 ||
       Object.keys(f.qualityFilters).some((k) => (f.qualityFilters as Record<string, unknown>)[k] != null) ||
-      Object.keys(f.metricFilters).length > 0
+      Object.keys(f.metricFilters).length > 0 ||
+      f.customColumnFilters.length > 0
     );
   };
 

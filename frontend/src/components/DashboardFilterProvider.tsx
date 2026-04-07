@@ -19,6 +19,8 @@ interface DashboardFilterAPI {
   updateMetricFilter: (metric: string, range: { min?: number; max?: number }) => void;
   addFitsQuery: (key: string, operator: string, value: string) => void;
   removeFitsQuery: (index: number) => void;
+  setCustomColumnFilter: (slug: string, value: string | null) => void;
+  customColumnFilters: () => { slug: string; value: string }[];
   resetFilters: () => void;
   page: () => number;
   pageSize: () => number;
@@ -42,7 +44,7 @@ export function useDashboardFilters(): DashboardFilterAPI {
 const FILTER_KEYS = [
   "search", "camera", "telescope", "filters", "object_type",
   "date_from", "date_to", "hfr_min", "hfr_max",
-  "fits_key", "fits_op", "fits_val",
+  "fits_key", "fits_op", "fits_val", "cc_filters",
 ];
 const METRIC_KEYS = [
   "fwhm", "eccentricity", "stars", "guiding_rms", "adu_mean",
@@ -83,6 +85,13 @@ function deriveFilters(sp: Record<string, string | undefined>): ActiveFilters {
     }
   }
 
+  let customColumnFilters: { slug: string; value: string }[] = [];
+  if (sp.cc_filters) {
+    try {
+      customColumnFilters = JSON.parse(sp.cc_filters);
+    } catch { /* ignore malformed */ }
+  }
+
   return {
     searchQuery: sp.search ?? "",
     camera: sp.camera || null,
@@ -96,6 +105,7 @@ function deriveFilters(sp: Record<string, string | undefined>): ActiveFilters {
     fitsQueries,
     qualityFilters,
     metricFilters,
+    customColumnFilters,
   };
 }
 
@@ -253,6 +263,24 @@ const DashboardFilterProvider: Component<{ children: JSX.Element }> = (props) =>
     });
   };
 
+  const setCustomColumnFilter = (slug: string, value: string | null) => {
+    const current = filters().customColumnFilters;
+    let next: { slug: string; value: string }[];
+    if (!value) {
+      next = current.filter((f) => f.slug !== slug);
+    } else {
+      const exists = current.find((f) => f.slug === slug);
+      if (exists) {
+        next = current.map((f) => (f.slug === slug ? { slug, value } : f));
+      } else {
+        next = [...current, { slug, value }];
+      }
+    }
+    set({
+      cc_filters: next.length > 0 ? JSON.stringify(next) : undefined,
+    });
+  };
+
   const resetFilters = () => {
     const clear: Record<string, undefined> = {};
     for (const key of ALL_PARAM_KEYS) {
@@ -272,6 +300,8 @@ const DashboardFilterProvider: Component<{ children: JSX.Element }> = (props) =>
     updateMetricFilter,
     addFitsQuery,
     removeFitsQuery,
+    setCustomColumnFilter,
+    customColumnFilters: () => filters().customColumnFilters,
     resetFilters,
     page: currentPage,
     pageSize: currentPageSize,
