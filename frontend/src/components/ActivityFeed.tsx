@@ -133,13 +133,32 @@ const ActivityFeed: Component<{
             <div class="w-full bg-theme-base rounded-full h-2">
               <div class="bg-theme-accent h-2 rounded-full transition-all" style={{ width: `${progressPct()}%` }} />
             </div>
-            <div class="flex gap-4 text-xs text-theme-text-secondary">
-              <Show when={elapsed() != null}>
-                <span>Elapsed: {formatDuration(elapsed()!)}</span>
-              </Show>
-              <Show when={throughput() != null}>
-                <span>{throughput()} files/s</span>
-              </Show>
+            <div class="flex justify-between text-xs text-theme-text-secondary">
+              <div class="flex gap-4">
+                <Show when={elapsed() != null}>
+                  <span>Elapsed: {formatDuration(elapsed()!)}</span>
+                </Show>
+                <Show when={throughput() != null}>
+                  <span>{throughput()} files/s</span>
+                </Show>
+              </div>
+              <div class="flex gap-3">
+                <Show when={props.scanStatus.new_files > 0}>
+                  <span>{props.scanStatus.new_files} new</span>
+                </Show>
+                <Show when={props.scanStatus.changed_files > 0}>
+                  <span>{props.scanStatus.changed_files} changed</span>
+                </Show>
+                <Show when={props.scanStatus.removed > 0}>
+                  <span>{props.scanStatus.removed} removed</span>
+                </Show>
+                <Show when={props.scanStatus.failed > 0}>
+                  <span class="text-theme-error">{props.scanStatus.failed} failed</span>
+                </Show>
+                <Show when={props.scanStatus.skipped_calibration > 0}>
+                  <span>{props.scanStatus.skipped_calibration} skipped</span>
+                </Show>
+              </div>
             </div>
           </Show>
         </div>

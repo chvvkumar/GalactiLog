@@ -6,7 +6,7 @@ class GeneralSettings(BaseModel):
     auto_scan_interval: int = 240
     thumbnail_width: int = 800
     default_page_size: int = 50
-    include_calibration: bool = True
+    include_calibration: bool = False
     filter_style: str = "text-only"
     theme: str = "deep-neutral"
     text_size: str = "medium"

@@ -302,7 +302,7 @@ const MosaicGrid: Component<Props> = (props) => {
       <Show when={tooltip()}>
         {(t) => (
           <div
-            class="fixed z-50 bg-theme-elevated border border-theme-border rounded px-3 py-2 text-xs shadow-[var(--shadow-md)] pointer-events-none"
+            class="fixed z-50 glass-popover bg-theme-elevated border border-theme-border rounded px-3 py-2 text-xs shadow-[var(--shadow-md)] pointer-events-none"
             style={{ left: `${t().x + 12}px`, top: `${t().y - 70}px` }}
           >
             <div class="font-medium text-theme-text-primary">{t().panel.panel_label}</div>

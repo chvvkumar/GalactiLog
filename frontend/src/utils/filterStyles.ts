@@ -3,7 +3,7 @@
 export type FilterBadgeStyle =
   | "solid"
   | "muted"
-  | "muted-bright"
+  | "frosted-glass"
   | "outlined"
   | "text-only"
   | "indicator-dots"
@@ -14,7 +14,7 @@ export type FilterBadgeStyle =
 export const FILTER_STYLE_OPTIONS: { value: FilterBadgeStyle; label: string }[] = [
   { value: "solid", label: "Solid" },
   { value: "muted", label: "Muted Backgrounds" },
-  { value: "muted-bright", label: "Muted Backgrounds (Bright)" },
+  { value: "frosted-glass", label: "Frosted Glass" },
   { value: "outlined", label: "Outlined (Hollow)" },
   { value: "text-only", label: "Colored Text Only (Default)" },
   { value: "indicator-dots", label: "Indicator Dots" },
@@ -70,11 +70,15 @@ export function getFilterBadgeStyle(
           color: hexColor,
         },
       };
-    case "muted-bright":
+    case "frosted-glass":
       return {
         style: {
-          "background-color": hexToRgba(hexColor, 0.57),
-          color: "black",
+          "background-color": hexToRgba(hexColor, 0.12),
+          "border": `1px solid ${hexToRgba(hexColor, 0.25)}`,
+          "backdrop-filter": "blur(8px) saturate(1.4)",
+          "-webkit-backdrop-filter": "blur(8px) saturate(1.4)",
+          "box-shadow": `inset 0 1px 0 0 rgba(255,255,255,0.06), 0 2px 8px ${hexToRgba(hexColor, 0.15)}`,
+          color: hexColor,
         },
       };
     case "outlined":
@@ -124,5 +128,8 @@ export function getFilterBadgeStyle(
           color: "black",
         },
       };
+    default:
+      // Backwards compat: unknown style (e.g. renamed "muted-bright") falls back to frosted-glass
+      return getFilterBadgeStyle("frosted-glass", hexColor);
   }
 }

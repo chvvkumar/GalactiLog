@@ -16,7 +16,7 @@ from app.services.scan_state import (
     get_activity, clear_activity,
 )
 from app.services.simbad import resolve_target_name, normalize_object_name
-from app.worker.tasks import regenerate_thumbnail, run_scan, rebuild_targets, smart_rebuild_targets, backfill_csv_metrics
+from app.worker.tasks import regenerate_thumbnail, run_scan, rebuild_targets, smart_rebuild_targets, retry_unresolved, backfill_csv_metrics
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +25,7 @@ router = APIRouter(prefix="/scan", tags=["scan"])
 
 @router.post("")
 async def trigger_scan(
-    include_calibration: bool = Query(True, description="Include calibration frames (BIAS, DARK, FLAT)"),
+    include_calibration: bool = Query(False, description="Include calibration frames (BIAS, DARK, FLAT)"),
     session: AsyncSession = Depends(get_session),
     user: User = Depends(require_admin),
 ):
@@ -301,8 +301,23 @@ async def trigger_smart_rebuild(user: User = Depends(require_admin)):
                 detail="A scan is already running. Wait for it to complete first.",
             )
 
-        smart_rebuild_targets.delay()
+        smart_rebuild_targets.delay(manual=True)
         return {"status": "accepted", "message": "Smart rebuild queued as background task"}
+
+
+@router.post("/retry-unresolved")
+async def trigger_retry_unresolved(user: User = Depends(require_admin)):
+    """Clear SIMBAD negative cache and SESAME cache, then re-resolve unresolved targets."""
+    async with async_redis() as r:
+        state = await get_scan_state(r)
+        if state.state in ("scanning", "ingesting"):
+            raise HTTPException(
+                status_code=409,
+                detail="A scan is already running. Wait for it to complete first.",
+            )
+
+        retry_unresolved.delay()
+        return {"status": "accepted", "message": "Retry unresolved queued as background task"}
 
 
 @router.post("/backfill-csv")
@@ -341,7 +356,9 @@ async def db_summary(session: AsyncSession = Depends(get_session), user: User = 
             (SELECT COUNT(*) FROM merge_candidates WHERE status = 'pending') AS pending_merges,
             (SELECT COUNT(*) FROM images WHERE detected_stars IS NOT NULL) AS csv_enriched,
             (SELECT COUNT(*) FROM vizier_cache) AS cached_vizier,
-            (SELECT COUNT(*) FROM vizier_cache WHERE size_major IS NULL AND size_minor IS NULL) AS cached_vizier_negative
+            (SELECT COUNT(*) FROM vizier_cache WHERE size_major IS NULL AND size_minor IS NULL) AS cached_vizier_negative,
+            (SELECT COUNT(*) FROM sesame_cache) AS cached_sesame,
+            (SELECT COUNT(*) FROM sesame_cache WHERE main_id IS NULL) AS cached_sesame_negative
     """))
     row = result.one()
     return {
@@ -355,6 +372,8 @@ async def db_summary(session: AsyncSession = Depends(get_session), user: User = 
         "csv_enriched": row[7],
         "cached_vizier": row[8],
         "cached_vizier_negative": row[9],
+        "cached_sesame": row[10],
+        "cached_sesame_negative": row[11],
     }
 
 
