@@ -138,7 +138,7 @@ For development: set `GALACTILOG_CORS_ORIGINS` environment variable with an expl
 
 ### First-Time Setup
 
-Set `GALACTILOG_ADMIN_PASSWORD` in `.env`. On first start, if no users exist, an admin account is created automatically:
+Set `GALACTILOG_ADMIN_PASSWORD` in `docker-compose.yml`. On first start, if no users exist, an admin account is created automatically:
 
 | Variable | Default | Purpose |
 |----------|---------|---------|

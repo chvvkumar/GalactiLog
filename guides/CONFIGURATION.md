@@ -2,59 +2,43 @@
 
 ## How Configuration Works
 
-GalactiLog uses two configuration files in the project root:
+All configuration is done in `docker-compose.yml`. The app service's `environment:` block passes `GALACTILOG_*` variables directly into the container. Volume mounts map host directories into the container.
 
-- **`.env`** -- Defines all your settings: credentials, host paths, and application options.
-- **`docker-compose.yml`** -- Defines the services (postgres, redis, app) and references `.env` variables for volume mounts and service configuration.
-
-### Variable Flow
-
-```
-.env  ──→  docker-compose.yml (${VAR:-default} substitution for volumes, ports, credentials)
-  │
-  └──→  app container (env_file: .env passes all variables into the container)
-              │
-              └──→  environment: block overrides specific variables with
-                    container-internal values (e.g., database hostname = "postgres")
-```
-
-Docker Compose loads `.env` automatically from the same directory. The `env_file: .env` directive on the app service passes every variable from `.env` into the container. The `environment:` block in docker-compose.yml overrides specific variables (like `GALACTILOG_DATABASE_URL`) with container-aware values -- for example, using `postgres` (the Docker service name) as the database hostname instead of `localhost`.
-
-Variables in docker-compose.yml use `${VAR:-default}` syntax. If the variable is set in `.env`, that value is used. If not, the default after `:-` applies. This means you can run GalactiLog with minimal configuration -- only the host paths and admin password are strictly required.
+See [`docker-compose.example.yml`](../docker-compose.example.yml) for the full template with comments.
 
 ## Environment Variables
 
-All environment variables use the `GALACTILOG_` prefix to avoid collisions with other tools. These are set in the `.env` file in the project root.
+All environment variables use the `GALACTILOG_` prefix to avoid collisions with other tools. These are set in the `environment:` section of the app service in `docker-compose.yml`.
 
 ### Application Settings
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `GALACTILOG_DATABASE_URL` | `postgresql+asyncpg://galactilog:galactilog@postgres:5432/galactilog_catalog` | PostgreSQL connection string (async driver). Normally built from GALACTILOG_POSTGRES_USER/PASSWORD/DB in docker-compose.yml. Only set this directly if connecting to an external database. |
+| `GALACTILOG_DATABASE_URL` | `postgresql+asyncpg://galactilog:galactilog@postgres:5432/galactilog_catalog` | PostgreSQL connection string (async driver). Must match the postgres service credentials in docker-compose.yml. Only change if connecting to an external database. |
 | `GALACTILOG_REDIS_URL` | `redis://redis:6379/0` | Redis connection string for task queue and caching. Default points to the redis container. Only change if using an external Redis instance. |
 | `GALACTILOG_FITS_DATA_PATH` | `/app/data/fits` | Container-internal path where FITS files are mounted. Must match the volume mount target in docker-compose.yml. |
 | `GALACTILOG_THUMBNAILS_PATH` | `/app/data/thumbnails` | Container-internal path for generated thumbnails. Must match the volume mount target in docker-compose.yml. |
 | `GALACTILOG_THUMBNAIL_MAX_WIDTH` | `800` | Maximum thumbnail width in pixels. Larger values produce sharper thumbnails but use more disk space. |
 
-### Docker Compose Host Paths
+### Volume Mounts
 
-These variables map directories on your host machine into the Docker containers. They are referenced in docker-compose.yml via `${VAR:-fallback}` syntax. When not set, Docker named volumes are used as fallbacks (fine for testing, not recommended for production).
+Host directories are mapped into containers via the `volumes:` section in `docker-compose.yml`. The example compose file uses Docker named volumes by default, with commented-out host path alternatives.
 
-| Variable | Fallback | Description |
-|----------|----------|-------------|
-| `GALACTILOG_FITS_HOST_PATH` | `./sample_fits` | Host directory containing your FITS files. Mounted read-only into the container. Use an absolute path to your imaging data (e.g., `/mnt/nas/astrophotography`). |
-| `GALACTILOG_THUMBNAILS_HOST_PATH` | `thumbnails_data` (named volume) | Host directory for thumbnail storage. GalactiLog creates JPEG thumbnails during ingest -- this directory grows over time. Set a host path for easy access and backups. |
-| `GALACTILOG_POSTGRES_DATA_HOST_PATH` | `postgres_data` (named volume) | Host directory for PostgreSQL data persistence. Set this to persist the database in a known location for backups. Without it, data lives in a Docker named volume. |
+| Mount | Container Path | Description |
+|-------|---------------|-------------|
+| FITS data | `/app/data/fits` (read-only) | Your host directory containing FITS files. |
+| Thumbnails | `/app/data/thumbnails` | Generated JPEG thumbnails. Grows over time. |
+| PostgreSQL data | `/var/lib/postgresql/data` | Database storage. |
 
 ### PostgreSQL Settings
 
-These configure both the postgres container (which creates the database on first start) and are interpolated into the `GALACTILOG_DATABASE_URL` connection string in docker-compose.yml. They must stay in sync.
+The postgres service credentials are set directly in the `environment:` section of the postgres service in `docker-compose.yml`. The `GALACTILOG_DATABASE_URL` on the app service must match.
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `GALACTILOG_POSTGRES_USER` | `galactilog` | Database username. |
-| `GALACTILOG_POSTGRES_PASSWORD` | `galactilog` | Database password. Change this for any network-exposed deployment. |
-| `GALACTILOG_POSTGRES_DB` | `galactilog_catalog` | Database name. |
+| Postgres Variable | Default | Description |
+|-------------------|---------|-------------|
+| `POSTGRES_USER` | `galactilog` | Database username. |
+| `POSTGRES_PASSWORD` | `galactilog` | Database password. |
+| `POSTGRES_DB` | `galactilog_catalog` | Database name. |
 
 ### Authentication Settings
 

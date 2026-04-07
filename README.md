@@ -220,40 +220,34 @@ See [N.I.N.A. Setup Guide](guides/NINA-SETUP.md) for detailed configuration inst
 
 ## Quickstart
 
-### Using pre-built images (recommended)
-
 ```bash
-# 1. Clone the repository (for config files)
-git clone https://github.com/chvvkumar/GalactiLog.git
-cd GalactiLog
+# 1. Download the example compose file
+curl -O https://raw.githubusercontent.com/chvvkumar/GalactiLog/main/docker-compose.example.yml
 
-# 2. Copy the example files and edit for your system
+# 2. Copy and edit for your system (lines marked "<-- CHANGE")
 cp docker-compose.example.yml docker-compose.yml
-cp .env.example .env
-# Edit .env to set your FITS, thumbnails, and database paths
+# Edit docker-compose.yml: set your FITS path, admin password, and port
 
-# 3. Run the setup script
-bash setup.sh
+# 3. Start
+docker compose up -d
 
-# 4. Open the web UI
-# Default: http://localhost:8080
+# 4. Open http://localhost:8080
 ```
 
-See [`.env.example`](.env.example) and [`docker-compose.example.yml`](docker-compose.example.yml) for all available configuration options.
+Database migrations run automatically on first start. Log in with the admin credentials you set in the compose file, then trigger your first scan from the Settings page.
 
-The setup script pulls the latest image from [DockerHub](https://hub.docker.com/r/chvvkumar/galactilog), initializes the database, and starts all services.
+See [`docker-compose.example.yml`](docker-compose.example.yml) for all available options.
 
 ### Updating
 
 ```bash
-cd GalactiLog
 docker compose pull app
 docker compose up -d
 ```
 
 ### Using a specific version
 
-Pin to a specific release or pre-release tag in your `.env` or `docker-compose.yml`:
+Pin to a specific release tag in `docker-compose.yml`:
 
 ```yaml
 # Stable release
@@ -269,7 +263,7 @@ image: chvvkumar/galactilog:latest
 image: chvvkumar/galactilog:dev
 ```
 
-For manual installation, custom paths, or building from source, see the [Install Guide](guides/INSTALL.md).
+For more details, platform-specific paths, or building from source, see the [Install Guide](guides/INSTALL.md).
 
 ## Guides
 
