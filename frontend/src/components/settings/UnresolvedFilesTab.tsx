@@ -17,6 +17,11 @@ const methodLabel = (c: FilenameCandidateResponse) => {
   }
 };
 
+/** Check if file paths suggest calibration frames (DARK/FLAT/BIAS in path). */
+const CALIB_DIR_RE = /[/\\](DARK|DARKS|FLAT|FLATS|BIAS|DARKFLAT|FLATDARK)[/\\]/i;
+const hasCalibrationPath = (paths: string[]): boolean =>
+  paths.some((p) => CALIB_DIR_RE.test(p));
+
 /** Extract a common directory from file paths for use as row title. */
 const commonDir = (paths: string[]): string => {
   if (!paths.length) return "Unknown";
@@ -155,6 +160,11 @@ export const UnresolvedFilesTab: Component = () => {
               <span class="text-xs text-theme-text-secondary bg-theme-surface border border-theme-border rounded px-1.5 py-0.5">
                 {methodLabel(c)}
               </span>
+              <Show when={hasCalibrationPath(c.file_paths)}>
+                <span class="text-xs text-theme-warning bg-theme-warning/10 border border-theme-warning/30 rounded px-1.5 py-0.5" title="File paths contain calibration directories (DARK/FLAT/BIAS) but FITS headers say LIGHT — possible mislabeled frames">
+                  Possible calibration
+                </span>
+              </Show>
               <Show when={c.suggested_target_name}>
                 <span class="text-theme-text-secondary text-xs">&rarr;</span>
                 <span class="text-theme-accent text-sm">{c.suggested_target_name}</span>
