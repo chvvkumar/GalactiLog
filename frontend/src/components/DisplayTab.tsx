@@ -229,8 +229,8 @@ export default function DisplayTab() {
                   type="button"
                   class={`px-3 py-1.5 rounded-[var(--radius-sm)] text-sm transition-colors duration-150 border ${
                     selectedTextSize() === size.id
-                      ? "border-theme-accent bg-theme-accent text-white"
-                      : "border-theme-border text-theme-text-secondary hover:border-theme-border-em"
+                      ? "border-theme-border-em bg-theme-elevated text-theme-text-primary font-medium"
+                      : "border-theme-border text-theme-text-secondary hover:border-theme-border-em hover:bg-theme-hover"
                   }`}
                   onClick={() => handleTextSizeChange(size.id)}
                 >
@@ -299,8 +299,8 @@ export default function DisplayTab() {
                   type="button"
                   class={`px-2.5 py-1.5 rounded-[var(--radius-sm)] text-xs transition-colors duration-150 border ${
                     selectedContentWidth() === opt.value
-                      ? "border-theme-accent bg-theme-accent text-white"
-                      : "border-theme-border text-theme-text-secondary hover:border-theme-border-em"
+                      ? "border-theme-border-em bg-theme-elevated text-theme-text-primary font-medium"
+                      : "border-theme-border text-theme-text-secondary hover:border-theme-border-em hover:bg-theme-hover"
                   }`}
                   onClick={() => handleContentWidthChange(opt.value)}
                   title={opt.desc}
@@ -359,7 +359,7 @@ export default function DisplayTab() {
 
       <Show when={local() && isAdmin()}>
         <div class="flex justify-end">
-          <button type="button" class="px-3 py-1.5 text-sm rounded-[var(--radius-sm)] bg-theme-accent text-white disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-90 transition-opacity" disabled={saving()} onClick={handleSave}>
+          <button type="button" class="px-3 py-1.5 text-sm rounded-[var(--radius-sm)] bg-theme-accent/15 text-theme-accent border border-theme-accent/30 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-theme-accent/25 transition-colors font-medium" disabled={saving()} onClick={handleSave}>
             {saving() ? "Saving..." : "Save"}
           </button>
         </div>

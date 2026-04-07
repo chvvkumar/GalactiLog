@@ -170,7 +170,7 @@ export const GroupingEditor: Component<Props> = (props) => {
           <button
             onClick={groupSelected}
             disabled={checkedCount() < 2}
-            class="px-3 py-1.5 bg-theme-accent text-white text-sm rounded hover:opacity-90 disabled:opacity-30 disabled:cursor-not-allowed transition-opacity"
+            class="px-3 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 text-sm font-medium rounded hover:bg-theme-accent/25 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
           >
             Group Selected ({checkedCount()})
           </button>

@@ -2,6 +2,7 @@ import { Component, For, Show, createSignal, onMount } from "solid-js";
 import { api } from "../../api/client";
 import { showToast } from "../Toast";
 import { useAuth } from "../AuthProvider";
+import { UnresolvedFilesTab } from "./UnresolvedFilesTab";
 import type { MergeCandidateResponse } from "../../types";
 
 export const MergesTab: Component = () => {
@@ -9,7 +10,8 @@ export const MergesTab: Component = () => {
   const [candidates, setCandidates] = createSignal<MergeCandidateResponse[]>([]);
   const [accepted, setAccepted] = createSignal<MergeCandidateResponse[]>([]);
   const [detecting, setDetecting] = createSignal(false);
-  const [view, setView] = createSignal<"suggestions" | "merged">("suggestions");
+  const [view, setView] = createSignal<"suggestions" | "merged" | "unresolved">("suggestions");
+  const [unresolvedCount, setUnresolvedCount] = createSignal(0);
   const [confirmMergeId, setConfirmMergeId] = createSignal<string | null>(null);
   const [confirmRevertId, setConfirmRevertId] = createSignal<string | null>(null);
 
@@ -26,7 +28,10 @@ export const MergesTab: Component = () => {
     }
   };
 
-  onMount(refresh);
+  onMount(() => {
+    refresh();
+    api.getFilenameCandidateCount().then((r) => setUnresolvedCount(r.count)).catch(() => {});
+  });
 
   const handleMerge = async (candidate: MergeCandidateResponse) => {
     setConfirmMergeId(null);
@@ -84,7 +89,7 @@ export const MergesTab: Component = () => {
       <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-4 space-y-3">
         <div class="flex justify-between items-center">
           <h3 class="text-theme-text-primary font-medium">Target Merges</h3>
-          <Show when={isAdmin()}>
+          <Show when={isAdmin() && view() !== "unresolved"}>
             <button
               onClick={handleDetect}
               disabled={detecting()}
@@ -98,7 +103,7 @@ export const MergesTab: Component = () => {
           <button
             onClick={() => setView("suggestions")}
             class={`px-3 py-1.5 text-sm rounded-[var(--radius-sm)] transition-colors ${
-              view() === "suggestions" ? "bg-theme-accent text-white" : "border border-theme-border text-theme-text-secondary hover:text-theme-text-primary"
+              view() === "suggestions" ? "bg-theme-elevated text-theme-text-primary font-medium border border-theme-border-em" : "border border-theme-border text-theme-text-secondary hover:text-theme-text-primary hover:bg-theme-hover"
             }`}
           >
             Suggestions ({candidates().length})
@@ -106,10 +111,18 @@ export const MergesTab: Component = () => {
           <button
             onClick={() => setView("merged")}
             class={`px-3 py-1.5 text-sm rounded-[var(--radius-sm)] transition-colors ${
-              view() === "merged" ? "bg-theme-accent text-white" : "border border-theme-border text-theme-text-secondary hover:text-theme-text-primary"
+              view() === "merged" ? "bg-theme-elevated text-theme-text-primary font-medium border border-theme-border-em" : "border border-theme-border text-theme-text-secondary hover:text-theme-text-primary hover:bg-theme-hover"
             }`}
           >
             Merged ({accepted().length})
+          </button>
+          <button
+            onClick={() => setView("unresolved")}
+            class={`px-3 py-1.5 text-sm rounded-[var(--radius-sm)] transition-colors ${
+              view() === "unresolved" ? "bg-theme-elevated text-theme-text-primary font-medium border border-theme-border-em" : "border border-theme-border text-theme-text-secondary hover:text-theme-text-primary hover:bg-theme-hover"
+            }`}
+          >
+            Unresolved Files ({unresolvedCount()})
           </button>
         </div>
 
@@ -154,7 +167,7 @@ export const MergesTab: Component = () => {
                         <div class="flex gap-2 pt-1">
                           <button
                             onClick={() => handleMerge(c)}
-                            class="px-3 py-1.5 bg-theme-accent text-white rounded text-xs font-medium hover:opacity-90 transition-opacity"
+                            class="px-3 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded text-xs font-medium hover:bg-theme-accent/25 transition-colors"
                           >
                             Yes, merge
                           </button>
@@ -207,7 +220,7 @@ export const MergesTab: Component = () => {
                         <div class="flex gap-2 pt-1">
                           <button
                             onClick={() => handleRevert(c)}
-                            class="px-3 py-1.5 bg-theme-warning text-white rounded text-xs font-medium hover:opacity-90 transition-opacity"
+                            class="px-3 py-1.5 bg-theme-warning/15 text-theme-warning border border-theme-warning/30 rounded text-xs font-medium hover:bg-theme-warning/25 transition-colors"
                           >
                             Yes, revert
                           </button>
@@ -225,6 +238,10 @@ export const MergesTab: Component = () => {
               </For>
             </div>
           </Show>
+        </Show>
+
+        <Show when={view() === "unresolved"}>
+          <UnresolvedFilesTab />
         </Show>
       </div>
     </div>

@@ -26,7 +26,7 @@ const BooleanFilter: Component<{
                 onClick={() => props.onChange(opt.value)}
                 class="flex-1 px-2 py-1 text-xs transition-colors"
                 classList={{
-                  "bg-theme-accent text-white": isActive(),
+                  "bg-theme-elevated text-theme-text-primary font-medium": isActive(),
                   "bg-theme-input text-theme-text-secondary hover:text-theme-text-primary": !isActive(),
                 }}
               >
