@@ -7,7 +7,7 @@ const App: Component<ParentProps> = (props) => {
   const location = useLocation();
 
   return (
-    <div class="min-h-screen bg-theme-base text-theme-text-primary">
+    <div class="min-h-screen bg-theme-base text-theme-text-primary relative z-10">
       <Show when={location.pathname !== "/login"}>
         <NavBar />
       </Show>

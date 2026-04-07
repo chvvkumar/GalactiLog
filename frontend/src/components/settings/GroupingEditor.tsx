@@ -153,7 +153,7 @@ export const GroupingEditor: Component<Props> = (props) => {
                       e.stopPropagation();
                       props.onUngroupedColorChange?.(item.name, e.currentTarget.value);
                     }}
-                    onClick={(e) => { e.stopPropagation(); e.preventDefault(); }}
+                    onClick={(e) => e.stopPropagation()}
                     class="w-5 h-5 rounded cursor-pointer border-0 bg-transparent flex-shrink-0"
                   />
                 </Show>
