@@ -168,9 +168,19 @@ const DashboardFilterProvider: Component<{ children: JSX.Element }> = (props) =>
     sortBy: apiSortBy(), sortDir: sortDir(),
   }));
 
-  const [targetData, { refetch: refetchTargets }] = createResource(fetchKey, (k) =>
-    api.getTargets(k.filters, k.page, k.pageSize, k.sortBy, k.sortDir)
-  );
+  let abortController: AbortController | undefined;
+
+  const [targetData, { refetch: refetchTargets }] = createResource(fetchKey, async (k) => {
+    abortController?.abort();
+    abortController = new AbortController();
+    const signal = abortController.signal;
+    try {
+      return await api.getTargets(k.filters, k.page, k.pageSize, k.sortBy, k.sortDir, signal);
+    } catch (e) {
+      if (signal.aborted) return undefined as unknown as TargetAggregationResponse;
+      throw e;
+    }
+  });
 
   const set = (updates: Record<string, string | undefined>) => {
     // Reset to page 1 when any filter changes (but not when only page changes)

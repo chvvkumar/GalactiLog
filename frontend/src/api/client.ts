@@ -51,11 +51,12 @@ async function doRefresh(): Promise<boolean> {
   }
 }
 
-async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
+async function fetchJson<T>(path: string, init?: RequestInit, signal?: AbortSignal): Promise<T> {
   const resp = await fetch(`${API_BASE}${path}`, {
     credentials: "same-origin",
     ...init,
     headers: { "Content-Type": "application/json", ...init?.headers },
+    signal: signal ?? init?.signal,
   });
 
   if (
@@ -168,8 +169,8 @@ export const api = {
   deleteUser: (id: string) =>
     fetchJson<void>(`/auth/users/${id}`, { method: "DELETE" }),
 
-  getTargets: (filters: ActiveFilters, page?: number, pageSize?: number, sortBy?: string, sortDir?: string) =>
-    fetchJson<TargetAggregationResponse>(`/targets?${buildTargetQuery(filters, page, pageSize, sortBy, sortDir)}`),
+  getTargets: (filters: ActiveFilters, page?: number, pageSize?: number, sortBy?: string, sortDir?: string, signal?: AbortSignal) =>
+    fetchJson<TargetAggregationResponse>(`/targets?${buildTargetQuery(filters, page, pageSize, sortBy, sortDir)}`, undefined, signal),
 
   getSessionDetail: (targetId: string, date: string) =>
     fetchJson<SessionDetail>(`/targets/${encodeURIComponent(decodeURIComponent(targetId))}/sessions/${date}`),

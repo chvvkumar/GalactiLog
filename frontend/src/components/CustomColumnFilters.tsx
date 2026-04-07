@@ -85,7 +85,7 @@ const TextFilter: Component<{
     if (debounceTimer) clearTimeout(debounceTimer);
     debounceTimer = setTimeout(() => {
       props.onChange(val || null);
-    }, 300);
+    }, 600);
   };
 
   return (
