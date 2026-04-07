@@ -281,11 +281,16 @@ def _do_ingest(fits_path: str, include_calibration: bool = True) -> dict:
     # Step 3: Resolve target (sync wrapper for async SIMBAD call)
     # Skip SIMBAD for calibration frames — they're not astronomical targets
     target_id = None
+    filename_candidate_name = None
     if not is_calibration:
         object_name = meta.get("object_name")
         if object_name:
             with Session(_sync_engine) as session:
                 target_id = resolve_target(object_name, session, redis=_redis)
+        else:
+            # No OBJECT header -- try extracting target from filename
+            from app.services.filename_parser import extract_target_from_filename
+            filename_candidate_name = extract_target_from_filename(path)
 
     # Step 4: Insert into database
     # Capture file stat for delta rescans (detect changed files without re-reading headers)
@@ -351,6 +356,53 @@ def _do_ingest(fits_path: str, include_calibration: bool = True) -> dict:
         if thumb_path and thumb_path.exists():
             thumb_path.unlink(missing_ok=True)
         raise
+
+    # Step 5: Track filename candidate for images without OBJECT header
+    if not is_calibration and not target_id and not meta.get("object_name"):
+        try:
+            with Session(_sync_engine) as session:
+                import uuid
+                from app.models.filename_candidate import FilenameCandidate
+                from app.services.filename_resolver import resolve_filename_candidate as _resolve_fn
+                from sqlalchemy import select as _sel
+
+                extracted = filename_candidate_name
+
+                # Check for existing pending candidate with same extracted name
+                existing = None
+                if extracted:
+                    existing = session.execute(
+                        _sel(FilenameCandidate).where(
+                            FilenameCandidate.extracted_name == extracted,
+                            FilenameCandidate.status == "pending",
+                        )
+                    ).scalar_one_or_none()
+
+                if existing:
+                    existing.image_ids = list(existing.image_ids or []) + [image.id]
+                    existing.file_paths = list(existing.file_paths or []) + [str(path)]
+                    existing.file_count = len(existing.image_ids)
+                else:
+                    # Resolve the candidate
+                    if extracted:
+                        resolution = _resolve_fn(extracted, session, redis=_redis)
+                    else:
+                        resolution = {"method": "none", "confidence": 0.0, "suggested_target_id": None}
+
+                    suggested_id = resolution.get("suggested_target_id")
+                    session.add(FilenameCandidate(
+                        extracted_name=extracted,
+                        suggested_target_id=uuid.UUID(suggested_id) if suggested_id else None,
+                        method=resolution["method"],
+                        confidence=resolution["confidence"],
+                        status="pending",
+                        file_count=1,
+                        file_paths=[str(path)],
+                        image_ids=[image.id],
+                    ))
+                session.commit()
+        except Exception:
+            logger.warning("Failed to create filename candidate for %s", path.name, exc_info=True)
 
     logger.info("Ingested: %s (target=%s)", path.name, target_id)
     increment_completed_sync(_redis)
@@ -1194,3 +1246,105 @@ def backfill_dark_hours() -> dict:
         raise
     finally:
         _redis.delete(DARK_HOURS_LOCK)
+
+
+@celery_app.task(name="detect_filename_targets")
+def detect_filename_targets():
+    """Scan uncategorized images (no OBJECT header) and extract targets from filenames."""
+    import uuid
+    from sqlalchemy import text as sa_text, select as sa_select, func as sa_func, or_
+    from app.models.image import Image
+    from app.models.filename_candidate import FilenameCandidate
+    from app.services.filename_parser import extract_target_from_filename
+    from app.services.filename_resolver import resolve_filename_candidate
+
+    with Session(_sync_engine) as db:
+        # Find images with no resolved target and no OBJECT header
+        unresolved_query = (
+            sa_select(Image.id, Image.file_path)
+            .where(
+                Image.resolved_target_id.is_(None),
+                Image.image_type == "LIGHT",
+                or_(
+                    ~Image.raw_headers.has_key("OBJECT"),
+                    Image.raw_headers["OBJECT"].astext == "",
+                    Image.raw_headers["OBJECT"].is_(None),
+                ),
+            )
+        )
+        unresolved = db.execute(unresolved_query).all()
+
+        if not unresolved:
+            return {"candidates_found": 0}
+
+        # Get image_ids already tracked by pending/accepted candidates
+        existing_candidates = db.execute(
+            sa_select(FilenameCandidate.image_ids, FilenameCandidate.extracted_name)
+            .where(FilenameCandidate.status.in_(["pending", "accepted"]))
+        ).all()
+        tracked_image_ids = set()
+        for row in existing_candidates:
+            if row[0]:
+                tracked_image_ids.update(row[0])
+
+        # Group by extracted name
+        groups: dict[str | None, list[tuple]] = {}  # key -> [(image_id, file_path)]
+        for image_id, file_path in unresolved:
+            if image_id in tracked_image_ids:
+                continue
+            extracted = extract_target_from_filename(Path(file_path))
+            # For "no guess" files, key by parent directory
+            key = extracted if extracted else f"__dir__:{Path(file_path).parent}"
+            groups.setdefault(key, []).append((image_id, file_path))
+
+        candidates_found = 0
+        for key, files in groups.items():
+            image_ids = [f[0] for f in files]
+            file_paths = [f[1] for f in files]
+
+            is_no_guess = key.startswith("__dir__:")
+            extracted_name = None if is_no_guess else key
+
+            # Check if a pending candidate with this extracted_name already exists
+            if extracted_name:
+                existing = db.execute(
+                    sa_select(FilenameCandidate)
+                    .where(
+                        FilenameCandidate.extracted_name == extracted_name,
+                        FilenameCandidate.status == "pending",
+                    )
+                ).scalar_one_or_none()
+                if existing:
+                    # Append to existing candidate
+                    existing.image_ids = list(set(list(existing.image_ids or []) + image_ids))
+                    existing.file_paths = list(set(list(existing.file_paths or []) + file_paths))
+                    existing.file_count = len(existing.image_ids)
+                    continue
+
+            # Resolve the extracted name
+            if extracted_name:
+                resolution = resolve_filename_candidate(extracted_name, db, redis=_redis)
+            else:
+                resolution = {
+                    "method": "none",
+                    "confidence": 0.0,
+                    "suggested_target_id": None,
+                    "suggested_target_name": None,
+                }
+
+            suggested_id = resolution.get("suggested_target_id")
+
+            db.add(FilenameCandidate(
+                extracted_name=extracted_name,
+                suggested_target_id=uuid.UUID(suggested_id) if suggested_id else None,
+                method=resolution["method"],
+                confidence=resolution["confidence"],
+                status="pending",
+                file_count=len(files),
+                file_paths=file_paths,
+                image_ids=image_ids,
+            ))
+            candidates_found += 1
+
+        db.commit()
+        return {"candidates_found": candidates_found}
