@@ -103,7 +103,7 @@ export const MergesTab: Component = () => {
           <button
             onClick={() => setView("suggestions")}
             class={`px-3 py-1.5 text-sm rounded-[var(--radius-sm)] transition-colors ${
-              view() === "suggestions" ? "bg-theme-accent text-white" : "border border-theme-border text-theme-text-secondary hover:text-theme-text-primary"
+              view() === "suggestions" ? "bg-theme-elevated text-theme-text-primary font-medium border border-theme-border-em" : "border border-theme-border text-theme-text-secondary hover:text-theme-text-primary hover:bg-theme-hover"
             }`}
           >
             Suggestions ({candidates().length})
@@ -111,7 +111,7 @@ export const MergesTab: Component = () => {
           <button
             onClick={() => setView("merged")}
             class={`px-3 py-1.5 text-sm rounded-[var(--radius-sm)] transition-colors ${
-              view() === "merged" ? "bg-theme-accent text-white" : "border border-theme-border text-theme-text-secondary hover:text-theme-text-primary"
+              view() === "merged" ? "bg-theme-elevated text-theme-text-primary font-medium border border-theme-border-em" : "border border-theme-border text-theme-text-secondary hover:text-theme-text-primary hover:bg-theme-hover"
             }`}
           >
             Merged ({accepted().length})
@@ -119,7 +119,7 @@ export const MergesTab: Component = () => {
           <button
             onClick={() => setView("unresolved")}
             class={`px-3 py-1.5 text-sm rounded-[var(--radius-sm)] transition-colors ${
-              view() === "unresolved" ? "bg-theme-accent text-white" : "border border-theme-border text-theme-text-secondary hover:text-theme-text-primary"
+              view() === "unresolved" ? "bg-theme-elevated text-theme-text-primary font-medium border border-theme-border-em" : "border border-theme-border text-theme-text-secondary hover:text-theme-text-primary hover:bg-theme-hover"
             }`}
           >
             Unresolved Files ({unresolvedCount()})
@@ -167,7 +167,7 @@ export const MergesTab: Component = () => {
                         <div class="flex gap-2 pt-1">
                           <button
                             onClick={() => handleMerge(c)}
-                            class="px-3 py-1.5 bg-theme-accent text-white rounded text-xs font-medium hover:opacity-90 transition-opacity"
+                            class="px-3 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded text-xs font-medium hover:bg-theme-accent/25 transition-colors"
                           >
                             Yes, merge
                           </button>
@@ -220,7 +220,7 @@ export const MergesTab: Component = () => {
                         <div class="flex gap-2 pt-1">
                           <button
                             onClick={() => handleRevert(c)}
-                            class="px-3 py-1.5 bg-theme-warning text-white rounded text-xs font-medium hover:opacity-90 transition-opacity"
+                            class="px-3 py-1.5 bg-theme-warning/15 text-theme-warning border border-theme-warning/30 rounded text-xs font-medium hover:bg-theme-warning/25 transition-colors"
                           >
                             Yes, revert
                           </button>

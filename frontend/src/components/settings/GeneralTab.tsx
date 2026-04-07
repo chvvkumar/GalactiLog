@@ -117,7 +117,7 @@ export const GeneralTab: Component = () => {
       <button
         onClick={handleSave}
         disabled={saving()}
-        class="px-4 py-2 bg-theme-accent text-white rounded text-sm hover:opacity-90 disabled:opacity-50 transition-opacity"
+        class="px-4 py-2 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded text-sm font-medium hover:bg-theme-accent/25 disabled:opacity-50 transition-colors"
       >
         {saving() ? "Saving..." : "Save"}
       </button>

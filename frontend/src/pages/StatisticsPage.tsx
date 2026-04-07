@@ -49,13 +49,13 @@ const StatisticsPage: Component = () => {
 
             <div class="flex items-center gap-2 mb-1">
               <button
-                class={`px-3 py-1 text-xs rounded ${timelineView() === "timeline" ? "bg-theme-accent text-white" : "bg-theme-bg text-theme-text-secondary border border-theme-border"}`}
+                class={`px-3 py-1 text-xs rounded ${timelineView() === "timeline" ? "bg-theme-elevated text-theme-text-primary font-medium border border-theme-border-em" : "bg-theme-bg text-theme-text-secondary border border-theme-border hover:bg-theme-hover"}`}
                 onClick={() => setTimelineView("timeline")}
               >
                 Timeline
               </button>
               <button
-                class={`px-3 py-1 text-xs rounded ${timelineView() === "calendar" ? "bg-theme-accent text-white" : "bg-theme-bg text-theme-text-secondary border border-theme-border"}`}
+                class={`px-3 py-1 text-xs rounded ${timelineView() === "calendar" ? "bg-theme-elevated text-theme-text-primary font-medium border border-theme-border-em" : "bg-theme-bg text-theme-text-secondary border border-theme-border hover:bg-theme-hover"}`}
                 onClick={() => setTimelineView("calendar")}
               >
                 Calendar

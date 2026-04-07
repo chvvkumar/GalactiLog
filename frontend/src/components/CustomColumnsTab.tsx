@@ -165,7 +165,7 @@ export default function CustomColumnsTab() {
           </div>
           <button
             onClick={handleCreate}
-            class="px-3 py-1 rounded bg-theme-accent text-white text-sm hover:opacity-90"
+            class="px-3 py-1 rounded bg-theme-accent/15 text-theme-accent border border-theme-accent/30 text-sm font-medium hover:bg-theme-accent/25 transition-colors"
           >
             Add
           </button>

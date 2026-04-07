@@ -354,11 +354,11 @@ const ImagingTimeline: Component<Props> = (props) => {
           {/* Gap mode toggle */}
           <div class="flex gap-0.5">
             <button
-              class={`px-2 py-0.5 text-xs rounded transition-colors duration-200 ${gapMode() === "imaged" ? "bg-theme-accent text-white" : "bg-theme-surface-alt text-theme-text-secondary"}`}
+              class={`px-2 py-0.5 text-xs rounded transition-colors duration-200 ${gapMode() === "imaged" ? "bg-theme-elevated text-theme-text-primary font-medium" : "bg-theme-surface-alt text-theme-text-secondary hover:text-theme-text-primary"}`}
               onClick={() => setGapMode("imaged")}
             >Imaged only</button>
             <button
-              class={`px-2 py-0.5 text-xs rounded transition-colors duration-200 ${gapMode() === "all" ? "bg-theme-accent text-white" : "bg-theme-surface-alt text-theme-text-secondary"}`}
+              class={`px-2 py-0.5 text-xs rounded transition-colors duration-200 ${gapMode() === "all" ? "bg-theme-elevated text-theme-text-primary font-medium" : "bg-theme-surface-alt text-theme-text-secondary hover:text-theme-text-primary"}`}
               onClick={() => setGapMode("all")}
             >{granularity() === "daily" ? "All nights" : granularity() === "weekly" ? "All weeks" : "All months"}</button>
           </div>
@@ -367,7 +367,7 @@ const ImagingTimeline: Component<Props> = (props) => {
             <For each={presets}>
               {(p) => (
                 <button
-                  class={`px-2 py-0.5 text-xs rounded transition-colors duration-200 ${activePreset() === p.key ? "bg-theme-accent text-white" : "bg-theme-surface-alt text-theme-text-secondary hover:text-theme-text-primary"}`}
+                  class={`px-2 py-0.5 text-xs rounded transition-colors duration-200 ${activePreset() === p.key ? "bg-theme-elevated text-theme-text-primary font-medium" : "bg-theme-surface-alt text-theme-text-secondary hover:text-theme-text-primary"}`}
                   onClick={() => applyPreset(p.key)}
                 >{p.label}</button>
               )}

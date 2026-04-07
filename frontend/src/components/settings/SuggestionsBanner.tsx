@@ -56,7 +56,7 @@ const MergeGroup: Component<{ group: SuggestionGroup; onMerge: (canonical: strin
       </For>
       <button
         onClick={handleMerge}
-        class="px-2 py-1 bg-theme-accent text-white text-xs rounded hover:opacity-90"
+        class="px-2 py-1 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 text-xs rounded font-medium hover:bg-theme-accent/25 transition-colors"
       >
         Merge
       </button>

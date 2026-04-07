@@ -87,7 +87,7 @@ export const UsersTab: Component = () => {
         <h2 class="text-base font-medium text-theme-text-primary">User Accounts</h2>
         <button
           onClick={() => setShowCreate(!showCreate())}
-          class="px-3 py-1.5 text-xs bg-theme-accent text-white rounded hover:opacity-90 transition-opacity"
+          class="px-3 py-1.5 text-xs bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded font-medium hover:bg-theme-accent/25 transition-colors"
         >
           {showCreate() ? "Cancel" : "Add User"}
         </button>
@@ -132,7 +132,7 @@ export const UsersTab: Component = () => {
           <button
             type="submit"
             disabled={creating()}
-            class="px-3 py-1.5 text-xs bg-theme-accent text-white rounded hover:opacity-90 transition-opacity disabled:opacity-50"
+            class="px-3 py-1.5 text-xs bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded font-medium hover:bg-theme-accent/25 transition-colors disabled:opacity-50"
           >
             {creating() ? "Creating..." : "Create User"}
           </button>
