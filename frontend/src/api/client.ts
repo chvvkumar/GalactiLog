@@ -7,6 +7,7 @@ import type {
   ObjectTypeCount,
   MergeCandidateResponse,
   MergedTargetResponse,
+  FilenameCandidateResponse,
   ScanResult,
   ScanStatus,
   ActiveFilters,
@@ -344,6 +345,37 @@ export const api = {
 
   triggerDuplicateDetection: () =>
     fetchJson<{ status: string; task_id: string }>("/targets/detect-duplicates", {
+      method: "POST",
+    }),
+
+  // Filename resolution
+  getFilenameCandidates: (status = "pending") =>
+    fetchJson<FilenameCandidateResponse[]>(`/filename-resolution/candidates?status=${status}`),
+
+  getFilenameCandidateCount: () =>
+    fetchJson<{ count: number }>("/filename-resolution/candidates/count"),
+
+  acceptFilenameCandidate: (id: string, targetId?: string, createNew = false) =>
+    fetchJson<{ status: string; assigned_count: number }>(`/filename-resolution/candidates/${id}/accept`, {
+      method: "POST",
+      body: JSON.stringify({
+        ...(targetId ? { target_id: targetId } : {}),
+        create_new: createNew,
+      }),
+    }),
+
+  dismissFilenameCandidate: (id: string) =>
+    fetchJson<{ status: string }>(`/filename-resolution/candidates/${id}/dismiss`, {
+      method: "POST",
+    }),
+
+  revertFilenameCandidate: (id: string) =>
+    fetchJson<{ status: string }>(`/filename-resolution/candidates/${id}/revert`, {
+      method: "POST",
+    }),
+
+  triggerFilenameDetection: () =>
+    fetchJson<{ status: string; task_id: string }>("/filename-resolution/detect", {
       method: "POST",
     }),
 

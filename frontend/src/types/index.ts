@@ -352,6 +352,20 @@ export interface MergedTargetResponse {
   image_count: number;
 }
 
+export interface FilenameCandidateResponse {
+  id: string;
+  extracted_name: string | null;
+  suggested_target_id: string | null;
+  suggested_target_name: string | null;
+  method: string;
+  confidence: number;
+  status: string;
+  file_count: number;
+  file_paths: string[];
+  created_at: string;
+  resolved_at: string | null;
+}
+
 // === Stats (Admin) ===
 
 export interface EquipmentItem {
