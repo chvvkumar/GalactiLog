@@ -79,7 +79,8 @@ BINNING_RE = re.compile(r"^(?:Bin[1-4]|[1-4]x[1-4])$", re.IGNORECASE)
 # Camera models
 CAMERA_RE = re.compile(
     r"^(?:ASI\d{3,4}\w*|QHY\d{3,4}\w*|\d{4}M[CP]?"
-    r"|Canon\w*|Nikon\w*|Sony\w*|EOS\w*|DSLR)$",
+    r"|Canon\w*|Nikon\w*|Sony\w*|EOS\w*|DSLR"
+    r"|Atik\w*|FLI\w*|SBIG\w*|Moravian\w*|PlayerOne\w*)$",
     re.IGNORECASE,
 )
 
@@ -88,14 +89,14 @@ HFR_FWHM_RE = re.compile(r"^\d+\.?\d*(?:HFR|FWHM)$", re.IGNORECASE)
 
 # Panel / pier
 PANEL_PIER_RE = re.compile(
-    r"^(?:Panel\d+|PierEast|PierWest|sop-east|sop-west)$",
+    r"^(?:Panel\d+|Pane\d+|Tile\d+|Mosaic\d+|PierEast|PierWest|sop-east|sop-west)$",
     re.IGNORECASE,
 )
 
 # Misc tokens
 MISC_RE = re.compile(
-    r"^(?:Stack\d+|USB\d+|Dithered|NoDither|HighGain|LowNoise|Normal|Unity"
-    r"|frame\d*|image)$",
+    r"^(?:Stack\d*|USB\d+|Dithered|NoDither|HighGain|LowNoise|Normal|Unity"
+    r"|frame\d*|image|RMS\w*|SQM\w*)$",
     re.IGNORECASE,
 )
 
