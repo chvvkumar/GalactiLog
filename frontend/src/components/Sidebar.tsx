@@ -1,5 +1,6 @@
 import { Component, Show } from "solid-js";
 import { useDashboardFilters } from "./DashboardFilterProvider";
+import { useSettingsContext } from "./SettingsProvider";
 import CollapsibleSection from "./CollapsibleSection";
 import SearchBar from "./SearchBar";
 import ObjectTypeToggles from "./ObjectTypeToggles";
@@ -15,6 +16,7 @@ import { formatIntegration } from "../utils/format";
 
 const Sidebar: Component = () => {
   const { resetFilters, targetData, filters } = useDashboardFilters();
+  const { customColumns } = useSettingsContext();
 
   const hasActiveFilters = () => {
     const f = filters();
@@ -61,7 +63,9 @@ const Sidebar: Component = () => {
       <CollapsibleSection id="quality" label="Quality (HFR)"><QualityFilters /></CollapsibleSection>
       <CollapsibleSection id="metrics" label="Metrics"><MetricFilters /></CollapsibleSection>
       <CollapsibleSection id="fits-query" label="FITS Header Query"><FitsQueryBuilder /></CollapsibleSection>
-      <CollapsibleSection id="custom-columns" label="Custom Columns"><CustomColumnFilters /></CollapsibleSection>
+      <Show when={(customColumns() ?? []).length > 0}>
+        <CollapsibleSection id="custom-columns" label="Custom Columns"><CustomColumnFilters /></CollapsibleSection>
+      </Show>
       <button
         onClick={resetFilters}
         class="w-full py-2 text-xs text-theme-text-secondary hover:text-theme-text-primary bg-theme-elevated hover:bg-theme-border-em rounded-[var(--radius-sm)] transition-colors"

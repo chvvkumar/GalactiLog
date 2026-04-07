@@ -1,4 +1,4 @@
-import { Component, For, Show, createSignal, onCleanup } from "solid-js";
+import { Component, For, Show, createEffect, createSignal, onCleanup } from "solid-js";
 import { useDashboardFilters } from "./DashboardFilterProvider";
 import { useSettingsContext } from "./SettingsProvider";
 import type { CustomColumn } from "../types";
@@ -70,6 +70,12 @@ const TextFilter: Component<{
   const [local, setLocal] = createSignal(props.value ?? "");
   let debounceTimer: ReturnType<typeof setTimeout> | undefined;
 
+  // Sync local state when value is cleared externally (e.g. Reset Filters)
+  createEffect(() => {
+    const external = props.value ?? "";
+    if (external !== local()) setLocal(external);
+  });
+
   onCleanup(() => {
     if (debounceTimer) clearTimeout(debounceTimer);
   });
@@ -114,6 +120,9 @@ const CustomColumnFilters: Component = () => {
     const groups: Record<GroupKey, CustomColumn[]> = { target: [], session: [], rig: [] };
     for (const col of columns()) {
       groups[col.applies_to as GroupKey]?.push(col);
+    }
+    for (const key of GROUP_ORDER) {
+      groups[key].sort((a, b) => a.display_order - b.display_order);
     }
     return groups;
   };
