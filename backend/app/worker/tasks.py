@@ -1266,6 +1266,18 @@ def detect_filename_targets():
         )
         db.commit()
 
+        # Build noise set from known equipment/filter names in the DB
+        db_noise: set[str] = set()
+        for col in (Image.camera, Image.telescope, Image.filter_used):
+            rows = db.execute(sa_select(col).where(col.isnot(None)).distinct()).all()
+            for (val,) in rows:
+                if val:
+                    db_noise.add(val.lower())
+                    # Also add individual words for multi-word names
+                    # e.g. "ZWO ASI2600MM Pro" -> {"zwo asi2600mm pro", "zwo", "asi2600mm", "pro"}
+                    for word in val.split():
+                        db_noise.add(word.lower())
+
         # Find images with no resolved target and no OBJECT header
         unresolved_query = (
             sa_select(Image.id, Image.file_path)
@@ -1299,7 +1311,7 @@ def detect_filename_targets():
         for image_id, file_path in unresolved:
             if image_id in tracked_image_ids:
                 continue
-            extracted = extract_target_from_filename(Path(file_path))
+            extracted = extract_target_from_filename(Path(file_path), db_noise=db_noise)
             # For "no guess" files, key by parent directory
             key = extracted if extracted else f"__dir__:{Path(file_path).parent}"
             groups.setdefault(key, []).append((image_id, file_path))

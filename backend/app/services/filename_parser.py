@@ -127,8 +127,14 @@ FSEQ_RE = re.compile(r"^f\d+$", re.IGNORECASE)
 NUMERIC_RE = re.compile(r"^\d+$")
 
 
-def _is_noise_token(token: str) -> bool:
-    """Return True if this token is noise that should be stripped."""
+def _is_noise_token(token: str, db_noise: set[str] | None = None) -> bool:
+    """Return True if this token is noise that should be stripped.
+
+    ``db_noise`` is an optional set of lowercased equipment/filter names
+    discovered from the images table (cameras, telescopes, filters).
+    """
+    if db_noise and token.lower() in db_noise:
+        return True
     if FRAME_TYPES_RE.match(token):
         return True
     low = token.lower()
@@ -283,7 +289,7 @@ _NOISE_DIR_RE = re.compile(
 )
 
 
-def _is_noise_dir(dirname: str) -> bool:
+def _is_noise_dir(dirname: str, db_noise: set[str] | None = None) -> bool:
     """Return True if this directory name is noise (not a target)."""
     if _NOISE_DIR_RE.match(dirname):
         return True
@@ -301,10 +307,13 @@ def _is_noise_dir(dirname: str) -> bool:
     low = dirname.lower()
     if low in FILTER_TOKENS or low in LP_FILTER_TOKENS:
         return True
+    # Extra: check against DB-discovered equipment/filter names
+    if db_noise and low in db_noise:
+        return True
     return False
 
 
-def _extract_target_from_path(filepath: Path) -> str | None:
+def _extract_target_from_path(filepath: Path, db_noise: set[str] | None = None) -> str | None:
     """Check directory components for target name patterns.
 
     Scans all directory components looking for target names. Uses two
@@ -335,7 +344,7 @@ def _extract_target_from_path(filepath: Path) -> str | None:
     for part in reversed(dirs):
         if not part or len(part) < 2:
             continue
-        if _is_noise_dir(part):
+        if _is_noise_dir(part, db_noise):
             continue
         # Skip purely numeric dirs and common path roots
         if part.replace("-", "").replace(".", "").isdigit():
@@ -346,18 +355,25 @@ def _extract_target_from_path(filepath: Path) -> str | None:
     return None
 
 
-def extract_target_from_filename(filepath: Path) -> str | None:
+def extract_target_from_filename(
+    filepath: Path,
+    db_noise: set[str] | None = None,
+) -> str | None:
     """Extract the target name from an astrophotography file path.
 
     First checks directory components for explicit target patterns
     (e.g., N.I.N.A.'s ``Target_<name>`` folders), then falls back to
     parsing the filename itself.
 
+    ``db_noise`` is an optional set of **lowercased** equipment/filter
+    names discovered from the images table.  These are checked in
+    addition to the built-in static patterns.
+
     Returns the cleaned target string, or None if no meaningful target
     name can be extracted.
     """
     # Try path-based extraction first (most reliable)
-    path_target = _extract_target_from_path(filepath)
+    path_target = _extract_target_from_path(filepath, db_noise)
     if path_target:
         return path_target
 
@@ -399,7 +415,7 @@ def extract_target_from_filename(filepath: Path) -> str | None:
     # Filter out noise tokens
     kept: list[str] = []
     for token in merged_tokens:
-        if _is_noise_token(token):
+        if _is_noise_token(token, db_noise):
             continue
         if NUMERIC_RE.match(token):
             continue
