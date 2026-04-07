@@ -65,6 +65,10 @@ GAIN_OFFSET_RE = re.compile(
 # Short gain: G139 (capital G + 2+ digits, standalone token)
 SHORT_GAIN_RE = re.compile(r"^G\d{2,}$")
 
+# Compact gain/offset: 110G (digits + G), 50Of (digits + Of)
+COMPACT_GAIN_RE = re.compile(r"^\d+G$")
+COMPACT_OFFSET_RE = re.compile(r"^\d+Of$", re.IGNORECASE)
+
 # Temperature: -10C, -10.0C, -10degC, -20C
 TEMP_NEG_RE = re.compile(
     r"^-\d+\.?\d*(?:deg)?C$", re.IGNORECASE
@@ -76,11 +80,12 @@ TEMP_T_RE = re.compile(r"^T-?\d+\.?\d*$")
 # Binning
 BINNING_RE = re.compile(r"^(?:Bin[1-4]|[1-4]x[1-4])$", re.IGNORECASE)
 
-# Camera models
+# Camera models (includes manufacturer prefixes that appear as separate tokens)
 CAMERA_RE = re.compile(
     r"^(?:ASI\d{3,4}\w*|QHY\d{3,4}\w*|\d{4}M[CP]?"
     r"|Canon\w*|Nikon\w*|Sony\w*|EOS\w*|DSLR"
-    r"|Atik\w*|FLI\w*|SBIG\w*|Moravian\w*|PlayerOne\w*)$",
+    r"|Atik\w*|FLI\w*|SBIG\w*|Moravian\w*|PlayerOne\w*"
+    r"|ZWO|Pro)$",
     re.IGNORECASE,
 )
 
@@ -92,6 +97,12 @@ PANEL_PIER_RE = re.compile(
     r"^(?:Panel\d+|Pane\d+|Tile\d+|Mosaic\d+|PierEast|PierWest|sop-east|sop-west)$",
     re.IGNORECASE,
 )
+
+# Angle/degree values: 93.74deg
+DEGREE_RE = re.compile(r"^\d+\.?\d*deg$", re.IGNORECASE)
+
+# Sky Quality: SQA55, SQM20.5
+SKY_QUALITY_RE = re.compile(r"^SQ[AM]\d+\.?\d*$", re.IGNORECASE)
 
 # Misc tokens
 MISC_RE = re.compile(
@@ -119,6 +130,14 @@ def _is_noise_token(token: str) -> bool:
     if GAIN_OFFSET_RE.match(token):
         return True
     if SHORT_GAIN_RE.match(token):
+        return True
+    if COMPACT_GAIN_RE.match(token):
+        return True
+    if COMPACT_OFFSET_RE.match(token):
+        return True
+    if DEGREE_RE.match(token):
+        return True
+    if SKY_QUALITY_RE.match(token):
         return True
     if TEMP_NEG_RE.match(token):
         return True
@@ -151,7 +170,15 @@ def _tokenize(name: str) -> list[str]:
     - Handles hyphens: preserves catalog IDs (Sh2-132) and LP filters (L-eXtreme),
       splits other standalone hyphens
     """
-    raw_parts = [p.strip() for p in name.split("_") if p.strip()]
+    # Split on underscores first, then split each part on spaces
+    # (handles filenames with spaces like "ZWO ASI2600MM Pro")
+    underscore_parts = [p.strip() for p in name.split("_") if p.strip()]
+    raw_parts = []
+    for part in underscore_parts:
+        if " " in part:
+            raw_parts.extend(s for s in part.split() if s)
+        else:
+            raw_parts.append(part)
 
     # Merge tokens where a bare number is followed by a time-unit token
     # e.g., ["30", "secs"] -> ["30secs"]
@@ -222,12 +249,38 @@ def _tokenize(name: str) -> list[str]:
     return tokens
 
 
+# Directory-based target patterns (e.g., N.I.N.A.'s "Target_NGC 2264")
+_TARGET_DIR_RE = re.compile(r"^Target[_\s]+(.+)$", re.IGNORECASE)
+
+
+def _extract_target_from_path(filepath: Path) -> str | None:
+    """Check directory components for target name patterns.
+
+    N.I.N.A. default folder structure: .../Target_<name>/...
+    Some users also use the target name as a plain directory name.
+    """
+    for part in filepath.parts:
+        m = _TARGET_DIR_RE.match(part)
+        if m:
+            return m.group(1).strip()
+    return None
+
+
 def extract_target_from_filename(filepath: Path) -> str | None:
-    """Extract the target name from an astrophotography filename.
+    """Extract the target name from an astrophotography file path.
+
+    First checks directory components for explicit target patterns
+    (e.g., N.I.N.A.'s ``Target_<name>`` folders), then falls back to
+    parsing the filename itself.
 
     Returns the cleaned target string, or None if no meaningful target
     name can be extracted.
     """
+    # Try path-based extraction first (most reliable)
+    path_target = _extract_target_from_path(filepath)
+    if path_target:
+        return path_target
+
     name = filepath.name
 
     # 1. Strip known extensions

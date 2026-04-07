@@ -66,3 +66,40 @@ from app.services.filename_parser import extract_target_from_filename
 def test_extract_target(filename: str, expected: str | None):
     result = extract_target_from_filename(Path(filename))
     assert result == expected
+
+
+class TestPathBasedExtraction:
+    """Test extraction from directory components (N.I.N.A. folder structure)."""
+
+    def test_nina_target_dir(self):
+        """N.I.N.A. default folder structure with Target_ prefix."""
+        p = Path("/app/data/fits/2026/Date_2026-02-09/LIGHT/ZWO ASI2600MM Pro/Target_NGC 2264/Angle_93.74/Ha_ZWO ASI2600MM Pro_SQA55_93.74deg_600.00s_110G_50Of_1.60HFR_0002.fits")
+        assert extract_target_from_filename(p) == "NGC 2264"
+
+    def test_nina_target_dir_messier(self):
+        p = Path("/data/Target_M31/Light/Ha_300s_0001.fits")
+        assert extract_target_from_filename(p) == "M31"
+
+    def test_nina_target_dir_multiword(self):
+        p = Path("/data/Target_North America Nebula/Light/Ha_300s_0001.fits")
+        assert extract_target_from_filename(p) == "North America Nebula"
+
+    def test_path_target_takes_precedence(self):
+        """Path-based target should win over filename-based extraction."""
+        p = Path("/data/Target_NGC 7000/M31_Light_Ha_300s_0001.fits")
+        assert extract_target_from_filename(p) == "NGC 7000"
+
+    def test_no_target_dir_falls_back_to_filename(self):
+        """Without Target_ dir, should fall back to filename parsing."""
+        p = Path("/data/some_folder/M42_Light_Ha_300s_0001.fits")
+        assert extract_target_from_filename(p) == "M42"
+
+    def test_nina_compact_gain_offset_sqm(self):
+        """N.I.N.A. filename with compact gain/offset and SQA."""
+        p = Path("/data/Ha_ZWO ASI2600MM Pro_SQA55_93.74deg_600.00s_110G_50Of_1.60HFR_0002.fits")
+        assert extract_target_from_filename(p) is None  # no target in filename alone
+
+    def test_nina_full_path_with_compact_tokens(self):
+        """Full N.I.N.A. path with Target_ dir and compact tokens in filename."""
+        p = Path("/app/data/fits/2026/Date_2026-02-09/LIGHT/ZWO ASI2600MM Pro/Target_NGC 2264/Angle_93.74/Ha_ZWO ASI2600MM Pro_SQA55_93.74deg_600.00s_110G_50Of_1.60HFR_0002.fits")
+        assert extract_target_from_filename(p) == "NGC 2264"
