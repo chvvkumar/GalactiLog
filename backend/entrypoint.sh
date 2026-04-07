@@ -42,8 +42,8 @@ eng.dispose()
 fi
 
 # Capture alembic output to detect what happened
-ALEMBIC_OUTPUT=$(alembic upgrade head 2>&1)
-ALEMBIC_EXIT=$?
+ALEMBIC_OUTPUT=$(alembic upgrade head 2>&1) || ALEMBIC_EXIT=$?
+ALEMBIC_EXIT=${ALEMBIC_EXIT:-0}
 echo "$ALEMBIC_OUTPUT"
 
 # Post migration result to Redis activity feed so it shows in the UI

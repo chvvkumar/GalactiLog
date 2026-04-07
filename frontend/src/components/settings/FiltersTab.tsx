@@ -6,6 +6,7 @@ import { SuggestionsBanner } from "./SuggestionsBanner";
 import { GroupingEditor, type GroupEntry } from "./GroupingEditor";
 import type { FilterConfig, SuggestionsResponse, DiscoveredItem, SuggestionGroup } from "../../types";
 import { api } from "../../api/client";
+import { getFilterColorMap } from "../../store/settings";
 
 export const FiltersTab: Component = () => {
   const { isAdmin } = useAuth();
@@ -45,6 +46,24 @@ export const FiltersTab: Component = () => {
       ]);
       setDiscovered(disc.items);
       setSuggestions(sugg);
+
+      // Seed ungrouped items with default colors from getFilterColorMap
+      // so R/G/B/L etc. show their conventional colors even before explicit save
+      const defaults = getFilterColorMap(settings());
+      const grouped = new Set<string>();
+      for (const g of groups()) {
+        grouped.add(g.canonical);
+        for (const a of g.aliases) grouped.add(a);
+      }
+      setUngroupedColors((prev) => {
+        const merged = { ...prev };
+        for (const item of disc.items) {
+          if (!grouped.has(item.name) && !merged[item.name] && defaults[item.name]) {
+            merged[item.name] = defaults[item.name];
+          }
+        }
+        return merged;
+      });
     } catch {
       // Non-blocking
     }
@@ -100,10 +119,22 @@ export const FiltersTab: Component = () => {
           aliases: g.aliases,
         };
       }
-      // Include ungrouped filters that have custom colors
+      // Include all ungrouped filters with their colors
       for (const [name, color] of Object.entries(ungroupedColors())) {
         if (!filtersPayload[name]) {
           filtersPayload[name] = { color, aliases: [] };
+        }
+      }
+      // Also include any discovered ungrouped filters not yet in the payload
+      // so their default colors get persisted on first save
+      const defaults = getFilterColorMap(settings());
+      const knownNames = new Set(Object.keys(filtersPayload));
+      for (const item of discovered()) {
+        if (!knownNames.has(item.name)) {
+          filtersPayload[item.name] = {
+            color: ungroupedColors()[item.name] || defaults[item.name] || "#808080",
+            aliases: [],
+          };
         }
       }
       await saveFilters(filtersPayload);
@@ -161,7 +192,7 @@ export const FiltersTab: Component = () => {
           <button
             onClick={handleSave}
             disabled={saving()}
-            class="px-3 py-1.5 bg-theme-accent text-white rounded text-sm hover:opacity-90 disabled:opacity-50 transition-opacity"
+            class="px-3 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded text-sm font-medium hover:bg-theme-accent/25 disabled:opacity-50 transition-colors"
           >
             {saving() ? "Saving..." : "Save"}
           </button>

@@ -194,7 +194,7 @@ const ExportModal: Component<Props> = (props) => {
             {copied() ? "Copied!" : "Copy to Clipboard"}
           </button>
           <button
-            class="text-xs px-3 py-1.5 bg-theme-accent text-white rounded hover:opacity-90 transition-opacity disabled:opacity-50"
+            class="text-xs px-3 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded font-medium hover:bg-theme-accent/25 transition-colors disabled:opacity-50"
             disabled={!exportData() || selectedDates().size === 0}
             onClick={downloadCsv}
           >
