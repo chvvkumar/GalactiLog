@@ -298,6 +298,8 @@ export interface DbSummary {
   cached_negative: number;
   cached_vizier: number;
   cached_vizier_negative: number;
+  cached_sesame: number;
+  cached_sesame_negative: number;
   pending_merges: number;
   csv_enriched: number;
 }
