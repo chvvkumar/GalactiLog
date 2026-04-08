@@ -41,18 +41,16 @@ def upgrade() -> None:
     # -- Extensions -------------------------------------------------------
     op.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm")
 
-    # -- Enums (create_type=False prevents duplicate creation in create_table)
-    user_role = sa.Enum("admin", "viewer", name="user_role",
-                        create_type=False)
-    user_role.create(conn, checkfirst=True)
-
-    column_type_enum = sa.Enum("boolean", "text", "dropdown",
-                               name="column_type_enum", create_type=False)
-    column_type_enum.create(conn, checkfirst=True)
-
-    applies_to_enum = sa.Enum("target", "session", "rig",
-                              name="applies_to_enum", create_type=False)
-    applies_to_enum.create(conn, checkfirst=True)
+    # -- Enums (raw SQL to avoid SQLAlchemy's auto-create on create_table)
+    op.execute("DO $$ BEGIN "
+               "CREATE TYPE user_role AS ENUM ('admin', 'viewer'); "
+               "EXCEPTION WHEN duplicate_object THEN NULL; END $$")
+    op.execute("DO $$ BEGIN "
+               "CREATE TYPE column_type_enum AS ENUM ('boolean', 'text', 'dropdown'); "
+               "EXCEPTION WHEN duplicate_object THEN NULL; END $$")
+    op.execute("DO $$ BEGIN "
+               "CREATE TYPE applies_to_enum AS ENUM ('target', 'session', 'rig'); "
+               "EXCEPTION WHEN duplicate_object THEN NULL; END $$")
 
     # -- targets ----------------------------------------------------------
     op.create_table(
@@ -175,7 +173,8 @@ def upgrade() -> None:
                   server_default=sa.text("gen_random_uuid()")),
         sa.Column("username", sa.String(150), unique=True, nullable=False),
         sa.Column("password_hash", sa.String(255), nullable=False),
-        sa.Column("role", user_role, nullable=False),
+        sa.Column("role", sa.Enum("admin", "viewer", name="user_role",
+                                create_type=False), nullable=False),
         sa.Column("is_active", sa.Boolean, nullable=False,
                   server_default=sa.text("true")),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False,
@@ -395,8 +394,12 @@ def upgrade() -> None:
                   server_default=sa.text("gen_random_uuid()")),
         sa.Column("name", sa.String(255), nullable=False),
         sa.Column("slug", sa.String(255), nullable=False, unique=True),
-        sa.Column("column_type", column_type_enum, nullable=False),
-        sa.Column("applies_to", applies_to_enum, nullable=False),
+        sa.Column("column_type", sa.Enum("boolean", "text", "dropdown",
+                                       name="column_type_enum",
+                                       create_type=False), nullable=False),
+        sa.Column("applies_to", sa.Enum("target", "session", "rig",
+                                        name="applies_to_enum",
+                                        create_type=False), nullable=False),
         sa.Column("dropdown_options", sa.ARRAY(sa.String), nullable=True),
         sa.Column("display_order", sa.Integer, nullable=False,
                   server_default=sa.text("0")),
