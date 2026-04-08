@@ -6,7 +6,7 @@ from datetime import date as date_type, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 import sqlalchemy as sa
-from sqlalchemy import select, or_, and_, func, cast, Float, Date, text
+from sqlalchemy import select, or_, and_, func, cast, Float, Date, String, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
