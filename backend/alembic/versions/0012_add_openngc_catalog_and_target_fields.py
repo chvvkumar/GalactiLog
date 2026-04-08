@@ -11,6 +11,7 @@ depends_on = None
 def upgrade() -> None:
     op.create_table(
         "openngc_catalog",
+        if_not_exists=True,
         sa.Column("name", sa.String(20), primary_key=True),
         sa.Column("type", sa.String(10), nullable=True),
         sa.Column("ra", sa.Float, nullable=True),

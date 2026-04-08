@@ -35,6 +35,7 @@ def upgrade() -> None:
 
     op.create_table(
         "vizier_cache",
+        if_not_exists=True,
         sa.Column("catalog_id", sa.String(50), primary_key=True),
         sa.Column("vizier_catalog", sa.String(20), nullable=True),
         sa.Column("size_major", sa.Float, nullable=True),

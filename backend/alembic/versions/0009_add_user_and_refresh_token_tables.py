@@ -15,6 +15,7 @@ def upgrade() -> None:
 
     op.create_table(
         "users",
+        if_not_exists=True,
         sa.Column("id", UUID(as_uuid=True), primary_key=True),
         sa.Column("username", sa.String(150), unique=True, nullable=False),
         sa.Column("password_hash", sa.String(255), nullable=False),
@@ -26,6 +27,7 @@ def upgrade() -> None:
 
     op.create_table(
         "refresh_tokens",
+        if_not_exists=True,
         sa.Column("id", UUID(as_uuid=True), primary_key=True),
         sa.Column("user_id", UUID(as_uuid=True), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
         sa.Column("token_hash", sa.String(64), unique=True, nullable=False),

@@ -11,7 +11,7 @@ def upgrade() -> None:
     op.add_column("targets", sa.Column("catalog_id", sa.String(100), nullable=True))
     op.add_column("targets", sa.Column("common_name", sa.String(255), nullable=True))
     op.execute(
-        "CREATE INDEX ix_targets_catalog_id_trgm ON targets "
+        "CREATE INDEX IF NOT EXISTS ix_targets_catalog_id_trgm ON targets "
         "USING GIN (catalog_id gin_trgm_ops)"
     )
 

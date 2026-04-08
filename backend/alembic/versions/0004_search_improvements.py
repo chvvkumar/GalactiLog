@@ -15,7 +15,7 @@ def upgrade() -> None:
 
     # Add GIN trigram index on targets.primary_name
     op.execute(
-        "CREATE INDEX ix_targets_primary_name_trgm ON targets "
+        "CREATE INDEX IF NOT EXISTS ix_targets_primary_name_trgm ON targets "
         "USING GIN (primary_name gin_trgm_ops)"
     )
 
@@ -41,6 +41,7 @@ def upgrade() -> None:
     # Create merge_candidates table
     op.create_table(
         "merge_candidates",
+        if_not_exists=True,
         sa.Column(
             "id",
             UUID(as_uuid=True),
