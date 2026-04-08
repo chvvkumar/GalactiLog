@@ -126,11 +126,16 @@ export const FiltersTab: Component = () => {
         }
       }
       // Also include any discovered ungrouped filters not yet in the payload
-      // so their default colors get persisted on first save
+      // so their default colors get persisted on first save.
+      // Skip names already covered as aliases in existing groups.
       const defaults = getFilterColorMap(settings());
       const knownNames = new Set(Object.keys(filtersPayload));
+      const coveredAliases = new Set<string>();
+      for (const cfg of Object.values(filtersPayload)) {
+        for (const alias of cfg.aliases) coveredAliases.add(alias);
+      }
       for (const item of discovered()) {
-        if (!knownNames.has(item.name)) {
+        if (!knownNames.has(item.name) && !coveredAliases.has(item.name)) {
           filtersPayload[item.name] = {
             color: ungroupedColors()[item.name] || defaults[item.name] || "#808080",
             aliases: [],
