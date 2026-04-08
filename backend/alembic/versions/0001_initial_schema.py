@@ -41,16 +41,17 @@ def upgrade() -> None:
     # -- Extensions -------------------------------------------------------
     op.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm")
 
-    # -- Enums ------------------------------------------------------------
-    user_role = sa.Enum("admin", "viewer", name="user_role")
+    # -- Enums (create_type=False prevents duplicate creation in create_table)
+    user_role = sa.Enum("admin", "viewer", name="user_role",
+                        create_type=False)
     user_role.create(conn, checkfirst=True)
 
     column_type_enum = sa.Enum("boolean", "text", "dropdown",
-                               name="column_type_enum")
+                               name="column_type_enum", create_type=False)
     column_type_enum.create(conn, checkfirst=True)
 
     applies_to_enum = sa.Enum("target", "session", "rig",
-                              name="applies_to_enum")
+                              name="applies_to_enum", create_type=False)
     applies_to_enum.create(conn, checkfirst=True)
 
     # -- targets ----------------------------------------------------------
