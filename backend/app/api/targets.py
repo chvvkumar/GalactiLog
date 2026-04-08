@@ -751,6 +751,7 @@ def _sort_clause(sort_by: str, sort_dir: str) -> str:
 async def list_targets_aggregated(
     session: AsyncSession = Depends(get_session),
     search: str | None = Query(None),
+    target_id: str | None = Query(None, description="Exact target UUID from search selection"),
     camera: str | None = Query(None),
     telescope: str | None = Query(None),
     filters: str | None = Query(None),
@@ -888,7 +889,10 @@ async def list_targets_aggregated(
     if date_to:
         where_parts.append("i.capture_date <= :date_to")
         params["date_to"] = datetime.strptime(date_to, "%Y-%m-%d").date() + timedelta(days=1)
-    if search:
+    if target_id:
+        where_parts.append("i.resolved_target_id = CAST(:exact_target_id AS uuid)")
+        params["exact_target_id"] = target_id
+    elif search:
         escaped_search = search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         pattern = f"%{escaped_search}%"
         where_parts.append("""(
