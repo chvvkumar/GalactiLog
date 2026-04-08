@@ -7,7 +7,7 @@ this migration.
 import json
 from alembic import op
 import sqlalchemy as sa
-from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
+from sqlalchemy.dialects.postgresql import ARRAY, ENUM, JSONB, UUID
 
 revision = "0001"
 down_revision = None
@@ -173,8 +173,8 @@ def upgrade() -> None:
                   server_default=sa.text("gen_random_uuid()")),
         sa.Column("username", sa.String(150), unique=True, nullable=False),
         sa.Column("password_hash", sa.String(255), nullable=False),
-        sa.Column("role", sa.Enum("admin", "viewer", name="user_role",
-                                create_type=False), nullable=False),
+        sa.Column("role", ENUM("admin", "viewer", name="user_role",
+                              create_type=False), nullable=False),
         sa.Column("is_active", sa.Boolean, nullable=False,
                   server_default=sa.text("true")),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False,
@@ -394,12 +394,12 @@ def upgrade() -> None:
                   server_default=sa.text("gen_random_uuid()")),
         sa.Column("name", sa.String(255), nullable=False),
         sa.Column("slug", sa.String(255), nullable=False, unique=True),
-        sa.Column("column_type", sa.Enum("boolean", "text", "dropdown",
-                                       name="column_type_enum",
-                                       create_type=False), nullable=False),
-        sa.Column("applies_to", sa.Enum("target", "session", "rig",
-                                        name="applies_to_enum",
-                                        create_type=False), nullable=False),
+        sa.Column("column_type", ENUM("boolean", "text", "dropdown",
+                                     name="column_type_enum",
+                                     create_type=False), nullable=False),
+        sa.Column("applies_to", ENUM("target", "session", "rig",
+                                     name="applies_to_enum",
+                                     create_type=False), nullable=False),
         sa.Column("dropdown_options", sa.ARRAY(sa.String), nullable=True),
         sa.Column("display_order", sa.Integer, nullable=False,
                   server_default=sa.text("0")),
@@ -458,7 +458,7 @@ def upgrade() -> None:
         sa.Column("file_count", sa.Integer, nullable=False,
                   server_default="0"),
         sa.Column("file_paths", JSONB, nullable=False,
-                  server_default="'[]'::jsonb"),
+                  server_default=sa.text("'[]'::jsonb")),
         sa.Column("image_ids", ARRAY(UUID(as_uuid=True)), nullable=False,
                   server_default="{}"),
         sa.Column("created_at", sa.DateTime(timezone=True),
