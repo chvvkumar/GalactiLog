@@ -1,4 +1,5 @@
 """Add user_settings table for application configuration."""
+import json
 import uuid
 from alembic import op
 import sqlalchemy as sa
@@ -38,18 +39,15 @@ def upgrade() -> None:
         sa.Column("equipment", JSONB, nullable=False, server_default="{}"),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
     )
-    # Seed single row with defaults
-    op.execute(
-        sa.text(
-            "INSERT INTO user_settings (id, general, filters, equipment) "
-            "VALUES (CAST(:id AS uuid), :general, :filters, :equipment)"
-        ).bindparams(
-            id=str(SETTINGS_ROW_ID),
-            general=sa.type_coerce(DEFAULT_GENERAL, JSONB),
-            filters=sa.type_coerce(DEFAULT_FILTERS, JSONB),
-            equipment=sa.type_coerce({"cameras": {}, "telescopes": {}}, JSONB),
-        )
-    )
+    # Seed single row with defaults — use raw SQL to avoid asyncpg type issues
+    general_json = json.dumps(DEFAULT_GENERAL).replace("'", "''")
+    filters_json = json.dumps(DEFAULT_FILTERS).replace("'", "''")
+    equipment_json = json.dumps({"cameras": {}, "telescopes": {}}).replace("'", "''")
+    op.execute(sa.text(
+        f"INSERT INTO user_settings (id, general, filters, equipment) "
+        f"VALUES ('{SETTINGS_ROW_ID}'::uuid, '{general_json}'::jsonb, "
+        f"'{filters_json}'::jsonb, '{equipment_json}'::jsonb)"
+    ))
 
 def downgrade() -> None:
     op.drop_table("user_settings")
