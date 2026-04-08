@@ -305,7 +305,14 @@ async def get_discovered(
     session: AsyncSession = Depends(get_session),
     user: User = Depends(get_current_user),
 ):
-    """Return all distinct raw values from DB with frame counts for a section."""
+    """Return all distinct values from DB with frame counts for a section.
+
+    For filters/cameras/telescopes, raw DB values are normalized through
+    the user-configured alias maps so that e.g. "Ha" and "ha" are merged
+    into a single canonical entry.
+    """
+    from app.services.normalization import load_alias_maps, normalize_filter, normalize_equipment
+
     column_map = {
         DiscoveredSection.filters: Image.filter_used,
         DiscoveredSection.cameras: Image.camera,
@@ -320,8 +327,24 @@ async def get_discovered(
     )
     result = await session.execute(q)
     rows = result.all()
+
+    filter_map, cam_map, tel_map = await load_alias_maps(session)
+    normalize_map = {
+        DiscoveredSection.filters: lambda n: normalize_filter(n, filter_map),
+        DiscoveredSection.cameras: lambda n: normalize_equipment(n, cam_map),
+        DiscoveredSection.telescopes: lambda n: normalize_equipment(n, tel_map),
+    }
+    normalize = normalize_map[section]
+
+    # Merge counts for names that normalize to the same canonical form
+    merged: dict[str, int] = {}
+    for name, count in rows:
+        canonical = normalize(name) or name
+        merged[canonical] = merged.get(canonical, 0) + count
+
+    items = sorted(merged.items(), key=lambda x: x[1], reverse=True)
     return DiscoveredResponse(
-        items=[DiscoveredItem(name=name, count=count) for name, count in rows]
+        items=[DiscoveredItem(name=name, count=count) for name, count in items]
     )
 
 
