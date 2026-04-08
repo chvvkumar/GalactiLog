@@ -1,15 +1,24 @@
-import { Component, createSignal, For, Show } from "solid-js";
+import { Component, createSignal, createEffect, on, For, Show } from "solid-js";
 import { api } from "../api/client";
 import { useDashboardFilters } from "./DashboardFilterProvider";
 import { debounce } from "../utils/debounce";
 import type { TargetSearchResultFuzzy } from "../types";
 
 const SearchBar: Component = () => {
-  const { updateFilter } = useDashboardFilters();
+  const { updateFilter, filters } = useDashboardFilters();
   const [query, setQuery] = createSignal("");
   const [suggestions, setSuggestions] = createSignal<TargetSearchResultFuzzy[]>([]);
   const [showSuggestions, setShowSuggestions] = createSignal(false);
   const [activeIndex, setActiveIndex] = createSignal(-1);
+
+  // Only sync when external value is cleared (e.g. Reset Filters)
+  // Never sync non-empty external values back — input owns its own text
+  createEffect(on(() => filters().searchQuery, (search, prev) => {
+    if (!search && prev) setQuery("");
+  }, { defer: true }));
+  createEffect(on(() => filters().selectedTargetId, (id, prev) => {
+    if (!id && prev) setQuery("");
+  }, { defer: true }));
 
   const fetchSuggestions = debounce(async (value: string) => {
     try {
@@ -56,7 +65,7 @@ const SearchBar: Component = () => {
   const selectTarget = (target: TargetSearchResultFuzzy) => {
     setQuery(target.primary_name);
     setShowSuggestions(false);
-    updateFilter("searchQuery", target.primary_name);
+    updateFilter("selectedTargetId", target.id);
   };
 
   return (

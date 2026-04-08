@@ -9,6 +9,7 @@ import ExportModal from "../components/ExportModal";
 import { useSettingsContext } from "../components/SettingsProvider";
 import { isFieldVisible } from "../utils/displaySettings";
 import { contentWidthClass } from "../utils/format";
+import SettingsHelpSection from "../components/settings/SettingsHelpSection";
 import { timezoneLabel } from "../utils/dateTime";
 
 import { formatIntegration } from "../utils/format";
@@ -272,6 +273,24 @@ const TargetDetailPage: Component = () => {
                   <div class="text-caption text-theme-text-secondary">Filters Used</div>
                 </div>
               </div>
+            </div>
+
+            {/* Help Section */}
+            <div class="px-4 sm:px-6 pt-4">
+              <SettingsHelpSection tabId="target-detail">
+                <p class="text-sm text-theme-text-secondary">
+                  The Target Detail page shows everything GalactiLog knows about a single imaging target.
+                </p>
+                <p class="text-sm text-theme-text-secondary">
+                  The header displays the resolved object name, coordinates, object type, and angular size from SIMBAD when available.
+                </p>
+                <ul class="list-disc list-inside space-y-1 text-sm text-theme-text-secondary">
+                  <li><strong class="text-theme-text-primary">Integration summary</strong> shows total exposure time, frame counts, and filter breakdown.</li>
+                  <li><strong class="text-theme-text-primary">Charts</strong> visualize quality metrics (HFR, FWHM, guiding RMS, etc.) across sessions. Click the chart header to expand or collapse it.</li>
+                  <li><strong class="text-theme-text-primary">Sessions</strong> are listed as expandable cards. Each card shows per-session metrics, and expanding it reveals individual frame details with all recorded FITS header data.</li>
+                  <li>Use the <strong class="text-theme-text-primary">Export</strong> button to generate AstroBin-compatible CSV files for your imaging data.</li>
+                </ul>
+              </SettingsHelpSection>
             </div>
 
             {/* Target Notes */}

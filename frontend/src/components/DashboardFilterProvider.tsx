@@ -43,7 +43,7 @@ export function useDashboardFilters(): DashboardFilterAPI {
 }
 
 const FILTER_KEYS = [
-  "search", "camera", "telescope", "filters", "object_type",
+  "search", "target_id", "camera", "telescope", "filters", "object_type",
   "date_from", "date_to", "hfr_min", "hfr_max",
   "fits_key", "fits_op", "fits_val", "cc_filters",
 ];
@@ -95,6 +95,7 @@ function deriveFilters(sp: Record<string, string | undefined>): ActiveFilters {
 
   return {
     searchQuery: sp.search ?? "",
+    selectedTargetId: sp.target_id || null,
     camera: sp.camera || null,
     telescope: sp.telescope || null,
     opticalFilters: sp.filters?.split(",").filter(Boolean) ?? [],
@@ -211,7 +212,10 @@ const DashboardFilterProvider: Component<{ children: JSX.Element }> = (props) =>
   const updateFilter = (key: string, value: any) => {
     switch (key) {
       case "searchQuery":
-        set({ search: value || undefined });
+        set({ search: value || undefined, target_id: undefined });
+        break;
+      case "selectedTargetId":
+        set({ target_id: value || undefined, search: undefined });
         break;
       case "camera":
         set({ camera: value || undefined });

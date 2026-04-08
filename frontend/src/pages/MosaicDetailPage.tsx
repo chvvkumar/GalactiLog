@@ -4,6 +4,7 @@ import { api } from "../api/client";
 import type { PanelStats } from "../types";
 import { formatIntegration, contentWidthClass } from "../utils/format";
 import { useSettingsContext } from "../components/SettingsProvider";
+import SettingsHelpSection from "../components/settings/SettingsHelpSection";
 
 const MosaicDetailPage: Component = () => {
   const ctx = useSettingsContext();
@@ -87,6 +88,18 @@ const MosaicDetailPage: Component = () => {
                 <span>{data().total_frames} frames</span>
               </div>
             </div>
+
+            {/* Help */}
+            <SettingsHelpSection tabId="mosaic-detail">
+              <p class="text-sm text-theme-text-secondary">
+                The Mosaic Detail page shows all panels belonging to this mosaic project along with their individual and combined statistics.
+              </p>
+              <ul class="list-disc list-inside space-y-1 text-sm text-theme-text-secondary">
+                <li>The <strong class="text-theme-text-primary">panel table</strong> lists each panel's target, integration time, frame count, and last session date. Click column headers to sort.</li>
+                <li>Click a panel's target name to navigate to its full Target Detail page.</li>
+                <li>Use <strong class="text-theme-text-primary">Notes</strong> to record project-level information like imaging goals, completion status, or processing notes.</li>
+              </ul>
+            </SettingsHelpSection>
 
             {/* Notes */}
             <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-4">
