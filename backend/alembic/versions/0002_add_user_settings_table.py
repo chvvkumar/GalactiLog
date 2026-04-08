@@ -41,19 +41,19 @@ def upgrade() -> None:
         if_not_exists=True,
     )
     # Seed single row with defaults (ON CONFLICT for stamped installs)
-    general_json = json.dumps(DEFAULT_GENERAL)
-    filters_json = json.dumps(DEFAULT_FILTERS)
-    equipment_json = json.dumps({"cameras": {}, "telescopes": {}})
-    op.execute(sa.text(
-        "INSERT INTO user_settings (id, general, filters, equipment) "
-        "VALUES (:id::uuid, :general::jsonb, :filters::jsonb, :equipment::jsonb) "
-        "ON CONFLICT (id) DO NOTHING"
-    ), {
-        "id": str(SETTINGS_ROW_ID),
-        "general": general_json,
-        "filters": filters_json,
-        "equipment": equipment_json,
-    })
+    op.get_bind().execute(
+        sa.text(
+            "INSERT INTO user_settings (id, general, filters, equipment) "
+            "VALUES (:id::uuid, :general::jsonb, :filters::jsonb, :equipment::jsonb) "
+            "ON CONFLICT (id) DO NOTHING"
+        ),
+        {
+            "id": str(SETTINGS_ROW_ID),
+            "general": json.dumps(DEFAULT_GENERAL),
+            "filters": json.dumps(DEFAULT_FILTERS),
+            "equipment": json.dumps({"cameras": {}, "telescopes": {}}),
+        },
+    )
 
 def downgrade() -> None:
     op.drop_table("user_settings")
