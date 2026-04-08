@@ -124,52 +124,54 @@ const ScanManager: Component = () => {
 
   return (
     <div class="space-y-4">
-      {/* Auto-scan settings */}
-      <Show when={isAdmin()}>
-        <div class="rounded-[var(--radius-md)] bg-theme-surface border border-theme-border p-4 space-y-4">
-          <h3 class="text-sm font-medium text-theme-text-primary">Auto-scan</h3>
-          <div class="flex items-center justify-between">
-            <label class="text-sm text-theme-text-secondary">Enable automatic scanning</label>
-            <button
-              onClick={handleAutoScanToggle}
-              class={`relative w-10 h-5 rounded-full transition-colors ${
-                autoScanEnabled() ? "bg-theme-accent" : "bg-theme-text-tertiary"
-              }`}
-            >
-              <span
-                class={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full transition-transform ${
-                  autoScanEnabled() ? "translate-x-5" : ""
-                }`}
-              />
-            </button>
-          </div>
-          <Show when={autoScanEnabled()}>
-            <div class="flex items-center justify-between">
-              <label class="text-sm text-theme-text-secondary">Scan interval</label>
-              <select
-                value={autoScanInterval()}
-                onChange={(e) => handleIntervalChange(parseInt(e.currentTarget.value))}
-                class="px-3 py-1.5 bg-theme-input border border-theme-border rounded-[var(--radius-sm)] text-sm text-theme-text-primary focus:ring-1 focus:ring-theme-accent focus:border-theme-accent outline-none"
-              >
-                {INTERVALS.map((opt) => (
-                  <option value={opt.value}>{opt.label}</option>
-                ))}
-              </select>
-            </div>
-          </Show>
-        </div>
-      </Show>
-
       <DatabaseOverview summary={dbSummary()} />
 
-      <ScanControls
-        isActive={isActive()}
-        stopping={stopping()}
-        frameFilter={frameFilter()}
-        onFrameFilterChange={setFrameFilter}
-        onStartScan={() => startScan({ includeCalibration: frameFilter() === "all" })}
-        onStopScan={stopScan}
-      />
+      {/* Auto-scan + Scan Controls side by side */}
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <Show when={isAdmin()}>
+          <div class="rounded-[var(--radius-md)] bg-theme-surface border border-theme-border p-4 space-y-4">
+            <h3 class="text-sm font-medium text-theme-text-primary">Auto-scan</h3>
+            <div class="flex items-center justify-between">
+              <label class="text-sm text-theme-text-secondary">Enable automatic scanning</label>
+              <button
+                onClick={handleAutoScanToggle}
+                class={`relative w-10 h-5 rounded-full transition-colors ${
+                  autoScanEnabled() ? "bg-theme-accent" : "bg-theme-text-tertiary"
+                }`}
+              >
+                <span
+                  class={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full transition-transform ${
+                    autoScanEnabled() ? "translate-x-5" : ""
+                  }`}
+                />
+              </button>
+            </div>
+            <Show when={autoScanEnabled()}>
+              <div class="flex items-center justify-between">
+                <label class="text-sm text-theme-text-secondary">Scan interval</label>
+                <select
+                  value={autoScanInterval()}
+                  onChange={(e) => handleIntervalChange(parseInt(e.currentTarget.value))}
+                  class="px-3 py-1.5 bg-theme-input border border-theme-border rounded-[var(--radius-sm)] text-sm text-theme-text-primary focus:ring-1 focus:ring-theme-accent focus:border-theme-accent outline-none"
+                >
+                  {INTERVALS.map((opt) => (
+                    <option value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
+              </div>
+            </Show>
+          </div>
+        </Show>
+
+        <ScanControls
+          isActive={isActive()}
+          stopping={stopping()}
+          frameFilter={frameFilter()}
+          onFrameFilterChange={setFrameFilter}
+          onStartScan={() => startScan({ includeCalibration: frameFilter() === "all" })}
+          onStopScan={stopScan}
+        />
+      </div>
 
       <ActivityFeed
         scanStatus={scanStatus()}
