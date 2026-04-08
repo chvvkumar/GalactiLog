@@ -1,4 +1,5 @@
 """Add user_settings table for application configuration."""
+import json
 import uuid
 from alembic import op
 import sqlalchemy as sa
@@ -40,18 +41,19 @@ def upgrade() -> None:
         if_not_exists=True,
     )
     # Seed single row with defaults (ON CONFLICT for stamped installs)
-    op.execute(
-        sa.text(
-            "INSERT INTO user_settings (id, general, filters, equipment) "
-            "VALUES (:id, :general, :filters, :equipment) "
-            "ON CONFLICT (id) DO NOTHING"
-        ).bindparams(
-            id=str(SETTINGS_ROW_ID),
-            general=sa.type_coerce(DEFAULT_GENERAL, JSONB),
-            filters=sa.type_coerce(DEFAULT_FILTERS, JSONB),
-            equipment=sa.type_coerce({"cameras": {}, "telescopes": {}}, JSONB),
-        )
-    )
+    general_json = json.dumps(DEFAULT_GENERAL)
+    filters_json = json.dumps(DEFAULT_FILTERS)
+    equipment_json = json.dumps({"cameras": {}, "telescopes": {}})
+    op.execute(sa.text(
+        "INSERT INTO user_settings (id, general, filters, equipment) "
+        "VALUES (:id::uuid, :general::jsonb, :filters::jsonb, :equipment::jsonb) "
+        "ON CONFLICT (id) DO NOTHING"
+    ), {
+        "id": str(SETTINGS_ROW_ID),
+        "general": general_json,
+        "filters": filters_json,
+        "equipment": equipment_json,
+    })
 
 def downgrade() -> None:
     op.drop_table("user_settings")
