@@ -39,6 +39,37 @@ eng.dispose()
         echo "Existing database detected without alembic tracking — stamping at head"
         alembic stamp head
     fi
+else
+    # alembic_version exists — check if it points to a revision that no
+    # longer exists (old incremental migrations were replaced by 0001).
+    # If so, re-stamp to the current head.
+    STALE=$(python -c "
+from sqlalchemy import create_engine, text
+from app.config import settings
+url = settings.database_url.replace('+asyncpg', '+psycopg2')
+eng = create_engine(url)
+with eng.connect() as c:
+    row = c.execute(text('SELECT version_num FROM alembic_version')).first()
+    if row and row[0] not in ('0001',):
+        print('yes')
+    else:
+        print('no')
+eng.dispose()
+" 2>/dev/null || echo "no")
+
+    if [ "$STALE" = "yes" ]; then
+        echo "Stale migration revision detected — re-stamping to current head"
+        python -c "
+from sqlalchemy import create_engine, text
+from app.config import settings
+url = settings.database_url.replace('+asyncpg', '+psycopg2')
+eng = create_engine(url)
+with eng.begin() as c:
+    c.execute(text(\"DELETE FROM alembic_version\"))
+    c.execute(text(\"INSERT INTO alembic_version (version_num) VALUES ('0001')\"))
+eng.dispose()
+"
+    fi
 fi
 
 # Capture alembic output to detect what happened
