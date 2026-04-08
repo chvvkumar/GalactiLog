@@ -42,7 +42,7 @@ def upgrade() -> None:
     op.execute(
         sa.text(
             "INSERT INTO user_settings (id, general, filters, equipment) "
-            "VALUES (:id::uuid, :general, :filters, :equipment)"
+            "VALUES (CAST(:id AS uuid), :general, :filters, :equipment)"
         ).bindparams(
             id=str(SETTINGS_ROW_ID),
             general=sa.type_coerce(DEFAULT_GENERAL, JSONB),
