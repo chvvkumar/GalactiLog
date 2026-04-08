@@ -1,6 +1,7 @@
-import { Component, For, Show, createEffect, createSignal, onCleanup } from "solid-js";
+import { Component, For, Show, createEffect, createSignal, on, onCleanup } from "solid-js";
 import { useDashboardFilters } from "./DashboardFilterProvider";
 import { useSettingsContext } from "./SettingsProvider";
+import { debounce } from "../utils/debounce";
 import type { CustomColumn } from "../types";
 
 const BooleanFilter: Component<{
@@ -68,24 +69,20 @@ const TextFilter: Component<{
   onChange: (value: string | null) => void;
 }> = (props) => {
   const [local, setLocal] = createSignal(props.value ?? "");
-  let debounceTimer: ReturnType<typeof setTimeout> | undefined;
 
-  // Sync local state when value is cleared externally (e.g. Reset Filters)
-  createEffect(() => {
-    const external = props.value ?? "";
-    if (external !== local()) setLocal(external);
-  });
+  const debouncedUpdate = debounce((value: string) => {
+    props.onChange(value || null);
+  }, 400);
 
-  onCleanup(() => {
-    if (debounceTimer) clearTimeout(debounceTimer);
-  });
+  // Only sync when external value is cleared (e.g. Reset Filters)
+  // Never sync non-empty external values back — input owns its own text
+  createEffect(on(() => props.value, (external) => {
+    if (external == null || external === "") setLocal("");
+  }, { defer: true }));
 
-  const handleInput = (val: string) => {
-    setLocal(val);
-    if (debounceTimer) clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(() => {
-      props.onChange(val || null);
-    }, 600);
+  const onInput = (value: string) => {
+    setLocal(value);
+    debouncedUpdate(value);
   };
 
   return (
@@ -94,7 +91,7 @@ const TextFilter: Component<{
       <input
         type="text"
         value={local()}
-        onInput={(e) => handleInput(e.currentTarget.value)}
+        onInput={(e) => onInput(e.currentTarget.value)}
         class="w-full px-2 py-1 rounded border border-theme-border bg-theme-input text-theme-text-primary text-sm"
         placeholder={`Search ${props.column.name}...`}
       />

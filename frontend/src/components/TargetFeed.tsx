@@ -33,7 +33,7 @@ const SkeletonCard: Component = () => (
 );
 
 const TargetFeed: Component = () => {
-  const { targetData, refetchTargets, page, totalPages, totalCount, setPage, pageSize, setPageSize } = useDashboardFilters();
+  const { targetData, refetchTargets, fetchError, page, totalPages, totalCount, setPage, pageSize, setPageSize } = useDashboardFilters();
   const PAGE_SIZES = [10, 25, 50, 100, 250];
 
 
@@ -65,16 +65,16 @@ const TargetFeed: Component = () => {
 
   return (
     <div class="p-4">
-      <Show when={targetData.error && !displayData()}>
+      <Show when={fetchError() && !displayData()}>
         <div class="text-center text-theme-error py-8">
-          Failed to load targets: {String(targetData.error)}
+          Failed to load targets: {String(fetchError())}
         </div>
       </Show>
 
       {/* Inline error banner when cached data is shown but latest request failed */}
-      <Show when={targetData.error && displayData()}>
+      <Show when={fetchError() && displayData()}>
         <div class="mb-2 px-3 py-2 rounded border border-theme-error/30 bg-theme-error/10 text-theme-error text-xs flex items-center justify-between">
-          <span>Filter request failed: {String(targetData.error)}</span>
+          <span>Filter request failed: {String(fetchError())}</span>
           <button onClick={() => refetchTargets()} class="ml-3 underline hover:no-underline">Retry</button>
         </div>
       </Show>
@@ -164,7 +164,7 @@ const TargetFeed: Component = () => {
               </Show>
             </div>
 
-            <div class={targetData.loading ? "opacity-50 pointer-events-none transition-opacity" : "transition-opacity"}>
+            <div class={targetData.loading && !fetchError() ? "opacity-50 pointer-events-none transition-opacity" : "transition-opacity"}>
               <TargetTable targets={data().targets} />
             </div>
           </Show>

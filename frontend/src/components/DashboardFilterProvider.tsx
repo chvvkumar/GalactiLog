@@ -12,6 +12,7 @@ interface DashboardFilterAPI {
   filters: () => ActiveFilters;
   targetData: ReturnType<typeof createResource<TargetAggregationResponse | undefined>>[0];
   refetchTargets: () => void;
+  fetchError: () => Error | null;
   updateFilter: (key: string, value: any) => void;
   toggleOpticalFilter: (name: string) => void;
   toggleObjectType: (type: string) => void;
@@ -169,16 +170,20 @@ const DashboardFilterProvider: Component<{ children: JSX.Element }> = (props) =>
   }));
 
   let abortController: AbortController | undefined;
+  const [fetchError, setFetchError] = createSignal<Error | null>(null);
 
   const [targetData, { refetch: refetchTargets }] = createResource(fetchKey, async (k) => {
     abortController?.abort();
     abortController = new AbortController();
     const signal = abortController.signal;
     try {
-      return await api.getTargets(k.filters, k.page, k.pageSize, k.sortBy, k.sortDir, signal);
+      const result = await api.getTargets(k.filters, k.page, k.pageSize, k.sortBy, k.sortDir, signal);
+      setFetchError(null);
+      return result;
     } catch (e) {
       if (signal.aborted) return undefined as unknown as TargetAggregationResponse;
-      throw e;
+      setFetchError(e instanceof Error ? e : new Error(String(e)));
+      return undefined as unknown as TargetAggregationResponse;
     }
   });
 
@@ -303,6 +308,7 @@ const DashboardFilterProvider: Component<{ children: JSX.Element }> = (props) =>
     filters,
     targetData,
     refetchTargets,
+    fetchError,
     updateFilter,
     toggleOpticalFilter,
     toggleObjectType,
