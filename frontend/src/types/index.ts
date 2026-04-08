@@ -230,6 +230,7 @@ export interface EquipmentList {
 
 export interface ActiveFilters {
   searchQuery: string;
+  selectedTargetId: string | null;
   camera: string | null;
   telescope: string | null;
   opticalFilters: string[];

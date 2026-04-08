@@ -104,7 +104,8 @@ function buildTargetQuery(filters: ActiveFilters, page?: number, pageSize?: numb
   if (pageSize != null) params.set("page_size", String(pageSize));
   if (sortBy) params.set("sort_by", sortBy);
   if (sortDir) params.set("sort_dir", sortDir);
-  if (filters.searchQuery) params.set("search", filters.searchQuery);
+  if (filters.selectedTargetId) params.set("target_id", filters.selectedTargetId);
+  else if (filters.searchQuery) params.set("search", filters.searchQuery);
   if (filters.camera) params.set("camera", filters.camera);
   if (filters.telescope) params.set("telescope", filters.telescope);
   if (filters.opticalFilters.length > 0) {
