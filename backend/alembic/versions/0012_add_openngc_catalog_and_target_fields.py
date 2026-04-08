@@ -11,7 +11,6 @@ depends_on = None
 def upgrade() -> None:
     op.create_table(
         "openngc_catalog",
-        if_not_exists=True,
         sa.Column("name", sa.String(20), primary_key=True),
         sa.Column("type", sa.String(10), nullable=True),
         sa.Column("ra", sa.Float, nullable=True),
@@ -25,6 +24,7 @@ def upgrade() -> None:
         sa.Column("surface_brightness", sa.Float, nullable=True),
         sa.Column("common_names", sa.String(500), nullable=True),
         sa.Column("messier", sa.String(10), nullable=True),
+        if_not_exists=True,
     )
 
     op.add_column("targets", sa.Column("constellation", sa.String(5), nullable=True))

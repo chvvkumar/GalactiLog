@@ -12,9 +12,9 @@ depends_on = None
 def upgrade() -> None:
     op.create_table(
         "app_metadata",
-        if_not_exists=True,
         sa.Column("key", sa.String(100), primary_key=True),
         sa.Column("value", JSONB, nullable=False, server_default="{}"),
+        if_not_exists=True,
     )
     # Seed the data_version row at 0 (no migrations applied yet)
     op.execute(

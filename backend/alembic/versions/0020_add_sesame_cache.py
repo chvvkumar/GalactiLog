@@ -12,7 +12,6 @@ depends_on = None
 def upgrade() -> None:
     op.create_table(
         "sesame_cache",
-        if_not_exists=True,
         sa.Column("query_name", sa.String(255), primary_key=True),
         sa.Column("main_id", sa.String(255), nullable=True),
         sa.Column("raw_aliases", ARRAY(sa.String), nullable=False, server_default="{}"),
@@ -22,6 +21,7 @@ def upgrade() -> None:
         sa.Column("resolver", sa.String(50), nullable=True),
         sa.Column("fetched_at", sa.DateTime(timezone=True),
                   server_default=sa.text("now()"), nullable=False),
+        if_not_exists=True,
     )
 
 

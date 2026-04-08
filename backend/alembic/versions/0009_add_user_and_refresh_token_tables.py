@@ -15,7 +15,6 @@ def upgrade() -> None:
 
     op.create_table(
         "users",
-        if_not_exists=True,
         sa.Column("id", UUID(as_uuid=True), primary_key=True),
         sa.Column("username", sa.String(150), unique=True, nullable=False),
         sa.Column("password_hash", sa.String(255), nullable=False),
@@ -23,11 +22,11 @@ def upgrade() -> None:
         sa.Column("is_active", sa.Boolean, nullable=False, server_default=sa.text("true")),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        if_not_exists=True,
     )
 
     op.create_table(
         "refresh_tokens",
-        if_not_exists=True,
         sa.Column("id", UUID(as_uuid=True), primary_key=True),
         sa.Column("user_id", UUID(as_uuid=True), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
         sa.Column("token_hash", sa.String(64), unique=True, nullable=False),
@@ -35,6 +34,7 @@ def upgrade() -> None:
         sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("revoked", sa.Boolean, nullable=False, server_default=sa.text("false")),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        if_not_exists=True,
     )
 
     op.create_index("ix_refresh_tokens_user_id", "refresh_tokens", ["user_id"])

@@ -41,7 +41,6 @@ def upgrade() -> None:
     # Create merge_candidates table
     op.create_table(
         "merge_candidates",
-        if_not_exists=True,
         sa.Column(
             "id",
             UUID(as_uuid=True),
@@ -79,6 +78,7 @@ def upgrade() -> None:
             sa.DateTime(timezone=True),
             nullable=True,
         ),
+        if_not_exists=True,
     )
 
 

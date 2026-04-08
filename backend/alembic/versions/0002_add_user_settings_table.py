@@ -32,12 +32,12 @@ DEFAULT_FILTERS = {
 def upgrade() -> None:
     op.create_table(
         "user_settings",
-        if_not_exists=True,
         sa.Column("id", sa.Uuid(), primary_key=True),
         sa.Column("general", JSONB, nullable=False, server_default="{}"),
         sa.Column("filters", JSONB, nullable=False, server_default="{}"),
         sa.Column("equipment", JSONB, nullable=False, server_default="{}"),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
+        if_not_exists=True,
     )
     # Seed single row with defaults (ON CONFLICT for stamped installs)
     op.execute(

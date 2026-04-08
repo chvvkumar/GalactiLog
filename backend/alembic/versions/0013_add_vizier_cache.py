@@ -35,7 +35,6 @@ def upgrade() -> None:
 
     op.create_table(
         "vizier_cache",
-        if_not_exists=True,
         sa.Column("catalog_id", sa.String(50), primary_key=True),
         sa.Column("vizier_catalog", sa.String(20), nullable=True),
         sa.Column("size_major", sa.Float, nullable=True),
@@ -43,6 +42,7 @@ def upgrade() -> None:
         sa.Column("constellation", sa.String(5), nullable=True),
         sa.Column("fetched_at", sa.DateTime(timezone=True),
                   server_default=sa.text("now()"), nullable=False),
+        if_not_exists=True,
     )
 
 
