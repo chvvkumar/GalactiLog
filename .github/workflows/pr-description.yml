@@ -24,7 +24,7 @@ jobs:
         run: |
           BASE_BRANCH="${{ github.event.pull_request.base.ref }}"
           MERGE_BASE=$(git merge-base "origin/$BASE_BRANCH" HEAD)
-          COMMITS=$(git log --pretty=format:"- %s (%h)" "$MERGE_BASE"..HEAD 2>/dev/null || echo "Unable to retrieve commits")
+          COMMITS=$(git log --no-merges --pretty=format:"- %s (%h)" "$MERGE_BASE"..HEAD 2>/dev/null || echo "Unable to retrieve commits")
           FILES_CHANGED=$(git diff --stat "$MERGE_BASE"...HEAD -- . ':!package-lock.json' ':!*.lock' 2>/dev/null || echo "Unable to get file stats")
           {
             echo "COMMITS:"
