@@ -204,7 +204,9 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
     for r in perf_result.all():
         tel = normalize_equipment(r.telescope, tel_map) or r.telescope
         cam = normalize_equipment(r.camera, cam_map) or r.camera
-        filt = normalize_filter(r.filter_used, filter_map) or r.filter_used or "Unknown"
+        filt = normalize_filter(r.filter_used, filter_map) or r.filter_used
+        if filt is None:
+            continue
         key = (tel, cam)
 
         if key not in combo_data:
@@ -303,7 +305,7 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
             median_eccentricity=weighted_median_approx(cd["ecc_vals"]),
             median_fwhm=weighted_median_approx(cd["fwhm_vals"]),
             grouped=len(cd["raw_telescopes"]) > 1 or len(cd["raw_cameras"]) > 1,
-            filters=sorted(f for f in cd["filters"] if f is not None),
+            filters=sorted(cd["filters"]),
             filter_breakdown=build_filter_metrics(cd["filter_rows"]),
         ))
 
