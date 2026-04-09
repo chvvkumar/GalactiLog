@@ -303,7 +303,7 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
             median_eccentricity=weighted_median_approx(cd["ecc_vals"]),
             median_fwhm=weighted_median_approx(cd["fwhm_vals"]),
             grouped=len(cd["raw_telescopes"]) > 1 or len(cd["raw_cameras"]) > 1,
-            filters=sorted(cd["filters"]),
+            filters=sorted(f for f in cd["filters"] if f is not None),
             filter_breakdown=build_filter_metrics(cd["filter_rows"]),
         ))
 
