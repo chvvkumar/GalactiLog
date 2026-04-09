@@ -205,8 +205,6 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
         tel = normalize_equipment(r.telescope, tel_map) or r.telescope
         cam = normalize_equipment(r.camera, cam_map) or r.camera
         filt = normalize_filter(r.filter_used, filter_map) or r.filter_used
-        if filt is None:
-            continue
         key = (tel, cam)
 
         if key not in combo_data:
@@ -229,9 +227,22 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
         cd = combo_data[key]
         cd["frame_count"] += r.frame_count
         cd["total_seconds"] += float(r.total_seconds)
+
+        if r.med_hfr is not None:
+            cd["hfr_vals"].append((r.med_hfr, r.frame_count))
+        if r.best_hfr is not None:
+            if cd["best_hfr"] is None or r.best_hfr < cd["best_hfr"]:
+                cd["best_hfr"] = r.best_hfr
+        if r.med_ecc is not None:
+            cd["ecc_vals"].append((r.med_ecc, r.frame_count))
+        if r.med_fwhm is not None:
+            cd["fwhm_vals"].append((r.med_fwhm, r.frame_count))
+
+        # Per-filter breakdown (skip rows without a filter name)
+        if filt is None:
+            continue
         cd["filters"].add(filt)
 
-        # Collect per-filter row
         fr = cd["filter_rows"].get(filt)
         if fr is None:
             fr = {
@@ -248,18 +259,13 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
         fr["total_seconds"] += float(r.total_seconds)
 
         if r.med_hfr is not None:
-            cd["hfr_vals"].append((r.med_hfr, r.frame_count))
             fr["hfr_vals"].append((r.med_hfr, r.frame_count))
         if r.best_hfr is not None:
-            if cd["best_hfr"] is None or r.best_hfr < cd["best_hfr"]:
-                cd["best_hfr"] = r.best_hfr
             if fr["best_hfr"] is None or r.best_hfr < fr["best_hfr"]:
                 fr["best_hfr"] = r.best_hfr
         if r.med_ecc is not None:
-            cd["ecc_vals"].append((r.med_ecc, r.frame_count))
             fr["ecc_vals"].append((r.med_ecc, r.frame_count))
         if r.med_fwhm is not None:
-            cd["fwhm_vals"].append((r.med_fwhm, r.frame_count))
             fr["fwhm_vals"].append((r.med_fwhm, r.frame_count))
 
     def weighted_median_approx(vals: list[tuple[float, int]]) -> float | None:
