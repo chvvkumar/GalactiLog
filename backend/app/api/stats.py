@@ -204,7 +204,7 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
     for r in perf_result.all():
         tel = normalize_equipment(r.telescope, tel_map) or r.telescope
         cam = normalize_equipment(r.camera, cam_map) or r.camera
-        filt = normalize_filter(r.filter_used, filter_map) or r.filter_used
+        filt = normalize_filter(r.filter_used, filter_map) or r.filter_used or "Unknown"
         key = (tel, cam)
 
         if key not in combo_data:
