@@ -11,6 +11,7 @@ from app.api.deps import get_current_user, require_admin
 from app.models.user import User
 from app.models.user_settings import UserSettings, SETTINGS_ROW_ID
 from app.models import Image
+from app.services.normalization import load_alias_maps, normalize_filter, normalize_equipment
 from app.schemas.settings import (
     GeneralSettings, FilterConfig, EquipmentConfig, EquipmentAliases,
     SettingsResponse, SuggestionsResponse, SuggestionGroup,
@@ -311,8 +312,6 @@ async def get_discovered(
     the user-configured alias maps so that e.g. "Ha" and "ha" are merged
     into a single canonical entry.
     """
-    from app.services.normalization import load_alias_maps, normalize_filter, normalize_equipment
-
     column_map = {
         DiscoveredSection.filters: Image.filter_used,
         DiscoveredSection.cameras: Image.camera,
