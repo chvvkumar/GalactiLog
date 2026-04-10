@@ -121,3 +121,140 @@ async def test_validate_rejects_invalid_json(mock_session, admin_user):
         assert body["valid"] is False
     finally:
         app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_restore_happy_path(mock_session, admin_user):
+    """POST /api/backup/restore commits on success."""
+    _override_deps(mock_session, admin_user)
+
+    backup_data = {
+        "meta": {
+            "schema_version": CURRENT_BACKUP_SCHEMA_VERSION,
+            "app_version": APP_VERSION,
+            "exported_at": "2026-04-09T00:00:00+00:00",
+        },
+        "settings": {"general": {}},
+        "session_notes": [],
+        "custom_columns": [],
+        "target_overrides": [],
+        "mosaics": [],
+        "users": [],
+        "column_visibility": [],
+    }
+
+    fake_result = {
+        "success": True,
+        "applied": {"settings": {"add": 0, "update": 1, "skip": 0, "unchanged": 0}},
+        "temporary_passwords": {},
+        "warnings": [],
+    }
+
+    mock_session.commit = AsyncMock()
+    mock_session.rollback = AsyncMock()
+
+    try:
+        with patch("app.api.backup.restore_backup", return_value=fake_result):
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://test") as client:
+                resp = await client.post(
+                    "/api/backup/restore",
+                    files={"file": ("backup.json", json.dumps(backup_data).encode(), "application/json")},
+                    data={"mode": "merge"},
+                )
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["success"] is True
+        mock_session.commit.assert_awaited_once()
+        mock_session.rollback.assert_not_called()
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_restore_rolls_back_on_exception(mock_session, admin_user):
+    """POST /api/backup/restore rolls back and returns error on exception."""
+    _override_deps(mock_session, admin_user)
+
+    backup_data = {
+        "meta": {
+            "schema_version": CURRENT_BACKUP_SCHEMA_VERSION,
+            "app_version": APP_VERSION,
+            "exported_at": "2026-04-09T00:00:00+00:00",
+        },
+        "settings": {"general": {}},
+        "session_notes": [],
+        "custom_columns": [],
+        "target_overrides": [],
+        "mosaics": [],
+        "users": [],
+        "column_visibility": [],
+    }
+
+    mock_session.commit = AsyncMock()
+    mock_session.rollback = AsyncMock()
+
+    async def boom(*args, **kwargs):
+        raise RuntimeError("simulated failure")
+
+    try:
+        with patch("app.api.backup.restore_backup", side_effect=boom):
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://test") as client:
+                resp = await client.post(
+                    "/api/backup/restore",
+                    files={"file": ("backup.json", json.dumps(backup_data).encode(), "application/json")},
+                    data={"mode": "merge"},
+                )
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["success"] is False
+        assert "failed" in body["error"].lower()
+        mock_session.rollback.assert_awaited_once()
+        mock_session.commit.assert_not_called()
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_restore_rejects_invalid_backup(mock_session, admin_user):
+    """POST /api/backup/restore rejects backup that fails validation."""
+    _override_deps(mock_session, admin_user)
+
+    # Backup from a future schema version
+    backup_data = {
+        "meta": {
+            "schema_version": CURRENT_BACKUP_SCHEMA_VERSION + 99,
+            "app_version": "99.0.0",
+            "exported_at": "2099-01-01T00:00:00+00:00",
+        },
+        "settings": {},
+        "session_notes": [],
+        "custom_columns": [],
+        "target_overrides": [],
+        "mosaics": [],
+        "users": [],
+        "column_visibility": [],
+    }
+
+    mock_session.commit = AsyncMock()
+    mock_session.rollback = AsyncMock()
+
+    try:
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.post(
+                "/api/backup/restore",
+                files={"file": ("backup.json", json.dumps(backup_data).encode(), "application/json")},
+                data={"mode": "merge"},
+            )
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["success"] is False
+        assert body["error"] is not None
+        mock_session.commit.assert_not_called()
+    finally:
+        app.dependency_overrides.clear()
