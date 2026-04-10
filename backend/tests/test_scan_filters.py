@@ -1,7 +1,7 @@
 import pytest
 from pathlib import Path
 
-from app.services.scan_filters import NameRule, ScanFilterConfig
+from app.services.scan_filters import NameRule, ScanFilterConfig, TestResult
 
 
 def _rule(**kwargs):
@@ -173,3 +173,36 @@ def test_roots_returns_includes_when_set(tmp_path):
         name_rules=[],
     )
     assert cfg.roots(tmp_path) == [tmp_path / "a", tmp_path / "b"]
+
+
+def test_test_path_included(tmp_path):
+    cfg = _cfg()
+    result = cfg.test_path(tmp_path / "M31" / "frame.fits", tmp_path)
+    assert result.verdict == "included"
+    assert result.matched_rule_ids == []
+
+
+def test_test_path_excluded_by_path(tmp_path):
+    (tmp_path / "rejected").mkdir()
+    cfg = _cfg(exclude_paths=[tmp_path / "rejected"])
+    result = cfg.test_path(tmp_path / "rejected" / "x.fits", tmp_path)
+    assert result.verdict == "excluded_by_path"
+
+
+def test_test_path_excluded_by_rule(tmp_path):
+    cfg = _cfg(rules=[_rule(
+        id="e1", action="exclude", type="glob",
+        pattern="*_bad.fits", target="file",
+    )])
+    result = cfg.test_path(tmp_path / "frame_bad.fits", tmp_path)
+    assert result.verdict == "excluded_by_rule"
+    assert "e1" in result.matched_rule_ids
+
+
+def test_test_path_excluded_by_missing_include(tmp_path):
+    cfg = _cfg(rules=[_rule(
+        id="i1", action="include", type="glob",
+        pattern="M*.fits", target="file",
+    )])
+    result = cfg.test_path(tmp_path / "NGC7000.fits", tmp_path)
+    assert result.verdict == "excluded_by_missing_include"

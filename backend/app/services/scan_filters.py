@@ -9,6 +9,19 @@ from typing import Literal
 Action = Literal["include", "exclude"]
 RuleType = Literal["glob", "substring", "regex"]
 Target = Literal["file", "folder"]
+Verdict = Literal[
+    "included", "excluded_by_path", "excluded_by_rule", "excluded_by_missing_include",
+]
+
+
+@dataclass
+class TestResult:
+    verdict: Verdict
+    matched_rule_ids: list[str]
+
+
+# Prevent pytest from collecting TestResult as a test class
+TestResult.__test__ = False
 
 
 @dataclass
@@ -139,3 +152,51 @@ class ScanFilterConfig:
         ):
             return False
         return True
+
+    def test_path(self, path: Path, fits_root: Path) -> TestResult:
+        resolved = path  # do NOT resolve - test paths may not exist
+        root = fits_root.resolve()
+        for excluded in self.exclude_paths:
+            try:
+                resolved.relative_to(excluded)
+                return TestResult("excluded_by_path", [])
+            except ValueError:
+                pass
+
+        try:
+            rel = resolved.relative_to(root)
+        except ValueError:
+            try:
+                rel = resolved.relative_to(fits_root)
+            except ValueError:
+                return TestResult("excluded_by_path", [])
+
+        parts = rel.parts
+        segments = list(parts[:-1]) if len(parts) > 1 else []
+        filename = parts[-1] if parts else ""
+
+        matched: list[str] = []
+        for rule in self.name_rules:
+            if rule.action != "exclude":
+                continue
+            if rule.target == "file" and rule.matches(filename):
+                matched.append(rule.id)
+                return TestResult("excluded_by_rule", matched)
+            if rule.target == "folder" and any(rule.matches(s) for s in segments):
+                matched.append(rule.id)
+                return TestResult("excluded_by_rule", matched)
+
+        file_includes = [r for r in self.name_rules
+                         if r.action == "include" and r.target == "file"]
+        folder_includes = [r for r in self.name_rules
+                           if r.action == "include" and r.target == "folder"]
+        file_hits = [r.id for r in file_includes if r.matches(filename)]
+        folder_hits = [r.id for r in folder_includes
+                       if any(r.matches(s) for s in segments)]
+
+        if file_includes and not file_hits:
+            return TestResult("excluded_by_missing_include", [])
+        if folder_includes and not folder_hits:
+            return TestResult("excluded_by_missing_include", [])
+
+        return TestResult("included", file_hits + folder_hits)
