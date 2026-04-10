@@ -1,4 +1,5 @@
 import { Component, createSignal, createEffect, onCleanup, Show, For } from "solid-js";
+import { createStore, produce } from "solid-js/store";
 import { scanFilters } from "../api/scanFilters";
 import type { BrowseEntry } from "../api/scanFilters";
 
@@ -29,56 +30,84 @@ const makeNode = (e: BrowseEntry): TreeNode => ({
 });
 
 const FolderBrowserModal: Component<Props> = (props) => {
-  const [nodes, setNodes] = createSignal<TreeNode[]>([]);
+  const [tree, setTree] = createStore<{ roots: TreeNode[] }>({ roots: [] });
   const [selected, setSelected] = createSignal<Set<string>>(new Set());
   const [loading, setLoading] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
+
+  // Resolve a path of indices to the current node inside the store.
+  const nodeAt = (path: number[]): TreeNode => {
+    let n: TreeNode = tree.roots[path[0]];
+    for (let i = 1; i < path.length; i++) n = n.children[path[i]];
+    return n;
+  };
+
+  // Mutate a node field at the given path via setTree, interleaving
+  // 'children' between each index so the store can walk the tree.
+  const mutateNode = <K extends keyof TreeNode>(
+    path: number[],
+    field: K,
+    value: TreeNode[K],
+  ) => {
+    setTree(
+      produce((s) => {
+        let n: TreeNode = s.roots[path[0]];
+        for (let i = 1; i < path.length; i++) n = n.children[path[i]];
+        n[field] = value;
+      }),
+    );
+  };
 
   const loadRoot = async () => {
     setLoading(true);
     setError(null);
     try {
       const entries = await scanFilters.browse();
-      setNodes(entries.map(makeNode));
+      setTree("roots", entries.map(makeNode));
     } catch (e: any) {
       setError(e?.message ?? "Failed to load folders");
+      setTree("roots", []);
     } finally {
       setLoading(false);
     }
   };
 
-  const toggle = async (node: TreeNode) => {
+  const toggle = async (path: number[]) => {
+    const node = nodeAt(path);
     if (node.expanded) {
-      node.expanded = false;
-      setNodes([...nodes()]);
+      mutateNode(path, "expanded", false);
       return;
     }
     if (!node.loaded) {
-      node.loading = true;
-      node.error = null;
-      setNodes([...nodes()]);
+      mutateNode(path, "loading", true);
+      mutateNode(path, "error", null);
       try {
         const children = await scanFilters.browse(node.entry.path);
-        node.children = children.map(makeNode);
-        node.loaded = true;
-        node.error = null;
-      } catch (e: any) {
-        node.error = e?.message ?? "Failed to load";
-        node.loading = false;
-        setNodes([...nodes()]);
+        setTree(
+          produce((s) => {
+            let n: TreeNode = s.roots[path[0]];
+            for (let i = 1; i < path.length; i++) n = n.children[path[i]];
+            n.children = children.map(makeNode);
+            n.loaded = true;
+            n.error = null;
+            n.loading = false;
+            n.expanded = true;
+          }),
+        );
         return;
-      } finally {
-        node.loading = false;
+      } catch (e: any) {
+        mutateNode(path, "error", e?.message ?? "Failed to load");
+        mutateNode(path, "loading", false);
+        return;
       }
     }
-    node.expanded = true;
-    setNodes([...nodes()]);
+    mutateNode(path, "expanded", true);
   };
 
-  const retryLoad = async (node: TreeNode) => {
-    node.loaded = false;
-    node.error = null;
-    await toggle(node);
+  const retryLoad = async (path: number[]) => {
+    mutateNode(path, "loaded", false);
+    mutateNode(path, "error", null);
+    await toggle(path);
   };
 
   const toggleSelected = (path: string) => {
@@ -101,7 +130,7 @@ const FolderBrowserModal: Component<Props> = (props) => {
   window.addEventListener("keydown", onKey);
   onCleanup(() => window.removeEventListener("keydown", onKey));
 
-  const renderNode = (node: TreeNode, depth: number) => (
+  const renderNode = (node: TreeNode, path: number[], depth: number) => (
     <div>
       <div
         class={`flex items-center gap-2 py-1 px-2 rounded ${
@@ -109,7 +138,7 @@ const FolderBrowserModal: Component<Props> = (props) => {
         }`}
         style={{ "padding-left": `${depth * 16 + 8}px` }}
         onClick={() => {
-          if (node.entry.has_children) toggle(node);
+          if (node.entry.has_children) toggle(path);
         }}
       >
         <Show
@@ -153,7 +182,7 @@ const FolderBrowserModal: Component<Props> = (props) => {
             class="underline hover:no-underline"
             onClick={(e) => {
               e.stopPropagation();
-              retryLoad(node);
+              retryLoad(path);
             }}
           >
             Retry
@@ -162,7 +191,7 @@ const FolderBrowserModal: Component<Props> = (props) => {
       </Show>
       <Show when={node.expanded}>
         <For each={node.children}>
-          {(child) => renderNode(child, depth + 1)}
+          {(child, i) => renderNode(child, [...path, i()], depth + 1)}
         </For>
       </Show>
     </div>
@@ -203,7 +232,9 @@ const FolderBrowserModal: Component<Props> = (props) => {
                 </button>
               </div>
             </Show>
-            <For each={nodes()}>{(n) => renderNode(n, 0)}</For>
+            <For each={tree.roots}>
+              {(n, i) => renderNode(n, [i()], 0)}
+            </For>
           </div>
           <div class="p-4 border-t border-theme-border flex items-center justify-between">
             <span class="text-xs text-theme-text-secondary">
