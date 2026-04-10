@@ -5,6 +5,7 @@ import { FiltersTab } from "../components/settings/FiltersTab";
 import { EquipmentTab } from "../components/settings/EquipmentTab";
 import { MergesTab } from "../components/settings/MergesTab";
 import { UsersTab } from "../components/settings/UsersTab";
+import { BackupRestoreTab } from "../components/settings/BackupRestoreTab";
 import ScanManager from "../components/ScanManager";
 import DisplayTab from "../components/DisplayTab";
 import AstroBinTab from "../components/settings/AstroBinTab";
@@ -22,6 +23,7 @@ const ALL_TABS = [
   { id: "astrobin", label: "AstroBin" },
   { id: "targets", label: "Target Management" },
   { id: "custom-columns", label: "Custom Columns" },
+  { id: "backup", label: "Backup & Restore", adminOnly: true },
   { id: "users", label: "Users", adminOnly: true },
 ] as const;
 
@@ -132,6 +134,18 @@ export const SettingsPage: Component = () => {
           </ul>
         </SettingsHelpSection>
         <CustomColumnsTab />
+      </Show>
+      <Show when={activeTab() === "backup" && isAdmin()}>
+        <SettingsHelpSection tabId="backup">
+          <p class="text-sm text-theme-text-secondary">Backup and restore lets you export and import your GalactiLog configuration and data as a versioned JSON file.</p>
+          <ul class="text-sm text-theme-text-secondary list-disc list-inside space-y-1">
+            <li><strong class="text-theme-text-primary">What's included:</strong> settings, filter and equipment configurations, session notes, custom columns, mosaic definitions, user accounts, and display preferences.</li>
+            <li>Backup files carry a schema version — older backups will restore cleanly on newer versions of the app.</li>
+            <li><strong class="text-theme-text-primary">Merge mode</strong> adds or updates items from the backup without touching data not present in the file. <strong class="text-theme-text-primary">Replace mode</strong> clears the selected sections first, then imports from the backup.</li>
+            <li>When restoring user accounts, temporary passwords are generated and shown once — save them before closing the restore dialog.</li>
+          </ul>
+        </SettingsHelpSection>
+        <BackupRestoreTab />
       </Show>
       <Show when={activeTab() === "users" && isAdmin()}>
         <SettingsHelpSection tabId="users">
