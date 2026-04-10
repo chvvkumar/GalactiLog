@@ -8,6 +8,7 @@ from typing import Any, Iterator
 import fitsio
 
 from app.services.csv_metadata import get_csv_metrics
+from app.services.scan_filters import ScanFilterConfig
 
 logger = logging.getLogger(__name__)
 
@@ -20,23 +21,46 @@ FITS_EXTENSIONS = SUPPORTED_EXTENSIONS
 CALIBRATION_FRAME_TYPES = {"BIAS", "DARK", "FLAT", "DARKFLAT", "BIASFLAT"}
 
 
-def _walk_supported_files(root: Path) -> Iterator[Path]:
+def _walk_supported_files(
+    root: Path,
+    filter_config: "ScanFilterConfig | None" = None,
+    fits_root: "Path | None" = None,
+) -> Iterator[Path]:
     """Yield supported image files using os.scandir for better NFS performance.
 
     os.scandir batches readdir calls per directory and caches DirEntry.name,
     avoiding the per-entry stat() overhead of Path.rglob on network filesystems.
+
+    When filter_config is provided, subtrees that fail should_walk_dir are
+    pruned before descent, and files that fail should_include_file are
+    dropped. fits_root is the effective data root used for relative-path
+    segment extraction; defaults to root when not provided.
     """
+    effective_root = fits_root or root
     try:
         with os.scandir(root) as entries:
             for entry in entries:
                 try:
                     if entry.is_dir(follow_symlinks=True):
-                        yield from _walk_supported_files(Path(entry.path))
+                        sub = Path(entry.path)
+                        if filter_config and not filter_config.should_walk_dir(
+                            sub, effective_root
+                        ):
+                            continue
+                        yield from _walk_supported_files(
+                            sub, filter_config, effective_root
+                        )
                     elif entry.is_file(follow_symlinks=True):
                         # entry.name is already cached - no extra stat
                         _, ext = os.path.splitext(entry.name)
-                        if ext in SUPPORTED_EXTENSIONS:
-                            yield Path(entry.path)
+                        if ext not in SUPPORTED_EXTENSIONS:
+                            continue
+                        path = Path(entry.path)
+                        if filter_config and not filter_config.should_include_file(
+                            path, effective_root
+                        ):
+                            continue
+                        yield path
                 except OSError as exc:
                     # Handle stale NFS handles, permission errors, etc.
                     logger.warning("Skipping inaccessible entry %s: %s", entry.path, exc)
@@ -52,6 +76,8 @@ def scan_directory(
     is_cancelled: "callable | None" = None,
     on_new_file: "callable | None" = None,
     on_changed_file: "callable | None" = None,
+    filter_config: "ScanFilterConfig | None" = None,
+    fits_root: "Path | None" = None,
 ) -> tuple[list[Path], list[Path], set[str]]:
     """Walk a directory tree finding new and changed image files.
 
@@ -73,7 +99,7 @@ def scan_directory(
     changed_files: list[Path] = []
     all_disk_paths: set[str] = set()
     discovered = 0
-    for path in _walk_supported_files(root):
+    for path in _walk_supported_files(root, filter_config, fits_root or root):
         if is_cancelled and is_cancelled():
             break
         path_str = str(path)
