@@ -47,6 +47,11 @@ export interface ApplyNowResult {
   matched: number;
 }
 
+export interface ValidateRegexResult {
+  ok: boolean;
+  error: string | null;
+}
+
 export const scanFilters = {
   get: (): Promise<ScanFiltersResponse> =>
     fetchJson<ScanFiltersResponse>("/scan/filters"),
@@ -64,6 +69,12 @@ export const scanFilters = {
     fetchJson<TestResult>("/scan/filters/test", {
       method: "POST",
       body: JSON.stringify({ path, target_kind: targetKind }),
+    }),
+
+  validateRegex: (pattern: string): Promise<ValidateRegexResult> =>
+    fetchJson<ValidateRegexResult>("/scan/filters/validate-regex", {
+      method: "POST",
+      body: JSON.stringify({ pattern }),
     }),
 
   applyNow: (dryRun: boolean): Promise<ApplyNowResult> =>

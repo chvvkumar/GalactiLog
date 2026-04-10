@@ -15,10 +15,18 @@ import { showToast } from "./Toast";
 const EMPTY: ScanFilters = { include_paths: [], exclude_paths: [], name_rules: [] };
 
 const VERDICT_LABEL: Record<Verdict, string> = {
-  included: "Included",
-  excluded_by_path: "Excluded by path",
-  excluded_by_rule: "Excluded by rule",
-  excluded_by_missing_include: "Excluded (no include rule matched)",
+  included: "Will be scanned",
+  excluded_by_path: "Skipped: excluded by path",
+  excluded_by_rule: "Skipped: matched an exclude rule",
+  excluded_by_missing_include: "Skipped: no include rule matched",
+};
+
+const VERDICT_HINT: Record<Verdict, string> = {
+  included: "No rule caused this path to be skipped.",
+  excluded_by_path: "A parent folder is listed under Exclude paths.",
+  excluded_by_rule: "A name rule with action=exclude matched.",
+  excluded_by_missing_include:
+    "Include rules are set, but none of them matched this path.",
 };
 
 interface Props {
@@ -37,11 +45,51 @@ const ScanFiltersPanel: Component<Props> = (props) => {
   const [testResult, setTestResult] = createSignal<
     null | { verdict: Verdict; matched: string[] }
   >(null);
+  const [testing, setTesting] = createSignal(false);
+
+  const describeRule = (id: string): string => {
+    const r = filters().name_rules.find((x) => x.id === id);
+    if (!r) return id.slice(0, 8);
+    return `${r.action} ${r.type} on ${r.target}: ${r.pattern}`;
+  };
+
+  // Regex validation runs on the backend (Python `re`) because the scanner
+  // uses that engine. Validating with `new RegExp(...)` here would reject
+  // Python-only syntax like `(?i)foo` or `(?P<name>)` even though the
+  // scanner accepts them. We cache results by pattern string so rendering
+  // stays synchronous.
+  const [regexCache, setRegexCache] = createSignal<Record<string, string | null>>({});
+  const regexPending = new Set<string>();
+
+  const validatePattern = (pattern: string) => {
+    if (regexPending.has(pattern) || pattern in regexCache()) return;
+    regexPending.add(pattern);
+    scanFilters.validateRegex(pattern).then(
+      (r) => {
+        regexPending.delete(pattern);
+        setRegexCache({ ...regexCache(), [pattern]: r.ok ? null : (r.error ?? "invalid regex") });
+      },
+      () => {
+        regexPending.delete(pattern);
+        // Network failure: don't block the user. Treat as valid for now;
+        // the backend will reject on save if it's truly broken.
+        setRegexCache({ ...regexCache(), [pattern]: null });
+      },
+    );
+  };
+
+  createEffect(() => {
+    for (const r of filters().name_rules) {
+      if (r.type === "regex" && r.pattern.trim()) validatePattern(r.pattern);
+    }
+  });
 
   const ruleIsInvalid = (r: NameRule): string | null => {
     if (!r.pattern.trim()) return "empty pattern";
     if (r.type === "regex") {
-      try { new RegExp(r.pattern); } catch { return "invalid regex"; }
+      const cached = regexCache()[r.pattern];
+      if (cached === undefined) return null; // optimistic while validating
+      return cached;
     }
     return null;
   };
@@ -95,12 +143,16 @@ const ScanFiltersPanel: Component<Props> = (props) => {
   };
 
   const runTest = async () => {
-    if (!testPath().trim()) return;
+    if (!testPath().trim() || testing()) return;
+    setTesting(true);
+    setTestResult(null);
     try {
       const r = await scanFilters.test(testPath().trim(), testKind());
       setTestResult({ verdict: r.verdict, matched: r.matched_rule_ids });
     } catch (e: any) {
       showToast(e?.message ?? "Test failed", "error");
+    } finally {
+      setTesting(false);
     }
   };
 
@@ -488,28 +540,49 @@ include rule   ^M\\d+$          (regex, folder)`}
                 <option value="folder">folder</option>
               </select>
               <button
-                class="px-4 py-1.5 bg-theme-surface text-theme-text-primary border border-theme-border rounded text-sm font-medium hover:bg-theme-hover transition-colors"
+                class="px-4 py-1.5 bg-theme-surface text-theme-text-primary border border-theme-border rounded text-sm font-medium hover:bg-theme-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 onClick={runTest}
+                disabled={testing() || !testPath().trim()}
               >
-                Test
+                {testing() ? "Testing…" : "Test"}
               </button>
             </div>
             <Show when={testResult()}>
-              <div class="text-xs">
-                Verdict:{" "}
-                <strong
-                  class={
-                    testResult()!.verdict === "included"
-                      ? "text-green-400"
-                      : "text-red-400"
-                  }
-                >
-                  {VERDICT_LABEL[testResult()!.verdict]}
-                </strong>
+              <div class="text-xs space-y-0.5">
+                <div>
+                  Verdict:{" "}
+                  <strong
+                    class={
+                      testResult()!.verdict === "included"
+                        ? "text-green-400"
+                        : "text-red-400"
+                    }
+                  >
+                    {VERDICT_LABEL[testResult()!.verdict]}
+                  </strong>
+                </div>
                 <Show when={testResult()!.matched.length > 0}>
-                  {" "}
-                  — matched rules: {testResult()!.matched.join(", ")}
+                  <ul class="list-disc list-inside text-theme-text-secondary">
+                    <For each={testResult()!.matched}>
+                      {(id) => (
+                        <li class="font-mono">{describeRule(id)}</li>
+                      )}
+                    </For>
+                  </ul>
                 </Show>
+                <div class="text-theme-text-secondary">
+                  {VERDICT_HINT[testResult()!.verdict]}
+                  <Show
+                    when={
+                      testResult()!.verdict === "included" &&
+                      filters().name_rules.some((r) => r.action === "exclude")
+                    }
+                  >
+                    {" "}None of your exclude rules matched this path. If you
+                    expected one to match, double-check the pattern against
+                    the exact filename.
+                  </Show>
+                </div>
               </div>
             </Show>
           </div>
