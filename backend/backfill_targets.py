@@ -53,13 +53,13 @@ async def backfill_existing_targets():
 
             # Extract a clean SIMBAD-compatible name for TAP lookup.
             # catalog_id may contain mangled values like "IC 1805 - Heart Nebula Panel 1"
-            # from a previous backfill run — strip everything after " - " to get "IC 1805".
+            # from a previous backfill run - strip everything after " - " to get "IC 1805".
             raw_lookup = target.catalog_id or target.primary_name
             lookup_name = raw_lookup.split(" - ")[0].strip()
             raw_aliases = await _fetch_tap_aliases(lookup_name)
 
             if not raw_aliases:
-                # TAP failed — try with normalized name
+                # TAP failed - try with normalized name
                 raw_aliases = await _fetch_tap_aliases(normalize_object_name(lookup_name, upper=False))
             if not raw_aliases and lookup_name != raw_lookup:
                 # Try the full value as last resort
@@ -70,8 +70,8 @@ async def backfill_existing_targets():
                 common_name = extract_common_name(raw_aliases, fits_names=fits_names)
                 curated = curate_aliases(raw_aliases, fits_names=fits_names)
             else:
-                # SIMBAD unavailable — do best-effort from existing data
-                log.warning("  No TAP data for %s — using existing aliases", lookup_name)
+                # SIMBAD unavailable - do best-effort from existing data
+                log.warning("  No TAP data for %s - using existing aliases", lookup_name)
                 catalog_id = normalize_object_name(lookup_name, upper=False)
                 common_name = extract_common_name([], fits_names=fits_names)
                 curated = [normalize_object_name(n) for n in fits_names]

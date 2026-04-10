@@ -34,7 +34,7 @@ export function pollTask(taskId: string, options: PollOptions = {}): () => void 
         onFailure?.(status.result?.error ?? "Task failed");
       }
     } catch {
-      // Network error — keep polling, it may recover
+      // Network error - keep polling, it may recover
     }
   };
 

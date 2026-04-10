@@ -54,7 +54,7 @@ function stopPolling() {
 }
 
 export function useScan() {
-  // On every mount, check server state — resume polling if scan is active
+  // On every mount, check server state - resume polling if scan is active
   onMount(async () => {
     await fetchStatus();
     const s = scanStatus();

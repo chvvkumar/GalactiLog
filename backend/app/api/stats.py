@@ -24,7 +24,7 @@ from app.schemas.stats import (
     SiteCoords,
     CalendarEntry,
 )
-# astro_night is no longer imported here — efficiency uses precomputed DB table
+# astro_night is no longer imported here - efficiency uses precomputed DB table
 
 router = APIRouter(prefix="/stats", tags=["stats"])
 
@@ -177,7 +177,7 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
 
     equipment = EquipmentStats(cameras=cameras, telescopes=telescopes)
 
-    # Equipment Performance — metrics per telescope+camera+filter combo
+    # Equipment Performance - metrics per telescope+camera+filter combo
     # Use nullif to treat 0 as missing data for all metrics
     hfr_nz = func.nullif(Image.median_hfr, 0)
     ecc_nz = func.nullif(Image.eccentricity, 0)
@@ -329,7 +329,7 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
         normalized_usage[canonical] = normalized_usage.get(canonical, 0.0) + seconds
     filter_usage = normalized_usage
 
-    # Timeline — monthly (backward compat)
+    # Timeline - monthly (backward compat)
     month_label = func.to_char(Image.capture_date, 'YYYY-MM').label('month')
     timeline_q = select(
         month_label,
@@ -343,7 +343,7 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
     # Site coordinates (for efficiency calc)
     site_coords = await _extract_site_coords(session)
 
-    # Timeline — weekly (raw data only, efficiency computed after DB work)
+    # Timeline - weekly (raw data only, efficiency computed after DB work)
     week_label = func.to_char(Image.capture_date, 'IYYY-"W"IW').label('week')
     weekly_q = select(
         week_label,
@@ -354,7 +354,7 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
     weekly_result = await session.execute(weekly_q)
     weekly_raw = [(r[0], float(r[1])) for r in weekly_result.all()]
 
-    # Timeline — daily (raw data only)
+    # Timeline - daily (raw data only)
     day_label = func.to_char(Image.capture_date, 'YYYY-MM-DD').label('day')
     daily_q = select(
         day_label,
@@ -409,7 +409,7 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
         hfr_distribution=hfr_buckets,
     )
 
-    # Storage — use cached values (background task refreshes them)
+    # Storage - use cached values (background task refreshes them)
     db_size_q = select(func.pg_database_size(func.current_database()))
     try:
         db_result = await session.execute(db_size_q)

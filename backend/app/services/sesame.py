@@ -1,4 +1,4 @@
-"""CDS SESAME name resolver — fallback when SIMBAD direct query fails.
+"""CDS SESAME name resolver - fallback when SIMBAD direct query fails.
 
 SESAME queries SIMBAD, NED, and VizieR behind a single endpoint.
 We use it as a fallback to catch objects NED or VizieR can resolve
@@ -138,7 +138,7 @@ def resolve_sesame_cached(
             return None
         return curate_simbad_result(cached)
 
-    # Query SESAME (NED + VizieR only — skip SIMBAD since we already tried it)
+    # Query SESAME (NED + VizieR only - skip SIMBAD since we already tried it)
     loop = asyncio.new_event_loop()
     try:
         raw = loop.run_until_complete(_query_sesame_raw(object_name, resolvers="NV"))

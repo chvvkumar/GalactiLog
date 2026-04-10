@@ -86,7 +86,7 @@ export const UnresolvedFilesTab: Component = () => {
         onSuccess: (result) => {
           dismissToast();
           const count = result?.candidates_found ?? 0;
-          showToast(`Detection complete — ${count} candidate(s) found`);
+          showToast(`Detection complete - ${count} candidate(s) found`);
           setDetecting(false);
           refresh();
         },

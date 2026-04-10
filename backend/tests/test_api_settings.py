@@ -264,7 +264,7 @@ async def test_put_general_invalid_payload():
             json={"auto_scan_enabled": "yes", "auto_scan_interval": -1,
                   "thumbnail_width": 800, "default_page_size": 50},
         )
-    # Pydantic will coerce "yes" string to bool — just check it responds
+    # Pydantic will coerce "yes" string to bool - just check it responds
     assert resp.status_code in (200, 422)
 
 
@@ -498,7 +498,7 @@ async def test_suggestions_filters_levenshtein_grouping():
 @pytest.mark.asyncio
 async def test_suggestions_filters_short_strings_not_levenshtein_grouped():
     """Short strings (<= 3 chars) are only grouped by case, not Levenshtein."""
-    # "Ha" and "Hb" differ by 1 char but are <= 3 chars — should NOT be grouped
+    # "Ha" and "Hb" differ by 1 char but are <= 3 chars - should NOT be grouped
     rows = [("Ha", 10), ("Hb", 5)]
 
     mock_result = MagicMock()

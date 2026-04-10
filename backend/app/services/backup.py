@@ -384,7 +384,7 @@ async def restore_backup(
             target = name_to_target.get(note.target_name)
             if not target:
                 result["warnings"].append(
-                    f"Target '{note.target_name}' not found — skipping session note"
+                    f"Target '{note.target_name}' not found - skipping session note"
                 )
                 skipped += 1
                 continue
@@ -496,7 +496,7 @@ async def restore_backup(
             target = name_to_target.get(override.target_name)
             if not target:
                 result["warnings"].append(
-                    f"Target '{override.target_name}' not found — skipping override"
+                    f"Target '{override.target_name}' not found - skipping override"
                 )
                 skipped += 1
                 continue
@@ -544,7 +544,7 @@ async def restore_backup(
                 panel_target = name_to_target.get(p.object_name)
                 if not panel_target:
                     result["warnings"].append(
-                        f"Target '{p.object_name}' not found — skipping mosaic panel"
+                        f"Target '{p.object_name}' not found - skipping mosaic panel"
                     )
                     continue
                 session.add(MosaicPanel(
@@ -561,7 +561,7 @@ async def restore_backup(
 
     # ── Users ──
     if "users" in active:
-        # Note: Replace mode does NOT delete existing users by design — this is a safety
+        # Note: Replace mode does NOT delete existing users by design - this is a safety
         # measure to prevent locking out admins mid-restore. Users are always merged by username.
         added, updated, skipped = 0, 0, 0
         for u_data in parsed.users:

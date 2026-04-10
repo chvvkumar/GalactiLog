@@ -123,7 +123,7 @@ const AnalysisPage: Component = () => {
             <strong class="text-theme-text-primary">Distributions</strong> shows histograms of individual metrics to understand their spread and typical values.
           </li>
           <li class="text-sm text-theme-text-secondary">
-            <strong class="text-theme-text-primary">Time Series</strong> tracks how metrics change over time — useful for detecting equipment degradation or seasonal trends.
+            <strong class="text-theme-text-primary">Time Series</strong> tracks how metrics change over time - useful for detecting equipment degradation or seasonal trends.
           </li>
           <li class="text-sm text-theme-text-secondary">
             <strong class="text-theme-text-primary">Matrix</strong> shows a correlation grid across all metric pairs. Click a cell to jump to its detailed correlation plot.

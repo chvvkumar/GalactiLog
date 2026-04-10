@@ -37,7 +37,7 @@ const StatisticsPage: Component = () => {
             <strong class="text-theme-text-primary">Filter Usage</strong>, <strong class="text-theme-text-primary">Equipment Inventory</strong>, and <strong class="text-theme-text-primary">Top Targets</strong> give quick breakdowns of what you image most.
           </li>
           <li class="text-sm text-theme-text-secondary">
-            <strong class="text-theme-text-primary">Timeline</strong> and <strong class="text-theme-text-primary">Calendar</strong> views show imaging activity over time — useful for tracking seasonal patterns and productivity.
+            <strong class="text-theme-text-primary">Timeline</strong> and <strong class="text-theme-text-primary">Calendar</strong> views show imaging activity over time - useful for tracking seasonal patterns and productivity.
           </li>
           <li class="text-sm text-theme-text-secondary">
             <strong class="text-theme-text-primary">Storage Breakdown</strong> and <strong class="text-theme-text-primary">Ingest History</strong> show disk usage and how your catalog has grown.

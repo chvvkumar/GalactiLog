@@ -1,4 +1,4 @@
-"""VizieR catalog service — TAP queries for non-NGC/IC target enrichment."""
+"""VizieR catalog service - TAP queries for non-NGC/IC target enrichment."""
 from __future__ import annotations
 
 import logging
@@ -31,7 +31,7 @@ _CATALOG_MAP: list[tuple[re.Pattern, str, str, str]] = [
     (re.compile(r"^B\s+(\d+)$"), "VII/220A", '"VII/220A/barnard"', "Barn"),
     (re.compile(r"^(Ced|Cederblad)\s+(.+)$", re.IGNORECASE), "VII/231", '"VII/231/catalog"', "Ced"),
     (re.compile(r"^(PN\s+A66|Abell)\s+(\d+)$", re.IGNORECASE), "V/84", '"V/84/main"', "Name"),
-    # Open clusters — multiple name formats, all go to B/ocl
+    # Open clusters - multiple name formats, all go to B/ocl
     (re.compile(r"^(Collinder|Cr|Melotte|Mel|Trumpler|Tr|Berkeley|King|Stock)\s+\d+", re.IGNORECASE),
      "B/ocl", '"B/ocl/clusters"', "Cluster"),
 ]
@@ -97,7 +97,7 @@ def build_adql_query(catalog_id: str | None) -> str | None:
         return f'SELECT LDN, Area, "_RA_icrs", "_DE_icrs" FROM {table} WHERE LDN={number}'
 
     elif viz_id == "VII/220A":
-        # Barnard: Barn is CHAR(4), space-padded — use TRIM
+        # Barnard: Barn is CHAR(4), space-padded - use TRIM
         return f"SELECT Barn, Diam, \"_RA_icrs\", \"_DE_icrs\" FROM {table} WHERE TRIM(Barn)='{number}'"
 
     elif viz_id == "VII/231":
@@ -152,7 +152,7 @@ def _parse_vizier_response(viz_id: str, lines: list[str]) -> dict[str, Any] | No
 
     if viz_id == "VII/20":
         size_major = _float("Diam")
-        ra = _float("RA1900")  # Approximate — B1900 coords
+        ra = _float("RA1900")  # Approximate - B1900 coords
         dec = _float("DE1900")
 
     elif viz_id == "VII/9":
@@ -228,7 +228,7 @@ def _coords_to_constellation(ra: float | None, dec: float | None) -> str | None:
     """Derive IAU constellation abbreviation from J2000 coordinates.
 
     Uses a simple lookup of the 88 constellation boundaries.
-    Returns None if coords are missing — constellation enrichment is best-effort.
+    Returns None if coords are missing - constellation enrichment is best-effort.
     """
     # Skip if no coordinates
     if ra is None or dec is None:
@@ -311,7 +311,7 @@ def enrich_target_from_vizier(session: Session, target: "Target") -> bool:
     # Check cache
     cached = get_cached_vizier(target.catalog_id, session)
     if cached is not None:
-        # Cached (positive or negative) — apply if positive
+        # Cached (positive or negative) - apply if positive
         if cached.size_major is None and cached.size_minor is None:
             return False
         updated = False
@@ -330,7 +330,7 @@ def enrich_target_from_vizier(session: Session, target: "Target") -> bool:
     viz_id = determine_vizier_catalog(target.catalog_id)[0]
     data = query_vizier(target.catalog_id)
 
-    # Cache the result (even if None — negative cache)
+    # Cache the result (even if None - negative cache)
     save_vizier_cache(session, target.catalog_id, viz_id, data)
     session.flush()
 

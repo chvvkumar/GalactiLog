@@ -6,7 +6,7 @@ echo "Running database migrations..."
 # Check if alembic_version table exists. If the DB has tables but no
 # alembic tracking (created by Base.metadata.create_all), stamp at head
 # since create_all produces the current schema. This makes deployment
-# safe for existing installs — future migrations will run incrementally.
+# safe for existing installs - future migrations will run incrementally.
 HAS_ALEMBIC=$(python -c "
 from sqlalchemy import create_engine, text
 from app.config import settings
@@ -36,11 +36,11 @@ eng.dispose()
 " 2>/dev/null || echo "no")
 
     if [ "$HAS_IMAGES" = "yes" ]; then
-        echo "Existing database detected without alembic tracking — stamping at head"
+        echo "Existing database detected without alembic tracking - stamping at head"
         alembic stamp head
     fi
 else
-    # alembic_version exists — check if it points to a revision that no
+    # alembic_version exists - check if it points to a revision that no
     # longer exists (old incremental migrations were replaced by 0001).
     # If so, re-stamp to the current head.
     STALE=$(python -c "
@@ -58,7 +58,7 @@ eng.dispose()
 " 2>/dev/null || echo "no")
 
     if [ "$STALE" = "yes" ]; then
-        echo "Stale migration revision detected — re-stamping to current head"
+        echo "Stale migration revision detected - re-stamping to current head"
         python -c "
 from sqlalchemy import create_engine, text
 from app.config import settings
@@ -157,7 +157,7 @@ eng.dispose()
 " 2>/dev/null || echo "current")
 
 if [ "$DATA_RESULT" != "current" ]; then
-    echo "Data version v${DATA_RESULT} is behind — scheduling background upgrade..."
+    echo "Data version v${DATA_RESULT} is behind - scheduling background upgrade..."
     python -c "
 import json, time
 import redis
@@ -177,7 +177,7 @@ run_data_migrations.apply_async(args=[${DATA_RESULT}])
 r.close()
 " 2>&1 || echo "Warning: could not dispatch data migration task"
 else
-    echo "Data version is current — scheduling startup maintenance..."
+    echo "Data version is current - scheduling startup maintenance..."
     python -c "
 from app.worker.tasks import smart_rebuild_targets, detect_mosaic_panels_task
 smart_rebuild_targets.apply_async(countdown=10)

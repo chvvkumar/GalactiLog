@@ -1,4 +1,4 @@
-"""Auto data migrations — backfill logic that runs when DATA_VERSION advances.
+"""Auto data migrations - backfill logic that runs when DATA_VERSION advances.
 
 Each migration is a function that receives a sync SQLAlchemy Session and returns
 a summary string. Register new migrations in MIGRATIONS with the next version number.
@@ -19,7 +19,7 @@ from app.services.vizier import enrich_target_from_vizier, determine_vizier_cata
 
 logger = logging.getLogger(__name__)
 
-# Current data version — bump this and add a migration function when
+# Current data version - bump this and add a migration function when
 # code changes affect how stored target data is derived.
 DATA_VERSION = 5
 
@@ -38,7 +38,7 @@ def _migrate_v1_fix_catalog_designations(session: Session) -> str:
 
     updated = 0
     for target in targets:
-        # Try multiple cache lookup keys — the cache may be stored under
+        # Try multiple cache lookup keys - the cache may be stored under
         # the FITS object name, the catalog_id, or the primary_name
         fits_result = session.execute(text("""
             SELECT DISTINCT raw_headers->>'OBJECT'
@@ -180,7 +180,7 @@ def _migrate_v5_strip_panel_aliases(session: Session) -> str:
     """Remove 'Panel N' suffixed aliases from targets.
 
     These leaked in from FITS OBJECT headers like 'Andromeda Galaxy Panel 1'.
-    The panel suffix is not meaningful as an alias — the base name is sufficient.
+    The panel suffix is not meaningful as an alias - the base name is sufficient.
     """
     import re
     from app.models import Target

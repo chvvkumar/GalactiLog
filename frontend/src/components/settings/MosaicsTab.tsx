@@ -126,7 +126,7 @@ export const MosaicsTab: Component = () => {
     setDetecting(true);
     try {
       const result = await api.triggerMosaicDetection();
-      showToast(`Detection complete — ${result.new_suggestions} new suggestion(s) found`);
+      showToast(`Detection complete - ${result.new_suggestions} new suggestion(s) found`);
       await refresh();
     } catch {
       showToast("Failed to run detection", "error");

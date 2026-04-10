@@ -103,7 +103,7 @@
   --color-filter-r: var(--color-filter-r);
   --color-filter-g: var(--color-filter-g);
   --color-filter-b: var(--color-filter-b);
-  /* Text size tiers — rem-based so they scale with the root font-size preset */
+  /* Text size tiers - rem-based so they scale with the root font-size preset */
   --font-size-micro: 0.5rem;    /* 7px  at 14px root */
   --font-size-tiny: 0.643rem;   /* 9px  at 14px root */
   --font-size-caption: 0.714rem; /* 10px at 14px root */

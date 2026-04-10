@@ -69,7 +69,7 @@ export const SettingsPage: Component = () => {
             <li><strong class="text-theme-text-primary">Auto-scan</strong> runs on a timer so new files are cataloged automatically. <strong class="text-theme-text-primary">Scan Directory</strong> triggers a one-time scan.</li>
             <li>Choose <strong class="text-theme-text-primary">Light frames only</strong> to skip calibration frames (darks, flats, bias) or <strong class="text-theme-text-primary">All frames</strong> to catalog everything.</li>
             <li>The <strong class="text-theme-text-primary">Database Overview</strong> shows current catalog totals and name-resolution cache status (SIMBAD, SESAME, VizieR).</li>
-            <li><strong class="text-theme-text-primary">Maintenance</strong> actions: <strong class="text-theme-text-primary">Re-match</strong> re-resolves all target names against SIMBAD. <strong class="text-theme-text-primary">Retry Unresolved</strong> retries only failed lookups. <strong class="text-theme-text-primary">Regenerate</strong> rebuilds thumbnails. <strong class="text-theme-text-primary">Full Rebuild</strong> re-scans all files from scratch — use sparingly.</li>
+            <li><strong class="text-theme-text-primary">Maintenance</strong> actions: <strong class="text-theme-text-primary">Re-match</strong> re-resolves all target names against SIMBAD. <strong class="text-theme-text-primary">Retry Unresolved</strong> retries only failed lookups. <strong class="text-theme-text-primary">Regenerate</strong> rebuilds thumbnails. <strong class="text-theme-text-primary">Full Rebuild</strong> re-scans all files from scratch - use sparingly.</li>
           </ul>
         </SettingsHelpSection>
         <ScanManager />
@@ -79,7 +79,7 @@ export const SettingsPage: Component = () => {
           <p class="text-sm text-theme-text-secondary">Filters represent the optical bandpass used for each exposure (e.g., Luminance, Red, H-alpha).</p>
           <ul class="text-sm text-theme-text-secondary list-disc list-inside space-y-1">
             <li>FITS headers often record the same filter under different names. Use <strong class="text-theme-text-primary">Filter Groups</strong> to merge aliases (e.g., "Ha" and "H-alpha") under a single canonical name.</li>
-            <li>Assign colors to each filter — these colors are used throughout the dashboard, charts, and session tables.</li>
+            <li>Assign colors to each filter - these colors are used throughout the dashboard, charts, and session tables.</li>
             <li>GalactiLog suggests groupings when it detects likely aliases. Accept or dismiss suggestions as they appear.</li>
           </ul>
         </SettingsHelpSection>
@@ -98,7 +98,7 @@ export const SettingsPage: Component = () => {
             <li><strong class="text-theme-text-primary">Theme</strong> changes the overall color scheme. <strong class="text-theme-text-primary">Text Size</strong> adjusts the base font size across the interface.</li>
             <li><strong class="text-theme-text-primary">Filter Badge Style</strong> controls how filter names appear in tables and charts (solid, outline, dot, etc.).</li>
             <li><strong class="text-theme-text-primary">Timezone</strong> sets the display timezone for all dates and timestamps shown in the interface.</li>
-            <li><strong class="text-theme-text-primary">Content Width</strong> constrains the maximum page width — useful on ultra-wide monitors.</li>
+            <li><strong class="text-theme-text-primary">Content Width</strong> constrains the maximum page width - useful on ultra-wide monitors.</li>
             <li><strong class="text-theme-text-primary">Metric Visibility</strong> controls which data columns (HFR, guiding RMS, weather, etc.) appear on target detail pages. Disable groups you don't collect to reduce clutter.</li>
           </ul>
         </SettingsHelpSection>
@@ -119,7 +119,7 @@ export const SettingsPage: Component = () => {
           <p class="text-sm text-theme-text-secondary">When different FITS headers produce slightly different target names for the same object, GalactiLog detects these as potential duplicates.</p>
           <ul class="text-sm text-theme-text-secondary list-disc list-inside space-y-1">
             <li><strong class="text-theme-text-primary">Run Detection</strong> scans for name-based duplicates. Review <strong class="text-theme-text-primary">Suggestions</strong> and merge or dismiss each pair.</li>
-            <li><strong class="text-theme-text-primary">Merged</strong> shows previously accepted merges — these can be reverted if needed.</li>
+            <li><strong class="text-theme-text-primary">Merged</strong> shows previously accepted merges - these can be reverted if needed.</li>
             <li><strong class="text-theme-text-primary">Unresolved Files</strong> lists FITS files whose target names could not be matched to any known object.</li>
           </ul>
         </SettingsHelpSection>
@@ -140,9 +140,9 @@ export const SettingsPage: Component = () => {
           <p class="text-sm text-theme-text-secondary">Backup and restore lets you export and import your GalactiLog configuration and data as a versioned JSON file.</p>
           <ul class="text-sm text-theme-text-secondary list-disc list-inside space-y-1">
             <li><strong class="text-theme-text-primary">What's included:</strong> settings, filter and equipment configurations, session notes, custom columns, mosaic definitions, user accounts, and display preferences.</li>
-            <li>Backup files carry a schema version — older backups will restore cleanly on newer versions of the app.</li>
+            <li>Backup files carry a schema version - older backups will restore cleanly on newer versions of the app.</li>
             <li><strong class="text-theme-text-primary">Merge mode</strong> adds or updates items from the backup without touching data not present in the file. <strong class="text-theme-text-primary">Replace mode</strong> clears the selected sections first, then imports from the backup.</li>
-            <li>When restoring user accounts, temporary passwords are generated and shown once — save them before closing the restore dialog.</li>
+            <li>When restoring user accounts, temporary passwords are generated and shown once - save them before closing the restore dialog.</li>
           </ul>
         </SettingsHelpSection>
         <BackupRestoreTab />

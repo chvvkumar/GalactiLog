@@ -85,7 +85,7 @@ def extract_catalog_id(aliases: list[str], simbad_main_id: str) -> str:
             best_name = n
 
     fallback = normalize_object_name(simbad_main_id, upper=False)
-    # Strip SIMBAD "NAME " prefix from fallback — it's a common-name marker, not a catalog ID
+    # Strip SIMBAD "NAME " prefix from fallback - it's a common-name marker, not a catalog ID
     if fallback.upper().startswith("NAME "):
         fallback = fallback[5:].strip()
     return best_name if best_name is not None else fallback
@@ -154,7 +154,7 @@ def extract_common_name(
         if n.upper().startswith("NAME "):
             return n[5:].strip().title()
 
-    # FITS name fallback — strip "Panel N" suffix
+    # FITS name fallback - strip "Panel N" suffix
     if fits_names:
         for fn in fits_names:
             n = _PANEL_RE.sub("", normalize_object_name(fn, upper=False)).strip()
@@ -511,14 +511,14 @@ def resolve_target_name_cached(
                 return None
             return curate_simbad_result(mapped_cached)
 
-    # Original was negative-cached and no mapped name — done
+    # Original was negative-cached and no mapped name - done
     if orig_cached is not None and orig_cached.get("_negative"):
         return None
 
     if skip_simbad:
         return None
 
-    # Query SIMBAD — try mapped name first (more likely to resolve), fall back to original
+    # Query SIMBAD - try mapped name first (more likely to resolve), fall back to original
     raw = None
     if mapped_norm:
         loop = asyncio.new_event_loop()

@@ -61,12 +61,12 @@ async def detect_mosaic_panels(session: AsyncSession, gap_days: int = 0) -> int:
     targets = (await session.execute(targets_q)).scalars().all()
 
     # Group by base name
-    # Tuple: (Target, label, panel_num) — panel_num used for OBJECT queries
+    # Tuple: (Target, label, panel_num) - panel_num used for OBJECT queries
     groups: dict[str, list[tuple[Target, str, str]]] = defaultdict(list)
     for t in targets:
         if t.id in in_mosaic:
             continue
-        # Check primary name and aliases — don't break, one target may match
+        # Check primary name and aliases - don't break, one target may match
         # multiple panels via its aliases
         names_to_check = [t.primary_name] + (t.aliases or [])
         seen_panels: set[str] = set()
@@ -118,7 +118,7 @@ async def detect_mosaic_panels(session: AsyncSession, gap_days: int = 0) -> int:
                 all_dates.extend(dates)
 
             if not all_dates:
-                # No date info found — fall through to non-clustered creation
+                # No date info found - fall through to non-clustered creation
                 if base_name in existing_names:
                     continue
                 suggestion = MosaicSuggestion(
@@ -133,7 +133,7 @@ async def detect_mosaic_panels(session: AsyncSession, gap_days: int = 0) -> int:
             clusters = cluster_sessions_by_gap(all_dates, gap_days)
 
             if len(clusters) == 1:
-                # Single campaign — use base name as-is
+                # Single campaign - use base name as-is
                 if base_name in existing_names:
                     continue
                 suggestion = MosaicSuggestion(
@@ -144,7 +144,7 @@ async def detect_mosaic_panels(session: AsyncSession, gap_days: int = 0) -> int:
                 session.add(suggestion)
                 count += 1
             else:
-                # Multiple campaigns — one suggestion per cluster with year suffix
+                # Multiple campaigns - one suggestion per cluster with year suffix
                 for cluster_dates in clusters:
                     cluster_set = set(cluster_dates)
                     suffix = _year_range_suffix(cluster_dates)
