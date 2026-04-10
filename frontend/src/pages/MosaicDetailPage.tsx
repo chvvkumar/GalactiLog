@@ -157,12 +157,12 @@ const MosaicDetailPage: Component = () => {
                                     class="w-full aspect-square object-cover rounded border border-theme-border"
                                   />
                                 </Show>
-                                <span class="absolute bottom-1 left-1 bg-black/60 text-white text-[10px] px-1.5 py-0.5 rounded">
+                                <span class="absolute bottom-1 left-1 bg-black/60 text-white text-caption px-1.5 py-0.5 rounded">
                                   {panel.panel_label}
                                 </span>
                               </div>
                               <div
-                                class="text-center text-[10px] mt-1 text-theme-text-secondary"
+                                class="text-center text-caption mt-1 text-theme-text-secondary"
                                 title={diff < 0
                                   ? `${formatIntegration(Math.abs(diff))} less than the most-imaged panel`
                                   : "Most integration time across all panels"}
