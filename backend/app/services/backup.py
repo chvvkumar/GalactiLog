@@ -12,11 +12,11 @@ from sqlalchemy.orm import selectinload
 
 from app.models.user_settings import UserSettings, SETTINGS_ROW_ID
 from app.models.session_note import SessionNote
-from app.models.custom_column import CustomColumn, CustomColumnValue
+from app.models.custom_column import CustomColumn, CustomColumnValue, ColumnType, AppliesTo
 from app.models.target import Target
 from app.models.mosaic import Mosaic
 from app.models.mosaic_panel import MosaicPanel
-from app.models.user import User
+from app.models.user import User, UserRole
 from app.schemas.backup import BackupPayload
 from app.services.auth import hash_password
 
@@ -237,6 +237,10 @@ def validate_backup(
         "error": None,
     }
 
+    if mode not in ("merge", "replace"):
+        result["error"] = f"Invalid mode '{mode}': must be 'merge' or 'replace'"
+        return result
+
     # ── Structure check ──
     if "meta" not in data:
         result["error"] = "Invalid backup file: missing 'meta' field"
@@ -318,6 +322,9 @@ async def restore_backup(
     mode: str,
 ) -> dict:
     """Apply a validated backup to the database. Runs in caller's transaction."""
+    if mode not in ("merge", "replace"):
+        raise ValueError(f"Invalid mode '{mode}': must be 'merge' or 'replace'")
+
     data = apply_migrations(data)
     parsed = BackupPayload.model_validate(data)
 
@@ -406,8 +413,14 @@ async def restore_backup(
 
         # Find any admin for created_by / updated_by
         admin = (await session.execute(
-            select(User).where(User.role == "admin")
+            select(User).where(User.role == UserRole.admin)
         )).scalars().first()
+
+        if parsed.custom_columns and admin is None:
+            raise ValueError(
+                "Cannot restore custom_columns: no admin user exists in the database. "
+                "Create an admin user first, or exclude custom_columns from the restore."
+            )
 
         added, updated, skipped = 0, 0, 0
         for col_data in parsed.custom_columns:
@@ -417,8 +430,8 @@ async def restore_backup(
 
             if existing_col:
                 existing_col.name = col_data.name
-                existing_col.column_type = col_data.column_type
-                existing_col.applies_to = col_data.applies_to
+                existing_col.column_type = ColumnType(col_data.column_type)
+                existing_col.applies_to = AppliesTo(col_data.applies_to)
                 existing_col.dropdown_options = col_data.dropdown_options
                 existing_col.display_order = col_data.display_order
                 col_obj = existing_col
@@ -427,11 +440,11 @@ async def restore_backup(
                 col_obj = CustomColumn(
                     name=col_data.name,
                     slug=col_data.slug,
-                    column_type=col_data.column_type,
-                    applies_to=col_data.applies_to,
+                    column_type=ColumnType(col_data.column_type),
+                    applies_to=AppliesTo(col_data.applies_to),
                     dropdown_options=col_data.dropdown_options,
                     display_order=col_data.display_order,
-                    created_by=admin.id if admin else None,
+                    created_by=admin.id,
                 )
                 session.add(col_obj)
                 await session.flush()
@@ -462,7 +475,7 @@ async def restore_backup(
                         session_date=sd,
                         rig_label=val.rig_label,
                         value=val.value,
-                        updated_by=admin.id if admin else None,
+                        updated_by=admin.id,
                     ))
 
         await session.flush()
@@ -549,14 +562,14 @@ async def restore_backup(
             )).scalar_one_or_none()
 
             if existing_user:
-                existing_user.role = u_data.role
+                existing_user.role = UserRole(u_data.role)
                 updated += 1
             else:
                 temp_password = secrets.token_urlsafe(12)
                 session.add(User(
                     username=u_data.username,
                     password_hash=hash_password(temp_password),
-                    role=u_data.role,
+                    role=UserRole(u_data.role),
                     is_active=True,
                 ))
                 result["temporary_passwords"][u_data.username] = temp_password
