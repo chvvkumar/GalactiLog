@@ -44,7 +44,7 @@ const CollapsibleSection: Component<{ id: string; label: string; children: JSX.E
         class="flex items-center justify-between w-full text-label font-medium uppercase tracking-wider text-theme-text-tertiary hover:text-theme-text-secondary transition-colors cursor-pointer select-none"
       >
         {props.label}
-        <span class={`text-[10px] transition-transform ${collapsed() ? "-rotate-90" : ""}`}>&#9660;</span>
+        <span class={`text-caption transition-transform ${collapsed() ? "-rotate-90" : ""}`}>&#9660;</span>
       </button>
       <Show when={!collapsed()}>
         <div class="mt-2">{props.children}</div>

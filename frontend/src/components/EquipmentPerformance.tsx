@@ -74,7 +74,7 @@ const ComboRow: Component<{ combo: EquipmentComboMetrics }> = (props) => {
             </span>
             <Show when={props.combo.grouped}>
               <span
-                class="text-theme-text-secondary text-[0.65rem] cursor-help"
+                class="text-theme-text-secondary text-tiny cursor-help"
                 title="Grouped: multiple equipment aliases are combined under this name"
               >
                 &#x29C9;
@@ -112,13 +112,13 @@ const ComboRow: Component<{ combo: EquipmentComboMetrics }> = (props) => {
             <table class="w-full text-xs min-w-[500px]">
               <thead>
                 <tr class="border-b border-theme-border">
-                  <th class="text-left text-theme-text-secondary font-normal py-1 pl-8 pr-2 text-[0.65rem] uppercase tracking-wide">Filter</th>
-                  <th class="text-right text-theme-text-secondary font-normal py-1 px-2 text-[0.65rem] uppercase tracking-wide">Frames</th>
-                  <th class="text-right text-theme-text-secondary font-normal py-1 px-2 text-[0.65rem] uppercase tracking-wide">Integration</th>
-                  <th class="text-right text-theme-text-secondary font-normal py-1 px-2 text-[0.65rem] uppercase tracking-wide">Med HFR</th>
-                  <th class="text-right text-theme-text-secondary font-normal py-1 px-2 text-[0.65rem] uppercase tracking-wide">Best HFR</th>
-                  <th class="text-right text-theme-text-secondary font-normal py-1 px-2 text-[0.65rem] uppercase tracking-wide">Med Ecc</th>
-                  <th class="text-right text-theme-text-secondary font-normal py-1 px-2 text-[0.65rem] uppercase tracking-wide">Med FWHM</th>
+                  <th class="text-left text-theme-text-secondary font-normal py-1 pl-8 pr-2 text-tiny uppercase tracking-wide">Filter</th>
+                  <th class="text-right text-theme-text-secondary font-normal py-1 px-2 text-tiny uppercase tracking-wide">Frames</th>
+                  <th class="text-right text-theme-text-secondary font-normal py-1 px-2 text-tiny uppercase tracking-wide">Integration</th>
+                  <th class="text-right text-theme-text-secondary font-normal py-1 px-2 text-tiny uppercase tracking-wide">Med HFR</th>
+                  <th class="text-right text-theme-text-secondary font-normal py-1 px-2 text-tiny uppercase tracking-wide">Best HFR</th>
+                  <th class="text-right text-theme-text-secondary font-normal py-1 px-2 text-tiny uppercase tracking-wide">Med Ecc</th>
+                  <th class="text-right text-theme-text-secondary font-normal py-1 px-2 text-tiny uppercase tracking-wide">Med FWHM</th>
                 </tr>
               </thead>
               <tbody>
@@ -146,14 +146,14 @@ const EquipmentPerformance: Component<{ combos: EquipmentComboMetrics[] }> = (pr
         <table class="w-full text-xs min-w-[600px]">
           <thead>
             <tr class="border-b border-theme-border">
-              <th class="text-left text-theme-text-secondary font-normal py-1 px-2 text-[0.65rem] uppercase tracking-wide">Equipment</th>
-              <th class="text-right text-theme-text-secondary font-normal py-1 px-2 text-[0.65rem] uppercase tracking-wide">Frames</th>
-              <th class="text-right text-theme-text-secondary font-normal py-1 px-2 text-[0.65rem] uppercase tracking-wide">Integration</th>
-              <th class="text-right text-theme-text-secondary font-normal py-1 px-2 text-[0.65rem] uppercase tracking-wide">Med HFR</th>
-              <th class="text-right text-theme-text-secondary font-normal py-1 px-2 text-[0.65rem] uppercase tracking-wide">Best HFR</th>
-              <th class="text-right text-theme-text-secondary font-normal py-1 px-2 text-[0.65rem] uppercase tracking-wide">Med Ecc</th>
-              <th class="text-right text-theme-text-secondary font-normal py-1 px-2 text-[0.65rem] uppercase tracking-wide">Med FWHM</th>
-              <th class="text-right text-theme-text-secondary font-normal py-1 px-2 text-[0.65rem] uppercase tracking-wide">Filters</th>
+              <th class="text-left text-theme-text-secondary font-normal py-1 px-2 text-tiny uppercase tracking-wide">Equipment</th>
+              <th class="text-right text-theme-text-secondary font-normal py-1 px-2 text-tiny uppercase tracking-wide">Frames</th>
+              <th class="text-right text-theme-text-secondary font-normal py-1 px-2 text-tiny uppercase tracking-wide">Integration</th>
+              <th class="text-right text-theme-text-secondary font-normal py-1 px-2 text-tiny uppercase tracking-wide">Med HFR</th>
+              <th class="text-right text-theme-text-secondary font-normal py-1 px-2 text-tiny uppercase tracking-wide">Best HFR</th>
+              <th class="text-right text-theme-text-secondary font-normal py-1 px-2 text-tiny uppercase tracking-wide">Med Ecc</th>
+              <th class="text-right text-theme-text-secondary font-normal py-1 px-2 text-tiny uppercase tracking-wide">Med FWHM</th>
+              <th class="text-right text-theme-text-secondary font-normal py-1 px-2 text-tiny uppercase tracking-wide">Filters</th>
             </tr>
           </thead>
           <tbody>

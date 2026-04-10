@@ -91,7 +91,7 @@ const MatrixTab: Component<Props> = (props) => {
                               }
                             }}
                           >
-                            <span class="text-theme-text-primary" style={{ "font-size": "0.65rem" }}>
+                            <span class="text-theme-text-primary text-tiny">
                               {cell()?.pearson_r !== null ? cell()!.pearson_r!.toFixed(2) : "\u2014"}
                             </span>
                           </td>
