@@ -77,24 +77,29 @@ const FolderBrowserModal: Component<Props> = (props) => {
   const renderNode = (node: TreeNode, depth: number) => (
     <div>
       <div
-        class="flex items-center gap-2 py-1 px-2 hover:bg-theme-surface-hover rounded"
+        class={`flex items-center gap-2 py-1 px-2 rounded ${
+          node.entry.has_children ? "cursor-pointer hover:bg-theme-hover" : ""
+        }`}
         style={{ "padding-left": `${depth * 16 + 8}px` }}
+        onClick={() => {
+          if (node.entry.has_children) toggle(node);
+        }}
       >
         <Show
           when={node.entry.has_children}
           fallback={<span class="w-4 inline-block" />}
         >
-          <button
-            class="w-4 text-theme-text-secondary"
-            onClick={() => toggle(node)}
-            aria-label={node.expanded ? "Collapse" : "Expand"}
+          <span
+            class="w-4 text-theme-text-secondary select-none"
+            aria-hidden="true"
           >
             {node.expanded ? "▾" : "▸"}
-          </button>
+          </span>
         </Show>
         <input
           type="checkbox"
           checked={selected().has(node.entry.path)}
+          onClick={(e) => e.stopPropagation()}
           onChange={() => toggleSelected(node.entry.path)}
         />
         <span class="text-sm text-theme-text-primary truncate">{node.entry.name}</span>
@@ -132,13 +137,13 @@ const FolderBrowserModal: Component<Props> = (props) => {
             </span>
             <div class="flex gap-2">
               <button
-                class="px-3 py-1.5 text-sm rounded border border-theme-border"
+                class="px-4 py-1.5 bg-theme-surface text-theme-text-primary border border-theme-border rounded text-sm font-medium hover:bg-theme-hover transition-colors"
                 onClick={props.onCancel}
               >
                 Cancel
               </button>
               <button
-                class="px-3 py-1.5 text-sm rounded bg-theme-accent text-white disabled:opacity-50"
+                class="px-4 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded text-sm font-medium disabled:opacity-50 hover:bg-theme-accent/25 transition-colors"
                 disabled={selected().size === 0}
                 onClick={() => props.onConfirm(Array.from(selected()))}
               >

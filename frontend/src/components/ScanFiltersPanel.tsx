@@ -122,7 +122,7 @@ const ScanFiltersPanel: Component<Props> = (props) => {
         <div class="flex items-center justify-between">
           <h4 class="text-sm font-medium text-theme-text-primary">{p.label}</h4>
           <button
-            class="px-2 py-1 text-xs rounded border border-theme-border"
+            class="px-4 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded text-sm font-medium hover:bg-theme-accent/25 transition-colors"
             onClick={p.onBrowse}
           >
             Browse…
