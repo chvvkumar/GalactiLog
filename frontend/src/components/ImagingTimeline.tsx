@@ -403,13 +403,13 @@ const ImagingTimeline: Component<Props> = (props) => {
                   >
                     {/* Efficiency label */}
                     <Show when={showEfficiency() && entry.efficiency_pct != null && i() % labelInterval() === 0}>
-                      <span class="text-green-400 leading-none mb-0.5" style={{ "font-size": "0.6rem" }}>
+                      <span class="text-green-400 leading-none mb-0.5 text-tiny">
                         {entry.efficiency_pct}%
                       </span>
                     </Show>
                     {/* Hour label */}
                     <Show when={!isEmpty() && i() % labelInterval() === 0}>
-                      <span class="text-theme-accent leading-none mb-0.5" style={{ "font-size": "0.65rem" }}>
+                      <span class="text-theme-accent leading-none mb-0.5 text-tiny">
                         {formatHours(entry.integration_seconds)}
                       </span>
                     </Show>

@@ -59,7 +59,7 @@ const FilterToggles: Component = () => {
         </Show>
         {name}
         <Show when={grouped}>
-          <span class="text-[0.5rem] opacity-70">{"\u29C9"}</span>
+          <span class="text-micro opacity-70">{"\u29C9"}</span>
         </Show>
       </button>
     );

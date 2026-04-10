@@ -16,7 +16,7 @@ const EquipmentTable: Component<{ title: string; items: EquipmentItem[] }> = (pr
             <td class="text-left text-theme-text-primary py-1 pr-4">
               {item.name}
               <Show when={item.grouped}>
-                <span class="text-theme-text-secondary text-[0.65rem] ml-1 cursor-help" title="Grouped: multiple equipment aliases are combined under this name">&#x29C9;</span>
+                <span class="text-theme-text-secondary text-tiny ml-1 cursor-help" title="Grouped: multiple equipment aliases are combined under this name">&#x29C9;</span>
               </Show>
             </td>
             <td class="text-right text-theme-text-secondary py-1 whitespace-nowrap">{item.frame_count.toLocaleString()}</td>
