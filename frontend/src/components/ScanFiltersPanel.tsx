@@ -45,6 +45,13 @@ const ScanFiltersPanel: Component<Props> = (props) => {
   const [testResult, setTestResult] = createSignal<
     null | { verdict: Verdict; matched: string[] }
   >(null);
+  const [testing, setTesting] = createSignal(false);
+
+  const describeRule = (id: string): string => {
+    const r = filters().name_rules.find((x) => x.id === id);
+    if (!r) return id.slice(0, 8);
+    return `${r.action} ${r.type} on ${r.target}: ${r.pattern}`;
+  };
 
   // Regex validation runs on the backend (Python `re`) because the scanner
   // uses that engine. Validating with `new RegExp(...)` here would reject
@@ -136,12 +143,16 @@ const ScanFiltersPanel: Component<Props> = (props) => {
   };
 
   const runTest = async () => {
-    if (!testPath().trim()) return;
+    if (!testPath().trim() || testing()) return;
+    setTesting(true);
+    setTestResult(null);
     try {
       const r = await scanFilters.test(testPath().trim(), testKind());
       setTestResult({ verdict: r.verdict, matched: r.matched_rule_ids });
     } catch (e: any) {
       showToast(e?.message ?? "Test failed", "error");
+    } finally {
+      setTesting(false);
     }
   };
 
@@ -529,10 +540,11 @@ include rule   ^M\\d+$          (regex, folder)`}
                 <option value="folder">folder</option>
               </select>
               <button
-                class="px-4 py-1.5 bg-theme-surface text-theme-text-primary border border-theme-border rounded text-sm font-medium hover:bg-theme-hover transition-colors"
+                class="px-4 py-1.5 bg-theme-surface text-theme-text-primary border border-theme-border rounded text-sm font-medium hover:bg-theme-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 onClick={runTest}
+                disabled={testing() || !testPath().trim()}
               >
-                Test
+                {testing() ? "Testing…" : "Test"}
               </button>
             </div>
             <Show when={testResult()}>
@@ -548,11 +560,16 @@ include rule   ^M\\d+$          (regex, folder)`}
                   >
                     {VERDICT_LABEL[testResult()!.verdict]}
                   </strong>
-                  <Show when={testResult()!.matched.length > 0}>
-                    {" "}
-                    — matched rules: {testResult()!.matched.join(", ")}
-                  </Show>
                 </div>
+                <Show when={testResult()!.matched.length > 0}>
+                  <ul class="list-disc list-inside text-theme-text-secondary">
+                    <For each={testResult()!.matched}>
+                      {(id) => (
+                        <li class="font-mono">{describeRule(id)}</li>
+                      )}
+                    </For>
+                  </ul>
+                </Show>
                 <div class="text-theme-text-secondary">
                   {VERDICT_HINT[testResult()!.verdict]}
                   <Show
