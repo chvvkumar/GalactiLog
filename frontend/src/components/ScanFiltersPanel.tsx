@@ -152,7 +152,7 @@ const ScanFiltersPanel: Component<Props> = (props) => {
       return null;
     };
     return (
-      <div class="space-y-2">
+      <section class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-2">
         <div class="flex items-center justify-between">
           <h4 class="text-sm font-medium text-theme-text-primary">{p.label}</h4>
           <button
@@ -213,7 +213,7 @@ const ScanFiltersPanel: Component<Props> = (props) => {
         <Show when={draftError()}>
           <p class="text-xs text-theme-error">{draftError()}</p>
         </Show>
-      </div>
+      </section>
     );
   };
 
@@ -322,7 +322,7 @@ include rule   ^M\\d+$          (regex, folder)`}
           onBrowse={() => setBrowsing("exclude")}
         />
 
-        <div class="space-y-2">
+        <section class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-2">
           <h4 class="text-sm font-medium text-theme-text-primary">Name rules</h4>
           <SettingsHelpSection tabId="scan_name_rules_syntax">
             <p class="text-xs text-theme-text-secondary">
@@ -456,9 +456,9 @@ include rule   ^M\\d+$          (regex, folder)`}
           >
             Add rule
           </button>
-        </div>
+        </section>
 
-        <div class="space-y-2">
+        <section class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-2">
           <h4 class="text-sm font-medium text-theme-text-primary">Test a path</h4>
           <p class="text-xs text-theme-text-secondary">
             Paste a file or folder path to see how the current rules would treat it.
@@ -513,7 +513,7 @@ include rule   ^M\\d+$          (regex, folder)`}
               </div>
             </Show>
           </div>
-        </div>
+        </section>
 
         <div class="flex flex-wrap gap-2">
           <button

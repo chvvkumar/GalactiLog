@@ -142,7 +142,7 @@ const ScanManager: Component = () => {
             <h3 class="text-sm font-medium text-theme-text-primary">Library Scanning</h3>
 
             <Show when={isAdmin()}>
-              <div class="space-y-4">
+              <section class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
                 <h4 class="text-sm font-medium text-theme-text-primary">Auto-scan</h4>
                 <div class="flex items-center justify-between">
                   <label class="text-sm text-theme-text-secondary">Enable automatic scanning</label>
@@ -173,7 +173,7 @@ const ScanManager: Component = () => {
                     </select>
                   </div>
                 </Show>
-              </div>
+              </section>
             </Show>
 
             <ScanFiltersPanel />
