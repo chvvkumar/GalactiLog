@@ -107,16 +107,21 @@ const ScanFiltersPanel: Component<Props> = (props) => {
     try {
       const dry = await scanFilters.applyNow(true);
       if (dry.matched === 0) {
-        showToast("No image rows match the current exclude rules");
+        showToast(
+          "Nothing to clean up. The saved filters do not exclude any " +
+          "existing image rows in the catalog."
+        );
         return;
       }
       const ok = window.confirm(
-        `This will remove ${dry.matched} image row(s) matching the current ` +
-        `exclude rules. Rows will return on next scan if rules change. Continue?`
+        `This will permanently remove ${dry.matched} image row(s) from the ` +
+        `catalog because they are excluded by the saved filters. The files ` +
+        `on disk are not touched, and rows will return on the next scan if ` +
+        `the filters are relaxed. Continue?`
       );
       if (!ok) return;
       const res = await scanFilters.applyNow(false);
-      showToast(`Removed ${res.matched} image row(s)`);
+      showToast(`Removed ${res.matched} image row(s) from the catalog`);
     } catch (e: any) {
       showToast(e?.message ?? "Apply now failed", "error");
     }
