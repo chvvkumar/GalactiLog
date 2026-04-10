@@ -117,7 +117,7 @@ async def login(
             audit_log("login", username=body.username, source_ip=ip, success=False, detail="Invalid credentials")
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
-        # Successful login — clear failure counter
+        # Successful login - clear failure counter
         await redis.delete(f"auth:failures:{body.username}")
 
     access = create_access_token(user.id, user.role.value)
@@ -149,7 +149,7 @@ async def refresh(
     if was_reuse:
         await session.commit()
         _clear_auth_cookies(response)
-        audit_log("refresh", source_ip=ip, success=False, detail="Token reuse detected — family revoked")
+        audit_log("refresh", source_ip=ip, success=False, detail="Token reuse detected - family revoked")
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token reuse detected")
 
     if old_rt is None:

@@ -15,7 +15,7 @@ function canonicalCategory(name: string): string | null {
   if (n === "g" || n === "green") return "G";
   // Blue
   if (n === "b" || n === "blue") return "B";
-  // Sulfur II — check before Ha to avoid "sho" false matches
+  // Sulfur II - check before Ha to avoid "sho" false matches
   if (n === "sii" || n === "s2" || n === "s" || n === "sulfur" || n === "sulphur"
     || n === "sulfurii" || n === "sulphurii") return "SII";
   // Hydrogen alpha

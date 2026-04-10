@@ -29,7 +29,7 @@ export const FiltersTab: Component = () => {
       if (cfg.aliases.length > 0) {
         entries.push({ canonical: name, aliases: cfg.aliases, color: cfg.color });
       } else {
-        // Standalone filter with just a color — treat as ungrouped with color
+        // Standalone filter with just a color - treat as ungrouped with color
         colors[name] = cfg.color;
       }
     }

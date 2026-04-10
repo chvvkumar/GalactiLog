@@ -14,7 +14,7 @@ interface Props {
   groups: GroupEntry[];
   /** Whether to show color pickers (filters mode) */
   showColorPicker?: boolean;
-  /** Colors for ungrouped items (keyed by name) — only used when showColorPicker is true */
+  /** Colors for ungrouped items (keyed by name) - only used when showColorPicker is true */
   ungroupedColors?: Record<string, string>;
   /** Called when user modifies groups locally */
   onGroupsChange: (groups: GroupEntry[]) => void;
@@ -130,7 +130,7 @@ export const GroupingEditor: Component<Props> = (props) => {
 
   return (
     <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-      {/* Left column — Ungrouped */}
+      {/* Left column - Ungrouped */}
       <div class="space-y-3">
         <h3 class="text-sm text-theme-text-secondary font-medium uppercase tracking-wide">
           Ungrouped ({ungrouped().length})
@@ -198,7 +198,7 @@ export const GroupingEditor: Component<Props> = (props) => {
         </div>
       </div>
 
-      {/* Right column — Groups */}
+      {/* Right column - Groups */}
       <div class="space-y-3">
         <h3 class="text-sm text-theme-text-secondary font-medium uppercase tracking-wide">
           Groups ({props.groups.length})
@@ -259,7 +259,7 @@ export const GroupingEditor: Component<Props> = (props) => {
             )}
           </For>
           <Show when={props.groups.length === 0}>
-            <p class="text-sm text-theme-text-secondary italic px-3 py-2">No groups yet — select items on the left to create one</p>
+            <p class="text-sm text-theme-text-secondary italic px-3 py-2">No groups yet - select items on the left to create one</p>
           </Show>
         </div>
       </div>

@@ -33,7 +33,7 @@ def _walk_supported_files(root: Path) -> Iterator[Path]:
                     if entry.is_dir(follow_symlinks=True):
                         yield from _walk_supported_files(Path(entry.path))
                     elif entry.is_file(follow_symlinks=True):
-                        # entry.name is already cached — no extra stat
+                        # entry.name is already cached - no extra stat
                         _, ext = os.path.splitext(entry.name)
                         if ext in SUPPORTED_EXTENSIONS:
                             yield Path(entry.path)
@@ -60,7 +60,7 @@ def scan_directory(
     - changed_files: known files whose size or mtime changed (delta rescan)
     - all_disk_paths: every supported path found during the walk
 
-    Calibration filtering is NOT done here — it's deferred to the ingest phase
+    Calibration filtering is NOT done here - it's deferred to the ingest phase
     where the file header is already being read for metadata extraction, avoiding
     a redundant file open per candidate (especially costly on NFS).
 
@@ -167,7 +167,7 @@ def extract_metadata(fits_path: Path, header=None) -> dict[str, Any]:
         "raw_headers": raw_headers,
     }
 
-    # Merge CSV metrics — CSV values take priority for median_hfr and eccentricity
+    # Merge CSV metrics - CSV values take priority for median_hfr and eccentricity
     csv_metrics = get_csv_metrics(fits_path)
     if csv_metrics:
         metadata.update(csv_metrics)

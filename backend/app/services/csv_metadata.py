@@ -115,7 +115,7 @@ def _parse_image_csv(csv_path: Path) -> dict[str, dict]:
                 raw_value = row.get(csv_col, "")
                 entry[db_col] = converter(raw_value)
 
-            # HFR == 0.0 means star detection failed in N.I.N.A. — treat as None
+            # HFR == 0.0 means star detection failed in N.I.N.A. - treat as None
             if entry.get("median_hfr") == 0.0:
                 entry["median_hfr"] = None
 

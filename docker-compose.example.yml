@@ -1,5 +1,5 @@
 # =============================================================================
-# GalactiLog — Docker Compose
+# GalactiLog - Docker Compose
 # =============================================================================
 # 1. Copy this file:      cp docker-compose.example.yml docker-compose.yml
 # 2. Edit lines marked:   <-- CHANGE
@@ -44,7 +44,7 @@ services:
     ports:
       - "8080:80"                                                # <-- CHANGE host port if needed
     environment:
-      # Database — must match the postgres service credentials above
+      # Database - must match the postgres service credentials above
       GALACTILOG_DATABASE_URL: postgresql+asyncpg://galactilog:galactilog@postgres:5432/galactilog_catalog
       GALACTILOG_REDIS_URL: redis://redis:6379/0
 
@@ -52,7 +52,7 @@ services:
       GALACTILOG_FITS_DATA_PATH: /app/data/fits
       GALACTILOG_THUMBNAILS_PATH: /app/data/thumbnails
 
-      # Admin account — created automatically on first start
+      # Admin account - created automatically on first start
       GALACTILOG_ADMIN_USERNAME: admin
       GALACTILOG_ADMIN_PASSWORD: changeme123                     # <-- CHANGE (min 8 characters)
 

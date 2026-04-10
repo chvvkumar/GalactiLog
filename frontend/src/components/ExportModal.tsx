@@ -133,7 +133,7 @@ const ExportModal: Component<Props> = (props) => {
         onClick={(e) => e.stopPropagation()}
       >
         <div class="p-4 border-b border-theme-border flex items-center justify-between">
-          <h2 class="text-sm font-medium text-theme-text-primary">Export — {props.targetName}</h2>
+          <h2 class="text-sm font-medium text-theme-text-primary">Export - {props.targetName}</h2>
           <button class="text-theme-text-secondary hover:text-theme-text-primary" onClick={props.onClose}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <line x1="6" y1="6" x2="18" y2="18" /><line x1="6" y1="18" x2="18" y2="6" />
@@ -159,7 +159,7 @@ const ExportModal: Component<Props> = (props) => {
                       checked={selectedDates().has(s.session_date)}
                       onChange={() => toggleDate(s.session_date)}
                     />
-                    {s.session_date} — {formatIntegration(s.integration_seconds)} ({s.frame_count} frames)
+                    {s.session_date} - {formatIntegration(s.integration_seconds)} ({s.frame_count} frames)
                   </label>
                 )}
               </For>

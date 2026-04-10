@@ -213,7 +213,7 @@ async def get_suggestions(
             obj_lower = obj_val.lower()
             for pattern, mappings in pattern_map.items():
                 # Convert SQL ILIKE pattern to simple substring check
-                # Patterns are like %name%num% — check each segment between %
+                # Patterns are like %name%num% - check each segment between %
                 segments = [s for s in pattern.lower().split("%") if s]
                 if all(seg in obj_lower for seg in segments):
                     for row_idx, label in mappings:
@@ -259,7 +259,7 @@ async def accept_suggestion(
     session.add(mosaic)
     await session.flush()
 
-    # Create panels — multiple panels may share the same target_id
+    # Create panels - multiple panels may share the same target_id
     # (SIMBAD often merges panel variants into one target)
     panel_num = 0
     created = 0

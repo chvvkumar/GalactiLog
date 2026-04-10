@@ -71,7 +71,7 @@ def test_mtf_stretch_dark_sky_background(sample_fits_mono: Path, tmp_path: Path)
 
     img = PILImage.open(output)
     pixels = np.array(img)
-    # Background sky (median) should be dark — below 64 on 0-255 scale
+    # Background sky (median) should be dark - below 64 on 0-255 scale
     # The MTF lifts faint signal but keeps background subdued
     assert np.median(pixels) < 64, (
         f"Sky background too bright: median={np.median(pixels):.0f}, "

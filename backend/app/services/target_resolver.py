@@ -1,4 +1,4 @@
-"""Centralized target resolution — the single authority for FITS OBJECT name → Target.
+"""Centralized target resolution - the single authority for FITS OBJECT name → Target.
 
 Usage:
     target_id = resolve_target(object_name, db_session, redis=redis_client)
@@ -38,7 +38,7 @@ def normalize_sql_expr(column_expr: str) -> str:
 def find_target_by_name(object_name: str, session: Session) -> Target | None:
     """Search for an existing target by normalized name in aliases, then primary_name.
 
-    This is the single DB lookup function — all target matching goes through here.
+    This is the single DB lookup function - all target matching goes through here.
     Also tries panel-stripped version (e.g. "M31 Panel 2" → "M31").
     """
     normalized = normalize_object_name(object_name)
@@ -104,7 +104,7 @@ def _create_target(
         return str(target.id)
     except IntegrityError:
         session.rollback()
-        # Another worker inserted this target — re-query
+        # Another worker inserted this target - re-query
         existing = session.execute(
             select(Target).where(Target.primary_name == simbad_result["primary_name"])
         ).scalar_one_or_none()
@@ -151,7 +151,7 @@ def resolve_target(
             redis.expire(NEGATIVE_CACHE_KEY, NEGATIVE_CACHE_TTL)
         return None
 
-    # Check again after SIMBAD — another worker may have created this target
+    # Check again after SIMBAD - another worker may have created this target
     # while we were waiting on SIMBAD
     existing = find_target_by_name(result["primary_name"], session)
     if existing:
