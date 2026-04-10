@@ -122,6 +122,21 @@ class ScanFilterConfig:
             except ValueError:
                 pass
 
+        # Include-paths narrowing: when set, the file must live under one
+        # of them. This matches the scan walker, which uses include_paths
+        # as effective roots.
+        if self.include_paths:
+            under_include = False
+            for inc in self.include_paths:
+                try:
+                    resolved.relative_to(inc)
+                    under_include = True
+                    break
+                except ValueError:
+                    pass
+            if not under_include:
+                return False
+
         # Collect ancestor folder segments under fits_root
         root = fits_root.resolve()
         try:
@@ -162,6 +177,20 @@ class ScanFilterConfig:
                 return TestResult("excluded_by_path", [])
             except ValueError:
                 pass
+
+        # Include-paths narrowing: when set, the path must live under one
+        # of them, otherwise the walker would never reach it.
+        if self.include_paths:
+            under_include = False
+            for inc in self.include_paths:
+                try:
+                    resolved.relative_to(inc)
+                    under_include = True
+                    break
+                except ValueError:
+                    pass
+            if not under_include:
+                return TestResult("excluded_by_path", [])
 
         try:
             rel = resolved.relative_to(root)

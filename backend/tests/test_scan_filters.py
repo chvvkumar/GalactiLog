@@ -206,3 +206,21 @@ def test_test_path_excluded_by_missing_include(tmp_path):
     )])
     result = cfg.test_path(tmp_path / "NGC7000.fits", tmp_path)
     assert result.verdict == "excluded_by_missing_include"
+
+
+def test_test_path_excluded_when_outside_include_paths(tmp_path):
+    (tmp_path / "kept").mkdir()
+    (tmp_path / "other").mkdir()
+    cfg = _cfg(include_paths=[tmp_path / "kept"])
+    assert cfg.test_path(tmp_path / "kept" / "x.fits", tmp_path).verdict == "included"
+    assert cfg.test_path(tmp_path / "other" / "x.fits", tmp_path).verdict == "excluded_by_path"
+    # The fits_root itself, when include_paths is set, is not under any include
+    assert cfg.test_path(tmp_path, tmp_path).verdict == "excluded_by_path"
+
+
+def test_should_include_file_respects_include_paths(tmp_path):
+    (tmp_path / "kept").mkdir()
+    (tmp_path / "other").mkdir()
+    cfg = _cfg(include_paths=[tmp_path / "kept"])
+    assert cfg.should_include_file(tmp_path / "kept" / "x.fits", tmp_path)
+    assert not cfg.should_include_file(tmp_path / "other" / "x.fits", tmp_path)
