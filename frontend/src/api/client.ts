@@ -80,6 +80,57 @@ async function doRefresh(): Promise<boolean> {
   }
 }
 
+async function fetchWithRefresh(path: string, init: RequestInit): Promise<Response> {
+  let resp = await fetch(`${API_BASE}${path}`, {
+    credentials: "same-origin",
+    ...init,
+  });
+
+  if (
+    resp.status === 401 &&
+    !path.startsWith("/auth/refresh") &&
+    !path.startsWith("/auth/login")
+  ) {
+    if (!refreshPromise) {
+      refreshPromise = doRefresh().finally(() => { refreshPromise = null; });
+    }
+    const ok = await refreshPromise;
+    if (ok) {
+      resp = await fetch(`${API_BASE}${path}`, {
+        credentials: "same-origin",
+        ...init,
+      });
+    } else {
+      if (window.location.pathname !== "/login") {
+        window.location.href = "/login";
+      }
+      throw new Error("Session expired");
+    }
+  }
+
+  return resp;
+}
+
+const FALLBACK_MESSAGES: Record<number, string> = {
+  400: "Invalid request",
+  403: "Permission denied",
+  404: "Not found",
+  409: "Conflict — resource already exists",
+  422: "Validation error",
+  500: "Server error — please try again later",
+};
+
+async function extractApiError(resp: Response, fallback: string): Promise<ApiError> {
+  let message: string;
+  try {
+    const body = await resp.json();
+    message = typeof body.detail === "string" ? body.detail : fallback;
+  } catch {
+    message = FALLBACK_MESSAGES[resp.status] ?? fallback;
+  }
+  return new ApiError(resp.status, message);
+}
+
 async function fetchJson<T>(path: string, init?: RequestInit, signal?: AbortSignal): Promise<T> {
   const resp = await fetch(`${API_BASE}${path}`, {
     credentials: "same-origin",
@@ -648,52 +699,47 @@ export const api = {
 
   // Backup / Restore
   createBackup: async (): Promise<Blob> => {
-    const resp = await fetch(`${API_BASE}/backup/create`, {
-      method: "POST",
-      credentials: "same-origin",
-    });
+    const resp = await fetchWithRefresh("/backup/create", { method: "POST" });
     if (!resp.ok) {
-      throw new ApiError(resp.status, "Failed to create backup");
+      throw await extractApiError(resp, "Failed to create backup");
     }
     return resp.blob();
   },
 
   validateBackup: async (
     file: File,
-    mode: string,
+    mode: "merge" | "replace",
     sections: string[],
   ): Promise<ValidateResponse> => {
     const form = new FormData();
     form.append("file", file);
     form.append("mode", mode);
     form.append("sections", sections.join(","));
-    const resp = await fetch(`${API_BASE}/backup/validate`, {
+    const resp = await fetchWithRefresh("/backup/validate", {
       method: "POST",
-      credentials: "same-origin",
       body: form,
     });
     if (!resp.ok) {
-      throw new ApiError(resp.status, "Failed to validate backup");
+      throw await extractApiError(resp, "Failed to validate backup");
     }
     return resp.json();
   },
 
   restoreBackup: async (
     file: File,
-    mode: string,
+    mode: "merge" | "replace",
     sections: string[],
   ): Promise<RestoreResponse> => {
     const form = new FormData();
     form.append("file", file);
     form.append("mode", mode);
     form.append("sections", sections.join(","));
-    const resp = await fetch(`${API_BASE}/backup/restore`, {
+    const resp = await fetchWithRefresh("/backup/restore", {
       method: "POST",
-      credentials: "same-origin",
       body: form,
     });
     if (!resp.ok) {
-      throw new ApiError(resp.status, "Failed to restore backup");
+      throw await extractApiError(resp, "Failed to restore backup");
     }
     return resp.json();
   },
