@@ -135,10 +135,18 @@ def run_scan(self, include_calibration: bool = True) -> dict:
             "timestamp": time.time(),
         })
 
-    # Detect and remove orphaned DB records (files deleted from disk)
-    orphaned_paths = known_paths - all_disk_paths
+    # Detect and remove orphaned DB records (files deleted from disk).
+    # CRITICAL: only consider rows the walker would have actually visited
+    # under the current filter config. When include_paths or excludes narrow
+    # the scan, out-of-scope rows appear "missing from disk" even though the
+    # walker never looked for them. Those must NOT be treated as orphans.
+    in_scope_known_paths = {
+        p for p in known_paths
+        if p and filter_config.should_include_file(Path(p), fits_root)
+    }
+    orphaned_paths = in_scope_known_paths - all_disk_paths
     removed = 0
-    if orphaned_paths and len(orphaned_paths) < len(known_paths) * 0.5:
+    if orphaned_paths and len(orphaned_paths) < max(1, len(in_scope_known_paths)) * 0.5:
         # Safety: only clean up if less than 50% of files appear missing
         # (protects against unmounted shares / unreachable storage)
         with Session(_sync_engine) as session:
@@ -171,14 +179,14 @@ def run_scan(self, include_calibration: bool = True) -> dict:
             })
     elif orphaned_paths:
         logger.warning(
-            "Skipped orphan cleanup: %d of %d files missing (>50%%) - "
+            "Skipped orphan cleanup: %d of %d in-scope files missing (>50%%) - "
             "possible unmounted share or unreachable storage",
-            len(orphaned_paths), len(known_paths),
+            len(orphaned_paths), len(in_scope_known_paths),
         )
         append_activity_sync(_redis, {
             "type": "orphan_warning",
-            "message": f"Orphan cleanup skipped: {len(orphaned_paths)} of {len(known_paths)} files missing (>50%) - possible unmounted share",
-            "details": {"missing": len(orphaned_paths), "total_known": len(known_paths)},
+            "message": f"Orphan cleanup skipped: {len(orphaned_paths)} of {len(in_scope_known_paths)} in-scope files missing (>50%) - possible unmounted share",
+            "details": {"missing": len(orphaned_paths), "total_known": len(in_scope_known_paths)},
             "timestamp": time.time(),
         })
 

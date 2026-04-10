@@ -103,12 +103,22 @@ class ScanFilterConfig:
                 return False
             except ValueError:
                 pass
-        # Folder name-rules apply to the segment name itself
-        segment = dir_path.name
+
+        # Folder exclude name-rules: check every segment between fits_root
+        # and dir_path (inclusive of dir_path itself). This lets the walker
+        # prune as early as possible even when starting from an include_path
+        # that sits deep in the tree.
+        root = fits_root.resolve()
+        try:
+            rel = resolved.relative_to(root)
+            segments = list(rel.parts)
+        except ValueError:
+            segments = [dir_path.name]
+
         for rule in self.name_rules:
             if rule.target != "folder" or rule.action != "exclude":
                 continue
-            if rule.matches(segment):
+            if any(rule.matches(s) for s in segments):
                 return False
         return True
 
@@ -168,9 +178,37 @@ class ScanFilterConfig:
             return False
         return True
 
-    def test_path(self, path: Path, fits_root: Path) -> TestResult:
-        resolved = path  # do NOT resolve - test paths may not exist
+    def test_path(
+        self,
+        path: Path,
+        fits_root: Path,
+        target_kind: str = "auto",
+    ) -> TestResult:
+        """Explain how the current config would treat `path`.
+
+        `target_kind` is "file", "folder", or "auto". In auto mode the
+        on-disk type is used when the path exists; otherwise a trailing
+        dot-extension hints at a file, else we treat it as a folder.
+        """
+        # Resolve to normalize `..`, drive letters, and symlinks so the
+        # verdict matches what should_include_file would decide. Resolve
+        # does not require the path to exist in modern Python.
+        try:
+            resolved = path.resolve()
+        except (OSError, RuntimeError):
+            resolved = path
+
         root = fits_root.resolve()
+
+        # Decide whether to treat this as a file or a folder.
+        if target_kind == "auto":
+            if resolved.exists():
+                kind = "folder" if resolved.is_dir() else "file"
+            else:
+                kind = "file" if resolved.suffix else "folder"
+        else:
+            kind = target_kind
+
         for excluded in self.exclude_paths:
             try:
                 resolved.relative_to(excluded)
@@ -201,14 +239,20 @@ class ScanFilterConfig:
                 return TestResult("excluded_by_path", [])
 
         parts = rel.parts
-        segments = list(parts[:-1]) if len(parts) > 1 else []
-        filename = parts[-1] if parts else ""
+        if kind == "folder":
+            # For a folder path the trailing component is a folder too,
+            # so every segment is a folder to evaluate. No filename.
+            segments = list(parts)
+            filename = ""
+        else:
+            segments = list(parts[:-1])
+            filename = parts[-1] if parts else ""
 
         matched: list[str] = []
         for rule in self.name_rules:
             if rule.action != "exclude":
                 continue
-            if rule.target == "file" and rule.matches(filename):
+            if rule.target == "file" and kind == "file" and rule.matches(filename):
                 matched.append(rule.id)
                 return TestResult("excluded_by_rule", matched)
             if rule.target == "folder" and any(rule.matches(s) for s in segments):
@@ -219,13 +263,14 @@ class ScanFilterConfig:
                          if r.action == "include" and r.target == "file"]
         folder_includes = [r for r in self.name_rules
                            if r.action == "include" and r.target == "folder"]
-        file_hits = [r.id for r in file_includes if r.matches(filename)]
+        file_hits = [r.id for r in file_includes if kind == "file" and r.matches(filename)]
         folder_hits = [r.id for r in folder_includes
                        if any(r.matches(s) for s in segments)]
 
-        if file_includes and not file_hits:
+        # File-include rules only narrow file tests; folder tests ignore them.
+        if kind == "file" and file_includes and not file_hits:
             return TestResult("excluded_by_missing_include", [])
-        if folder_includes and not folder_hits:
+        if folder_includes and segments and not folder_hits:
             return TestResult("excluded_by_missing_include", [])
 
         return TestResult("included", file_hits + folder_hits)

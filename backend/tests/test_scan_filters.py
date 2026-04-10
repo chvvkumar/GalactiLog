@@ -224,3 +224,59 @@ def test_should_include_file_respects_include_paths(tmp_path):
     cfg = _cfg(include_paths=[tmp_path / "kept"])
     assert cfg.should_include_file(tmp_path / "kept" / "x.fits", tmp_path)
     assert not cfg.should_include_file(tmp_path / "other" / "x.fits", tmp_path)
+
+
+def test_test_path_folder_target_uses_full_segments(tmp_path):
+    """When target_kind is folder, the trailing component is a segment too."""
+    (tmp_path / "M31").mkdir()
+    cfg = _cfg(rules=[_rule(
+        id="i1", action="include", type="regex",
+        pattern=r"^M\d+$", target="folder",
+    )])
+    # As a folder test, M31 matches the folder-include rule
+    assert cfg.test_path(tmp_path / "M31", tmp_path, target_kind="folder").verdict == "included"
+    # As a file test on the same path, M31 is treated as a filename and the
+    # include rule (which targets folders) does not narrow it
+    assert cfg.test_path(tmp_path / "M31", tmp_path, target_kind="file").verdict == "included"
+
+
+def test_test_path_folder_target_matches_exclude_folder_rule(tmp_path):
+    cfg = _cfg(rules=[_rule(
+        id="e1", action="exclude", type="substring",
+        pattern="rejected", target="folder",
+    )])
+    r = cfg.test_path(tmp_path / "rejected", tmp_path, target_kind="folder")
+    assert r.verdict == "excluded_by_rule"
+    assert "e1" in r.matched_rule_ids
+
+
+def test_test_path_auto_detects_dir_on_disk(tmp_path):
+    (tmp_path / "kept").mkdir()
+    cfg = _cfg(rules=[_rule(
+        id="e1", action="exclude", type="substring",
+        pattern="kept", target="folder",
+    )])
+    # auto mode should detect the existing dir and evaluate as folder
+    assert cfg.test_path(tmp_path / "kept", tmp_path).verdict == "excluded_by_rule"
+
+
+def test_test_path_resolves_dotdot(tmp_path):
+    (tmp_path / "a").mkdir()
+    cfg = _cfg()
+    # /root/a/../a/x.fits should resolve to /root/a/x.fits and pass
+    r = cfg.test_path(tmp_path / "a" / ".." / "a" / "x.fits", tmp_path)
+    assert r.verdict == "included"
+
+
+def test_should_walk_dir_prunes_on_ancestor_segment(tmp_path):
+    (tmp_path / "rejected" / "inner" / "deep").mkdir(parents=True)
+    cfg = _cfg(rules=[_rule(
+        id="e1", action="exclude", type="substring",
+        pattern="rejected", target="folder",
+    )])
+    # "inner" name alone doesn't match, but an ancestor "rejected" does
+    assert not cfg.should_walk_dir(tmp_path / "rejected" / "inner", tmp_path)
+    assert not cfg.should_walk_dir(tmp_path / "rejected" / "inner" / "deep", tmp_path)
+    # A sibling without the ancestor should still be walkable
+    (tmp_path / "kept").mkdir()
+    assert cfg.should_walk_dir(tmp_path / "kept", tmp_path)

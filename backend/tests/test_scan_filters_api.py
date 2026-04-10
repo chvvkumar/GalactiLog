@@ -127,6 +127,49 @@ async def test_put_filters_rejects_path_outside_root(admin_user):
 
 
 @pytest.mark.asyncio
+async def test_put_filters_rejects_duplicate_rule_ids(admin_user):
+    session = _make_session(settings_row=None)
+    _override_admin(session, admin_user)
+    try:
+        payload = {
+            "include_paths": [], "exclude_paths": [],
+            "name_rules": [
+                {"id": "dup", "action": "exclude", "type": "glob",
+                 "pattern": "*.tmp", "target": "file", "enabled": True},
+                {"id": "dup", "action": "exclude", "type": "glob",
+                 "pattern": "*.bak", "target": "file", "enabled": True},
+            ],
+        }
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            r = await client.put("/api/scan/filters", json=payload)
+        assert r.status_code == 422
+        assert "duplicate" in r.text.lower()
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_put_filters_rejects_control_chars_in_pattern(admin_user):
+    session = _make_session(settings_row=None)
+    _override_admin(session, admin_user)
+    try:
+        payload = {
+            "include_paths": [], "exclude_paths": [],
+            "name_rules": [{
+                "id": "r1", "action": "exclude", "type": "substring",
+                "pattern": "bad\x00pattern", "target": "file", "enabled": True,
+            }],
+        }
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            r = await client.put("/api/scan/filters", json=payload)
+        assert r.status_code == 422
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
 async def test_put_filters_requires_admin():
     """Without overriding require_admin, the endpoint must reject."""
     # Clear any lingering overrides

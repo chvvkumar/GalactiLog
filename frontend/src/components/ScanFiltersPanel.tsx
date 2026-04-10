@@ -32,9 +32,23 @@ const ScanFiltersPanel: Component<Props> = (props) => {
   const [browsing, setBrowsing] = createSignal<null | "include" | "exclude">(null);
   const [saving, setSaving] = createSignal(false);
   const [testPath, setTestPath] = createSignal("");
+  const [testKind, setTestKind] = createSignal<"auto" | "file" | "folder">("auto");
   const [testResult, setTestResult] = createSignal<
     null | { verdict: Verdict; matched: string[] }
   >(null);
+
+  const ruleIsInvalid = (r: NameRule): string | null => {
+    if (!r.pattern.trim()) return "empty pattern";
+    if (r.type === "regex") {
+      try { new RegExp(r.pattern); } catch { return "invalid regex"; }
+    }
+    return null;
+  };
+  const anyRuleInvalid = () => filters().name_rules.some((r) => ruleIsInvalid(r) !== null);
+  const anyPathInvalid = () =>
+    filters().include_paths.some((p) => !pathIsInsideRoot(p)) ||
+    filters().exclude_paths.some((p) => !pathIsInsideRoot(p));
+  const canSave = () => dirty() && !saving() && !anyRuleInvalid() && !anyPathInvalid();
 
   const load = async () => {
     try {
@@ -82,7 +96,7 @@ const ScanFiltersPanel: Component<Props> = (props) => {
   const runTest = async () => {
     if (!testPath().trim()) return;
     try {
-      const r = await scanFilters.test(testPath().trim());
+      const r = await scanFilters.test(testPath().trim(), testKind());
       setTestResult({ verdict: r.verdict, matched: r.matched_rule_ids });
     } catch (e: any) {
       showToast(e?.message ?? "Test failed", "error");
@@ -108,6 +122,14 @@ const ScanFiltersPanel: Component<Props> = (props) => {
     }
   };
 
+  const pathIsInsideRoot = (p: string): boolean => {
+    const root = fitsRoot();
+    if (!root) return true; // can't validate yet, defer to server
+    const trimmed = p.trim().replace(/[\\/]+$/, "");
+    const rootTrimmed = root.replace(/[\\/]+$/, "");
+    return trimmed === rootTrimmed || trimmed.startsWith(rootTrimmed + "/");
+  };
+
   const PathList: Component<{
     label: string;
     help: string;
@@ -117,6 +139,12 @@ const ScanFiltersPanel: Component<Props> = (props) => {
     onBrowse: () => void;
   }> = (p) => {
     const [draft, setDraft] = createSignal("");
+    const draftError = () => {
+      const d = draft().trim();
+      if (!d) return null;
+      if (!pathIsInsideRoot(d)) return `Path must be inside ${fitsRoot()}`;
+      return null;
+    };
     return (
       <div class="space-y-2">
         <div class="flex items-center justify-between">
@@ -136,9 +164,11 @@ const ScanFiltersPanel: Component<Props> = (props) => {
           <ul class="space-y-1">
             <For each={p.values}>{(v, i) => (
               <li class="flex items-center gap-2 text-sm">
-                <code class="flex-1 truncate">{v}</code>
+                <code class={`flex-1 truncate ${pathIsInsideRoot(v) ? "" : "text-theme-error"}`}>
+                  {v}
+                </code>
                 <button
-                  class="text-xs text-red-400"
+                  class="text-xs text-theme-error hover:underline"
                   onClick={() => p.onRemove(i())}
                 >
                   Remove
@@ -150,15 +180,23 @@ const ScanFiltersPanel: Component<Props> = (props) => {
         <div class="flex gap-2">
           <input
             type="text"
-            placeholder={`${fitsRoot()}/subfolder`}
+            placeholder={`${fitsRoot() || "/data/fits"}/subfolder`}
             value={draft()}
             onInput={(e) => setDraft(e.currentTarget.value)}
-            class="flex-1 px-2 py-1 text-xs bg-theme-input border border-theme-border rounded"
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !draftError() && draft().trim()) {
+                p.onAdd(draft().trim());
+                setDraft("");
+              }
+            }}
+            class={`flex-1 px-2 py-1 text-xs bg-theme-input border rounded ${
+              draftError() ? "border-theme-error" : "border-theme-border"
+            }`}
           />
           <button
-            class="px-2 py-1 text-xs rounded border border-theme-border"
+            class="px-4 py-1.5 bg-theme-surface text-theme-text-primary border border-theme-border rounded text-sm font-medium disabled:opacity-50 hover:bg-theme-hover transition-colors"
+            disabled={!draft().trim() || !!draftError()}
             onClick={() => {
-              if (!draft().trim()) return;
               p.onAdd(draft().trim());
               setDraft("");
             }}
@@ -166,6 +204,9 @@ const ScanFiltersPanel: Component<Props> = (props) => {
             Add
           </button>
         </div>
+        <Show when={draftError()}>
+          <p class="text-xs text-theme-error">{draftError()}</p>
+        </Show>
       </div>
     );
   };
@@ -328,7 +369,10 @@ const ScanFiltersPanel: Component<Props> = (props) => {
                           next[i()] = { ...rule, pattern: e.currentTarget.value };
                           updateFilters({ name_rules: next });
                         }}
-                        class="w-full px-1 py-0.5 bg-theme-input border border-theme-border rounded font-mono"
+                        class={`w-full px-1 py-0.5 bg-theme-input border rounded font-mono ${
+                          ruleIsInvalid(rule) ? "border-theme-error" : "border-theme-border"
+                        }`}
+                        title={ruleIsInvalid(rule) ?? ""}
                       />
                     </td>
                     <td class="p-1">
@@ -374,16 +418,29 @@ const ScanFiltersPanel: Component<Props> = (props) => {
             save first to test them.
           </p>
           <div class="space-y-1">
-            <div class="flex gap-2">
+            <div class="flex gap-2 flex-wrap">
               <input
                 type="text"
                 value={testPath()}
                 onInput={(e) => setTestPath(e.currentTarget.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") runTest(); }}
                 placeholder={`${fitsRoot() || "/data/fits"}/2025/M31/frame_bad.fits`}
-                class="flex-1 px-2 py-1 text-xs bg-theme-input border border-theme-border rounded font-mono"
+                class="flex-1 min-w-0 px-2 py-1 text-xs bg-theme-input border border-theme-border rounded font-mono"
               />
+              <select
+                value={testKind()}
+                onChange={(e) =>
+                  setTestKind(e.currentTarget.value as "auto" | "file" | "folder")
+                }
+                class="px-2 py-1 text-xs bg-theme-input border border-theme-border rounded"
+                title="Treat the path as a file, a folder, or auto-detect"
+              >
+                <option value="auto">auto</option>
+                <option value="file">file</option>
+                <option value="folder">folder</option>
+              </select>
               <button
-                class="px-2 py-1 text-xs rounded border border-theme-border"
+                class="px-4 py-1.5 bg-theme-surface text-theme-text-primary border border-theme-border rounded text-sm font-medium hover:bg-theme-hover transition-colors"
                 onClick={runTest}
               >
                 Test
@@ -413,8 +470,9 @@ const ScanFiltersPanel: Component<Props> = (props) => {
         <div class="flex flex-wrap gap-2">
           <button
             class="px-4 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded text-sm font-medium disabled:opacity-50 hover:bg-theme-accent/25 transition-colors"
-            disabled={!dirty() || saving()}
+            disabled={!canSave()}
             onClick={save}
+            title={anyRuleInvalid() ? "One or more rules have empty or invalid patterns" : anyPathInvalid() ? "One or more paths are outside the data root" : ""}
           >
             {saving() ? "Saving…" : "Save filters"}
           </button>

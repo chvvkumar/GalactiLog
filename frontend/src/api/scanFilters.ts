@@ -57,10 +57,13 @@ export const scanFilters = {
       body: JSON.stringify(filters),
     }),
 
-  test: (path: string): Promise<TestResult> =>
+  test: (
+    path: string,
+    targetKind: "auto" | "file" | "folder" = "auto",
+  ): Promise<TestResult> =>
     fetchJson<TestResult>("/scan/filters/test", {
       method: "POST",
-      body: JSON.stringify({ path }),
+      body: JSON.stringify({ path, target_kind: targetKind }),
     }),
 
   applyNow: (dryRun: boolean): Promise<ApplyNowResult> =>

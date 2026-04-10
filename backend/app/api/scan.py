@@ -505,7 +505,9 @@ async def test_scan_filter_path(
         cfg = ScanFilterConfig.from_settings(general, fits_root)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
-    test_result = cfg.test_path(FsPath(payload.path), fits_root)
+    test_result = cfg.test_path(
+        FsPath(payload.path), fits_root, target_kind=payload.target_kind,
+    )
     return TestPathOut(
         verdict=test_result.verdict,
         matched_rule_ids=test_result.matched_rule_ids,
@@ -551,10 +553,19 @@ async def apply_filters_now(
 @router.get("/browse", response_model=list[BrowseEntry])
 async def browse_folders(
     path: str | None = Query(None),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_admin),
 ):
     fits_root = FsPath(app_settings.fits_data_path).resolve()
-    target = FsPath(path).resolve() if path else fits_root
+
+    # Reject relative paths so we never resolve against the process CWD.
+    if path is not None:
+        candidate = FsPath(path)
+        if not candidate.is_absolute():
+            raise HTTPException(status_code=400, detail="path must be absolute")
+        target = candidate.resolve()
+    else:
+        target = fits_root
+
     try:
         target.relative_to(fits_root)
     except ValueError:
@@ -567,25 +578,35 @@ async def browse_folders(
         with os.scandir(target) as it:
             for entry in it:
                 try:
-                    if not entry.is_dir(follow_symlinks=True):
+                    # Do NOT follow symlinks: a symlink inside fits_root
+                    # could otherwise point outside and enumerate host dirs.
+                    if not entry.is_dir(follow_symlinks=False):
+                        continue
+                    # Defence in depth: re-check containment on the resolved
+                    # child so a TOCTOU race or mount change cannot escape.
+                    resolved_child = FsPath(entry.path).resolve()
+                    try:
+                        resolved_child.relative_to(fits_root)
+                    except ValueError:
                         continue
                     has_children = False
                     try:
                         with os.scandir(entry.path) as sub_it:
                             for sub in sub_it:
-                                if sub.is_dir(follow_symlinks=True):
+                                if sub.is_dir(follow_symlinks=False):
                                     has_children = True
                                     break
                     except OSError:
                         pass
                     entries.append(BrowseEntry(
                         name=entry.name,
-                        path=str(FsPath(entry.path).resolve()),
+                        path=str(resolved_child),
                         has_children=has_children,
                     ))
                 except OSError:
                     continue
     except OSError as exc:
-        raise HTTPException(status_code=500, detail=f"cannot read directory: {exc}")
+        logger.warning("browse_folders: cannot read %s: %s", target, exc)
+        raise HTTPException(status_code=500, detail="cannot read directory")
     entries.sort(key=lambda e: e.name.lower())
     return entries
