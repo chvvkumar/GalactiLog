@@ -63,7 +63,7 @@ Configure from **Settings > General**:
 - **Scan Interval** -- 1 to 24 hours
 - **Include Calibration Frames** -- Whether to ingest DARK, FLAT, and BIAS frames
 
-Manual scans can be triggered from **Settings > Scan & Ingest**.
+Manual scans can be triggered from **Settings > Library**.
 
 ## Filter Aliases
 

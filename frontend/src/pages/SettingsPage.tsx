@@ -16,7 +16,7 @@ import { contentWidthClass } from "../utils/format";
 import SettingsHelpSection from "../components/settings/SettingsHelpSection";
 
 const ALL_TABS = [
-  { id: "scan", label: "Scan & Ingest" },
+  { id: "scan", label: "Library" },
   { id: "filters", label: "Filters" },
   { id: "equipment", label: "Equipment" },
   { id: "display", label: "Display" },
@@ -66,10 +66,11 @@ export const SettingsPage: Component = () => {
         <SettingsHelpSection tabId="scan">
           <p class="text-sm text-theme-text-secondary">GalactiLog builds its catalog by scanning a directory of FITS files. Each scan reads FITS headers to extract target names, filters, timestamps, and equipment metadata.</p>
           <ul class="text-sm text-theme-text-secondary list-disc list-inside space-y-1">
-            <li><strong class="text-theme-text-primary">Auto-scan</strong> runs on a timer so new files are cataloged automatically. <strong class="text-theme-text-primary">Scan Directory</strong> triggers a one-time scan.</li>
-            <li>Choose <strong class="text-theme-text-primary">Light frames only</strong> to skip calibration frames (darks, flats, bias) or <strong class="text-theme-text-primary">All frames</strong> to catalog everything.</li>
-            <li>The <strong class="text-theme-text-primary">Database Overview</strong> shows current catalog totals and name-resolution cache status (SIMBAD, SESAME, VizieR).</li>
-            <li><strong class="text-theme-text-primary">Maintenance</strong> actions: <strong class="text-theme-text-primary">Re-match</strong> re-resolves all target names against SIMBAD. <strong class="text-theme-text-primary">Retry Unresolved</strong> retries only failed lookups. <strong class="text-theme-text-primary">Regenerate</strong> rebuilds thumbnails. <strong class="text-theme-text-primary">Full Rebuild</strong> re-scans all files from scratch - use sparingly.</li>
+            <li><strong class="text-theme-text-primary">Library Scanning</strong> holds everything that controls what gets cataloged. <strong class="text-theme-text-primary">Auto-scan</strong> runs periodically on a configurable interval; <strong class="text-theme-text-primary">Scan Directory</strong> triggers a one-time scan.</li>
+            <li><strong class="text-theme-text-primary">Path & name rules</strong> restrict which folders are walked and which file or folder names are included or excluded. Rules accept wildcard, substring, or regex patterns, and a test-a-path tool previews matches before saving.</li>
+            <li>The action bar exposes <strong class="text-theme-text-primary">Save rules</strong>, <strong class="text-theme-text-primary">Revert</strong>, and <strong class="text-theme-text-primary">Apply now</strong>, plus a frame-filter selector: pick <strong class="text-theme-text-primary">Light frames only</strong> to skip calibration frames (darks, flats, bias) or <strong class="text-theme-text-primary">All frames</strong> to catalog everything.</li>
+            <li>The <strong class="text-theme-text-primary">Database Overview</strong> card shows current catalog totals and name-resolution cache status (SIMBAD, SESAME, VizieR).</li>
+            <li><strong class="text-theme-text-primary">Maintenance</strong> actions: <strong class="text-theme-text-primary">Re-match</strong> re-resolves all target names against SIMBAD. <strong class="text-theme-text-primary">Retry Unresolved</strong> retries only failed lookups. <strong class="text-theme-text-primary">Regenerate</strong> rebuilds thumbnails. <strong class="text-theme-text-primary">Full Rebuild</strong> re-scans all files from scratch, use sparingly.</li>
           </ul>
         </SettingsHelpSection>
         <ScanManager />

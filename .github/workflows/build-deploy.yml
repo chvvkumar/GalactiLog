@@ -90,6 +90,7 @@ jobs:
           password: ${{ secrets.DOCKER_PASSWORD }}
 
       - name: Build and push Docker image
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -97,6 +98,70 @@ jobs:
           tags: ${{ steps.version.outputs.docker_tags }}
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=local,dest=/tmp/.buildx-cache,mode=max
+
+      - name: Report image size
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          TAG="chvvkumar/galactilog:${VERSION}"
+          {
+            echo "### Image size"
+            echo ""
+            echo "| Tag | Platform | Compressed size |"
+            echo "| --- | --- | ---: |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          IMAGE_TAG="$TAG" IMAGE_DIGEST="$IMAGE_DIGEST" python3 - <<'PYEOF' >> "$GITHUB_STEP_SUMMARY"
+          import json, os, subprocess
+
+          tag = os.environ["IMAGE_TAG"]
+          digest = os.environ.get("IMAGE_DIGEST", "")
+
+          def inspect_raw(ref: str) -> dict:
+              return json.loads(subprocess.check_output(
+                  ["docker", "buildx", "imagetools", "inspect", ref, "--raw"]
+              ))
+
+          def fmt(n: int) -> str:
+              if n < 1024 * 1024:
+                  return f"{n / 1024:.1f} KiB"
+              if n < 1024 * 1024 * 1024:
+                  return f"{n / 1024 / 1024:.1f} MiB"
+              return f"{n / 1024 / 1024 / 1024:.2f} GiB"
+
+          def layer_total(manifest: dict) -> int:
+              total = sum(l.get("size", 0) for l in manifest.get("layers", []))
+              cfg = manifest.get("config")
+              if isinstance(cfg, dict):
+                  total += cfg.get("size", 0)
+              return total
+
+          ref = f"{tag.split(':')[0]}@{digest}" if digest else tag
+          m = inspect_raw(ref)
+
+          rows = []
+          if "layers" in m:
+              rows.append(("linux/amd64", layer_total(m)))
+          elif "manifests" in m:
+              for sub in m["manifests"]:
+                  if "platform" not in sub:
+                      continue
+                  plat = sub["platform"]
+                  if plat.get("architecture") == "unknown":
+                      continue
+                  parch = f"{plat.get('os', '?')}/{plat.get('architecture', '?')}"
+                  sub_ref = f"{tag.split(':')[0]}@{sub['digest']}"
+                  try:
+                      sub_m = inspect_raw(sub_ref)
+                      rows.append((parch, layer_total(sub_m)))
+                  except Exception:
+                      rows.append((parch, sub.get("size", 0)))
+
+          for name, size in rows:
+              print(f"| `{tag}` | {name} | {fmt(size)} |")
+          PYEOF
 
       - name: Create and push git tag
         run: |

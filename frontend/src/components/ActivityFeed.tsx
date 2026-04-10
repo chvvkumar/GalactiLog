@@ -92,8 +92,8 @@ const ActivityFeed: Component<{
     formatDateTime(new Date(ts * 1000), settingsCtx.timezone()) + " " + timezoneLabel(settingsCtx.timezone());
 
   return (
-    <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-4 space-y-3">
-      <div class="flex justify-between items-center flex-wrap gap-2">
+    <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-4 flex flex-col h-full min-h-0">
+      <div class="flex justify-between items-center flex-wrap gap-2 mb-3">
         <h3 class="text-theme-text-primary font-medium">Activity</h3>
         <Show when={activity().length > 0 && !isActive()}>
           <button
@@ -105,6 +105,7 @@ const ActivityFeed: Component<{
         </Show>
       </div>
 
+      <div class="flex-1 min-h-0 overflow-y-auto space-y-3">
       <Show when={props.scanError}>
         <p class="text-xs text-theme-error">{props.scanError}</p>
       </Show>
@@ -233,6 +234,7 @@ const ActivityFeed: Component<{
       <Show when={!isActive() && props.rebuildStatus.state !== "running" && props.scanStatus.state !== "stalled" && activity().length === 0 && !props.scanError}>
         <p class="text-xs text-theme-text-secondary">No recent activity</p>
       </Show>
+      </div>
     </div>
   );
 };

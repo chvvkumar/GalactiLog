@@ -8,6 +8,8 @@ import DatabaseOverview from "./DatabaseOverview";
 import ScanControls from "./ScanControls";
 import ActivityFeed from "./ActivityFeed";
 import MaintenanceActions from "./MaintenanceActions";
+import ScanFiltersPanel from "./ScanFiltersPanel";
+import ScanFiltersOnboarding from "./ScanFiltersOnboarding";
 import { showToast } from "./Toast";
 
 type FrameFilter = "all" | "light_only";
@@ -126,71 +128,93 @@ const ScanManager: Component = () => {
     <div class="space-y-4">
       <DatabaseOverview summary={dbSummary()} />
 
-      {/* Auto-scan + Scan Controls side by side */}
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <Show when={isAdmin()}>
-          <div class="rounded-[var(--radius-md)] bg-theme-surface border border-theme-border p-4 space-y-4">
-            <h3 class="text-sm font-medium text-theme-text-primary">Auto-scan</h3>
-            <div class="flex items-center justify-between">
-              <label class="text-sm text-theme-text-secondary">Enable automatic scanning</label>
-              <button
-                onClick={handleAutoScanToggle}
-                class={`relative w-10 h-5 rounded-full transition-colors ${
-                  autoScanEnabled() ? "bg-theme-accent" : "bg-theme-text-tertiary"
-                }`}
-              >
-                <span
-                  class={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full transition-transform ${
-                    autoScanEnabled() ? "translate-x-5" : ""
-                  }`}
-                />
-              </button>
-            </div>
-            <Show when={autoScanEnabled()}>
-              <div class="flex items-center justify-between">
-                <label class="text-sm text-theme-text-secondary">Scan interval</label>
-                <select
-                  value={autoScanInterval()}
-                  onChange={(e) => handleIntervalChange(parseInt(e.currentTarget.value))}
-                  class="px-3 py-1.5 bg-theme-input border border-theme-border rounded-[var(--radius-sm)] text-sm text-theme-text-primary focus:ring-1 focus:ring-theme-accent focus:border-theme-accent outline-none"
-                >
-                  {INTERVALS.map((opt) => (
-                    <option value={opt.value}>{opt.label}</option>
-                  ))}
-                </select>
+      <div class="grid grid-cols-1 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] gap-4 items-start">
+        {/* Left column: controls */}
+        <div class="space-y-4 min-w-0">
+          <ScanFiltersOnboarding
+            onReview={() => {
+              const el = document.getElementById("scan-filters-panel");
+              if (el instanceof HTMLDetailsElement) el.open = true;
+              el?.scrollIntoView({ behavior: "smooth", block: "start" });
+            }}
+          />
+          <div class="rounded-[var(--radius-md)] bg-theme-surface border border-theme-border p-4 space-y-6">
+            <h3 class="text-sm font-medium text-theme-text-primary">Library Scanning</h3>
+
+            <Show when={isAdmin()}>
+              <div class="space-y-4">
+                <h4 class="text-sm font-medium text-theme-text-primary">Auto-scan</h4>
+                <div class="flex items-center justify-between">
+                  <label class="text-sm text-theme-text-secondary">Enable automatic scanning</label>
+                  <button
+                    onClick={handleAutoScanToggle}
+                    class={`relative w-10 h-5 rounded-full transition-colors ${
+                      autoScanEnabled() ? "bg-theme-accent" : "bg-theme-text-tertiary"
+                    }`}
+                  >
+                    <span
+                      class={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full transition-transform ${
+                        autoScanEnabled() ? "translate-x-5" : ""
+                      }`}
+                    />
+                  </button>
+                </div>
+                <Show when={autoScanEnabled()}>
+                  <div class="flex items-center justify-between">
+                    <label class="text-sm text-theme-text-secondary">Scan interval</label>
+                    <select
+                      value={autoScanInterval()}
+                      onChange={(e) => handleIntervalChange(parseInt(e.currentTarget.value))}
+                      class="px-3 py-1.5 bg-theme-input border border-theme-border rounded-[var(--radius-sm)] text-sm text-theme-text-primary focus:ring-1 focus:ring-theme-accent focus:border-theme-accent outline-none"
+                    >
+                      {INTERVALS.map((opt) => (
+                        <option value={opt.value}>{opt.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                </Show>
               </div>
             </Show>
+
+            <ScanFiltersPanel />
+
+            <div class="flex flex-wrap items-center gap-4 justify-end pt-2 border-t border-theme-border">
+              <ScanControls
+                isActive={isActive()}
+                stopping={stopping()}
+                frameFilter={frameFilter()}
+                onFrameFilterChange={setFrameFilter}
+                onStartScan={() => startScan({ includeCalibration: frameFilter() === "all" })}
+                onStopScan={stopScan}
+              />
+            </div>
           </div>
-        </Show>
 
-        <ScanControls
-          isActive={isActive()}
-          stopping={stopping()}
-          frameFilter={frameFilter()}
-          onFrameFilterChange={setFrameFilter}
-          onStartScan={() => startScan({ includeCalibration: frameFilter() === "all" })}
-          onStopScan={stopScan}
-        />
+          <Show when={isAdmin()}>
+            <MaintenanceActions
+              disabled={isActive()}
+              rebuildRunning={rebuildState().state === "running"}
+              rebuildMode={rebuildState().mode}
+              onRegenThumbnails={startRegeneration}
+              onStartedAction={startRebuildPolling}
+            />
+          </Show>
+        </div>
+
+        {/* Right column: sticky activity feed */}
+        <div class="lg:sticky lg:top-4 lg:self-start min-w-0">
+          <div class="lg:max-h-[calc(100vh-2rem)] lg:overflow-hidden lg:flex lg:flex-col">
+            <ActivityFeed
+              scanStatus={scanStatus()}
+              rebuildStatus={rebuildState()}
+              stopping={stopping()}
+              scanError={scanError()}
+              onResetAndRescan={handleResetAndRescan}
+              onDismissStalled={resetScan}
+            />
+          </div>
+        </div>
       </div>
-
-      <ActivityFeed
-        scanStatus={scanStatus()}
-        rebuildStatus={rebuildState()}
-        stopping={stopping()}
-        scanError={scanError()}
-        onResetAndRescan={handleResetAndRescan}
-        onDismissStalled={resetScan}
-      />
-
-      <Show when={isAdmin()}>
-        <MaintenanceActions
-          disabled={isActive()}
-          rebuildRunning={rebuildState().state === "running"}
-          rebuildMode={rebuildState().mode}
-          onRegenThumbnails={startRegeneration}
-          onStartedAction={startRebuildPolling}
-        />
-      </Show>
     </div>
   );
 };
