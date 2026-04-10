@@ -228,7 +228,13 @@ def validate_backup(
     sections: list[str] | None,
     mode: str,
 ) -> dict:
-    """Validate a backup dict and return a preview. No DB access needed."""
+    """Validate a backup dict and return a preview. No DB access.
+
+    NOTE: Preview counts are upper bounds computed from the backup file
+    content only. The actual restore result may reclassify some items as
+    updates rather than adds. The true breakdown is reported by
+    restore_backup in its `applied` field.
+    """
     result = {
         "valid": False,
         "meta": None,
@@ -320,6 +326,7 @@ async def restore_backup(
     data: dict,
     sections: list[str] | None,
     mode: str,
+    acting_user_id=None,  # UUID from the requesting admin
 ) -> dict:
     """Apply a validated backup to the database. Runs in caller's transaction."""
     if mode not in ("merge", "replace"):
@@ -408,19 +415,9 @@ async def restore_backup(
     # ── Custom columns ──
     if "custom_columns" in active:
         if mode == "replace":
+            await session.execute(delete(CustomColumnValue))
             await session.execute(delete(CustomColumn))
             await session.flush()
-
-        # Find any admin for created_by / updated_by
-        admin = (await session.execute(
-            select(User).where(User.role == UserRole.admin)
-        )).scalars().first()
-
-        if parsed.custom_columns and admin is None:
-            raise ValueError(
-                "Cannot restore custom_columns: no admin user exists in the database. "
-                "Create an admin user first, or exclude custom_columns from the restore."
-            )
 
         added, updated, skipped = 0, 0, 0
         for col_data in parsed.custom_columns:
@@ -444,7 +441,7 @@ async def restore_backup(
                     applies_to=AppliesTo(col_data.applies_to),
                     dropdown_options=col_data.dropdown_options,
                     display_order=col_data.display_order,
-                    created_by=admin.id,
+                    created_by=acting_user_id,
                 )
                 session.add(col_obj)
                 await session.flush()
@@ -457,13 +454,22 @@ async def restore_backup(
                     continue
 
                 sd = date_type.fromisoformat(val.session_date) if val.session_date else None
+
+                conditions = [
+                    CustomColumnValue.column_id == col_obj.id,
+                    CustomColumnValue.target_id == target.id,
+                ]
+                if sd is None:
+                    conditions.append(CustomColumnValue.session_date.is_(None))
+                else:
+                    conditions.append(CustomColumnValue.session_date == sd)
+                if val.rig_label is None:
+                    conditions.append(CustomColumnValue.rig_label.is_(None))
+                else:
+                    conditions.append(CustomColumnValue.rig_label == val.rig_label)
+
                 existing_val = (await session.execute(
-                    select(CustomColumnValue).where(
-                        CustomColumnValue.column_id == col_obj.id,
-                        CustomColumnValue.target_id == target.id,
-                        CustomColumnValue.session_date == sd,
-                        CustomColumnValue.rig_label == val.rig_label,
-                    )
+                    select(CustomColumnValue).where(*conditions)
                 )).scalar_one_or_none()
 
                 if existing_val:
@@ -475,7 +481,7 @@ async def restore_backup(
                         session_date=sd,
                         rig_label=val.rig_label,
                         value=val.value,
-                        updated_by=admin.id,
+                        updated_by=acting_user_id,
                     ))
 
         await session.flush()
@@ -555,6 +561,8 @@ async def restore_backup(
 
     # ── Users ──
     if "users" in active:
+        # Note: Replace mode does NOT delete existing users by design — this is a safety
+        # measure to prevent locking out admins mid-restore. Users are always merged by username.
         added, updated, skipped = 0, 0, 0
         for u_data in parsed.users:
             existing_user = (await session.execute(

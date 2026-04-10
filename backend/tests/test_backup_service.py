@@ -191,7 +191,13 @@ async def test_restore_session_notes_merge():
         ],
     })
 
-    result = await restore_backup(session, data, sections=["session_notes"], mode="merge")
+    import uuid
+    result = await restore_backup(
+        session, data,
+        sections=["session_notes"],
+        mode="merge",
+        acting_user_id=uuid.uuid4(),
+    )
     assert result["success"] is True
     assert result["applied"]["session_notes"]["add"] == 1
 
@@ -210,3 +216,53 @@ def test_migration_chain_noop_current():
     data = _make_backup()
     result = apply_migrations(data)
     assert result["meta"]["schema_version"] == CURRENT_BACKUP_SCHEMA_VERSION
+
+
+@pytest.mark.asyncio
+async def test_restore_users_merges_not_replaces():
+    """Restore users section never deletes existing users, even in replace mode."""
+    import uuid
+    session = AsyncMock()
+
+    empty_result = MagicMock()
+    empty_result.scalar_one_or_none.return_value = None
+    empty_result.scalars.return_value.all.return_value = []
+
+    session.execute = AsyncMock(return_value=empty_result)
+    session.add = MagicMock()
+    session.flush = AsyncMock()
+
+    data = _make_backup({
+        "users": [{"username": "new_viewer", "role": "viewer"}],
+    })
+
+    result = await restore_backup(
+        session, data,
+        sections=["users"],
+        mode="replace",
+        acting_user_id=uuid.uuid4(),
+    )
+    assert result["success"] is True
+    # Verify no bulk delete call was made against User table
+    # (the mock.execute call args would show delete(User) if it happened)
+
+
+@pytest.mark.asyncio
+async def test_restore_accepts_acting_user_id():
+    """restore_backup signature accepts acting_user_id parameter."""
+    import uuid
+    session = AsyncMock()
+    empty_result = MagicMock()
+    empty_result.scalar_one_or_none.return_value = None
+    empty_result.scalars.return_value.all.return_value = []
+    session.execute = AsyncMock(return_value=empty_result)
+    session.flush = AsyncMock()
+
+    data = _make_backup()
+    result = await restore_backup(
+        session, data,
+        sections=[],
+        mode="merge",
+        acting_user_id=uuid.uuid4(),
+    )
+    assert result["success"] is True

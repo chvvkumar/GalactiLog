@@ -102,7 +102,12 @@ async def restore_backup_endpoint(
 
     logger.info("backup: restore starting user=%s mode=%s sections=%s", user.username, mode, sections or "all")
     try:
-        result = await restore_backup(session, data, sections=section_list, mode=mode)
+        result = await restore_backup(
+            session, data,
+            sections=section_list,
+            mode=mode,
+            acting_user_id=user.id,
+        )
         await session.commit()
         logger.info("backup: restore success user=%s applied=%s", user.username, list(result.get("applied", {}).keys()))
         return result

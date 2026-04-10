@@ -49,8 +49,6 @@ class BackupMosaicPanel(BaseModel):
     object_name: str
     panel_label: str
     sort_order: int = 0
-    ra: float | None = None
-    dec: float | None = None
 
 
 class BackupMosaic(BaseModel):
