@@ -228,6 +228,12 @@ def auto_scan_tick():
     if row is None or not (row.general or {}).get("auto_scan_enabled", True):
         return
 
+    # Gate auto-scan on first boot until the user has reviewed scan filters.
+    # The onboarding banner lets them either configure rules or explicitly
+    # accept defaults, which flips this flag. Manual scans remain unaffected.
+    if not (row.general or {}).get("scan_filters_configured"):
+        return
+
     interval_minutes = (row.general or {}).get("auto_scan_interval", 240)
     last_run_str = _redis.get("autoscan:last_run")
     now = time.time()
