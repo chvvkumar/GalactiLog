@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 # ── Export format ──────────────────────────────────────────────────────
@@ -31,11 +31,11 @@ class BackupCustomColumnValue(BaseModel):
 class BackupCustomColumn(BaseModel):
     name: str
     slug: str
-    column_type: str  # "boolean" | "text" | "dropdown"
-    applies_to: str  # "target" | "session" | "rig"
+    column_type: Literal["boolean", "text", "dropdown"]
+    applies_to: Literal["target", "session", "rig"]
     dropdown_options: list[str] | None = None
     display_order: int = 0
-    values: list[BackupCustomColumnValue] = []
+    values: list[BackupCustomColumnValue] = Field(default_factory=list)
 
 
 class BackupTargetOverride(BaseModel):
@@ -56,12 +56,12 @@ class BackupMosaicPanel(BaseModel):
 class BackupMosaic(BaseModel):
     name: str
     notes: str | None = None
-    panels: list[BackupMosaicPanel] = []
+    panels: list[BackupMosaicPanel] = Field(default_factory=list)
 
 
 class BackupUser(BaseModel):
     username: str
-    role: str  # "admin" | "viewer"
+    role: Literal["admin", "viewer"]
 
 
 class BackupColumnVisibility(BaseModel):
@@ -72,12 +72,12 @@ class BackupColumnVisibility(BaseModel):
 class BackupPayload(BaseModel):
     meta: BackupMeta
     settings: dict[str, Any]
-    session_notes: list[BackupSessionNote] = []
-    custom_columns: list[BackupCustomColumn] = []
-    target_overrides: list[BackupTargetOverride] = []
-    mosaics: list[BackupMosaic] = []
-    users: list[BackupUser] = []
-    column_visibility: list[BackupColumnVisibility] = []
+    session_notes: list[BackupSessionNote] = Field(default_factory=list)
+    custom_columns: list[BackupCustomColumn] = Field(default_factory=list)
+    target_overrides: list[BackupTargetOverride] = Field(default_factory=list)
+    mosaics: list[BackupMosaic] = Field(default_factory=list)
+    users: list[BackupUser] = Field(default_factory=list)
+    column_visibility: list[BackupColumnVisibility] = Field(default_factory=list)
 
 
 # ── Validate / restore responses ──────────────────────────────────────
@@ -93,14 +93,14 @@ class SectionPreview(BaseModel):
 class ValidateResponse(BaseModel):
     valid: bool
     meta: BackupMeta | None = None
-    preview: dict[str, SectionPreview] = {}
-    warnings: list[str] = []
+    preview: dict[str, SectionPreview] = Field(default_factory=dict)
+    warnings: list[str] = Field(default_factory=list)
     error: str | None = None
 
 
 class RestoreResponse(BaseModel):
     success: bool
-    applied: dict[str, SectionPreview] = {}
-    temporary_passwords: dict[str, str] = {}
-    warnings: list[str] = []
+    applied: dict[str, SectionPreview] = Field(default_factory=dict)
+    temporary_passwords: dict[str, str] = Field(default_factory=dict)
+    warnings: list[str] = Field(default_factory=list)
     error: str | None = None
