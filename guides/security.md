@@ -1,7 +1,5 @@
 # Security
 
-GalactiLog authentication and security implementation details.
-
 ## Authentication
 
 Cookie-based JWT authentication, same-origin behind nginx reverse proxy.

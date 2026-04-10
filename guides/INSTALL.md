@@ -62,11 +62,7 @@ nas.local:/volume1/astrophotography  /mnt/astro  nfs  ro,soft,timeo=30  0  0
 
 #### Optional settings
 
-The compose file also includes commented-out options for:
-
-- **Host paths for postgres data and thumbnails** -- by default these use Docker named volumes; uncomment to use host directories for easier backups
-- **JWT secret** -- set for persistent sessions across container restarts
-- **Viewer account** -- read-only access for sharing without admin privileges
+The compose file includes commented-out options for host paths (postgres data, thumbnails), JWT secret, and a read-only viewer account.
 
 ### 3. Start
 
@@ -77,14 +73,11 @@ docker compose up -d
 docker compose logs -f app
 ```
 
-On first start, GalactiLog will:
-1. Run database migrations to create all tables
-2. Create the admin account from the credentials in the compose file
-3. Start the web UI, API, and background worker
+On first start, GalactiLog runs migrations, creates the admin account, and starts the web UI, API, and background worker.
 
 ### 4. Verify
 
-Open `http://localhost:8080` (or your configured port). You should see the GalactiLog login page.
+Open `http://localhost:8080` (or your configured port).
 
 ```bash
 # Verify the API is responding
@@ -94,15 +87,7 @@ curl http://localhost:8080/api/scan/status
 
 ### 5. First Scan
 
-Log in with your admin credentials, then navigate to **Settings > Scan & Ingest** and click **Start Scan**. GalactiLog will:
-
-1. Discover all FITS files in your configured directory
-2. Extract metadata from FITS headers
-3. Generate stretched JPEG thumbnails
-4. Resolve target names via SIMBAD (with local caching)
-5. Backfill additional metrics from any N.I.N.A. CSV files found alongside the FITS files
-
-Progress is shown in real-time on the Settings page.
+Log in and go to **Settings > Scan & Ingest > Start Scan**. GalactiLog discovers FITS files, extracts metadata, generates thumbnails, resolves targets via SIMBAD, and backfills metrics from any N.I.N.A. CSV files. Progress is shown in real-time.
 
 ## Architecture
 
@@ -130,9 +115,7 @@ docker compose pull app
 docker compose up -d
 ```
 
-This pulls the latest image from DockerHub and restarts the application. Database migrations are applied automatically on startup.
-
-To pin a specific version, edit the image tag in `docker-compose.yml`:
+Migrations run automatically on startup. To pin a specific version:
 
 ```yaml
 image: chvvkumar/galactilog:1.0.1
@@ -187,10 +170,7 @@ ports:
 
 ### SIMBAD resolution timeouts
 
-SIMBAD is an external service and may be slow or temporarily unavailable. GalactiLog handles this gracefully:
-- Failed lookups are retried on subsequent scans
-- Successfully resolved targets are cached in the local database
-- You can trigger a backfill from Settings > Scan & Ingest > Backfill Targets
+SIMBAD may be slow or temporarily unavailable. Failed lookups are retried on subsequent scans, and resolved targets are cached locally. You can trigger a backfill from Settings > Scan & Ingest > Backfill Targets.
 
 ### Database connection errors
 
