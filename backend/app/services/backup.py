@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+"""Export/restore user customizations as portable versioned JSON backups."""
+
+from collections.abc import Callable
 from datetime import datetime, timezone
 
 from sqlalchemy import select
@@ -11,7 +14,6 @@ from app.models.session_note import SessionNote
 from app.models.custom_column import CustomColumn
 from app.models.target import Target
 from app.models.mosaic import Mosaic
-from app.models.mosaic_panel import MosaicPanel
 from app.models.user import User
 
 CURRENT_BACKUP_SCHEMA_VERSION = 1
@@ -20,10 +22,16 @@ APP_VERSION = "0.1.0"
 # ── Schema migrations ────────────────────────────────────────────────
 # Each key is the version to migrate FROM. The function transforms the
 # backup dict in-place and returns it.
-MIGRATIONS: dict[int, callable] = {}
+MIGRATIONS: dict[int, Callable[[dict], dict]] = {}
 
 
 def apply_migrations(data: dict) -> dict:
+    """Apply schema migrations sequentially from data's schema_version to current.
+
+    Migrations should transform the backup dict and return it (either in-place
+    or as a new dict). Raises ValueError if the backup's schema is newer than
+    this app supports, or if a migration step is missing from MIGRATIONS.
+    """
     version = data["meta"]["schema_version"]
     if version > CURRENT_BACKUP_SCHEMA_VERSION:
         raise ValueError(
