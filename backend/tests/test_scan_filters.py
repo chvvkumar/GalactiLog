@@ -1,7 +1,7 @@
 import pytest
 from pathlib import Path
 
-from app.services.scan_filters import NameRule
+from app.services.scan_filters import NameRule, ScanFilterConfig
 
 
 def _rule(**kwargs):
@@ -52,3 +52,59 @@ def test_disabled_rule_never_matches():
 def test_invalid_regex_raises_at_construction():
     with pytest.raises(ValueError, match="invalid regex"):
         _rule(type="regex", pattern="[unclosed")
+
+
+def test_from_settings_empty(tmp_path):
+    cfg = ScanFilterConfig.from_settings({}, tmp_path)
+    assert cfg.include_paths == []
+    assert cfg.exclude_paths == []
+    assert cfg.name_rules == []
+
+
+def test_from_settings_parses_paths_and_rules(tmp_path):
+    (tmp_path / "2025").mkdir()
+    (tmp_path / "2025" / "rejected").mkdir()
+    general = {
+        "scan_filters": {
+            "include_paths": [str(tmp_path / "2025")],
+            "exclude_paths": [str(tmp_path / "2025" / "rejected")],
+            "name_rules": [
+                {"id": "r1", "action": "exclude", "type": "glob",
+                 "pattern": "*_bad.fits", "target": "file", "enabled": True},
+            ],
+        }
+    }
+    cfg = ScanFilterConfig.from_settings(general, tmp_path)
+    assert len(cfg.include_paths) == 1
+    assert len(cfg.exclude_paths) == 1
+    assert len(cfg.name_rules) == 1
+
+
+def test_from_settings_rejects_path_outside_root(tmp_path):
+    outside = tmp_path.parent / "escape"
+    outside.mkdir(exist_ok=True)
+    general = {
+        "scan_filters": {
+            "include_paths": [str(outside)],
+            "exclude_paths": [],
+            "name_rules": [],
+        }
+    }
+    with pytest.raises(ValueError, match="outside configured data path"):
+        ScanFilterConfig.from_settings(general, tmp_path)
+
+
+def test_roots_returns_fits_root_when_includes_empty(tmp_path):
+    cfg = ScanFilterConfig(include_paths=[], exclude_paths=[], name_rules=[])
+    assert cfg.roots(tmp_path) == [tmp_path]
+
+
+def test_roots_returns_includes_when_set(tmp_path):
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    cfg = ScanFilterConfig(
+        include_paths=[tmp_path / "a", tmp_path / "b"],
+        exclude_paths=[],
+        name_rules=[],
+    )
+    assert cfg.roots(tmp_path) == [tmp_path / "a", tmp_path / "b"]

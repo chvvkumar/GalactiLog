@@ -47,3 +47,37 @@ class NameRule:
             assert self._regex is not None
             return bool(self._regex.search(value))
         return False
+
+
+@dataclass
+class ScanFilterConfig:
+    include_paths: list[Path]
+    exclude_paths: list[Path]
+    name_rules: list[NameRule]
+
+    @classmethod
+    def from_settings(cls, general: dict, fits_root: Path) -> "ScanFilterConfig":
+        raw = (general or {}).get("scan_filters") or {}
+        root = fits_root.resolve()
+
+        def _validate(path_str: str) -> Path:
+            p = Path(path_str).resolve()
+            try:
+                p.relative_to(root)
+            except ValueError as exc:
+                raise ValueError(
+                    f"path {path_str} is outside configured data path {root}"
+                ) from exc
+            return p
+
+        include_paths = [_validate(p) for p in raw.get("include_paths", [])]
+        exclude_paths = [_validate(p) for p in raw.get("exclude_paths", [])]
+        name_rules = [NameRule(**r) for r in raw.get("name_rules", [])]
+        return cls(
+            include_paths=include_paths,
+            exclude_paths=exclude_paths,
+            name_rules=name_rules,
+        )
+
+    def roots(self, fits_root: Path) -> list[Path]:
+        return list(self.include_paths) if self.include_paths else [fits_root]
