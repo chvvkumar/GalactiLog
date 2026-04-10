@@ -8,6 +8,8 @@ import DatabaseOverview from "./DatabaseOverview";
 import ScanControls from "./ScanControls";
 import ActivityFeed from "./ActivityFeed";
 import MaintenanceActions from "./MaintenanceActions";
+import ScanFiltersPanel from "./ScanFiltersPanel";
+import ScanFiltersOnboarding from "./ScanFiltersOnboarding";
 import { showToast } from "./Toast";
 
 type FrameFilter = "all" | "light_only";
@@ -129,7 +131,13 @@ const ScanManager: Component = () => {
       <div class="grid grid-cols-1 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] gap-4 items-start">
         {/* Left column: controls */}
         <div class="space-y-4 min-w-0">
-          {/* scan-filters-onboarding-slot */}
+          <ScanFiltersOnboarding
+            onReview={() => {
+              const el = document.getElementById("scan-filters-panel");
+              if (el instanceof HTMLDetailsElement) el.open = true;
+              el?.scrollIntoView({ behavior: "smooth", block: "start" });
+            }}
+          />
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
             <Show when={isAdmin()}>
               <div class="rounded-[var(--radius-md)] bg-theme-surface border border-theme-border p-4 space-y-4">
@@ -176,7 +184,7 @@ const ScanManager: Component = () => {
             />
           </div>
 
-          {/* scan-filters-panel-slot */}
+          <ScanFiltersPanel />
 
           <Show when={isAdmin()}>
             <MaintenanceActions
