@@ -38,10 +38,43 @@ const ScanFiltersPanel: Component<Props> = (props) => {
     null | { verdict: Verdict; matched: string[] }
   >(null);
 
+  // Regex validation runs on the backend (Python `re`) because the scanner
+  // uses that engine. Validating with `new RegExp(...)` here would reject
+  // Python-only syntax like `(?i)foo` or `(?P<name>)` even though the
+  // scanner accepts them. We cache results by pattern string so rendering
+  // stays synchronous.
+  const [regexCache, setRegexCache] = createSignal<Record<string, string | null>>({});
+  const regexPending = new Set<string>();
+
+  const validatePattern = (pattern: string) => {
+    if (regexPending.has(pattern) || pattern in regexCache()) return;
+    regexPending.add(pattern);
+    scanFilters.validateRegex(pattern).then(
+      (r) => {
+        regexPending.delete(pattern);
+        setRegexCache({ ...regexCache(), [pattern]: r.ok ? null : (r.error ?? "invalid regex") });
+      },
+      () => {
+        regexPending.delete(pattern);
+        // Network failure: don't block the user. Treat as valid for now;
+        // the backend will reject on save if it's truly broken.
+        setRegexCache({ ...regexCache(), [pattern]: null });
+      },
+    );
+  };
+
+  createEffect(() => {
+    for (const r of filters().name_rules) {
+      if (r.type === "regex" && r.pattern.trim()) validatePattern(r.pattern);
+    }
+  });
+
   const ruleIsInvalid = (r: NameRule): string | null => {
     if (!r.pattern.trim()) return "empty pattern";
     if (r.type === "regex") {
-      try { new RegExp(r.pattern); } catch { return "invalid regex"; }
+      const cached = regexCache()[r.pattern];
+      if (cached === undefined) return null; // optimistic while validating
+      return cached;
     }
     return null;
   };

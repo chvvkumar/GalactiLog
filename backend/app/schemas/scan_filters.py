@@ -88,3 +88,17 @@ class BrowseEntry(BaseModel):
 class ApplyNowOut(BaseModel):
     dry_run: bool
     matched: int
+
+
+class ValidateRegexIn(BaseModel):
+    pattern: str = Field(min_length=1, max_length=512)
+
+    @field_validator("pattern")
+    @classmethod
+    def _pattern_clean(cls, v: str) -> str:
+        return _no_control_chars(v, "pattern")
+
+
+class ValidateRegexOut(BaseModel):
+    ok: bool
+    error: str | None = None

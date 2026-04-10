@@ -13,8 +13,11 @@ from app.api.deps import get_current_user, require_admin
 from app.models.user import User
 from app.models import Image, Target
 from app.models.user_settings import UserSettings, SETTINGS_ROW_ID
+import re as _re
+
 from app.schemas.scan_filters import (
     ScanFiltersIn, ScanFiltersOut, TestPathIn, TestPathOut, BrowseEntry, ApplyNowOut,
+    ValidateRegexIn, ValidateRegexOut,
 )
 from app.services.scan_filters import ScanFilterConfig
 from app.services.scan_state import (
@@ -512,6 +515,25 @@ async def test_scan_filter_path(
         verdict=test_result.verdict,
         matched_rule_ids=test_result.matched_rule_ids,
     )
+
+
+@router.post("/filters/validate-regex", response_model=ValidateRegexOut)
+async def validate_scan_filter_regex(
+    payload: ValidateRegexIn,
+    user: User = Depends(get_current_user),
+):
+    """Validate a regex pattern against Python's `re` engine.
+
+    The scanner evaluates name rules with `re.compile(...).search(...)`, so
+    this is the single source of truth for pattern validity. The frontend
+    calls this instead of `new RegExp(...)` to avoid JS/Python dialect
+    mismatches (e.g. `(?i)` inline flags, `(?P<name>)` named groups).
+    """
+    try:
+        _re.compile(payload.pattern)
+    except _re.error as exc:
+        return ValidateRegexOut(ok=False, error=str(exc))
+    return ValidateRegexOut(ok=True)
 
 
 @router.post("/filters/apply-now", response_model=ApplyNowOut)
