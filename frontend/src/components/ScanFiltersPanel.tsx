@@ -412,21 +412,21 @@ const ScanFiltersPanel: Component<Props> = (props) => {
 
         <div class="flex flex-wrap gap-2">
           <button
-            class="px-3 py-1.5 text-sm rounded bg-theme-accent text-white disabled:opacity-50"
+            class="px-4 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded text-sm font-medium disabled:opacity-50 hover:bg-theme-accent/25 transition-colors"
             disabled={!dirty() || saving()}
             onClick={save}
           >
             {saving() ? "Saving…" : "Save filters"}
           </button>
           <button
-            class="px-3 py-1.5 text-sm rounded border border-theme-border disabled:opacity-50"
+            class="px-4 py-1.5 bg-theme-surface text-theme-text-primary border border-theme-border rounded text-sm font-medium disabled:opacity-50 hover:bg-theme-hover transition-colors"
             disabled={!dirty()}
             onClick={revert}
           >
             Revert
           </button>
           <button
-            class="px-3 py-1.5 text-sm rounded border border-amber-500 text-amber-400"
+            class="px-4 py-1.5 bg-theme-warning/15 text-theme-warning border border-theme-warning/30 rounded text-sm font-medium hover:bg-theme-warning/25 transition-colors"
             onClick={applyNow}
           >
             Apply now
