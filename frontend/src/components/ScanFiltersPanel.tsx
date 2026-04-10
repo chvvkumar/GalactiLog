@@ -9,6 +9,7 @@ import type {
   Verdict,
 } from "../api/scanFilters";
 import FolderBrowserModal from "./FolderBrowserModal";
+import SettingsHelpSection from "./settings/SettingsHelpSection";
 import { showToast } from "./Toast";
 
 const EMPTY: ScanFilters = { include_paths: [], exclude_paths: [], name_rules: [] };
@@ -216,13 +217,25 @@ const ScanFiltersPanel: Component<Props> = (props) => {
     );
   };
 
+  const firstVisit = (() => {
+    try {
+      const key = "galactilog.scanFiltersPanel.visited";
+      if (localStorage.getItem(key)) return false;
+      localStorage.setItem(key, "1");
+      return true;
+    } catch {
+      return false;
+    }
+  })();
+
   return (
     <details
       id="scan-filters-panel"
-      class="rounded-[var(--radius-md)] bg-theme-surface border border-theme-border"
+      open={firstVisit}
+      class="rounded-[var(--radius-sm)] border border-theme-border"
     >
-      <summary class="p-4 cursor-pointer text-sm font-medium text-theme-text-primary">
-        Scan filters — {filters().include_paths.length} include path(s),{" "}
+      <summary class="p-3 cursor-pointer text-sm font-medium text-theme-text-primary">
+        Path & name rules — {filters().include_paths.length} include path(s),{" "}
         {filters().exclude_paths.length} exclude path(s),{" "}
         {filters().name_rules.length} name rule(s)
         <Show when={dirty()}>
@@ -231,34 +244,59 @@ const ScanFiltersPanel: Component<Props> = (props) => {
       </summary>
 
       <div class="p-4 border-t border-theme-border space-y-6">
-        <div class="text-xs text-theme-text-secondary space-y-2">
-          <p>
-            Scan filters control what the scanner walks and ingests. There are two
-            kinds of rules working together:
-          </p>
-          <ul class="list-disc pl-4 space-y-1">
-            <li>
-              <strong>Paths</strong>: <em>include paths</em> narrow the scan to a
-              subset of the data root (empty means scan everything).{" "}
-              <em>Exclude paths</em> prune subtrees that should never be walked.
-            </li>
-            <li>
-              <strong>Name rules</strong>: wildcard, substring, or regex patterns
-              that match on file names or folder names. Exclude rules win over
-              includes. When at least one include rule exists for a target (file
-              or folder), that target must match one of them.
-            </li>
-          </ul>
-          <p>
-            Example: include path <code>{fitsRoot() || "/data/fits"}/2025</code>,
-            exclude path <code>{fitsRoot() || "/data/fits"}/2025/rejected</code>,
-            plus a file exclude rule <code>*_bad.fits</code> and a folder include
-            regex <code>^M\d+$</code>. The scanner walks only 2025, skips{" "}
-            <code>rejected</code>, drops any file ending in <code>_bad.fits</code>,
-            and only keeps files whose parent folder name matches an{" "}
-            <code>M</code>-catalog designation.
-          </p>
-        </div>
+        <SettingsHelpSection tabId="scan_path_name_rules">
+          <div class="space-y-3 text-xs text-theme-text-secondary">
+            <p>
+              Filtering happens in <strong class="text-theme-text-primary">two layers</strong>, applied in order.
+            </p>
+
+            <div class="space-y-1">
+              <p class="text-theme-text-primary font-medium">1. Paths, which folders to walk</p>
+              <ul class="list-disc pl-5 space-y-0.5">
+                <li>
+                  <strong>Include paths</strong> limit the scan to specific subtrees.
+                  <em> Empty means scan everything under the data root.</em>
+                </li>
+                <li>
+                  <strong>Exclude paths</strong> skip subtrees entirely.
+                  <em> Exclude always wins over include.</em>
+                </li>
+              </ul>
+            </div>
+
+            <div class="space-y-1">
+              <p class="text-theme-text-primary font-medium">2. Name rules, which files and folders to keep</p>
+              <ul class="list-disc pl-5 space-y-0.5">
+                <li>
+                  Patterns match against <strong>file names</strong> or <strong>folder names</strong>, using
+                  <strong> wildcard</strong>, <strong>substring</strong>, or <strong>regex</strong>.
+                </li>
+                <li>
+                  <strong>Exclude rules</strong> are checked first, then <strong>include rules</strong> narrow the result.
+                </li>
+                <li>
+                  If any include rule exists for a target kind (file or folder), that target
+                  <strong> must</strong> match at least one.
+                </li>
+              </ul>
+            </div>
+
+            <div class="space-y-1">
+              <p class="text-theme-text-primary font-medium">Example</p>
+              <pre class="bg-theme-input border border-theme-border rounded p-2 font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-all">
+{`include path   ${fitsRoot() || "/data/fits"}/2025
+exclude path   ${fitsRoot() || "/data/fits"}/2025/rejected
+exclude rule   *_bad.fits      (wildcard, file)
+include rule   ^M\\d+$          (regex, folder)`}
+              </pre>
+              <p>
+                Result: scans only <code>2025</code>, skips <code>rejected/</code>, drops any file ending in
+                {" "}<code>_bad.fits</code>, and only keeps files whose parent folder name is an M-catalog
+                designation like <code>M31</code> or <code>M42</code>.
+              </p>
+            </div>
+          </div>
+        </SettingsHelpSection>
 
         <PathList
           label="Include paths"
@@ -286,17 +324,17 @@ const ScanFiltersPanel: Component<Props> = (props) => {
 
         <div class="space-y-2">
           <h4 class="text-sm font-medium text-theme-text-primary">Name rules</h4>
-          <p class="text-xs text-theme-text-secondary">
-            Rules are evaluated in order: excludes first, then include-narrowing.
-            Three pattern types: <strong>wildcard</strong> uses <code>*</code> for
-            any characters and <code>?</code> for a single character — examples{" "}
-            <code>*_bad.fits</code>, <code>*_calibration</code>.{" "}
-            <strong>Substring</strong> matches if the pattern appears anywhere
-            inside the name (case-insensitive) — examples <code>rejected</code>,{" "}
-            <code>test_</code>. <strong>Regex</strong> is a full regular
-            expression — examples <code>^M\d+$</code>,{" "}
-            <code>.*_v[0-9]+\.fits</code>.
-          </p>
+          <SettingsHelpSection tabId="scan_name_rules_syntax">
+            <p class="text-xs text-theme-text-secondary">
+              Pattern syntax: <strong>wildcard</strong> uses <code>*</code> for any
+              characters and <code>?</code> for a single character (e.g.{" "}
+              <code>*_bad.fits</code>, <code>*_calibration</code>).{" "}
+              <strong>Substring</strong> matches anywhere inside the name,
+              case-insensitive (e.g. <code>rejected</code>, <code>test_</code>).{" "}
+              <strong>Regex</strong> is a full regular expression (e.g.{" "}
+              <code>^M\d+$</code>, <code>.*_v[0-9]+\.fits</code>).
+            </p>
+          </SettingsHelpSection>
           <div class="overflow-x-auto">
             <table class="w-full text-xs">
               <thead>
@@ -490,7 +528,7 @@ const ScanFiltersPanel: Component<Props> = (props) => {
                 : "Store the current filters. Future scans will use them. Does not touch the existing catalog."
             }
           >
-            {saving() ? "Saving…" : "Save filters"}
+            {saving() ? "Saving…" : "Save rules"}
           </button>
           <button
             class="px-4 py-1.5 bg-theme-surface text-theme-text-primary border border-theme-border rounded text-sm font-medium disabled:opacity-50 hover:bg-theme-hover transition-colors"

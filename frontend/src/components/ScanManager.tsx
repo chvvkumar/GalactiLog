@@ -138,10 +138,12 @@ const ScanManager: Component = () => {
               el?.scrollIntoView({ behavior: "smooth", block: "start" });
             }}
           />
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div class="rounded-[var(--radius-md)] bg-theme-surface border border-theme-border p-4 space-y-6">
+            <h3 class="text-sm font-medium text-theme-text-primary">Library Scanning</h3>
+
             <Show when={isAdmin()}>
-              <div class="rounded-[var(--radius-md)] bg-theme-surface border border-theme-border p-4 space-y-4">
-                <h3 class="text-sm font-medium text-theme-text-primary">Auto-scan</h3>
+              <div class="space-y-4">
+                <h4 class="text-sm font-medium text-theme-text-primary">Auto-scan</h4>
                 <div class="flex items-center justify-between">
                   <label class="text-sm text-theme-text-secondary">Enable automatic scanning</label>
                   <button
@@ -174,17 +176,19 @@ const ScanManager: Component = () => {
               </div>
             </Show>
 
-            <ScanControls
-              isActive={isActive()}
-              stopping={stopping()}
-              frameFilter={frameFilter()}
-              onFrameFilterChange={setFrameFilter}
-              onStartScan={() => startScan({ includeCalibration: frameFilter() === "all" })}
-              onStopScan={stopScan}
-            />
-          </div>
+            <ScanFiltersPanel />
 
-          <ScanFiltersPanel />
+            <div class="flex flex-wrap items-center gap-4 justify-end pt-2 border-t border-theme-border">
+              <ScanControls
+                isActive={isActive()}
+                stopping={stopping()}
+                frameFilter={frameFilter()}
+                onFrameFilterChange={setFrameFilter}
+                onStartScan={() => startScan({ includeCalibration: frameFilter() === "all" })}
+                onStopScan={stopScan}
+              />
+            </div>
+          </div>
 
           <Show when={isAdmin()}>
             <MaintenanceActions

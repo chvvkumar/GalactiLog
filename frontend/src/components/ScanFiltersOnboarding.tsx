@@ -85,7 +85,7 @@ const ScanFiltersOnboarding: Component<Props> = (props) => {
               >
                 Auto-scan is paused until you configure scan filters. Restrict which
                 folders are scanned and which file or folder names are included or
-                excluded under Settings → Scan & Ingest, or accept the defaults to
+                excluded under Settings → Library, or accept the defaults to
                 scan everything under the configured data root.
               </Show>
             </p>
