@@ -283,7 +283,7 @@ const ScanFiltersPanel: Component<Props> = (props) => {
 
             <div class="space-y-1">
               <p class="text-theme-text-primary font-medium">Example</p>
-              <pre class="bg-theme-input border border-theme-border rounded p-2 font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-all">
+              <pre class="bg-theme-input border border-theme-border rounded p-2 font-mono text-label leading-relaxed whitespace-pre-wrap break-all">
 {`include path   ${fitsRoot() || "/data/fits"}/2025
 exclude path   ${fitsRoot() || "/data/fits"}/2025/rejected
 exclude rule   *_bad.fits      (wildcard, file)
