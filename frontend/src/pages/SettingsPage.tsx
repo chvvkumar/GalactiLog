@@ -5,6 +5,7 @@ import { FiltersTab } from "../components/settings/FiltersTab";
 import { EquipmentTab } from "../components/settings/EquipmentTab";
 import { MergesTab } from "../components/settings/MergesTab";
 import { UsersTab } from "../components/settings/UsersTab";
+import { BackupRestoreTab } from "../components/settings/BackupRestoreTab";
 import ScanManager from "../components/ScanManager";
 import DisplayTab from "../components/DisplayTab";
 import AstroBinTab from "../components/settings/AstroBinTab";
@@ -22,6 +23,7 @@ const ALL_TABS = [
   { id: "astrobin", label: "AstroBin" },
   { id: "targets", label: "Target Management" },
   { id: "custom-columns", label: "Custom Columns" },
+  { id: "backup", label: "Backup & Restore", adminOnly: true },
   { id: "users", label: "Users", adminOnly: true },
 ] as const;
 
@@ -132,6 +134,9 @@ export const SettingsPage: Component = () => {
           </ul>
         </SettingsHelpSection>
         <CustomColumnsTab />
+      </Show>
+      <Show when={activeTab() === "backup" && isAdmin()}>
+        <BackupRestoreTab />
       </Show>
       <Show when={activeTab() === "users" && isAdmin()}>
         <SettingsHelpSection tabId="users">
