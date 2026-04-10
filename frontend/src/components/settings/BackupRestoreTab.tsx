@@ -1,4 +1,4 @@
-import { type Component, createSignal, For, Show } from "solid-js";
+import { type Component, createEffect, createSignal, For, onCleanup, Show } from "solid-js";
 import { api } from "../../api/client";
 import type { ValidateResponse, RestoreResponse } from "../../api/client";
 import { showToast } from "../Toast";
@@ -28,6 +28,21 @@ export const BackupRestoreTab: Component = () => {
   const [restoring, setRestoring] = createSignal(false);
   const [restoreResult, setRestoreResult] = createSignal<RestoreResponse | null>(null);
 
+  let fileInputRef: HTMLInputElement | undefined;
+  let cancelButtonRef: HTMLButtonElement | undefined;
+
+  createEffect(() => {
+    if (showConfirm()) {
+      const handler = (e: KeyboardEvent) => {
+        if (e.key === "Escape") setShowConfirm(false);
+      };
+      window.addEventListener("keydown", handler);
+      // Focus the cancel button (safer default for destructive action)
+      queueMicrotask(() => cancelButtonRef?.focus());
+      onCleanup(() => window.removeEventListener("keydown", handler));
+    }
+  });
+
   // ── Backup ──
 
   const handleCreateBackup = async () => {
@@ -42,7 +57,8 @@ export const BackupRestoreTab: Component = () => {
       a.click();
       URL.revokeObjectURL(url);
       showToast("Backup created successfully");
-    } catch {
+    } catch (err) {
+      console.error("Backup create failed:", err);
       showToast("Failed to create backup", "error");
     } finally {
       setCreating(false);
@@ -51,6 +67,9 @@ export const BackupRestoreTab: Component = () => {
 
   // ── Restore ──
 
+  // Preview counts are derived from the backup content only (not current DB state
+  // or mode), so we only need to validate once on file upload. Mode/section changes
+  // take effect at restore time.
   const handleFileSelect = async (e: Event) => {
     const input = e.target as HTMLInputElement;
     const f = input.files?.[0];
@@ -66,10 +85,13 @@ export const BackupRestoreTab: Component = () => {
     try {
       const result = await api.validateBackup(f, "merge", ALL_SECTIONS);
       setValidation(result);
-      if (!result.valid) {
+      if (result.valid) {
+        setSelectedSections(new Set(Object.keys(result.preview)));
+      } else {
         showToast(result.error || "Invalid backup file", "error");
       }
-    } catch {
+    } catch (err) {
+      console.error("Backup validate failed:", err);
       showToast("Failed to validate backup file", "error");
     } finally {
       setValidating(false);
@@ -97,10 +119,14 @@ export const BackupRestoreTab: Component = () => {
       setRestoreResult(result);
       if (result.success) {
         showToast("Backup restored successfully");
+        setFile(null);
+        setValidation(null);
+        if (fileInputRef) fileInputRef.value = "";
       } else {
         showToast(result.error || "Restore failed", "error");
       }
-    } catch {
+    } catch (err) {
+      console.error("Backup restore failed:", err);
       showToast("Failed to restore backup", "error");
     } finally {
       setRestoring(false);
@@ -112,8 +138,7 @@ export const BackupRestoreTab: Component = () => {
     setValidation(null);
     setRestoreResult(null);
     setShowConfirm(false);
-    const input = document.getElementById("backup-file-input") as HTMLInputElement;
-    if (input) input.value = "";
+    if (fileInputRef) fileInputRef.value = "";
   };
 
   return (
@@ -146,8 +171,10 @@ export const BackupRestoreTab: Component = () => {
           existing data.
         </p>
 
+        <label for="backup-file-input" class="sr-only">Backup file</label>
         <input
           id="backup-file-input"
+          ref={fileInputRef}
           type="file"
           accept=".json"
           onChange={handleFileSelect}
@@ -182,7 +209,7 @@ export const BackupRestoreTab: Component = () => {
             <div>
               <h4 class="text-sm font-medium text-theme-text-primary mb-2">Sections to restore</h4>
               <div class="grid grid-cols-2 gap-2">
-                <For each={ALL_SECTIONS}>
+                <For each={Object.keys(validation()!.preview)}>
                   {(section) => {
                     const preview = () => validation()!.preview[section];
                     const count = () => {
@@ -197,7 +224,7 @@ export const BackupRestoreTab: Component = () => {
                           onChange={() => toggleSection(section)}
                           class="rounded"
                         />
-                        <span>{SECTION_LABELS[section]}</span>
+                        <span>{SECTION_LABELS[section] || section}</span>
                         <Show when={count() > 0}>
                           <span class="text-theme-text-tertiary">({count()})</span>
                         </Show>
@@ -309,6 +336,15 @@ export const BackupRestoreTab: Component = () => {
                   </For>
                 </div>
               </Show>
+
+              <div class="mt-3">
+                <button
+                  class="px-3 py-1.5 rounded-[var(--radius-md)] bg-theme-elevated text-theme-text-secondary border border-theme-border hover:bg-theme-hover transition-colors text-sm"
+                  onClick={resetRestore}
+                >
+                  Restore another
+                </button>
+              </div>
             </Show>
 
             <Show when={!restoreResult()!.success}>
@@ -321,13 +357,19 @@ export const BackupRestoreTab: Component = () => {
 
       {/* ── Confirmation Modal ── */}
       <Show when={showConfirm()}>
-        <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setShowConfirm(false)}>
+        <div
+          class="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+          onClick={() => setShowConfirm(false)}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="backup-restore-confirm-title"
+        >
           <div
             class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-lg)] max-w-md w-full mx-4"
             onClick={(e) => e.stopPropagation()}
           >
             <div class="p-4 border-b border-theme-border">
-              <h2 class="text-lg font-semibold text-theme-text-primary">Confirm Restore</h2>
+              <h2 id="backup-restore-confirm-title" class="text-lg font-semibold text-theme-text-primary">Confirm Restore</h2>
             </div>
             <div class="p-4 space-y-3">
               <p class="text-sm text-theme-text-secondary">
@@ -347,6 +389,7 @@ export const BackupRestoreTab: Component = () => {
             </div>
             <div class="p-4 border-t border-theme-border flex gap-2 justify-end">
               <button
+                ref={cancelButtonRef}
                 class="px-4 py-2 rounded-[var(--radius-md)] bg-theme-elevated text-theme-text-secondary border border-theme-border hover:bg-theme-hover transition-colors"
                 onClick={() => setShowConfirm(false)}
               >
