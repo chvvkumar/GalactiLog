@@ -30,6 +30,35 @@ import type {
 
 const API_BASE = import.meta.env.VITE_API_URL || "/api";
 
+export interface BackupMeta {
+  schema_version: number;
+  app_version: string;
+  exported_at: string;
+}
+
+export interface SectionPreview {
+  add: number;
+  update: number;
+  skip: number;
+  unchanged: number;
+}
+
+export interface ValidateResponse {
+  valid: boolean;
+  meta: BackupMeta | null;
+  preview: Record<string, SectionPreview>;
+  warnings: string[];
+  error: string | null;
+}
+
+export interface RestoreResponse {
+  success: boolean;
+  applied: Record<string, SectionPreview>;
+  temporary_passwords: Record<string, string>;
+  warnings: string[];
+  error: string | null;
+}
+
 export class ApiError extends Error {
   constructor(public status: number, message: string) {
     super(message);
@@ -616,4 +645,56 @@ export const api = {
       method: "PUT",
       body: JSON.stringify(body),
     }),
+
+  // Backup / Restore
+  createBackup: async (): Promise<Blob> => {
+    const resp = await fetch(`${API_BASE}/backup/create`, {
+      method: "POST",
+      credentials: "same-origin",
+    });
+    if (!resp.ok) {
+      throw new ApiError(resp.status, "Failed to create backup");
+    }
+    return resp.blob();
+  },
+
+  validateBackup: async (
+    file: File,
+    mode: string,
+    sections: string[],
+  ): Promise<ValidateResponse> => {
+    const form = new FormData();
+    form.append("file", file);
+    form.append("mode", mode);
+    form.append("sections", sections.join(","));
+    const resp = await fetch(`${API_BASE}/backup/validate`, {
+      method: "POST",
+      credentials: "same-origin",
+      body: form,
+    });
+    if (!resp.ok) {
+      throw new ApiError(resp.status, "Failed to validate backup");
+    }
+    return resp.json();
+  },
+
+  restoreBackup: async (
+    file: File,
+    mode: string,
+    sections: string[],
+  ): Promise<RestoreResponse> => {
+    const form = new FormData();
+    form.append("file", file);
+    form.append("mode", mode);
+    form.append("sections", sections.join(","));
+    const resp = await fetch(`${API_BASE}/backup/restore`, {
+      method: "POST",
+      credentials: "same-origin",
+      body: form,
+    });
+    if (!resp.ok) {
+      throw new ApiError(resp.status, "Failed to restore backup");
+    }
+    return resp.json();
+  },
 };
