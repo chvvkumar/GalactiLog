@@ -156,6 +156,13 @@ async def clear_activity(r: aioredis.Redis) -> None:
     await r.delete(SCAN_ACTIVITY_KEY)
 
 
+async def append_activity(r: aioredis.Redis, entry: dict) -> None:
+    """Append an activity entry (newest first) and cap at SCAN_ACTIVITY_MAX."""
+    import json
+    await r.lpush(SCAN_ACTIVITY_KEY, json.dumps(entry))
+    await r.ltrim(SCAN_ACTIVITY_KEY, 0, SCAN_ACTIVITY_MAX - 1)
+
+
 async def set_idle(r: aioredis.Redis) -> None:
     """Mark scan as complete with zero files (nothing to do)."""
     await r.hset(SCAN_KEY, mapping={

@@ -131,7 +131,7 @@ async function extractApiError(resp: Response, fallback: string): Promise<ApiErr
   return new ApiError(resp.status, message);
 }
 
-async function fetchJson<T>(path: string, init?: RequestInit, signal?: AbortSignal): Promise<T> {
+export async function fetchJson<T>(path: string, init?: RequestInit, signal?: AbortSignal): Promise<T> {
   const resp = await fetch(`${API_BASE}${path}`, {
     credentials: "same-origin",
     ...init,
