@@ -1,4 +1,4 @@
-import { Component, createSignal, createEffect, Show, For } from "solid-js";
+import { Component, createSignal, createEffect, onCleanup, Show, For } from "solid-js";
 import { scanFilters } from "../api/scanFilters";
 import type { BrowseEntry } from "../api/scanFilters";
 
@@ -14,8 +14,19 @@ interface TreeNode {
   entry: BrowseEntry;
   expanded: boolean;
   loaded: boolean;
+  loading: boolean;
+  error: string | null;
   children: TreeNode[];
 }
+
+const makeNode = (e: BrowseEntry): TreeNode => ({
+  entry: e,
+  expanded: false,
+  loaded: false,
+  loading: false,
+  error: null,
+  children: [],
+});
 
 const FolderBrowserModal: Component<Props> = (props) => {
   const [nodes, setNodes] = createSignal<TreeNode[]>([]);
@@ -28,9 +39,7 @@ const FolderBrowserModal: Component<Props> = (props) => {
     setError(null);
     try {
       const entries = await scanFilters.browse();
-      setNodes(entries.map((e) => ({
-        entry: e, expanded: false, loaded: false, children: [],
-      })));
+      setNodes(entries.map(makeNode));
     } catch (e: any) {
       setError(e?.message ?? "Failed to load folders");
     } finally {
@@ -45,19 +54,31 @@ const FolderBrowserModal: Component<Props> = (props) => {
       return;
     }
     if (!node.loaded) {
+      node.loading = true;
+      node.error = null;
+      setNodes([...nodes()]);
       try {
         const children = await scanFilters.browse(node.entry.path);
-        node.children = children.map((e) => ({
-          entry: e, expanded: false, loaded: false, children: [],
-        }));
+        node.children = children.map(makeNode);
         node.loaded = true;
+        node.error = null;
       } catch (e: any) {
-        setError(e?.message ?? "Failed to load");
+        node.error = e?.message ?? "Failed to load";
+        node.loading = false;
+        setNodes([...nodes()]);
         return;
+      } finally {
+        node.loading = false;
       }
     }
     node.expanded = true;
     setNodes([...nodes()]);
+  };
+
+  const retryLoad = async (node: TreeNode) => {
+    node.loaded = false;
+    node.error = null;
+    await toggle(node);
   };
 
   const toggleSelected = (path: string) => {
@@ -74,6 +95,12 @@ const FolderBrowserModal: Component<Props> = (props) => {
     }
   });
 
+  const onKey = (e: KeyboardEvent) => {
+    if (e.key === "Escape" && props.open) props.onCancel();
+  };
+  window.addEventListener("keydown", onKey);
+  onCleanup(() => window.removeEventListener("keydown", onKey));
+
   const renderNode = (node: TreeNode, depth: number) => (
     <div>
       <div
@@ -89,12 +116,24 @@ const FolderBrowserModal: Component<Props> = (props) => {
           when={node.entry.has_children}
           fallback={<span class="w-4 inline-block" />}
         >
-          <span
-            class="w-4 text-theme-text-secondary select-none"
-            aria-hidden="true"
+          <Show
+            when={!node.loading}
+            fallback={
+              <span
+                class="w-4 inline-block text-theme-text-secondary animate-pulse select-none"
+                aria-hidden="true"
+              >
+                ⋯
+              </span>
+            }
           >
-            {node.expanded ? "▾" : "▸"}
-          </span>
+            <span
+              class="w-4 text-theme-text-secondary select-none"
+              aria-hidden="true"
+            >
+              {node.expanded ? "▾" : "▸"}
+            </span>
+          </Show>
         </Show>
         <input
           type="checkbox"
@@ -104,6 +143,23 @@ const FolderBrowserModal: Component<Props> = (props) => {
         />
         <span class="text-sm text-theme-text-primary truncate">{node.entry.name}</span>
       </div>
+      <Show when={node.error}>
+        <div
+          class="flex items-center gap-2 text-xs text-theme-error"
+          style={{ "padding-left": `${depth * 16 + 28}px` }}
+        >
+          <span>{node.error}</span>
+          <button
+            class="underline hover:no-underline"
+            onClick={(e) => {
+              e.stopPropagation();
+              retryLoad(node);
+            }}
+          >
+            Retry
+          </button>
+        </div>
+      </Show>
       <Show when={node.expanded}>
         <For each={node.children}>
           {(child) => renderNode(child, depth + 1)}
@@ -114,20 +170,38 @@ const FolderBrowserModal: Component<Props> = (props) => {
 
   return (
     <Show when={props.open}>
-      <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+      <div
+        class="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="folder-browser-title"
+      >
         <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] w-full max-w-xl max-h-[80vh] flex flex-col">
           <div class="p-4 border-b border-theme-border">
-            <h3 class="text-sm font-medium text-theme-text-primary">{props.title}</h3>
+            <h3
+              id="folder-browser-title"
+              class="text-sm font-medium text-theme-text-primary"
+            >
+              {props.title}
+            </h3>
             <p class="text-xs text-theme-text-secondary mt-1">
               Browse folders under <code>{props.fitsRoot}</code>
             </p>
           </div>
           <div class="flex-1 overflow-y-auto p-2">
             <Show when={loading()}>
-              <div class="p-4 text-sm">Loading…</div>
+              <div class="p-4 text-sm text-theme-text-secondary">Loading…</div>
             </Show>
             <Show when={error()}>
-              <div class="p-4 text-sm text-red-400">{error()}</div>
+              <div class="p-4 text-sm text-theme-error flex items-center gap-2">
+                <span>{error()}</span>
+                <button
+                  class="underline hover:no-underline"
+                  onClick={() => loadRoot()}
+                >
+                  Retry
+                </button>
+              </div>
             </Show>
             <For each={nodes()}>{(n) => renderNode(n, 0)}</For>
           </div>

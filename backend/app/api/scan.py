@@ -20,7 +20,7 @@ from app.services.scan_filters import ScanFilterConfig
 from app.services.scan_state import (
     get_scan_state, get_failed_files, start_scanning, set_ingesting, set_idle, reset_scan,
     get_rebuild_state, request_cancel,
-    get_activity, clear_activity,
+    get_activity, clear_activity, append_activity,
 )
 from app.services.simbad import resolve_target_name, normalize_object_name
 from app.worker.tasks import regenerate_thumbnail, run_scan, rebuild_targets, smart_rebuild_targets, retry_unresolved, backfill_csv_metrics
@@ -546,6 +546,26 @@ async def apply_filters_now(
             {"ids": matched_ids},
         )
         await session.commit()
+
+        import time as _time
+        async with async_redis() as r:
+            await append_activity(r, {
+                "type": "scan_filters_applied",
+                "message": (
+                    f"Scan filters applied: {len(matched_ids)} image row"
+                    f"{'s' if len(matched_ids) != 1 else ''} removed "
+                    f"(by {user.username})"
+                ),
+                "details": {
+                    "removed": len(matched_ids),
+                    "by_user": user.username,
+                },
+                "timestamp": _time.time(),
+            })
+        logger.info(
+            "scan_filters_applied: removed %d image rows by user %s",
+            len(matched_ids), user.username,
+        )
 
     return ApplyNowOut(dry_run=dry_run, matched=len(matched_ids))
 
