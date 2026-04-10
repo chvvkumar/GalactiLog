@@ -23,7 +23,7 @@ from app.worker.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
 
-# Celery uses sync — create a sync engine for the worker
+# Celery uses sync - create a sync engine for the worker
 # Replace asyncpg with psycopg2 for sync operations
 _sync_url = settings.database_url.replace("+asyncpg", "+psycopg2")
 _sync_engine = create_engine(_sync_url, pool_pre_ping=True)
@@ -66,7 +66,7 @@ def run_scan(self, include_calibration: bool = True) -> dict:
     if not include_calibration:
         known_paths |= get_skipped_paths_sync(_redis)
     else:
-        # Calibration now included — clear the skip cache so they get ingested
+        # Calibration now included - clear the skip cache so they get ingested
         clear_skipped_paths_sync(_redis)
 
     fits_root = Path(settings.fits_data_path)
@@ -144,13 +144,13 @@ def run_scan(self, include_calibration: bool = True) -> dict:
             })
     elif orphaned_paths:
         logger.warning(
-            "Skipped orphan cleanup: %d of %d files missing (>50%%) — "
+            "Skipped orphan cleanup: %d of %d files missing (>50%%) - "
             "possible unmounted share or unreachable storage",
             len(orphaned_paths), len(known_paths),
         )
         append_activity_sync(_redis, {
             "type": "orphan_warning",
-            "message": f"Orphan cleanup skipped: {len(orphaned_paths)} of {len(known_paths)} files missing (>50%) — possible unmounted share",
+            "message": f"Orphan cleanup skipped: {len(orphaned_paths)} of {len(known_paths)} files missing (>50%) - possible unmounted share",
             "details": {"missing": len(orphaned_paths), "total_known": len(known_paths)},
             "timestamp": time.time(),
         })
@@ -170,7 +170,7 @@ def run_scan(self, include_calibration: bool = True) -> dict:
         })
         return {"status": "complete", "new_files_queued": 0, "already_known": cataloged, "removed": removed}
 
-    # Transition to ingesting with final total — ingest tasks are already running
+    # Transition to ingesting with final total - ingest tasks are already running
     set_ingesting_sync(_redis, total=total_queued, removed=removed, new_files=len(new_files), changed_files=len(changed_files))
     # Some tasks may have already completed during discovery, check now
     check_complete_sync(_redis)
@@ -251,7 +251,7 @@ def _do_ingest(fits_path: str, include_calibration: bool = True) -> dict:
     if is_xisf:
         meta = extract_xisf_metadata(path)
     else:
-        # Read header once — pixel data is read separately (decimated)
+        # Read header once - pixel data is read separately (decimated)
         # only if a thumbnail is needed.
         header = fitsio.read_header(str(path), ext=0)
         meta = extract_metadata(path, header=header)
@@ -279,7 +279,7 @@ def _do_ingest(fits_path: str, include_calibration: bool = True) -> dict:
             generate_thumbnail(path, thumb_path, max_width=settings.thumbnail_max_width)
 
     # Step 3: Resolve target (sync wrapper for async SIMBAD call)
-    # Skip SIMBAD for calibration frames — they're not astronomical targets
+    # Skip SIMBAD for calibration frames - they're not astronomical targets
     target_id = None
     filename_candidate_name = None
     if not is_calibration:
@@ -421,7 +421,7 @@ def _is_unrecoverable(exc: Exception) -> bool:
     # PermissionError won't resolve on retry
     if isinstance(exc, PermissionError):
         return True
-    # Other OSError subtypes — check for known unrecoverable messages
+    # Other OSError subtypes - check for known unrecoverable messages
     if isinstance(exc, OSError):
         msg = str(exc)
         return any(s in msg for s in ("SIMPLE card", "not a valid FITS"))
@@ -560,7 +560,7 @@ def detect_duplicate_targets():
 
             matched = False
 
-            # Strategy 1: SIMBAD resolution — resolve the name and match against existing targets
+            # Strategy 1: SIMBAD resolution - resolve the name and match against existing targets
             simbad_result = resolve_target_name_cached(obj_name, db)
             if simbad_result:
                 catalog_id = simbad_result.get("catalog_id")
@@ -599,10 +599,10 @@ def detect_duplicate_targets():
             if matched:
                 continue
 
-            # SIMBAD resolved the name but no existing target matched — create the target
+            # SIMBAD resolved the name but no existing target matched - create the target
             # and resolve images directly instead of suggesting a wrong trigram match.
             if simbad_result:
-                logger.info("detect_duplicates: '%s' resolved by SIMBAD to '%s' — creating target and resolving images",
+                logger.info("detect_duplicates: '%s' resolved by SIMBAD to '%s' - creating target and resolving images",
                             obj_name, simbad_result.get("primary_name"))
                 target_id = resolve_target(obj_name, db, redis=_redis)
                 if target_id:
@@ -739,7 +739,7 @@ def rebuild_targets(self) -> dict:
         "details": {"resolved": resolved, "failed": failed, "total": total},
         "timestamp": time.time(),
     })
-    logger.info("rebuild_targets: done — resolved=%d, failed=%d", resolved, failed)
+    logger.info("rebuild_targets: done - resolved=%d, failed=%d", resolved, failed)
     return {"status": "complete", **details}
 
 
@@ -747,7 +747,7 @@ def rebuild_targets(self) -> dict:
 def retry_unresolved(self) -> dict:
     """Clear SIMBAD negative cache and SESAME cache, then re-resolve unresolved targets.
 
-    Unlike Full Rebuild, this only touches unresolved images — existing targets are untouched.
+    Unlike Full Rebuild, this only touches unresolved images - existing targets are untouched.
     Useful after adding SESAME fallback or when upstream resolvers have new data.
     """
     logger.info("retry_unresolved: starting")
@@ -818,7 +818,7 @@ def retry_unresolved(self) -> dict:
         "details": details,
         "timestamp": time.time(),
     })
-    logger.info("retry_unresolved: done — resolved=%d, failed=%d", resolved, failed)
+    logger.info("retry_unresolved: done - resolved=%d, failed=%d", resolved, failed)
     return {"status": "complete", **details}
 
 
@@ -999,7 +999,7 @@ def _smart_rebuild_inner(manual: bool = False) -> dict:
             "details": stats,
             "timestamp": time.time(),
         })
-    logger.info("smart_rebuild: done — %s", stats)
+    logger.info("smart_rebuild: done - %s", stats)
     return {"status": "complete", **stats}
 
 
@@ -1135,13 +1135,13 @@ def run_data_migrations(self, from_version: int) -> dict:
         results = []
         with Session(_sync_engine) as session:
             for ver, desc, func in pending:
-                logger.info("data_migrations: running v%d — %s", ver, desc)
+                logger.info("data_migrations: running v%d - %s", ver, desc)
                 try:
                     summary = func(session)
                     set_data_version(session, ver)
                     session.commit()
                     results.append(f"v{ver}: {summary}")
-                    logger.info("data_migrations: v%d complete — %s", ver, summary)
+                    logger.info("data_migrations: v%d complete - %s", ver, summary)
                 except Exception as e:
                     session.rollback()
                     error_msg = f"Data upgrade failed at v{ver} ({desc}): {e}"
@@ -1259,7 +1259,7 @@ def detect_filename_targets():
     from app.services.filename_resolver import resolve_filename_candidate
 
     with Session(_sync_engine) as db:
-        # Clear all pending candidates — re-detect from scratch with latest parser
+        # Clear all pending candidates - re-detect from scratch with latest parser
         from sqlalchemy import delete as sa_delete
         db.execute(
             sa_delete(FilenameCandidate).where(FilenameCandidate.status == "pending")

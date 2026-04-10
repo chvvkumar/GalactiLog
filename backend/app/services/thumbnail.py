@@ -124,7 +124,7 @@ def _read_decimated(fits_path: Path, max_width: int) -> np.ndarray:
         if len(dims) != 2:
             return hdu.read().astype(np.float32)
 
-        # Use the larger dimension for step calculation — fitsio dims order
+        # Use the larger dimension for step calculation - fitsio dims order
         # may vary (NAXIS1/NAXIS2), and we just need a proportional decimation.
         max_dim = max(dims)
         step = max(1, max_dim // (max_width * 2))
@@ -147,7 +147,7 @@ def generate_thumbnail(
     Pipeline: read (decimated) → flip → resize (raw linear) → MTF stretch → save.
     Handles both mono (2D) and color (3D with shape [3, H, W]) data.
 
-    Uses decimated reads for large images to reduce I/O — for a 6000px wide
+    Uses decimated reads for large images to reduce I/O - for a 6000px wide
     sensor targeting 800px thumbnails, this reads ~16x fewer pixels from disk.
     """
     data = _read_decimated(fits_path, max_width)

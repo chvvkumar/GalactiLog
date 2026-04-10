@@ -117,7 +117,7 @@ const DashboardFilterProvider: Component<{ children: JSX.Element }> = (props) =>
 
   const filters = createMemo(() => deriveFilters(searchParams));
 
-  // Sort state — persisted to localStorage
+  // Sort state - persisted to localStorage
   let initialSort: { key: SortKey; dir: SortDir } = { key: "integration", dir: "desc" };
   try {
     const stored = localStorage.getItem("dashboard_sort");
@@ -149,7 +149,7 @@ const DashboardFilterProvider: Component<{ children: JSX.Element }> = (props) =>
   // Map frontend sort keys to backend API values
   const apiSortBy = createMemo(() => {
     const key = sortKey();
-    // "equipment" has no backend sort — fall back to integration
+    // "equipment" has no backend sort - fall back to integration
     if (key === "equipment") return "integration";
     return key;
   });

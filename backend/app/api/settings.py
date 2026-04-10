@@ -122,7 +122,7 @@ def _normalize_for_comparison(name: str) -> str:
 def _are_similar(a: str, b: str) -> bool:
     """Determine if two equipment/filter names likely refer to the same thing.
 
-    Uses three strategies (no edit distance — too many false positives
+    Uses three strategies (no edit distance - too many false positives
     with names like ASI533MC/ASI533MM or Askar40/Askar140):
     1. Case-insensitive exact match
     2. Normalized match (ignore underscores, spaces, hyphens)

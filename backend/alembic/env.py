@@ -8,7 +8,7 @@ from app.models import Base
 
 config = context.config
 
-# Use psycopg2 (sync) for migrations — asyncpg's strict type handling
+# Use psycopg2 (sync) for migrations - asyncpg's strict type handling
 # causes unnecessary issues with DDL operations and data seeding.
 sync_url = settings.database_url.replace("+asyncpg", "+psycopg2")
 config.set_main_option("sqlalchemy.url", sync_url)

@@ -28,7 +28,7 @@ const MaintenanceActions: Component<{
           <button
             onClick={() => runAction(api.smartRebuildTargets)}
             disabled={anyDisabled()}
-            title="Re-matches orphaned images to existing targets using known aliases and cached SIMBAD results. Fast and offline — no network calls needed."
+            title="Re-matches orphaned images to existing targets using known aliases and cached SIMBAD results. Fast and offline - no network calls needed."
             class="px-3 py-1.5 border border-theme-border-em text-theme-text-secondary rounded text-sm disabled:opacity-50 hover:text-theme-text-primary hover:border-theme-accent transition-colors"
           >
             {props.rebuildRunning && props.rebuildMode === "smart" ? "Running..." : "Re-match"}

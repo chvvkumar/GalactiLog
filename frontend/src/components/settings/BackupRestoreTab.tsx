@@ -247,7 +247,7 @@ export const BackupRestoreTab: Component = () => {
                     onChange={() => setMode("merge")}
                   />
                   <span>Merge</span>
-                  <span class="text-theme-text-tertiary">— add new items, update existing</span>
+                  <span class="text-theme-text-tertiary">- add new items, update existing</span>
                 </label>
                 <label class="flex items-center gap-2 text-sm text-theme-text-primary cursor-pointer">
                   <input
@@ -258,7 +258,7 @@ export const BackupRestoreTab: Component = () => {
                     onChange={() => setMode("replace")}
                   />
                   <span>Replace</span>
-                  <span class="text-theme-text-tertiary">— clear sections first</span>
+                  <span class="text-theme-text-tertiary">- clear sections first</span>
                 </label>
               </div>
             </div>
@@ -315,7 +315,7 @@ export const BackupRestoreTab: Component = () => {
               <Show when={Object.keys(restoreResult()!.temporary_passwords).length > 0}>
                 <div class="mt-3 p-3 rounded-[var(--radius-md)] bg-theme-warning/10 border border-theme-warning/30">
                   <h4 class="text-sm font-medium text-theme-warning mb-1">
-                    New user accounts — save these passwords
+                    New user accounts - save these passwords
                   </h4>
                   <div class="text-sm font-mono space-y-1">
                     <For each={Object.entries(restoreResult()!.temporary_passwords)}>

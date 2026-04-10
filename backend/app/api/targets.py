@@ -208,7 +208,7 @@ async def search_targets(
     spaced = re.sub(r"([A-Za-z])(\d)", r"\1 \2", escaped)
     spaced_pattern = f"%{spaced}%" if spaced != escaped else None
 
-    # Tier 1: Exact substring matches — exclude soft-deleted
+    # Tier 1: Exact substring matches - exclude soft-deleted
     aliases_str = func.array_to_string(Target.aliases, ' ')
     ilike_conditions = [
         Target.primary_name.ilike(pattern),
@@ -252,7 +252,7 @@ async def search_targets(
             similarity_score=1.0,
         ))
 
-    # Tier 1.5: Common name map lookup — match colloquial names to catalog IDs
+    # Tier 1.5: Common name map lookup - match colloquial names to catalog IDs
     if len(results) < limit:
         q_lower = q.lower()
         mapped_catalog_ids = set()
@@ -327,7 +327,7 @@ async def search_targets(
     return results
 
 
-# --- 2. Equipment (SECOND — before path-parameter routes) ---
+# --- 2. Equipment (SECOND - before path-parameter routes) ---
 
 @router.get("/equipment", response_model=EquipmentResponse)
 async def get_equipment(session: AsyncSession = Depends(get_session), user: User = Depends(get_current_user)):
@@ -745,7 +745,7 @@ def _sort_clause(sort_by: str, sort_dir: str) -> str:
     return f"{col} {direction} {nulls}"
 
 
-# --- 3. Aggregation (THIRD — after fixed paths, before path params) ---
+# --- 3. Aggregation (THIRD - after fixed paths, before path params) ---
 
 @router.get("", response_model=TargetAggregationResponse)
 async def list_targets_aggregated(
@@ -1282,7 +1282,7 @@ async def list_targets_aggregated(
     )
 
 
-# --- 4. Session detail (LAST — has path parameters) ---
+# --- 4. Session detail (LAST - has path parameters) ---
 
 
 def _compute_insights(

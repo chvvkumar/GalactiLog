@@ -211,7 +211,7 @@ def generate_xisf_thumbnail(
         stretched = _stretch_channel(resized)
         img = PILImage.fromarray(stretched, mode="L")
     elif data.ndim == 3 and data.shape[2] == 3:
-        # Channels-last [H, W, 3] — process each channel independently
+        # Channels-last [H, W, 3] - process each channel independently
         channels = []
         for i in range(3):
             ch = _normalize_to_unit(data[:, :, i])
@@ -233,7 +233,7 @@ def generate_xisf_thumbnail(
     else:
         raise ValueError(f"Unsupported XISF data shape: {data.shape}")
 
-    # No vertical flip — XISF uses top-left origin (unlike FITS)
+    # No vertical flip - XISF uses top-left origin (unlike FITS)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     img.save(output_path, "JPEG", quality=85)
     return output_path
