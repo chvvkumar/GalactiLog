@@ -71,6 +71,19 @@ def run_scan(self, include_calibration: bool = True) -> dict:
 
     fits_root = Path(settings.fits_data_path)
 
+    # Load scan filters from user settings
+    from app.services.scan_filters import ScanFilterConfig
+    with Session(_sync_engine) as session:
+        us = session.execute(
+            select(UserSettings).where(UserSettings.id == SETTINGS_ROW_ID)
+        ).scalar_one_or_none()
+        general = (us.general if us else {}) or {}
+    try:
+        filter_config = ScanFilterConfig.from_settings(general, fits_root)
+    except ValueError as exc:
+        logger.error("Invalid scan filters, scanning with no filters: %s", exc)
+        filter_config = ScanFilterConfig(include_paths=[], exclude_paths=[], name_rules=[])
+
     # Dispatch ingest tasks as files are discovered (parallel discovery + ingestion)
     # Calibration filtering is deferred to the ingest phase to avoid opening
     # every file during discovery (costly on NFS).
@@ -81,13 +94,27 @@ def run_scan(self, include_calibration: bool = True) -> dict:
         """Re-ingest a known file whose size or mtime changed on disk."""
         reingest_changed_file.delay(str(path), include_calibration=include_calibration)
 
-    new_files, changed_files, all_disk_paths = scan_directory(
-        fits_root, known_paths=known_paths, known_file_stats=known_file_stats,
-        on_progress=lambda count: set_discovered_sync(_redis, count),
-        is_cancelled=lambda: is_cancel_requested_sync(_redis),
-        on_new_file=_queue_file,
-        on_changed_file=_queue_changed_file,
-    )
+    new_files: list[Path] = []
+    changed_files: list[Path] = []
+    all_disk_paths: set[str] = set()
+
+    for scan_root in filter_config.roots(fits_root):
+        if is_cancel_requested_sync(_redis):
+            break
+        nf, cf, paths = scan_directory(
+            scan_root,
+            known_paths=known_paths,
+            known_file_stats=known_file_stats,
+            on_progress=lambda count: set_discovered_sync(_redis, count),
+            is_cancelled=lambda: is_cancel_requested_sync(_redis),
+            on_new_file=_queue_file,
+            on_changed_file=_queue_changed_file,
+            filter_config=filter_config,
+            fits_root=fits_root,
+        )
+        new_files.extend(nf)
+        changed_files.extend(cf)
+        all_disk_paths.update(paths)
 
     if is_cancel_requested_sync(_redis):
         set_cancelled_sync(_redis)
