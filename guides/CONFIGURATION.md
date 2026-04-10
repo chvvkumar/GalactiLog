@@ -1,14 +1,8 @@
 # Configuration Guide
 
-## How Configuration Works
-
-All configuration is done in `docker-compose.yml`. The app service's `environment:` block passes `GALACTILOG_*` variables directly into the container. Volume mounts map host directories into the container.
-
-See [`docker-compose.example.yml`](../docker-compose.example.yml) for the full template with comments.
-
 ## Environment Variables
 
-All environment variables use the `GALACTILOG_` prefix to avoid collisions with other tools. These are set in the `environment:` section of the app service in `docker-compose.yml`.
+All configuration is done via `GALACTILOG_*` environment variables in `docker-compose.yml`. See [`docker-compose.example.yml`](../docker-compose.example.yml) for the full template.
 
 ### Application Settings
 
@@ -22,7 +16,7 @@ All environment variables use the `GALACTILOG_` prefix to avoid collisions with 
 
 ### Volume Mounts
 
-Host directories are mapped into containers via the `volumes:` section in `docker-compose.yml`. The example compose file uses Docker named volumes by default, with commented-out host path alternatives.
+Default uses Docker named volumes; host path alternatives are commented out in the example compose file.
 
 | Mount | Container Path | Description |
 |-------|---------------|-------------|
@@ -32,7 +26,7 @@ Host directories are mapped into containers via the `volumes:` section in `docke
 
 ### PostgreSQL Settings
 
-The postgres service credentials are set directly in the `environment:` section of the postgres service in `docker-compose.yml`. The `GALACTILOG_DATABASE_URL` on the app service must match.
+Set in the postgres service's `environment:` block. Must match `GALACTILOG_DATABASE_URL`.
 
 | Postgres Variable | Default | Description |
 |-------------------|---------|-------------|
@@ -63,87 +57,57 @@ See the [Security Guide](security.md) for full details on authentication, cookie
 
 ## Auto-Scan
 
-GalactiLog can automatically scan your FITS directory for new files on a schedule.
+Configure from **Settings > General**:
 
-Configure auto-scan from the **Settings > General** tab in the web UI:
-
-- **Enable/Disable** -- Toggle automatic scanning on or off
-- **Scan Interval** -- How often to check for new files (1 hour to 24 hours)
+- **Enable/Disable** -- Toggle automatic scanning
+- **Scan Interval** -- 1 to 24 hours
 - **Include Calibration Frames** -- Whether to ingest DARK, FLAT, and BIAS frames
 
-The auto-scan scheduler runs via Celery Beat, which checks every 60 seconds whether a scan is due based on your configured interval.
-
-You can also trigger a manual scan at any time from **Settings > Scan & Ingest**.
+Manual scans can be triggered from **Settings > Scan & Ingest**.
 
 ## Filter Aliases
 
-GalactiLog lets you normalize filter names and assign colors for consistent display across your data.
+Different equipment or N.I.N.A. profiles may record the same filter under different names (e.g. "Ha", "H-alpha", "Hydrogen Alpha"). Aliases map these variants to a single canonical name.
 
-### Why Use Aliases
-
-Different equipment or N.I.N.A. profiles may record the same filter under different names. For example:
-- "Ha", "H-alpha", "Hydrogen Alpha" all refer to the same filter
-- "L", "Lum", "Luminance" are all the luminance filter
-
-Aliases map these variants to a single canonical name.
-
-### Configuring Filters
-
-Navigate to **Settings > Filters** to:
-
-1. **Set canonical names** -- The display name used throughout the UI
-2. **Add aliases** -- Raw filter names from FITS headers that should map to this filter
-3. **Choose colors** -- Pick a color for each filter (used in badges, charts, and palette displays)
-4. **Set badge style** -- Choose from 9 display styles for filter badges
-
-GalactiLog auto-discovers filter names from your data and suggests groupings. Check the suggestions banner at the top of the Filters settings tab.
+Configure from **Settings > Filters**: set canonical names, add aliases, choose colors, and pick a badge style. GalactiLog auto-discovers filter names and suggests groupings.
 
 ### Available Badge Styles
 
 | Style | Description |
 |-------|-------------|
 | Solid | Colored background, dark text |
-| Muted | Light colored background, colored text |
-| Muted Bright | Medium colored background, dark text |
-| Outlined | Transparent background, colored border and text |
-| Text Only | Neutral background, colored text |
+| Muted Backgrounds | Light colored background, colored text |
+| Frosted Glass | Translucent glass-effect background |
+| Outlined (Hollow) | Transparent background, colored border and text |
+| Colored Text Only | Neutral background, colored text (default) |
 | Indicator Dots | Neutral background with small colored dot |
-| Underline | Neutral background with colored bottom border |
-| Tint Border | Light tinted background with subtle colored border |
-| Tint Border Bright | Medium tinted background with colored border |
+| Underline Accents | Neutral background with colored bottom border |
+| Subtle Tint & Border | Light tinted background with subtle colored border |
+| Subtle Tint & Border (Bright) | Medium tinted background with colored border |
 
 ## Equipment Aliases
 
-Similar to filter aliases, equipment aliases normalize camera and telescope names.
-
-### Why Use Aliases
-
-The same camera may appear in FITS headers as:
-- "ZWO ASI533MC Pro", "ASI533MC Pro", "ZWO ASI533MC"
-
-Equipment aliases map all variants to one canonical name for clean display and accurate grouping.
-
-### Configuring Equipment
-
-Navigate to **Settings > Equipment** to:
-
-1. Set canonical names for cameras and telescopes
-2. Add aliases for each piece of equipment
-3. Review auto-discovered equipment suggestions
+Same concept as filter aliases -- the same camera may appear in FITS headers as "ZWO ASI533MC Pro", "ASI533MC Pro", etc. Configure from **Settings > Equipment** to set canonical names and add aliases.
 
 ## Themes
 
-GalactiLog includes 5 built-in themes. Select your theme from **Settings > Display**.
+GalactiLog includes 11 built-in themes. Select your theme from **Settings > Display**.
 
 | Theme | Description |
 |-------|-------------|
-| **Default Dark** | Clean dark theme with indigo accents |
-| **Nebula Glass** | Purple/violet glassmorphism with holographic deep-space aesthetic |
-| **Aurora Glass** | Green/teal glassmorphism inspired by northern lights |
-| **Nebula Cyan** | Cyan/blue glassmorphism with a holographic star-chart feel |
-| **Stellar Glass** | Warm orange/gold glassmorphism with cosmic tones |
+| **Nebula Cyan** | Holographic star-chart glassmorphism |
+| **Deep Space** | Frosted translucent glass panels |
+| **Void** | Dark glass with muted slate and indigo depth |
+| **Dark** | Modern dark theme |
+| **Deep Neutral** | Ultra-dark pure graphite grey |
+| **Slate Blue** | Deep slate with muted blue tint |
+| **Warm Stone** | Dark graphite with earthy undertones |
+| **Soft Zinc** | Matte studio-grade dark grey |
+| **Twilight** | Mid-tone grey with cool undertones |
+| **Silver Mist** | Soft silver with muted blue accent |
+| **Daylight** | Clean light theme for daytime use |
 
-Glass themes use backdrop blur and gradient backgrounds for a frosted-glass appearance.
+The first three are glass themes with backdrop blur and gradient backgrounds.
 
 ### Text Size
 
@@ -154,13 +118,11 @@ Four text size presets are available:
 | Small | 13px |
 | Medium | 14px (default) |
 | Large | 16px |
-| X-Large | 18px |
+| Extra Large | 18px |
 
 ## Display Settings
 
-Control which metric groups and individual fields appear in session views and charts.
-
-Navigate to **Settings > Display** to toggle visibility for:
+Toggle metric visibility from **Settings > Display**. Each group can be toggled as a whole or per-metric:
 
 | Group | Metrics |
 |-------|---------|
@@ -171,28 +133,8 @@ Navigate to **Settings > Display** to toggle visibility for:
 | **Weather** | Ambient Temperature, Humidity, Dew Point, Pressure, Wind Speed, Wind Direction, Wind Gust, Cloud Cover, Sky Quality |
 | **Mount** | Airmass, Pier Side, Rotator Position |
 
-Each group can be toggled as a whole, or individual metrics within a group can be enabled or disabled.
-
 ## Target Merging
 
-GalactiLog includes automatic duplicate detection for astronomical targets.
+After each scan, GalactiLog compares unresolved object names against resolved target aliases using trigram similarity. Names scoring above 0.4 are flagged as merge candidates.
 
-### How It Works
-
-After each scan, GalactiLog runs a duplicate detection pass:
-
-1. Collects all unresolved object names (names not yet linked to a resolved target)
-2. Compares each name against all resolved target aliases using trigram similarity
-3. Names with a similarity score above 0.4 are flagged as merge candidates
-
-### Managing Merges
-
-Navigate to **Settings > Target Merges** to:
-
-- **Review merge candidates** -- See suggested matches with similarity scores
-- **Accept a merge** -- Combine two targets into one, transferring all images to the winner
-- **Dismiss a candidate** -- Hide a suggestion you've reviewed and rejected
-- **Unmerge** -- Restore a previously merged target (soft-deleted targets are recoverable)
-- **Trigger detection** -- Manually run the duplicate detection algorithm
-
-Merged targets are soft-deleted (not permanently removed), so they can always be restored.
+Manage from **Settings > Target Merges**: review candidates, accept or dismiss merges, unmerge, or manually trigger detection. Merged targets are soft-deleted and can be restored.
