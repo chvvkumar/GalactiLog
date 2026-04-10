@@ -99,6 +99,71 @@ def test_roots_returns_fits_root_when_includes_empty(tmp_path):
     assert cfg.roots(tmp_path) == [tmp_path]
 
 
+def _cfg(include_paths=None, exclude_paths=None, rules=None):
+    return ScanFilterConfig(
+        include_paths=include_paths or [],
+        exclude_paths=exclude_paths or [],
+        name_rules=rules or [],
+    )
+
+
+def test_should_walk_dir_prunes_exclude_paths(tmp_path):
+    (tmp_path / "rejected").mkdir()
+    cfg = _cfg(exclude_paths=[tmp_path / "rejected"])
+    assert not cfg.should_walk_dir(tmp_path / "rejected", tmp_path)
+    assert not cfg.should_walk_dir(tmp_path / "rejected" / "sub", tmp_path)
+    assert cfg.should_walk_dir(tmp_path / "kept", tmp_path)
+
+
+def test_should_walk_dir_exclude_folder_name_rule(tmp_path):
+    cfg = _cfg(rules=[_rule(
+        type="substring", pattern="rejected", target="folder", action="exclude",
+    )])
+    (tmp_path / "2025_rejected").mkdir()
+    assert not cfg.should_walk_dir(tmp_path / "2025_rejected", tmp_path)
+    assert cfg.should_walk_dir(tmp_path / "2025_kept", tmp_path)
+
+
+def test_should_include_file_exclude_wins(tmp_path):
+    cfg = _cfg(rules=[
+        _rule(id="i1", action="include", type="glob",
+              pattern="*.fits", target="file"),
+        _rule(id="e1", action="exclude", type="glob",
+              pattern="*_bad.fits", target="file"),
+    ])
+    assert cfg.should_include_file(tmp_path / "frame.fits", tmp_path)
+    assert not cfg.should_include_file(tmp_path / "frame_bad.fits", tmp_path)
+
+
+def test_should_include_file_include_narrowing(tmp_path):
+    # An include rule exists for 'file' target, so files must match at least one
+    cfg = _cfg(rules=[
+        _rule(id="i1", action="include", type="regex",
+              pattern=r"^M\d+_.*\.fits$", target="file"),
+    ])
+    assert cfg.should_include_file(tmp_path / "M31_L.fits", tmp_path)
+    assert not cfg.should_include_file(tmp_path / "NGC7000_L.fits", tmp_path)
+
+
+def test_should_include_file_no_includes_passes_all(tmp_path):
+    cfg = _cfg(rules=[
+        _rule(id="e1", action="exclude", type="substring",
+              pattern="tmp", target="file"),
+    ])
+    assert cfg.should_include_file(tmp_path / "frame.fits", tmp_path)
+    assert not cfg.should_include_file(tmp_path / "frame.tmp", tmp_path)
+
+
+def test_should_include_file_folder_rule_applies_to_ancestors(tmp_path):
+    (tmp_path / "rejected" / "sub").mkdir(parents=True)
+    cfg = _cfg(rules=[_rule(
+        id="e1", action="exclude", type="substring", pattern="rejected",
+        target="folder",
+    )])
+    f = tmp_path / "rejected" / "sub" / "frame.fits"
+    assert not cfg.should_include_file(f, tmp_path)
+
+
 def test_roots_returns_includes_when_set(tmp_path):
     (tmp_path / "a").mkdir()
     (tmp_path / "b").mkdir()

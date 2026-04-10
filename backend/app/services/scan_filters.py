@@ -81,3 +81,61 @@ class ScanFilterConfig:
 
     def roots(self, fits_root: Path) -> list[Path]:
         return list(self.include_paths) if self.include_paths else [fits_root]
+
+    def should_walk_dir(self, dir_path: Path, fits_root: Path) -> bool:
+        resolved = dir_path.resolve()
+        for excluded in self.exclude_paths:
+            try:
+                resolved.relative_to(excluded)
+                return False
+            except ValueError:
+                pass
+        # Folder name-rules apply to the segment name itself
+        segment = dir_path.name
+        for rule in self.name_rules:
+            if rule.target != "folder" or rule.action != "exclude":
+                continue
+            if rule.matches(segment):
+                return False
+        return True
+
+    def should_include_file(self, file_path: Path, fits_root: Path) -> bool:
+        # Path-based excludes
+        resolved = file_path.resolve()
+        for excluded in self.exclude_paths:
+            try:
+                resolved.relative_to(excluded)
+                return False
+            except ValueError:
+                pass
+
+        # Collect ancestor folder segments under fits_root
+        root = fits_root.resolve()
+        try:
+            rel = resolved.relative_to(root)
+        except ValueError:
+            return False
+        segments = list(rel.parts[:-1])  # exclude filename
+        filename = rel.parts[-1] if rel.parts else file_path.name
+
+        # Exclude name-rules (file + folder)
+        for rule in self.name_rules:
+            if rule.action != "exclude":
+                continue
+            if rule.target == "file" and rule.matches(filename):
+                return False
+            if rule.target == "folder" and any(rule.matches(s) for s in segments):
+                return False
+
+        # Include-narrowing, per target type
+        file_includes = [r for r in self.name_rules
+                         if r.action == "include" and r.target == "file"]
+        folder_includes = [r for r in self.name_rules
+                           if r.action == "include" and r.target == "folder"]
+        if file_includes and not any(r.matches(filename) for r in file_includes):
+            return False
+        if folder_includes and not any(
+            r.matches(s) for s in segments for r in folder_includes
+        ):
+            return False
+        return True
