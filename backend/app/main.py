@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     # Warn if JWT secret was auto-generated (won't survive restarts)
     if not os.environ.get("GALACTILOG_JWT_SECRET"):
-        logger.warning("GALACTILOG_JWT_SECRET is not set — using auto-generated secret. Sessions will not survive restarts. Set GALACTILOG_JWT_SECRET in .env for persistence.")
+        logger.warning("GALACTILOG_JWT_SECRET is not set - using auto-generated secret. Sessions will not survive restarts. Set GALACTILOG_JWT_SECRET in .env for persistence.")
 
     # Ensure required PostgreSQL extensions exist (idempotent)
     from app.database import async_session

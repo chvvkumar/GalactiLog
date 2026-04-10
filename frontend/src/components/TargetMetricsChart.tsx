@@ -97,7 +97,7 @@ export default function TargetMetricsChart(props: Props) {
     return { labels, framesByIndex, sessionBoundaries };
   });
 
-  // Mutable state read by the session boundary plugin — updated before each chart draw
+  // Mutable state read by the session boundary plugin - updated before each chart draw
   let currentBoundaries: number[] = [];
   let currentSortedDates: string[] = [];
 

@@ -116,7 +116,7 @@ async def rotate_refresh_token(
         return None, False
 
     if old_rt.revoked:
-        # Theft detected — revoke entire family
+        # Theft detected - revoke entire family
         await revoke_family(session, old_rt.family_id)
         return None, True
 

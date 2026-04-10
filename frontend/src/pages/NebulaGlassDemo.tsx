@@ -35,7 +35,7 @@ export default function NebulaGlassDemo() {
   return (
     <div class="min-h-screen bg-theme-base text-theme-text-secondary font-sans overflow-hidden relative selection:bg-theme-accent/30">
 
-      {/* Orbs are rendered by applyTheme() — no hardcoded background needed */}
+      {/* Orbs are rendered by applyTheme() - no hardcoded background needed */}
 
       <div class="relative z-10 flex h-screen p-4 gap-4">
 

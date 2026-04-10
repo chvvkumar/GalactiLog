@@ -12,7 +12,7 @@ const SearchBar: Component = () => {
   const [activeIndex, setActiveIndex] = createSignal(-1);
 
   // Only sync when external value is cleared (e.g. Reset Filters)
-  // Never sync non-empty external values back — input owns its own text
+  // Never sync non-empty external values back - input owns its own text
   createEffect(on(() => filters().searchQuery, (search, prev) => {
     if (!search && prev) setQuery("");
   }, { defer: true }));

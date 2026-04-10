@@ -59,7 +59,7 @@ def _parse_coord(value) -> float | None:
 
 
 def _parse_ra(value) -> float | None:
-    """Parse RA — if sexagesimal (HH MM SS), multiply by 15 for degrees."""
+    """Parse RA - if sexagesimal (HH MM SS), multiply by 15 for degrees."""
     if value is None:
         return None
     if isinstance(value, (int, float)):

@@ -211,7 +211,7 @@ export default function SessionMetricsChart(props: Props) {
         buildChart();
       });
     } else {
-      // Collapsed — clean up the chart instance
+      // Collapsed - clean up the chart instance
       if (chartInstance) {
         chartInstance.destroy();
         chartInstance = null;

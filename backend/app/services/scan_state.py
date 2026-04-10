@@ -1,7 +1,7 @@
 """Redis-backed scan state manager.
 
 Keys used:
-  scan:state   — hash with fields: state, total, completed, failed, started_at, completed_at
+  scan:state   - hash with fields: state, total, completed, failed, started_at, completed_at
   scan:state is set to expire after 24h on completion so old results don't linger forever.
 """
 

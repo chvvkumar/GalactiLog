@@ -283,7 +283,7 @@ async def revert_merge_candidate(
 
     source_name = candidate.source_name
 
-    # Check if there's a soft-deleted target for this source name — if so, do a full unmerge
+    # Check if there's a soft-deleted target for this source name - if so, do a full unmerge
     loser_result = await session.execute(
         select(Target).where(
             Target.merged_into_id == winner.id,

@@ -1,4 +1,4 @@
-"""OpenNGC catalog service — load CSV, lookup, and enrich targets."""
+"""OpenNGC catalog service - load CSV, lookup, and enrich targets."""
 from __future__ import annotations
 
 import csv

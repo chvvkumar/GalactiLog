@@ -1,6 +1,6 @@
 """View-layer normalization: maps aliases to canonical names.
 
-Does NOT mutate stored data — applied at query time only.
+Does NOT mutate stored data - applied at query time only.
 """
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession

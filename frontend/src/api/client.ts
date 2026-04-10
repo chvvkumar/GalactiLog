@@ -115,9 +115,9 @@ const FALLBACK_MESSAGES: Record<number, string> = {
   400: "Invalid request",
   403: "Permission denied",
   404: "Not found",
-  409: "Conflict — resource already exists",
+  409: "Conflict - resource already exists",
   422: "Validation error",
-  500: "Server error — please try again later",
+  500: "Server error - please try again later",
 };
 
 async function extractApiError(resp: Response, fallback: string): Promise<ApiError> {
@@ -167,9 +167,9 @@ async function fetchJson<T>(path: string, init?: RequestInit, signal?: AbortSign
         400: "Invalid request",
         403: "Permission denied",
         404: "Not found",
-        409: "Conflict — resource already exists",
+        409: "Conflict - resource already exists",
         422: "Validation error",
-        500: "Server error — please try again later",
+        500: "Server error - please try again later",
       };
       message = fallback[resp.status] || "Something went wrong";
     }

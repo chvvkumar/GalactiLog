@@ -75,7 +75,7 @@ const TextFilter: Component<{
   }, 400);
 
   // Only sync when external value is cleared (e.g. Reset Filters)
-  // Never sync non-empty external values back — input owns its own text
+  // Never sync non-empty external values back - input owns its own text
   createEffect(on(() => props.value, (external) => {
     if (external == null || external === "") setLocal("");
   }, { defer: true }));

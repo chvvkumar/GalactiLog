@@ -32,7 +32,7 @@ async def trigger_scan(
     """Walk the FITS directory, queue new files for ingestion.
 
     The heavy directory scan runs inside a Celery task so this endpoint
-    returns immediately — no nginx timeout issues on large data sets.
+    returns immediately - no nginx timeout issues on large data sets.
     """
     # Persist the frame filter choice for next visit
     from app.models.user_settings import UserSettings, SETTINGS_ROW_ID
@@ -59,7 +59,7 @@ async def trigger_scan(
 
             run_scan.delay(include_calibration=include_calibration)
 
-            return {"status": "accepted", "message": "Scan queued — check /scan/status for progress"}
+            return {"status": "accepted", "message": "Scan queued - check /scan/status for progress"}
         finally:
             await r.delete("scan:lock")
 
@@ -118,7 +118,7 @@ async def stop_scan(user: User = Depends(require_admin)):
         if state.state not in ("scanning", "ingesting"):
             return {"status": "not_running", "state": state.state}
         await request_cancel(r)
-        return {"status": "stopping", "message": "Cancel requested — scan will stop shortly"}
+        return {"status": "stopping", "message": "Cancel requested - scan will stop shortly"}
 
 
 @router.get("/activity")
@@ -272,7 +272,7 @@ async def trigger_rebuild_targets(user: User = Depends(require_admin)):
 
     This is a destructive operation that clears all targets, merge history,
     and re-resolves everything from scratch. Runs as a background Celery task.
-    Uses persistent SIMBAD cache — fast on repeat runs.
+    Uses persistent SIMBAD cache - fast on repeat runs.
     """
     async with async_redis() as r:
         state = await get_scan_state(r)
@@ -382,7 +382,7 @@ VALID_INTERVALS = {60, 120, 240, 480, 720, 1440}
 
 @router.get("/autoscan")
 async def get_autoscan(session: AsyncSession = Depends(get_session), user: User = Depends(get_current_user)):
-    """Return current auto-scan settings (deprecated — use /settings/general)."""
+    """Return current auto-scan settings (deprecated - use /settings/general)."""
     from app.models.user_settings import UserSettings, SETTINGS_ROW_ID
     result = await session.execute(
         select(UserSettings).where(UserSettings.id == SETTINGS_ROW_ID)
@@ -402,7 +402,7 @@ async def set_autoscan(
     session: AsyncSession = Depends(get_session),
     user: User = Depends(require_admin),
 ):
-    """Update auto-scan settings (deprecated — use /settings/general)."""
+    """Update auto-scan settings (deprecated - use /settings/general)."""
     if interval_minutes not in VALID_INTERVALS:
         raise HTTPException(status_code=400, detail=f"Invalid interval. Must be one of: {sorted(VALID_INTERVALS)}")
 
