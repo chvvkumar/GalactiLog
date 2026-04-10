@@ -186,6 +186,59 @@ async def test_put_filters_requires_admin():
 
 
 @pytest.mark.asyncio
+async def test_general_settings_put_preserves_scan_filters(admin_user):
+    """Regression: PUT /settings/general must not wipe scan_filters state.
+
+    scan_filters and scan_filters_configured live as sibling keys inside the
+    same `general` JSON blob as the GeneralSettings schema fields. Saving
+    general settings (e.g. toggling auto-scan, changing theme) previously
+    replaced the whole blob, clearing the configured flag and causing the
+    onboarding banner to reappear and the worker to pause auto-scans.
+    """
+    existing_row = MagicMock()
+    existing_row.general = {
+        "_migrated": True,
+        "auto_scan_enabled": True,
+        "auto_scan_interval": 240,
+        "scan_filters": {
+            "include_paths": [],
+            "exclude_paths": ["/tmp/test_fits/reject"],
+            "name_rules": [],
+        },
+        "scan_filters_configured": True,
+    }
+    existing_row.filters = {}
+    existing_row.equipment = {}
+    existing_row.display = None
+    existing_row.graph = None
+    existing_row.dismissed_suggestions = []
+
+    session = _make_session(settings_row=existing_row)
+    session.refresh = AsyncMock()
+    session.flush = AsyncMock()
+    _override_admin(session, admin_user)
+    try:
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            r = await client.put(
+                "/api/settings/general",
+                json={"auto_scan_enabled": False, "auto_scan_interval": 120},
+            )
+        assert r.status_code == 200
+
+        # Sibling keys must survive the write.
+        assert existing_row.general.get("scan_filters_configured") is True
+        assert existing_row.general["scan_filters"]["exclude_paths"] == [
+            "/tmp/test_fits/reject",
+        ]
+        # And the new values must be applied.
+        assert existing_row.general["auto_scan_enabled"] is False
+        assert existing_row.general["auto_scan_interval"] == 120
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
 async def test_test_path_endpoint(admin_user):
     # Pre-populate the session with an existing scan_filters row so the
     # endpoint can load them directly (avoids relying on PUT persistence).
