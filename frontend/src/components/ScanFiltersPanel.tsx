@@ -238,10 +238,10 @@ const ScanFiltersPanel: Component<Props> = (props) => {
               <em>Exclude paths</em> prune subtrees that should never be walked.
             </li>
             <li>
-              <strong>Name rules</strong>: glob, substring, or regex patterns that
-              match on file names or folder names. Exclude rules win over includes.
-              When at least one include rule exists for a target (file or folder),
-              that target must match one of them.
+              <strong>Name rules</strong>: wildcard, substring, or regex patterns
+              that match on file names or folder names. Exclude rules win over
+              includes. When at least one include rule exists for a target (file
+              or folder), that target must match one of them.
             </li>
           </ul>
           <p>
@@ -283,9 +283,14 @@ const ScanFiltersPanel: Component<Props> = (props) => {
           <h4 class="text-sm font-medium text-theme-text-primary">Name rules</h4>
           <p class="text-xs text-theme-text-secondary">
             Rules are evaluated in order: excludes first, then include-narrowing.
-            Glob examples: <code>*_bad.fits</code>, <code>*_calibration</code>.
-            Substring examples: <code>rejected</code>, <code>test_</code>. Regex
-            examples: <code>^M\d+$</code>, <code>.*_v[0-9]+\.fits</code>.
+            Three pattern types: <strong>wildcard</strong> uses <code>*</code> for
+            any characters and <code>?</code> for a single character — examples{" "}
+            <code>*_bad.fits</code>, <code>*_calibration</code>.{" "}
+            <strong>Substring</strong> matches if the pattern appears anywhere
+            inside the name (case-insensitive) — examples <code>rejected</code>,{" "}
+            <code>test_</code>. <strong>Regex</strong> is a full regular
+            expression — examples <code>^M\d+$</code>,{" "}
+            <code>.*_v[0-9]+\.fits</code>.
           </p>
           <div class="overflow-x-auto">
             <table class="w-full text-xs">
@@ -337,7 +342,7 @@ const ScanFiltersPanel: Component<Props> = (props) => {
                         }}
                         class="bg-theme-input border border-theme-border rounded px-1"
                       >
-                        <option value="glob">glob</option>
+                        <option value="glob">wildcard</option>
                         <option value="substring">substring</option>
                         <option value="regex">regex</option>
                       </select>
@@ -472,7 +477,13 @@ const ScanFiltersPanel: Component<Props> = (props) => {
             class="px-4 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded text-sm font-medium disabled:opacity-50 hover:bg-theme-accent/25 transition-colors"
             disabled={!canSave()}
             onClick={save}
-            title={anyRuleInvalid() ? "One or more rules have empty or invalid patterns" : anyPathInvalid() ? "One or more paths are outside the data root" : ""}
+            title={
+              anyRuleInvalid()
+                ? "One or more rules have empty or invalid patterns"
+                : anyPathInvalid()
+                ? "One or more paths are outside the data root"
+                : "Store the current filters. Future scans will use them. Does not touch the existing catalog."
+            }
           >
             {saving() ? "Saving…" : "Save filters"}
           </button>
@@ -480,12 +491,14 @@ const ScanFiltersPanel: Component<Props> = (props) => {
             class="px-4 py-1.5 bg-theme-surface text-theme-text-primary border border-theme-border rounded text-sm font-medium disabled:opacity-50 hover:bg-theme-hover transition-colors"
             disabled={!dirty()}
             onClick={revert}
+            title="Discard unsaved changes and reload the last saved filters"
           >
             Revert
           </button>
           <button
             class="px-4 py-1.5 bg-theme-warning/15 text-theme-warning border border-theme-warning/30 rounded text-sm font-medium hover:bg-theme-warning/25 transition-colors"
             onClick={applyNow}
+            title="Remove already-ingested image rows that match the current exclude rules. Destructive. Uses the last SAVED filters, not unsaved edits. You will see a confirmation with the row count before anything is deleted."
           >
             Apply now
           </button>
