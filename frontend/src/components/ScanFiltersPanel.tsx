@@ -15,10 +15,18 @@ import { showToast } from "./Toast";
 const EMPTY: ScanFilters = { include_paths: [], exclude_paths: [], name_rules: [] };
 
 const VERDICT_LABEL: Record<Verdict, string> = {
-  included: "Included",
-  excluded_by_path: "Excluded by path",
-  excluded_by_rule: "Excluded by rule",
-  excluded_by_missing_include: "Excluded (no include rule matched)",
+  included: "Will be scanned",
+  excluded_by_path: "Skipped: excluded by path",
+  excluded_by_rule: "Skipped: matched an exclude rule",
+  excluded_by_missing_include: "Skipped: no include rule matched",
+};
+
+const VERDICT_HINT: Record<Verdict, string> = {
+  included: "No rule caused this path to be skipped.",
+  excluded_by_path: "A parent folder is listed under Exclude paths.",
+  excluded_by_rule: "A name rule with action=exclude matched.",
+  excluded_by_missing_include:
+    "Include rules are set, but none of them matched this path.",
 };
 
 interface Props {
@@ -528,21 +536,36 @@ include rule   ^M\\d+$          (regex, folder)`}
               </button>
             </div>
             <Show when={testResult()}>
-              <div class="text-xs">
-                Verdict:{" "}
-                <strong
-                  class={
-                    testResult()!.verdict === "included"
-                      ? "text-green-400"
-                      : "text-red-400"
-                  }
-                >
-                  {VERDICT_LABEL[testResult()!.verdict]}
-                </strong>
-                <Show when={testResult()!.matched.length > 0}>
-                  {" "}
-                  — matched rules: {testResult()!.matched.join(", ")}
-                </Show>
+              <div class="text-xs space-y-0.5">
+                <div>
+                  Verdict:{" "}
+                  <strong
+                    class={
+                      testResult()!.verdict === "included"
+                        ? "text-green-400"
+                        : "text-red-400"
+                    }
+                  >
+                    {VERDICT_LABEL[testResult()!.verdict]}
+                  </strong>
+                  <Show when={testResult()!.matched.length > 0}>
+                    {" "}
+                    — matched rules: {testResult()!.matched.join(", ")}
+                  </Show>
+                </div>
+                <div class="text-theme-text-secondary">
+                  {VERDICT_HINT[testResult()!.verdict]}
+                  <Show
+                    when={
+                      testResult()!.verdict === "included" &&
+                      filters().name_rules.some((r) => r.action === "exclude")
+                    }
+                  >
+                    {" "}None of your exclude rules matched this path. If you
+                    expected one to match, double-check the pattern against
+                    the exact filename.
+                  </Show>
+                </div>
               </div>
             </Show>
           </div>
