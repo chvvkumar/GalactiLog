@@ -1,15 +1,22 @@
 import asyncio
 import logging
+import os
+from pathlib import Path as FsPath
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import async_redis
+from app.config import async_redis, settings as app_settings
 from app.database import get_session
 from app.api.deps import get_current_user, require_admin
 from app.models.user import User
 from app.models import Image, Target
+from app.models.user_settings import UserSettings, SETTINGS_ROW_ID
+from app.schemas.scan_filters import (
+    ScanFiltersIn, ScanFiltersOut, TestPathIn, TestPathOut, BrowseEntry, ApplyNowOut,
+)
+from app.services.scan_filters import ScanFilterConfig
 from app.services.scan_state import (
     get_scan_state, get_failed_files, start_scanning, set_ingesting, set_idle, reset_scan,
     get_rebuild_state, request_cancel,
@@ -425,3 +432,160 @@ async def set_autoscan(
         "enabled": enabled,
         "interval_minutes": interval_minutes,
     }
+
+
+@router.get("/filters", response_model=ScanFiltersOut)
+async def get_scan_filters(
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    result = await session.execute(
+        select(UserSettings).where(UserSettings.id == SETTINGS_ROW_ID)
+    )
+    row = result.scalar_one_or_none()
+    general = (row.general if row else {}) or {}
+    sf = general.get("scan_filters") or {
+        "include_paths": [], "exclude_paths": [], "name_rules": [],
+    }
+    return ScanFiltersOut(
+        configured=bool(general.get("scan_filters_configured")),
+        filters=ScanFiltersIn(**sf),
+        fits_root=str(FsPath(app_settings.fits_data_path).resolve()),
+    )
+
+
+@router.put("/filters", response_model=ScanFiltersOut)
+async def put_scan_filters(
+    payload: ScanFiltersIn,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(require_admin),
+):
+    fits_root = FsPath(app_settings.fits_data_path)
+    # Validate by constructing the config
+    try:
+        ScanFilterConfig.from_settings(
+            {"scan_filters": payload.model_dump()}, fits_root,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    result = await session.execute(
+        select(UserSettings).where(UserSettings.id == SETTINGS_ROW_ID)
+    )
+    row = result.scalar_one_or_none()
+    if row is None:
+        row = UserSettings(id=SETTINGS_ROW_ID)
+        session.add(row)
+    row.general = {
+        **(row.general or {}),
+        "scan_filters": payload.model_dump(),
+        "scan_filters_configured": True,
+    }
+    await session.commit()
+    return ScanFiltersOut(
+        configured=True,
+        filters=payload,
+        fits_root=str(fits_root.resolve()),
+    )
+
+
+@router.post("/filters/test", response_model=TestPathOut)
+async def test_scan_filter_path(
+    payload: TestPathIn,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    fits_root = FsPath(app_settings.fits_data_path)
+    result = await session.execute(
+        select(UserSettings).where(UserSettings.id == SETTINGS_ROW_ID)
+    )
+    row = result.scalar_one_or_none()
+    general = (row.general if row else {}) or {}
+    try:
+        cfg = ScanFilterConfig.from_settings(general, fits_root)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    test_result = cfg.test_path(FsPath(payload.path), fits_root)
+    return TestPathOut(
+        verdict=test_result.verdict,
+        matched_rule_ids=test_result.matched_rule_ids,
+    )
+
+
+@router.post("/filters/apply-now", response_model=ApplyNowOut)
+async def apply_filters_now(
+    dry_run: bool = Query(True),
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(require_admin),
+):
+    fits_root = FsPath(app_settings.fits_data_path)
+    result = await session.execute(
+        select(UserSettings).where(UserSettings.id == SETTINGS_ROW_ID)
+    )
+    row = result.scalar_one_or_none()
+    general = (row.general if row else {}) or {}
+    try:
+        cfg = ScanFilterConfig.from_settings(general, fits_root)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    # Pull file paths and evaluate in Python (keeps rule logic in one place)
+    paths_result = await session.execute(select(Image.id, Image.file_path))
+    matched_ids: list = []
+    for image_id, file_path in paths_result.all():
+        if not file_path:
+            continue
+        if not cfg.should_include_file(FsPath(file_path), fits_root):
+            matched_ids.append(image_id)
+
+    if not dry_run and matched_ids:
+        await session.execute(
+            text("DELETE FROM images WHERE id = ANY(:ids)"),
+            {"ids": matched_ids},
+        )
+        await session.commit()
+
+    return ApplyNowOut(dry_run=dry_run, matched=len(matched_ids))
+
+
+@router.get("/browse", response_model=list[BrowseEntry])
+async def browse_folders(
+    path: str | None = Query(None),
+    user: User = Depends(get_current_user),
+):
+    fits_root = FsPath(app_settings.fits_data_path).resolve()
+    target = FsPath(path).resolve() if path else fits_root
+    try:
+        target.relative_to(fits_root)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="path outside configured data path")
+    if not target.exists() or not target.is_dir():
+        raise HTTPException(status_code=404, detail="directory not found")
+
+    entries: list[BrowseEntry] = []
+    try:
+        with os.scandir(target) as it:
+            for entry in it:
+                try:
+                    if not entry.is_dir(follow_symlinks=True):
+                        continue
+                    has_children = False
+                    try:
+                        with os.scandir(entry.path) as sub_it:
+                            for sub in sub_it:
+                                if sub.is_dir(follow_symlinks=True):
+                                    has_children = True
+                                    break
+                    except OSError:
+                        pass
+                    entries.append(BrowseEntry(
+                        name=entry.name,
+                        path=str(FsPath(entry.path).resolve()),
+                        has_children=has_children,
+                    ))
+                except OSError:
+                    continue
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"cannot read directory: {exc}")
+    entries.sort(key=lambda e: e.name.lower())
+    return entries
