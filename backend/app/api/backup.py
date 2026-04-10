@@ -119,5 +119,5 @@ async def restore_backup_endpoint(
             "applied": {},
             "temporary_passwords": {},
             "warnings": [],
-            "error": f"Restore failed: {e}",
+            "error": "Restore failed — see server logs for details.",
         }
