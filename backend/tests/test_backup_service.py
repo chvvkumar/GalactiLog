@@ -2,7 +2,7 @@ import pytest
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock
 
-from app.services.backup import export_backup, CURRENT_BACKUP_SCHEMA_VERSION, APP_VERSION
+from app.services.backup import export_backup, validate_backup, CURRENT_BACKUP_SCHEMA_VERSION, APP_VERSION
 
 
 @pytest.mark.asyncio
@@ -75,3 +75,81 @@ async def test_export_backup_has_all_sections():
     ]
     for section in expected_sections:
         assert section in result, f"Missing section: {section}"
+
+
+def _make_backup(overrides=None):
+    """Build a minimal valid backup dict."""
+    data = {
+        "meta": {
+            "schema_version": CURRENT_BACKUP_SCHEMA_VERSION,
+            "app_version": APP_VERSION,
+            "exported_at": "2026-04-09T00:00:00+00:00",
+        },
+        "settings": {
+            "general": {"auto_scan_enabled": True},
+            "filters": {},
+            "equipment": {"cameras": {}, "telescopes": {}},
+            "display": {},
+            "graph": {},
+            "dismissed_suggestions": [],
+        },
+        "session_notes": [],
+        "custom_columns": [],
+        "target_overrides": [],
+        "mosaics": [],
+        "users": [],
+        "column_visibility": [],
+    }
+    if overrides:
+        data.update(overrides)
+    return data
+
+
+def test_validate_rejects_future_schema():
+    """Validation rejects backups from a newer schema version."""
+    data = _make_backup()
+    data["meta"]["schema_version"] = CURRENT_BACKUP_SCHEMA_VERSION + 1
+
+    result = validate_backup(data, sections=None, mode="merge")
+    assert result["valid"] is False
+    assert "newer" in result["error"].lower()
+
+
+def test_validate_rejects_missing_meta():
+    """Validation rejects backups without meta."""
+    result = validate_backup({}, sections=None, mode="merge")
+    assert result["valid"] is False
+
+
+def test_validate_accepts_valid_backup():
+    """Validation accepts a well-formed backup."""
+    data = _make_backup()
+    result = validate_backup(data, sections=None, mode="merge")
+    assert result["valid"] is True
+    assert result["error"] is None
+
+
+def test_validate_preview_counts_notes():
+    """Preview counts session notes correctly."""
+    data = _make_backup({
+        "session_notes": [
+            {"target_name": "M31", "session_date": "2026-01-01", "notes": "Good seeing"},
+            {"target_name": "M42", "session_date": "2026-01-02", "notes": "Cloudy"},
+        ],
+    })
+    result = validate_backup(data, sections=["session_notes"], mode="merge")
+    assert result["valid"] is True
+    assert result["preview"]["session_notes"]["add"] == 2
+
+
+def test_validate_filters_sections():
+    """Only selected sections appear in preview."""
+    data = _make_backup({
+        "session_notes": [
+            {"target_name": "M31", "session_date": "2026-01-01", "notes": "test"},
+        ],
+        "users": [{"username": "viewer1", "role": "viewer"}],
+    })
+    result = validate_backup(data, sections=["users"], mode="merge")
+    assert "session_notes" not in result["preview"]
+    assert "users" in result["preview"]
