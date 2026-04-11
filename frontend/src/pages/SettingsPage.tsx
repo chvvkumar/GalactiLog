@@ -17,7 +17,6 @@ import SettingsHelpSection from "../components/settings/SettingsHelpSection";
 
 const ALL_TABS = [
   { id: "scan", label: "Library" },
-  { id: "filters", label: "Filters" },
   { id: "equipment", label: "Equipment" },
   { id: "display", label: "Display" },
   { id: "astrobin", label: "AstroBin" },
@@ -76,23 +75,27 @@ export const SettingsPage: Component = () => {
         </SettingsHelpSection>
         <ScanManager />
       </Show>
-      <Show when={activeTab() === "filters"}>
-        <SettingsHelpSection tabId="filters">
+      <Show when={activeTab() === "equipment"}>
+        <SettingsHelpSection tabId="equipment">
           <p class="text-sm text-theme-text-secondary">Filters represent the optical bandpass used for each exposure (e.g., Luminance, Red, H-alpha).</p>
           <ul class="text-sm text-theme-text-secondary list-disc list-inside space-y-1">
             <li>FITS headers often record the same filter under different names. Use <strong class="text-theme-text-primary">Filter Groups</strong> to merge aliases (e.g., "Ha" and "H-alpha") under a single canonical name.</li>
             <li>Assign colors to each filter - these colors are used throughout the dashboard, charts, and session tables.</li>
             <li>GalactiLog suggests groupings when it detects likely aliases. Accept or dismiss suggestions as they appear.</li>
           </ul>
-        </SettingsHelpSection>
-        <FiltersTab />
-      </Show>
-      <Show when={activeTab() === "equipment"}>
-        <SettingsHelpSection tabId="equipment">
           <p class="text-sm text-theme-text-secondary">Equipment grouping works like filter grouping: merge different FITS header strings that refer to the same camera or telescope into one canonical name.</p>
           <p class="text-sm text-theme-text-secondary">This keeps your dashboard and statistics consistent even if your capture software records equipment names differently across sessions.</p>
         </SettingsHelpSection>
-        <EquipmentTab />
+        <div class="rounded-[var(--radius-md)] bg-theme-surface border border-theme-border p-4 space-y-6">
+          <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
+            <h2 class="text-sm font-semibold text-theme-text-primary">Filters</h2>
+            <FiltersTab />
+          </div>
+          <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
+            <h2 class="text-sm font-semibold text-theme-text-primary">Equipment Grouping</h2>
+            <EquipmentTab />
+          </div>
+        </div>
       </Show>
       <Show when={activeTab() === "display"}>
         <SettingsHelpSection tabId="display">

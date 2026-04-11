@@ -118,16 +118,17 @@ export default function CustomColumnsTab() {
   }
 
   return (
-    <div class="space-y-6">
-      <h3 class="text-lg font-semibold">Custom Columns</h3>
-      <p class="text-sm text-theme-text-secondary">
-        Define custom columns that appear in the dashboard and session tables.
-        All users share the same column definitions and values.
-      </p>
+    <div class="rounded-[var(--radius-md)] bg-theme-surface border border-theme-border p-4 space-y-6">
+      <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
+        <h2 class="text-sm font-semibold text-theme-text-primary">Custom Columns</h2>
+        <p class="text-sm text-theme-text-secondary">
+          Define custom columns that appear in the dashboard and session tables.
+          All users share the same column definitions and values.
+        </p>
+      </div>
 
-      {/* Create Form */}
-      <div class="rounded-lg border border-theme-border p-4 space-y-3">
-        <h4 class="font-medium">Add Column</h4>
+      <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
+        <h2 class="text-sm font-semibold text-theme-text-primary">Add Column</h2>
         <div class="flex flex-wrap gap-3 items-end">
           <div>
             <label class="block text-xs mb-1">Name</label>
@@ -178,9 +179,10 @@ export default function CustomColumnsTab() {
         </Show>
       </div>
 
-      {/* Existing Columns */}
-      <Show when={columns()?.length} fallback={<p class="text-sm text-theme-text-secondary">No custom columns defined yet.</p>}>
-        <table class="w-full text-sm">
+      <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
+        <h2 class="text-sm font-semibold text-theme-text-primary">Existing Columns</h2>
+        <Show when={columns()?.length} fallback={<p class="text-sm text-theme-text-secondary">No custom columns defined yet.</p>}>
+          <table class="w-full text-sm">
           <thead>
             <tr class="border-b border-theme-border text-left text-theme-text-secondary">
               <th class="py-2 px-2">Order</th>
@@ -239,7 +241,7 @@ export default function CustomColumnsTab() {
                           <button onClick={() => startEdit(col)} class="text-xs text-theme-accent hover:underline">Edit</button>
                         }
                       >
-                        <button onClick={() => handleSaveEdit(col)} class="text-xs text-green-500 hover:underline">Save</button>
+                        <button onClick={() => handleSaveEdit(col)} class="px-4 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded text-sm font-medium hover:bg-theme-accent/25 transition-colors">Save</button>
                         <button onClick={() => setEditingId(null)} class="text-xs text-theme-text-secondary hover:underline">Cancel</button>
                       </Show>
                       <button onClick={() => handleDelete(col.id)} class="text-xs text-red-500 hover:underline">Delete</button>
@@ -249,8 +251,9 @@ export default function CustomColumnsTab() {
               )}
             </For>
           </tbody>
-        </table>
-      </Show>
+          </table>
+        </Show>
+      </div>
     </div>
   );
 }

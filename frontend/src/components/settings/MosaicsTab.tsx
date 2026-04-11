@@ -328,7 +328,7 @@ export const MosaicsTab: Component = () => {
             <button
               onClick={handleDetect}
               disabled={detecting()}
-              class="px-3 py-1.5 border border-theme-border-em text-theme-text-secondary rounded text-sm disabled:opacity-50 hover:text-theme-text-primary hover:border-theme-accent transition-colors"
+              class="px-4 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded text-sm font-medium disabled:opacity-50 hover:bg-theme-accent/25 transition-colors"
             >
               {detecting() ? "Detecting..." : "Run Detection"}
             </button>
@@ -543,7 +543,7 @@ export const MosaicsTab: Component = () => {
                           <div class="flex gap-2 px-3 py-2">
                             <button
                               onClick={() => handleAccept(s)}
-                              class="px-2.5 py-1 text-xs border border-theme-accent/50 text-theme-accent rounded-[var(--radius-sm)] hover:bg-theme-accent/10 transition-colors"
+                              class="px-4 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded text-sm font-medium hover:bg-theme-accent/25 transition-colors"
                             >
                               Accept{(() => {
                                 const sel = selectedPanels()[s.id];
@@ -600,7 +600,7 @@ export const MosaicsTab: Component = () => {
             />
             <button
               onClick={handleCreate}
-              class="px-3 py-1.5 text-sm border border-theme-accent/50 text-theme-accent rounded-[var(--radius-sm)] hover:bg-theme-accent/10 transition-colors"
+              class="px-4 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded text-sm font-medium hover:bg-theme-accent/25 transition-colors"
             >
               Create
             </button>
@@ -641,7 +641,7 @@ export const MosaicsTab: Component = () => {
                     </button>
                     <a
                       href={`/mosaics/${m.id}`}
-                      class="ml-3 px-2 py-1 text-xs text-theme-accent hover:underline shrink-0"
+                      class="ml-3 px-4 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded text-sm font-medium hover:bg-theme-accent/25 transition-colors shrink-0"
                     >
                       Detail
                     </a>

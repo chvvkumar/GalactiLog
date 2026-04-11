@@ -133,97 +133,114 @@ const AnalysisPage: Component = () => {
           </li>
         </ul>
       </SettingsHelpSection>
-      {/* Shared Controls */}
-      <div class="flex flex-wrap items-center gap-3">
-        <select
-          ref={equipSelectRef}
-          class={selectClass}
-          value={equipmentValue()}
-          onChange={(e) => {
-            const val = e.currentTarget.value;
-            if (!val) {
-              setTelescope(undefined);
-              setCamera(undefined);
-            } else {
-              const [t, c] = val.split("|||");
-              setTelescope(t);
-              setCamera(c);
-            }
-          }}
-        >
-          <option value="">All equipment</option>
-          <For each={combos()}>
-            {(c) => (
-              <option value={`${c.telescope}|||${c.camera}`}>{c.label}{c.grouped ? " \u29C9" : ""}</option>
-            )}
-          </For>
-        </select>
+      <div class="rounded-[var(--radius-md)] bg-theme-surface border border-theme-border p-4 space-y-6">
+        <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
+          <h2 class="text-sm font-semibold text-theme-text-primary">Shared Filters</h2>
+          <div class="flex flex-wrap items-center gap-3">
+            <select
+              ref={equipSelectRef}
+              class={selectClass}
+              value={equipmentValue()}
+              onChange={(e) => {
+                const val = e.currentTarget.value;
+                if (!val) {
+                  setTelescope(undefined);
+                  setCamera(undefined);
+                } else {
+                  const [t, c] = val.split("|||");
+                  setTelescope(t);
+                  setCamera(c);
+                }
+              }}
+            >
+              <option value="">All equipment</option>
+              <For each={combos()}>
+                {(c) => (
+                  <option value={`${c.telescope}|||${c.camera}`}>{c.label}{c.grouped ? " \u29C9" : ""}</option>
+                )}
+              </For>
+            </select>
 
-        <select
-          class={selectClass}
-          value={filterUsed() || ""}
-          onChange={(e) => setFilterUsed(e.currentTarget.value || undefined)}
-        >
-          <option value="">All filters</option>
-          <For each={filters() || []}>
-            {(f) => <option value={f}>{f}</option>}
-          </For>
-        </select>
+            <select
+              class={selectClass}
+              value={filterUsed() || ""}
+              onChange={(e) => setFilterUsed(e.currentTarget.value || undefined)}
+            >
+              <option value="">All filters</option>
+              <For each={filters() || []}>
+                {(f) => <option value={f}>{f}</option>}
+              </For>
+            </select>
 
-        <div class="flex items-center gap-1">
-          <button class={toggleClass(granularity() === "frame")} onClick={() => setGranularity("frame")}>
-            Per Frame
-          </button>
-          <button class={toggleClass(granularity() === "session")} onClick={() => setGranularity("session")}>
-            Per Session
-          </button>
+            <div class="flex items-center gap-1">
+              <button class={toggleClass(granularity() === "frame")} onClick={() => setGranularity("frame")}>
+                Per Frame
+              </button>
+              <button class={toggleClass(granularity() === "session")} onClick={() => setGranularity("session")}>
+                Per Session
+              </button>
+            </div>
+
+            <div class="flex items-center gap-1.5 text-sm text-theme-text-secondary">
+              <span>From</span>
+              <input
+                type="date"
+                class={selectClass}
+                value={dateFrom() || ""}
+                onChange={(e) => setDateFrom(e.currentTarget.value || undefined)}
+              />
+              <span>To</span>
+              <input
+                type="date"
+                class={selectClass}
+                value={dateTo() || ""}
+                onChange={(e) => setDateTo(e.currentTarget.value || undefined)}
+              />
+            </div>
+          </div>
+
+          <div class="flex flex-wrap gap-1">
+            <For each={TABS}>
+              {(tab) => (
+                <button class={tabClass(activeTab() === tab.id)} onClick={() => setActiveTab(tab.id)}>
+                  {tab.label}
+                </button>
+              )}
+            </For>
+          </div>
         </div>
 
-        <div class="flex items-center gap-1.5 text-sm text-theme-text-secondary">
-          <span>From</span>
-          <input
-            type="date"
-            class={selectClass}
-            value={dateFrom() || ""}
-            onChange={(e) => setDateFrom(e.currentTarget.value || undefined)}
-          />
-          <span>To</span>
-          <input
-            type="date"
-            class={selectClass}
-            value={dateTo() || ""}
-            onChange={(e) => setDateTo(e.currentTarget.value || undefined)}
-          />
-        </div>
+        <Show when={activeTab() === "correlation"}>
+          <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
+            <h2 class="text-sm font-semibold text-theme-text-primary">Correlation</h2>
+            <CorrelationTab filters={shared()} navX={navX()} navY={navY()} onNavConsumed={() => { setNavX(undefined); setNavY(undefined); }} />
+          </div>
+        </Show>
+        <Show when={activeTab() === "distributions"}>
+          <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
+            <h2 class="text-sm font-semibold text-theme-text-primary">Distributions</h2>
+            <DistributionsTab filters={shared()} />
+          </div>
+        </Show>
+        <Show when={activeTab() === "timeseries"}>
+          <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
+            <h2 class="text-sm font-semibold text-theme-text-primary">Time Series</h2>
+            <TimeSeriesTab filters={shared()} />
+          </div>
+        </Show>
+        <Show when={activeTab() === "matrix"}>
+          <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
+            <h2 class="text-sm font-semibold text-theme-text-primary">Matrix</h2>
+            <MatrixTab filters={shared()} />
+          </div>
+        </Show>
+        <Show when={activeTab() === "compare"}>
+          <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
+            <h2 class="text-sm font-semibold text-theme-text-primary">Compare</h2>
+            <CompareTab filters={shared()} combos={combos()} availableFilters={filters() || []} />
+          </div>
+        </Show>
       </div>
-
-      {/* Tab Bar */}
-      <div class="flex flex-wrap gap-1">
-        <For each={TABS}>
-          {(tab) => (
-            <button class={tabClass(activeTab() === tab.id)} onClick={() => setActiveTab(tab.id)}>
-              {tab.label}
-            </button>
-          )}
-        </For>
-      </div>
-
-      {/* Tab Content */}
-      <Show when={activeTab() === "correlation"}>
-        <CorrelationTab filters={shared()} navX={navX()} navY={navY()} onNavConsumed={() => { setNavX(undefined); setNavY(undefined); }} />
-      </Show>
-      <Show when={activeTab() === "distributions"}>
-        <DistributionsTab filters={shared()} />
-      </Show>
-      <Show when={activeTab() === "timeseries"}>
-        <TimeSeriesTab filters={shared()} />
-      </Show>
-      <Show when={activeTab() === "matrix"}>
-        <MatrixTab filters={shared()} />
-      </Show>
-      <Show when={activeTab() === "compare"}>
-        <CompareTab filters={shared()} combos={combos()} availableFilters={filters() || []} />
-      </Show>
     </div>
   );
 };

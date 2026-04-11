@@ -181,11 +181,11 @@ export default function DisplayTab() {
   };
 
   return (
-    <div class="space-y-4">
-      {/* Theme */}
+    <div class="rounded-[var(--radius-md)] bg-theme-surface border border-theme-border p-4 space-y-6">
       <Show when={THEMES_SORTED.length > 1}>
-        <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-4 space-y-3">
-          <h3 class="text-theme-text-primary font-medium">Theme</h3>
+        <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
+          <h2 class="text-sm font-semibold text-theme-text-primary">Theme</h2>
+          <p class="text-sm text-theme-text-secondary">Select the color palette used across the interface.</p>
           <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <For each={THEMES_SORTED}>
               {(theme: ThemeMeta) => (
@@ -216,12 +216,11 @@ export default function DisplayTab() {
         </div>
       </Show>
 
-      {/* Appearance */}
-      <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-4 space-y-4">
-        <h3 class="text-theme-text-primary font-medium">Appearance</h3>
-
+      <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
+        <h2 class="text-sm font-semibold text-theme-text-primary">Text Size</h2>
+        <p class="text-sm text-theme-text-secondary">Adjust the base font size used across the interface.</p>
         <div class="flex items-center justify-between">
-          <span class="text-sm text-theme-text-secondary">Text Size</span>
+          <span class="text-sm text-theme-text-secondary">Size</span>
           <div class="flex gap-2">
             <For each={TEXT_SIZES}>
               {(size) => (
@@ -240,9 +239,13 @@ export default function DisplayTab() {
             </For>
           </div>
         </div>
+      </div>
 
+      <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
+        <h2 class="text-sm font-semibold text-theme-text-primary">Filter Badge Style</h2>
+        <p class="text-sm text-theme-text-secondary">Choose how filter badges are rendered in tables and lists.</p>
         <div class="flex items-center justify-between">
-          <span class="text-sm text-theme-text-secondary">Filter Badge Style</span>
+          <span class="text-sm text-theme-text-secondary">Style</span>
           <div class="flex items-center gap-3">
             <select
               value={filterStyle()}
@@ -273,9 +276,13 @@ export default function DisplayTab() {
             </div>
           </div>
         </div>
+      </div>
 
+      <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
+        <h2 class="text-sm font-semibold text-theme-text-primary">Timezone</h2>
+        <p class="text-sm text-theme-text-secondary">Used to format session timestamps and date ranges.</p>
         <div class="flex items-center justify-between">
-          <span class="text-sm text-theme-text-secondary">Timezone</span>
+          <span class="text-sm text-theme-text-secondary">Zone</span>
           <div class="flex items-center gap-2">
             <select
               value={selectedTimezone()}
@@ -289,9 +296,13 @@ export default function DisplayTab() {
             <span class="text-xs text-theme-text-tertiary">{timezoneLabel(selectedTimezone())}</span>
           </div>
         </div>
+      </div>
 
+      <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
+        <h2 class="text-sm font-semibold text-theme-text-primary">Content Width</h2>
+        <p class="text-sm text-theme-text-secondary">Constrain the maximum width of page content.</p>
         <div class="flex items-center justify-between">
-          <span class="text-sm text-theme-text-secondary">Content Width</span>
+          <span class="text-sm text-theme-text-secondary">Width</span>
           <div class="flex gap-1">
             <For each={CONTENT_WIDTH_OPTIONS}>
               {(opt) => (
@@ -311,12 +322,10 @@ export default function DisplayTab() {
             </For>
           </div>
         </div>
-
       </div>
 
-      {/* Metric Visibility */}
-      <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-4 space-y-3">
-        <h3 class="text-theme-text-primary font-medium">Metric Visibility</h3>
+      <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
+        <h2 class="text-sm font-semibold text-theme-text-primary">Metric Visibility</h2>
         <p class="text-sm text-theme-text-secondary">Choose which metric groups and individual fields appear on target detail pages.</p>
         <Show when={local()} fallback={<p class="text-theme-text-secondary text-sm">Loading...</p>}>
           {(settings) => (
