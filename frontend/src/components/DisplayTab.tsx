@@ -19,11 +19,11 @@ const PREVIEW_FILTERS: { name: string; color: string }[] = [
 
 const CONTENT_WIDTH_OPTIONS: { value: string; label: string; desc: string }[] = [
   { value: "full", label: "Full", desc: "100%" },
+  { value: "extra-wide", label: "Extra Wide", desc: "1792px" },
   { value: "ultra-wide", label: "Ultra Wide", desc: "1536px" },
   { value: "wide", label: "Wide", desc: "1280px" },
   { value: "standard", label: "Standard", desc: "1152px" },
   { value: "compact", label: "Compact", desc: "1024px" },
-  { value: "narrow", label: "Narrow", desc: "896px" },
 ];
 
 const TIMEZONE_OPTIONS: { value: string; label: string }[] = [

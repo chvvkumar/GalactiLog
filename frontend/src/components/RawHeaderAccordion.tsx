@@ -9,10 +9,10 @@ const RawHeaderAccordion: Component<{ headers: Record<string, unknown> | null }>
   };
 
   return (
-    <div class="bg-theme-base rounded-[var(--radius-md)]">
+    <div class="bg-theme-elevated border border-theme-border-em rounded-[var(--radius-sm)]">
       <button
         onClick={() => setOpen((v) => !v)}
-        class="flex justify-between items-center w-full text-xs py-2 px-3 hover:bg-theme-hover rounded-[var(--radius-md)] hover:text-theme-text-primary transition-colors cursor-pointer"
+        class="flex justify-between items-center w-full text-xs py-2 px-3 hover:bg-theme-hover rounded-[var(--radius-sm)] hover:text-theme-text-primary transition-colors cursor-pointer"
         classList={{ "text-theme-text-primary": open(), "text-theme-text-secondary": !open() }}
       >
         <span class="font-semibold border-l-2 border-theme-accent pl-2">
