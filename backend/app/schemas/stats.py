@@ -6,6 +6,9 @@ class OverviewStats(BaseModel):
     target_count: int
     total_frames: int
     disk_usage_bytes: int
+    session_count: int
+    first_capture_date: str | None
+    last_capture_date: str | None
 
 
 class EquipmentItem(BaseModel):

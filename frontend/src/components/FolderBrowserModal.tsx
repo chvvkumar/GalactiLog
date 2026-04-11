@@ -7,6 +7,7 @@ interface Props {
   open: boolean;
   fitsRoot: string;
   title: string;
+  existing?: string[];
   onCancel: () => void;
   onConfirm: (paths: string[]) => void;
 }
@@ -110,7 +111,11 @@ const FolderBrowserModal: Component<Props> = (props) => {
     await toggle(path);
   };
 
+  const isExisting = (path: string) =>
+    (props.existing ?? []).includes(path);
+
   const toggleSelected = (path: string) => {
+    if (isExisting(path)) return;
     const s = new Set<string>(selected());
     if (s.has(path)) s.delete(path);
     else s.add(path);
@@ -166,11 +171,23 @@ const FolderBrowserModal: Component<Props> = (props) => {
         </Show>
         <input
           type="checkbox"
-          checked={selected().has(node.entry.path)}
+          checked={isExisting(node.entry.path) || selected().has(node.entry.path)}
+          disabled={isExisting(node.entry.path)}
           onClick={(e) => e.stopPropagation()}
           onChange={() => toggleSelected(node.entry.path)}
         />
-        <span class="text-sm text-theme-text-primary truncate">{node.entry.name}</span>
+        <span
+          class={`text-sm truncate ${
+            isExisting(node.entry.path)
+              ? "text-theme-text-secondary italic"
+              : "text-theme-text-primary"
+          }`}
+        >
+          {node.entry.name}
+          <Show when={isExisting(node.entry.path)}>
+            <span class="ml-2 text-xs">(already added)</span>
+          </Show>
+        </span>
       </div>
       <Show when={node.error}>
         <div

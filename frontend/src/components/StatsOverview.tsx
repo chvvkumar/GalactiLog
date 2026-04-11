@@ -1,31 +1,50 @@
 import { Component } from "solid-js";
 import type { OverviewStats } from "../types";
-
 import { formatIntegration } from "../utils/format";
-function formatBytes(b: number): string {
-  if (b < 1e9) return (b / 1e6).toFixed(0) + " MB";
-  if (b < 1e12) return (b / 1e9).toFixed(1) + " GB";
-  return (b / 1e12).toFixed(2) + " TB";
+
+function formatSpan(start: string | null, end: string | null): string {
+  if (!start || !end) return "\u2014";
+  const s = new Date(start);
+  const e = new Date(end);
+  if (isNaN(s.getTime()) || isNaN(e.getTime())) return "\u2014";
+  let months = (e.getFullYear() - s.getFullYear()) * 12 + (e.getMonth() - s.getMonth());
+  if (e.getDate() < s.getDate()) months -= 1;
+  if (months < 0) months = 0;
+  const years = Math.floor(months / 12);
+  const rem = months % 12;
+  if (years === 0 && rem === 0) return "< 1 mo";
+  if (years === 0) return `${rem} mo`;
+  if (rem === 0) return `${years}y`;
+  return `${years}y ${rem}mo`;
+}
+
+function formatSpanSubtitle(start: string | null, end: string | null): string {
+  if (!start || !end) return "";
+  return `${start} → ${end}`;
 }
 
 const StatsOverview: Component<{
   overview: OverviewStats;
-  avgHfr: number | null;
-  avgEccentricity: number | null;
-  bestHfr: number | null;
 }> = (props) => {
-  const cards = () => [
-    { label: "Total Integration", subtitle: "all LIGHT frames", value: formatIntegration(props.overview.total_integration_seconds) },
-    { label: "Resolved Targets", subtitle: "via SIMBAD", value: String(props.overview.target_count) },
-    { label: "Total Frames", subtitle: "all LIGHT frames", value: props.overview.total_frames.toLocaleString() },
-    { label: "Total Storage", subtitle: "", value: formatBytes(props.overview.disk_usage_bytes) },
-    { label: "Avg HFR", subtitle: "", value: props.avgHfr?.toFixed(2) ?? "\u2014" },
-    { label: "Avg Ecc", subtitle: "", value: props.avgEccentricity?.toFixed(2) ?? "\u2014" },
-    { label: "Best HFR", subtitle: "", value: props.bestHfr?.toFixed(2) ?? "\u2014" },
-  ];
+  const cards = () => {
+    const ov = props.overview;
+    const avgSession = ov.session_count > 0
+      ? formatIntegration(ov.total_integration_seconds / ov.session_count)
+      : "\u2014";
+    const avgPerTarget = ov.target_count > 0
+      ? formatIntegration(ov.total_integration_seconds / ov.target_count)
+      : "\u2014";
+    return [
+      { label: "Total Integration", subtitle: "all LIGHT frames", value: formatIntegration(ov.total_integration_seconds) },
+      { label: "Total Frames", subtitle: "all LIGHT frames", value: ov.total_frames.toLocaleString() },
+      { label: "Active Span", subtitle: formatSpanSubtitle(ov.first_capture_date, ov.last_capture_date), value: formatSpan(ov.first_capture_date, ov.last_capture_date) },
+      { label: "Avg Session Length", subtitle: `${ov.session_count.toLocaleString()} sessions`, value: avgSession },
+      { label: "Avg per Target", subtitle: `${ov.target_count.toLocaleString()} targets`, value: avgPerTarget },
+    ];
+  };
 
   return (
-    <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
+    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
       {cards().map((c) => (
         <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-4 text-center">
           <div class="text-xs text-theme-text-secondary mb-1">{c.label}</div>

@@ -46,7 +46,7 @@ const SessionAccordionCard: Component<{
   onCheckChange?: () => void;
   targetId?: string;
 }> = (props) => {
-  let cardRef: HTMLDivElement | undefined;
+  let cardRef: HTMLTableRowElement | undefined;
   const settingsCtx = useSettingsContext();
   const { displaySettings } = settingsCtx;
   const visible = (group: Parameters<typeof isFieldVisible>[1], field: string) =>

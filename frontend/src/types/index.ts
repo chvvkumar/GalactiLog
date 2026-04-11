@@ -430,6 +430,9 @@ export interface OverviewStats {
   target_count: number;
   total_frames: number;
   disk_usage_bytes: number;
+  session_count: number;
+  first_capture_date: string | null;
+  last_capture_date: string | null;
 }
 
 export interface StatsResponse {
