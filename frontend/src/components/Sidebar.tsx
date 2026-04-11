@@ -1,6 +1,7 @@
 import { Component, Show } from "solid-js";
 import { useDashboardFilters } from "./DashboardFilterProvider";
 import { useSettingsContext } from "./SettingsProvider";
+import { toggleSidebarCollapsed } from "./sidebarLayout";
 import CollapsibleSection from "./CollapsibleSection";
 import SearchBar from "./SearchBar";
 import ObjectTypeToggles from "./ObjectTypeToggles";
@@ -56,7 +57,20 @@ const Sidebar: Component = () => {
   const hasActiveFilters = () => getActiveSectionIds(filters() as unknown as ActiveSectionFilters).size > 0;
 
   return (
-    <aside class="w-72 min-h-0 max-h-[calc(100vh-57px)] border-r border-theme-border-em p-4 space-y-3 overflow-y-auto">
+    <aside class="w-full min-h-0 max-h-[calc(100vh-57px)] p-4 space-y-3 overflow-y-auto">
+      <div class="flex items-center justify-between -mt-1">
+        <span class="text-label font-medium uppercase tracking-wider text-theme-text-tertiary">Filters</span>
+        <button
+          onClick={toggleSidebarCollapsed}
+          class="p-1 text-theme-text-tertiary hover:text-theme-text-primary transition-colors cursor-pointer"
+          aria-label="Collapse sidebar"
+          title="Collapse sidebar"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="15 18 9 12 15 6" />
+          </svg>
+        </button>
+      </div>
       <Show when={targetData()}>
         {(data) => (
           <section class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-3 flex flex-wrap gap-x-4 gap-y-1 text-sm">
