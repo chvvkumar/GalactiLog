@@ -12,22 +12,25 @@ const StorageBreakdown: Component<{
   thumbnailBytes: number;
   databaseBytes: number;
 }> = (props) => {
-  const total = () => props.fitsBytes + props.thumbnailBytes + props.databaseBytes;
-  const pct = (v: number) => total() > 0 ? ((v / total()) * 100).toFixed(1) : "0";
+  const rows = () => [
+    { label: "FITS files", value: props.fitsBytes, hint: "raw capture data" },
+    { label: "Thumbnails", value: props.thumbnailBytes, hint: "generated previews" },
+    { label: "Database", value: props.databaseBytes, hint: "metadata and indexes" },
+  ];
 
   return (
-    <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-4 space-y-3">
-      <h3 class="text-theme-text-primary font-medium text-sm">Storage Breakdown</h3>
-      {/* Stacked bar */}
-      <div class="w-full h-4 bg-theme-base rounded-full overflow-hidden flex">
-        <div class="bg-theme-info h-4" style={{ width: `${pct(props.fitsBytes)}%` }} title="FITS" />
-        <div class="bg-theme-success h-4" style={{ width: `${pct(props.thumbnailBytes)}%` }} title="Thumbnails" />
-        <div class="bg-theme-warning h-4" style={{ width: `${pct(props.databaseBytes)}%` }} title="Database" />
-      </div>
-      <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs text-center">
-        <div><span class="inline-block w-2 h-2 bg-theme-info rounded-full mr-1" />FITS: {formatBytes(props.fitsBytes)}</div>
-        <div><span class="inline-block w-2 h-2 bg-theme-success rounded-full mr-1" />Thumbs: {formatBytes(props.thumbnailBytes)}</div>
-        <div><span class="inline-block w-2 h-2 bg-theme-warning rounded-full mr-1" />DB: {formatBytes(props.databaseBytes)}</div>
+    <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-4">
+      <h3 class="text-theme-text-primary font-medium text-sm mb-3">Storage</h3>
+      <div class="divide-y divide-theme-border/40">
+        {rows().map((r) => (
+          <div class="flex items-baseline justify-between py-2">
+            <div>
+              <div class="text-sm text-theme-text-primary">{r.label}</div>
+              <div class="text-caption text-theme-text-tertiary italic">{r.hint}</div>
+            </div>
+            <div class="text-sm font-semibold text-theme-text-primary tabular-nums">{formatBytes(r.value)}</div>
+          </div>
+        ))}
       </div>
     </div>
   );

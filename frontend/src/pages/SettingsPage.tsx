@@ -11,6 +11,7 @@ import DisplayTab from "../components/DisplayTab";
 import AstroBinTab from "../components/settings/AstroBinTab";
 import CustomColumnsTab from "../components/CustomColumnsTab";
 import IngestHistory from "../components/IngestHistory";
+import StorageBreakdown from "../components/StorageBreakdown";
 import { useAuth } from "../components/AuthProvider";
 import { useSettingsContext } from "../components/SettingsProvider";
 import { useStats } from "../store/stats";
@@ -74,12 +75,22 @@ export const SettingsPage: Component = () => {
             <li>The action bar exposes <strong class="text-theme-text-primary">Save rules</strong>, <strong class="text-theme-text-primary">Revert</strong>, and <strong class="text-theme-text-primary">Apply now</strong>, plus a frame-filter selector: pick <strong class="text-theme-text-primary">Light frames only</strong> to skip calibration frames (darks, flats, bias) or <strong class="text-theme-text-primary">All frames</strong> to catalog everything.</li>
             <li>The <strong class="text-theme-text-primary">Database Overview</strong> card shows current catalog totals and name-resolution cache status (SIMBAD, SESAME, VizieR).</li>
             <li><strong class="text-theme-text-primary">Maintenance</strong> actions: <strong class="text-theme-text-primary">Re-match</strong> re-resolves all target names against SIMBAD. <strong class="text-theme-text-primary">Retry Unresolved</strong> retries only failed lookups. <strong class="text-theme-text-primary">Regenerate</strong> rebuilds thumbnails. <strong class="text-theme-text-primary">Full Rebuild</strong> re-scans all files from scratch, use sparingly.</li>
+            <li><strong class="text-theme-text-primary">Storage Breakdown</strong> shows on-disk size of FITS files, generated thumbnails, and the database.</li>
             <li><strong class="text-theme-text-primary">Ingest History</strong> lists the most recent scan dates and how many files were added each time.</li>
           </ul>
         </SettingsHelpSection>
         <ScanManager />
         <Show when={stats()}>
-          {(data) => <IngestHistory history={data().ingest_history} />}
+          {(data) => (
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <StorageBreakdown
+                fitsBytes={data().storage.fits_bytes}
+                thumbnailBytes={data().storage.thumbnail_bytes}
+                databaseBytes={data().storage.database_bytes}
+              />
+              <IngestHistory history={data().ingest_history} />
+            </div>
+          )}
         </Show>
       </Show>
       <Show when={activeTab() === "filters"}>

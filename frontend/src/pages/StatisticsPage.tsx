@@ -10,7 +10,6 @@ import FilterUsageChart from "../components/FilterUsageChart";
 import ImagingTimeline from "../components/ImagingTimeline";
 import ImagingCalendar from "../components/ImagingCalendar";
 import TopTargets from "../components/TopTargets";
-import StorageBreakdown from "../components/StorageBreakdown";
 
 const StatisticsPage: Component = () => {
   const { stats } = useStats();
@@ -27,7 +26,7 @@ const StatisticsPage: Component = () => {
         </p>
         <ul class="list-disc list-inside space-y-1">
           <li class="text-sm text-theme-text-secondary">
-            <strong class="text-theme-text-primary">Overview</strong> shows total integration time, number of targets, frames, and a storage breakdown by category.
+            <strong class="text-theme-text-primary">Overview</strong> shows total integration time, frame count, how long the catalog has been active, average session length (with multi-rig nights counted per rig), and average integration per target.
           </li>
           <li class="text-sm text-theme-text-secondary">
             <strong class="text-theme-text-primary">Equipment Performance</strong> compares imaging quality across telescope/camera combinations.
@@ -52,10 +51,7 @@ const StatisticsPage: Component = () => {
       <Show when={stats()}>
         {(data) => (
           <>
-            <StatsOverview
-              overview={data().overview}
-              storage={data().storage}
-            />
+            <StatsOverview overview={data().overview} />
 
             <EquipmentPerformance combos={data().equipment_performance} />
 
