@@ -125,12 +125,13 @@ const MosaicDetailPage: Component = () => {
               <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
                 <h2 class="text-sm font-semibold text-theme-text-primary">Panels</h2>
                 {(() => {
-                  const cols = Math.ceil(Math.sqrt(data().panels.length));
+                  const n = data().panels.length;
                   const maxIntegration = Math.max(...data().panels.map((p: PanelStats) => p.total_integration_seconds));
+                  const containerMax = Math.min(n * 280, 1680);
                   return (
                     <div
                       class="grid gap-2 mx-auto"
-                      style={{ "grid-template-columns": `repeat(${cols}, 1fr)`, "max-width": "800px" }}
+                      style={{ "grid-template-columns": `repeat(auto-fit, minmax(220px, 1fr))`, "max-width": `${containerMax}px` }}
                     >
                       <For each={[...data().panels].sort((a: PanelStats, b: PanelStats) => {
                         const na = parseInt(a.panel_label.replace(/\D/g, "")) || a.sort_order;
