@@ -57,11 +57,22 @@ const ALL_PARAM_KEYS = [
   "page",
 ];
 
-function hasFilterParams(sp: Record<string, string | undefined>): boolean {
-  return ALL_PARAM_KEYS.some((k) => sp[k] !== undefined && sp[k] !== "");
+type RawSearchParams = Record<string, string | string[] | undefined>;
+
+function firstValue(v: string | string[] | undefined): string | undefined {
+  return Array.isArray(v) ? v[0] : v;
 }
 
-function deriveFilters(sp: Record<string, string | undefined>): ActiveFilters {
+function hasFilterParams(sp: RawSearchParams): boolean {
+  return ALL_PARAM_KEYS.some((k) => {
+    const v = firstValue(sp[k]);
+    return v !== undefined && v !== "";
+  });
+}
+
+function deriveFilters(rawSp: RawSearchParams): ActiveFilters {
+  const sp: Record<string, string | undefined> = {};
+  for (const k in rawSp) sp[k] = firstValue(rawSp[k]);
   const fitsKeys = sp.fits_key?.split(",").filter(Boolean) ?? [];
   const fitsOps = sp.fits_op?.split(",").filter(Boolean) ?? [];
   const fitsVals = sp.fits_val?.split(",").filter(Boolean) ?? [];
