@@ -40,6 +40,7 @@ const ScanFiltersPanel: Component<Props> = (props) => {
   const [dirty, setDirty] = createSignal(false);
   const [browsing, setBrowsing] = createSignal<null | "include" | "exclude">(null);
   const [saving, setSaving] = createSignal(false);
+  const [applying, setApplying] = createSignal(false);
   const [testPath, setTestPath] = createSignal("");
   const [testKind, setTestKind] = createSignal<"auto" | "file" | "folder">("auto");
   const [testResult, setTestResult] = createSignal<
@@ -165,6 +166,7 @@ const ScanFiltersPanel: Component<Props> = (props) => {
       );
       return;
     }
+    setApplying(true);
     try {
       const dry = await scanFilters.applyNow(true);
       if (dry.matched === 0) {
@@ -190,6 +192,8 @@ const ScanFiltersPanel: Component<Props> = (props) => {
       showToast(`Removed ${res.matched} image row(s) from the catalog`);
     } catch (e: any) {
       showToast(e?.message ?? "Apply now failed", "error");
+    } finally {
+      setApplying(false);
     }
   };
 
@@ -626,7 +630,7 @@ include rule   ^M\\d+$          (regex, folder)`}
           </button>
           <button
             class="px-4 py-1.5 bg-theme-warning/15 text-theme-warning border border-theme-warning/30 rounded text-sm font-medium disabled:opacity-50 hover:bg-theme-warning/25 transition-colors"
-            disabled={dirty()}
+            disabled={dirty() || applying()}
             onClick={applyNow}
             title={
               dirty()
@@ -634,7 +638,7 @@ include rule   ^M\\d+$          (regex, folder)`}
                 : "Remove already-ingested image rows that match the current exclude rules. Destructive. You will see a confirmation with the row count and example paths before anything is deleted."
             }
           >
-            Apply now
+            {applying() ? "Checking\u2026" : "Apply now"}
           </button>
         </div>
       </div>
