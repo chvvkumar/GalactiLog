@@ -6,6 +6,7 @@ import { useStats } from "../store/stats";
 import { api } from "../api/client";
 import type { RebuildStatus } from "../types";
 import DatabaseOverview from "./DatabaseOverview";
+import CaptureActivity from "./CaptureActivity";
 import ScanControls from "./ScanControls";
 import ActivityFeed from "./ActivityFeed";
 import MaintenanceActions from "./MaintenanceActions";
@@ -129,6 +130,10 @@ const ScanManager: Component = () => {
   return (
     <div class="space-y-4">
       <DatabaseOverview summary={dbSummary()} storage={stats()?.storage} />
+
+      <Show when={stats()}>
+        {(data) => <CaptureActivity history={data().ingest_history} />}
+      </Show>
 
       <div class="grid grid-cols-1 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] gap-4 items-start">
         {/* Left column: controls */}
