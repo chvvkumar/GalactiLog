@@ -45,6 +45,7 @@ export interface BrowseEntry {
 export interface ApplyNowResult {
   dry_run: boolean;
   matched: number;
+  sample_paths?: string[];
 }
 
 export interface ValidateRegexResult {

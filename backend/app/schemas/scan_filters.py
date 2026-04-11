@@ -88,6 +88,7 @@ class BrowseEntry(BaseModel):
 class ApplyNowOut(BaseModel):
     dry_run: bool
     matched: int
+    sample_paths: list[str] = Field(default_factory=list)
 
 
 class ValidateRegexIn(BaseModel):
