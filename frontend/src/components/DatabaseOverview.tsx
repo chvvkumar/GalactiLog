@@ -2,7 +2,17 @@ import { Component, Show } from "solid-js";
 import { useNavigate } from "@solidjs/router";
 import type { DbSummary } from "../types";
 
-const DatabaseOverview: Component<{ summary: DbSummary | null }> = (props) => {
+function formatBytes(b: number): string {
+  if (b < 1e6) return (b / 1e3).toFixed(0) + " KB";
+  if (b < 1e9) return (b / 1e6).toFixed(0) + " MB";
+  if (b < 1e12) return (b / 1e9).toFixed(1) + " GB";
+  return (b / 1e12).toFixed(2) + " TB";
+}
+
+const DatabaseOverview: Component<{
+  summary: DbSummary | null;
+  storage?: { fits_bytes: number; thumbnail_bytes: number; database_bytes: number };
+}> = (props) => {
   const navigate = useNavigate();
 
   return (
@@ -20,6 +30,15 @@ const DatabaseOverview: Component<{ summary: DbSummary | null }> = (props) => {
             onClick={() => navigate("/?object_type=Unresolved")}
           />
           <StatTile label="From CSV" value={props.summary!.csv_enriched} info />
+          <Show when={props.storage}>
+            {(s) => (
+              <>
+                <StatTile label="FITS" value={formatBytes(s().fits_bytes)} title="On-disk size of raw FITS capture files." />
+                <StatTile label="Thumbnails" value={formatBytes(s().thumbnail_bytes)} title="On-disk size of generated preview thumbnails." />
+                <StatTile label="Database" value={formatBytes(s().database_bytes)} title="On-disk size of the PostgreSQL database." />
+              </>
+            )}
+          </Show>
         </div>
         <Show when={props.summary!.cached_simbad > 0 || props.summary!.cached_vizier > 0 || props.summary!.cached_sesame > 0 || props.summary!.pending_merges > 0}>
           <div class="flex gap-4 mt-3 text-xs text-theme-text-secondary justify-center flex-wrap">
@@ -55,13 +74,14 @@ const DatabaseOverview: Component<{ summary: DbSummary | null }> = (props) => {
 
 const StatTile: Component<{
   label: string;
-  value: number;
+  value: number | string;
   warn?: boolean;
   info?: boolean;
   title?: string;
   onClick?: () => void;
 }> = (props) => {
   const clickable = () => !!props.onClick;
+  const display = () => typeof props.value === "number" ? props.value.toLocaleString() : props.value;
   return (
     <div
       class={`text-center min-w-[5rem] ${clickable() ? "cursor-pointer hover:opacity-80" : ""}`}
@@ -73,7 +93,7 @@ const StatTile: Component<{
         props.info ? "text-theme-info" :
         "text-theme-text-primary"
       }`}>
-        {props.value.toLocaleString()}
+        {display()}
       </div>
       <div class={`text-xs text-theme-text-secondary ${clickable() ? "underline decoration-dotted" : ""}`}>
         {props.label}

@@ -2,6 +2,7 @@ import { Component, createSignal, createEffect, onCleanup, Show } from "solid-js
 import { useScan } from "../store/scan";
 import { useSettingsContext } from "./SettingsProvider";
 import { useAuth } from "./AuthProvider";
+import { useStats } from "../store/stats";
 import { api } from "../api/client";
 import type { RebuildStatus } from "../types";
 import DatabaseOverview from "./DatabaseOverview";
@@ -27,6 +28,7 @@ const ScanManager: Component = () => {
   const { scanStatus, scanError, isActive, stopping, startScan, startRegeneration, resetScan, stopScan, stopPolling } = useScan();
   const { settings, saveGeneral } = useSettingsContext();
   const { isAdmin } = useAuth();
+  const { stats } = useStats();
   const [frameFilter, setFrameFilter] = createSignal<FrameFilter>("all");
   const [dbSummary, setDbSummary] = createSignal<import("../types").DbSummary | null>(null);
   const [rebuildState, setRebuildState] = createSignal<RebuildStatus>({
@@ -126,7 +128,7 @@ const ScanManager: Component = () => {
 
   return (
     <div class="space-y-4">
-      <DatabaseOverview summary={dbSummary()} />
+      <DatabaseOverview summary={dbSummary()} storage={stats()?.storage} />
 
       <div class="grid grid-cols-1 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] gap-4 items-start">
         {/* Left column: controls */}
