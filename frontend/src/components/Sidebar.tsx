@@ -89,7 +89,7 @@ const Sidebar: Component = () => {
           </section>
         )}
       </Show>
-      <section class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-3"><SearchBar /></section>
+      <CollapsibleSection id="search" label="Search"><SearchBar /></CollapsibleSection>
       <CollapsibleSection id="object-type" label="Object Type"><ObjectTypeToggles /></CollapsibleSection>
       <CollapsibleSection id="date-range" label="Date Range"><DateRangePicker /></CollapsibleSection>
       <CollapsibleSection id="filters" label="Filters"><FilterToggles /></CollapsibleSection>

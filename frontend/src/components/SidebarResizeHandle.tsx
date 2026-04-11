@@ -1,4 +1,4 @@
-import { Component } from "solid-js";
+import { Component, onCleanup } from "solid-js";
 import { sidebarWidth, setSidebarWidth, setResizing, resetSidebarWidth } from "./sidebarLayout";
 
 const SidebarResizeHandle: Component = () => {
@@ -10,13 +10,19 @@ const SidebarResizeHandle: Component = () => {
     setSidebarWidth(startWidth + dx);
   };
 
-  const onPointerUp = (e: PointerEvent) => {
+  const endDrag = () => {
     setResizing(false);
-    (e.target as HTMLElement).releasePointerCapture?.(e.pointerId);
     window.removeEventListener("pointermove", onPointerMove);
     window.removeEventListener("pointerup", onPointerUp);
     window.removeEventListener("pointercancel", onPointerUp);
   };
+
+  const onPointerUp = (e: PointerEvent) => {
+    (e.target as HTMLElement).releasePointerCapture?.(e.pointerId);
+    endDrag();
+  };
+
+  onCleanup(endDrag);
 
   const onPointerDown = (e: PointerEvent) => {
     e.preventDefault();

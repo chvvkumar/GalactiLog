@@ -10,9 +10,14 @@ function getCollapsedState(): Record<string, boolean> {
     if (raw) return JSON.parse(raw);
     const legacy = localStorage.getItem(LEGACY_KEY);
     if (legacy) {
-      localStorage.setItem(STORAGE_KEY, legacy);
+      let parsed: unknown = null;
+      try { parsed = JSON.parse(legacy); } catch { /* ignore */ }
+      const valid = (parsed && typeof parsed === "object" && !Array.isArray(parsed))
+        ? (parsed as Record<string, boolean>)
+        : {};
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(valid));
       localStorage.removeItem(LEGACY_KEY);
-      return JSON.parse(legacy);
+      return valid;
     }
     return {};
   } catch {
