@@ -11,7 +11,6 @@ import ImagingTimeline from "../components/ImagingTimeline";
 import ImagingCalendar from "../components/ImagingCalendar";
 import TopTargets from "../components/TopTargets";
 import StorageBreakdown from "../components/StorageBreakdown";
-import IngestHistory from "../components/IngestHistory";
 
 const StatisticsPage: Component = () => {
   const { stats } = useStats();
@@ -28,7 +27,7 @@ const StatisticsPage: Component = () => {
         </p>
         <ul class="list-disc list-inside space-y-1">
           <li class="text-sm text-theme-text-secondary">
-            <strong class="text-theme-text-primary">Overview</strong> shows total integration time, number of targets, frames, and total storage, alongside storage breakdown and ingest history widgets.
+            <strong class="text-theme-text-primary">Overview</strong> shows total integration time, number of targets, frames, and a storage breakdown by category.
           </li>
           <li class="text-sm text-theme-text-secondary">
             <strong class="text-theme-text-primary">Equipment Performance</strong> compares imaging quality across telescope/camera combinations.
@@ -53,16 +52,10 @@ const StatisticsPage: Component = () => {
       <Show when={stats()}>
         {(data) => (
           <>
-            <StatsOverview overview={data().overview} />
-
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 [&>*]:border [&>*]:border-theme-border [&>*]:rounded-[var(--radius-md)] [&>*]:shadow-[var(--shadow-sm)]">
-              <StorageBreakdown
-                fitsBytes={data().storage.fits_bytes}
-                thumbnailBytes={data().storage.thumbnail_bytes}
-                databaseBytes={data().storage.database_bytes}
-              />
-              <IngestHistory history={data().ingest_history} />
-            </div>
+            <StatsOverview
+              overview={data().overview}
+              storage={data().storage}
+            />
 
             <EquipmentPerformance combos={data().equipment_performance} />
 
