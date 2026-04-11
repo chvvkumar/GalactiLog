@@ -1,4 +1,4 @@
-import { createMemo, createEffect, onCleanup, Show } from "solid-js";
+import { createMemo, createEffect, createSignal, onCleanup, Show, untrack } from "solid-js";
 import { Chart, LineController, CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Filler } from "chart.js";
 import type { SessionDetail, FrameRecord } from "../types";
 import { useSettingsContext } from "./SettingsProvider";
@@ -6,6 +6,7 @@ import { formatTime } from "../utils/dateTime";
 import { METRIC_DEFINITIONS, getMetricColor, getMetricDef, chartFontSize } from "../utils/chartConfig";
 import MetricTogglePills from "./MetricTogglePills";
 import FilterTogglePills from "./FilterTogglePills";
+import RigTogglePills from "./RigTogglePills";
 
 /** Dash patterns used to distinguish rigs on the same color-coded line. */
 const RIG_DASH_PATTERNS: number[][] = [
@@ -28,6 +29,8 @@ interface Props {
   sessionDetails: Record<string, SessionDetail>;
   expanded: boolean;
   onLoadSession: (date: string) => void;
+  /** Full list of filters available across all sessions for this target. */
+  availableFilters: string[];
 }
 
 /** Sentinel value inserted between sessions to create a visual gap */
@@ -49,31 +52,53 @@ export default function TargetMetricsChart(props: Props) {
     }
   });
 
-  const allFilters = createMemo(() => {
-    const filterSet = new Set<string>();
-    for (const date of props.selectedDates) {
-      const detail = props.sessionDetails[date];
-      if (detail) {
-        for (const fd of detail.filter_details) filterSet.add(fd.filter_name);
-      }
-    }
-    return [...filterSet].sort();
-  });
+  // Target-wide filters (from targetDetail.filters_used). Always shows the
+  // full set for the target regardless of which sessions are currently selected.
+  const allFilters = createMemo(() => [...props.availableFilters].sort());
 
+  // Rigs from every loaded session detail (not just selected), so rig pills
+  // grow as the user expands or selects additional sessions.
   const allRigs = createMemo(() => {
     const rigSet = new Set<string>();
-    for (const date of props.selectedDates) {
-      const detail = props.sessionDetails[date];
-      if (detail) {
-        for (const frame of detail.frames) {
-          if (frame.rig) rigSet.add(frame.rig);
-        }
+    for (const detail of Object.values(props.sessionDetails)) {
+      if (!detail) continue;
+      for (const frame of detail.frames) {
+        if (frame.rig) rigSet.add(frame.rig);
       }
     }
     return [...rigSet].sort();
   });
 
   const isMultiRig = () => allRigs().length > 1;
+
+  const [enabledRigs, setEnabledRigs] = createSignal<string[]>([]);
+  // Tracks rigs previously observed in allRigs() so we can distinguish a newly
+  // discovered rig (default it on) from a rig the user explicitly toggled off.
+  let seenRigs = new Set<string>();
+
+  createEffect(() => {
+    const current = allRigs();
+    untrack(() => {
+      const added = current.filter((r) => !seenRigs.has(r));
+      const stillPresent = (r: string) => current.includes(r);
+      if (added.length > 0) {
+        setEnabledRigs((prev) => [...prev.filter(stillPresent), ...added]);
+      } else {
+        // Drop any enabled rigs that are no longer present.
+        setEnabledRigs((prev) => {
+          const next = prev.filter(stillPresent);
+          return next.length === prev.length ? prev : next;
+        });
+      }
+      seenRigs = new Set(current);
+    });
+  });
+
+  const toggleRig = (rig: string) => {
+    setEnabledRigs((prev) =>
+      prev.includes(rig) ? prev.filter((r) => r !== rig) : [...prev, rig]
+    );
+  };
 
   /** Build arrays of labels + per-metric data, with gaps between sessions */
   const chartFrameData = createMemo(() => {
@@ -156,7 +181,28 @@ export default function TargetMetricsChart(props: Props) {
     const datasets: any[] = [];
 
     const multiRig = isMultiRig();
-    const rigs = multiRig ? allRigs() : [null];
+    const activeRigs = multiRig
+      ? allRigs().filter((r) => enabledRigs().includes(r))
+      : [null];
+    // Preserve rig index from the full rig list so dash patterns remain stable
+    // even when some rigs are toggled off.
+    const allRigList = allRigs();
+
+    // Segment callback that hides line segments crossing a session boundary,
+    // so spanGaps:true connects points within a session (across interleaved
+    // frames from other rigs/filters) but never draws across sessions.
+    const crossesBoundary = (p0Idx: number, p1Idx: number): boolean => {
+      for (const b of sessionBoundaries) {
+        if (b > 0 && p0Idx < b && p1Idx >= b) return true;
+      }
+      return false;
+    };
+    const segmentBreak = {
+      borderColor: (ctx: any) =>
+        crossesBoundary(ctx.p0DataIndex, ctx.p1DataIndex)
+          ? "rgba(0,0,0,0)"
+          : undefined,
+    };
 
     for (const metricKey of enabledMetrics) {
       const def = getMetricDef(metricKey);
@@ -164,8 +210,8 @@ export default function TargetMetricsChart(props: Props) {
       const field = def.frameField as keyof FrameRecord;
       const metricColor = getMetricColor(def.colorVar);
 
-      for (let ri = 0; ri < rigs.length; ri++) {
-        const rig = rigs[ri];
+      for (const rig of activeRigs) {
+        const ri = rig === null ? 0 : allRigList.indexOf(rig);
         const dash = multiRig ? rigDash(ri) : undefined;
         const rigLabel = rig ? ` [${rig}]` : "";
 
@@ -184,7 +230,8 @@ export default function TargetMetricsChart(props: Props) {
             pointRadius: 0,
             pointHitRadius: 8,
             tension: 0.3,
-            spanGaps: false,
+            spanGaps: true,
+            segment: segmentBreak,
             yAxisID: def.yAxisId,
             borderDash: dash,
           });
@@ -206,7 +253,8 @@ export default function TargetMetricsChart(props: Props) {
             pointRadius: 0,
             pointHitRadius: 8,
             tension: 0.3,
-            spanGaps: false,
+            spanGaps: true,
+            segment: segmentBreak,
             yAxisID: def.yAxisId,
             borderDash: dash ?? [4, 2],
           });
@@ -304,6 +352,7 @@ export default function TargetMetricsChart(props: Props) {
     // Track all reactive dependencies
     chartFrameData();
     graphSettings();
+    enabledRigs();
     if (pendingRAF !== null) cancelAnimationFrame(pendingRAF);
     if (props.expanded) {
       pendingRAF = requestAnimationFrame(() => {
@@ -342,8 +391,15 @@ export default function TargetMetricsChart(props: Props) {
         </div>
         <MetricTogglePills availableMetrics={availableMetricKeys()} />
       </div>
-      <div class="mb-3">
+      <div class="mb-3 flex flex-wrap items-center gap-3">
         <FilterTogglePills filters={allFilters()} />
+        <Show when={isMultiRig()}>
+          <RigTogglePills
+            rigs={allRigs()}
+            enabledRigs={enabledRigs()}
+            onToggle={toggleRig}
+          />
+        </Show>
       </div>
       <div style={{ height: "220px" }}>
         <canvas ref={canvasRef} />

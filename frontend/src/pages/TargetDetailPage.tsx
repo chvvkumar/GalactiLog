@@ -369,6 +369,7 @@ const TargetDetailPage: Component = () => {
                     sessionDetails={sessionCache()}
                     expanded={targetChartExpanded()}
                     onLoadSession={loadSessionDetail}
+                    availableFilters={detail().filters_used ?? []}
                   />
                 </Show>
               </div>
