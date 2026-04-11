@@ -135,19 +135,44 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
     filter_map, cam_map, tel_map = await load_alias_maps(session)
 
     # Overview
+    capture_date_col = func.cast(Image.capture_date, Date)
     overview_q = select(
         func.coalesce(func.sum(Image.exposure_time), 0),
         func.count(func.distinct(Image.resolved_target_id)),
         func.count(Image.id),
-    ).where(Image.image_type == "LIGHT")
+        func.count(func.distinct(
+            func.concat(
+                capture_date_col,
+                "|",
+                func.coalesce(Image.telescope, ""),
+                "|",
+                func.coalesce(Image.camera, ""),
+            )
+        )),
+        func.min(capture_date_col),
+        func.max(capture_date_col),
+    ).where(
+        Image.image_type == "LIGHT",
+        Image.capture_date.isnot(None),
+    )
     ov = await session.execute(overview_q)
-    total_seconds, target_count, total_frames = ov.one()
+    (
+        total_seconds,
+        target_count,
+        total_frames,
+        session_count,
+        first_capture_date,
+        last_capture_date,
+    ) = ov.one()
 
     overview = OverviewStats(
         total_integration_seconds=float(total_seconds),
         target_count=target_count,
         total_frames=total_frames,
         disk_usage_bytes=_storage_cache["fits"] + _storage_cache["thumbnails"],
+        session_count=session_count or 0,
+        first_capture_date=first_capture_date.isoformat() if first_capture_date else None,
+        last_capture_date=last_capture_date.isoformat() if last_capture_date else None,
     )
 
     # Equipment

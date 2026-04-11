@@ -99,7 +99,7 @@ const ExportModal: Component<Props> = (props) => {
 
   const toggleAll = () => {
     if (selectedDates().size === props.sessions.length) {
-      setSelectedDates(new Set());
+      setSelectedDates(new Set<string>());
     } else {
       setSelectedDates(new Set(props.sessions.map((s) => s.session_date)));
     }

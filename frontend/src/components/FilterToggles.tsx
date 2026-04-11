@@ -49,8 +49,9 @@ const FilterToggles: Component = () => {
         classList={{
           "ring-1 ring-white/40 brightness-125": active(),
           "opacity-40 hover:opacity-70": !active(),
+          "w-6": name.length <= 1 && !badgeStyle().dot && !grouped,
+          "px-1.5": name.length > 1 || !!badgeStyle().dot || grouped,
         }}
-        classList={{ "w-6": name.length <= 1 && !badgeStyle().dot && !grouped, "px-1.5": name.length > 1 || !!badgeStyle().dot || grouped }}
         style={badgeStyle().style}
         title={grouped ? `${name} (grouped: multiple filter aliases combined)` : name}
       >
