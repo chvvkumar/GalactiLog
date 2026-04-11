@@ -5,6 +5,7 @@ import type { PanelStats } from "../types";
 import { formatIntegration, contentWidthClass } from "../utils/format";
 import { useSettingsContext } from "../components/SettingsProvider";
 import HelpPopover from "../components/HelpPopover";
+import MosaicPanelArranger from "../components/mosaics/MosaicPanelArranger";
 
 const MosaicDetailPage: Component = () => {
   const ctx = useSettingsContext();
@@ -124,61 +125,10 @@ const MosaicDetailPage: Component = () => {
             <Show when={data().panels.some((p: PanelStats) => p.thumbnail_url)}>
               <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
                 <h2 class="text-sm font-semibold text-theme-text-primary">Panels</h2>
-                {(() => {
-                  const n = data().panels.length;
-                  const maxIntegration = Math.max(...data().panels.map((p: PanelStats) => p.total_integration_seconds));
-                  const containerMax = Math.min(n * 280, 1680);
-                  return (
-                    <div
-                      class="grid gap-2 mx-auto"
-                      style={{ "grid-template-columns": `repeat(auto-fit, minmax(220px, 1fr))`, "max-width": `${containerMax}px` }}
-                    >
-                      <For each={[...data().panels].sort((a: PanelStats, b: PanelStats) => {
-                        const na = parseInt(a.panel_label.replace(/\D/g, "")) || a.sort_order;
-                        const nb = parseInt(b.panel_label.replace(/\D/g, "")) || b.sort_order;
-                        return na - nb;
-                      })}>
-                        {(panel: PanelStats) => {
-                          const diff = panel.total_integration_seconds - maxIntegration;
-                          return (
-                            <div>
-                              <div class="relative">
-                                <Show
-                                  when={panel.thumbnail_url}
-                                  fallback={
-                                    <div class="aspect-square bg-theme-elevated border border-theme-border rounded flex items-center justify-center text-theme-text-secondary text-xs">
-                                      {panel.panel_label}
-                                    </div>
-                                  }
-                                >
-                                  <img
-                                    src={api.thumbnailUrl(panel.thumbnail_url!)}
-                                    alt={panel.panel_label}
-                                    class="w-full aspect-square object-cover rounded border border-theme-border"
-                                  />
-                                </Show>
-                                <span class="absolute bottom-1 left-1 bg-black/60 text-white text-caption px-1.5 py-0.5 rounded">
-                                  {panel.panel_label}
-                                </span>
-                              </div>
-                              <div
-                                class="text-center text-caption mt-1 text-theme-text-secondary"
-                                title={diff < 0
-                                  ? `${formatIntegration(Math.abs(diff))} less than the most-imaged panel`
-                                  : "Most integration time across all panels"}
-                              >
-                                {formatIntegration(panel.total_integration_seconds)}
-                                <Show when={diff < 0}>
-                                  <span class="ml-1 text-amber-400">(-{formatIntegration(Math.abs(diff))})</span>
-                                </Show>
-                              </div>
-                            </div>
-                          );
-                        }}
-                      </For>
-                    </div>
-                  );
-                })()}
+                <MosaicPanelArranger
+                  mosaicId={params.mosaicId}
+                  panels={data().panels}
+                />
               </div>
             </Show>
 

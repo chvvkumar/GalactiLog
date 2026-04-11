@@ -13,6 +13,10 @@ class MosaicPanelUpdate(BaseModel):
     panel_label: str | None = None
     sort_order: int | None = None
     object_pattern: str | None = None
+    grid_row: int | None = None
+    grid_col: int | None = None
+    rotation: int | None = None
+    flip_h: bool | None = None
 
 
 class MosaicCreate(BaseModel):
@@ -41,6 +45,10 @@ class PanelStats(BaseModel):
     thumbnail_url: str | None = None
     thumbnail_pier_side: str | None = None
     object_pattern: str | None = None
+    grid_row: int | None = None
+    grid_col: int | None = None
+    rotation: int = 0
+    flip_h: bool = False
 
 
 class MosaicSummary(BaseModel):
