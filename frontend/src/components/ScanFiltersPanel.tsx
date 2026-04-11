@@ -627,6 +627,11 @@ include rule   ^M\\d+$          (regex, folder)`}
         title={
           browsing() === "include" ? "Add include paths" : "Add exclude paths"
         }
+        existing={
+          browsing() === "include"
+            ? filters().include_paths
+            : filters().exclude_paths
+        }
         onCancel={() => setBrowsing(null)}
         onConfirm={(paths) => {
           const key =
