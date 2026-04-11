@@ -1,4 +1,4 @@
-import { createMemo, createEffect, onCleanup, Show } from "solid-js";
+import { createMemo, createEffect, createSignal, onCleanup, Show } from "solid-js";
 import { Chart, LineController, CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Filler } from "chart.js";
 import type { SessionDetail, FrameRecord } from "../types";
 import { useSettingsContext } from "./SettingsProvider";
@@ -6,6 +6,7 @@ import { formatTime } from "../utils/dateTime";
 import { METRIC_DEFINITIONS, getMetricColor, getMetricDef, chartFontSize } from "../utils/chartConfig";
 import MetricTogglePills from "./MetricTogglePills";
 import FilterTogglePills from "./FilterTogglePills";
+import RigTogglePills from "./RigTogglePills";
 
 /** Dash patterns used to distinguish rigs on the same color-coded line. */
 const RIG_DASH_PATTERNS: number[][] = [
@@ -74,6 +75,28 @@ export default function TargetMetricsChart(props: Props) {
   });
 
   const isMultiRig = () => allRigs().length > 1;
+
+  const [enabledRigs, setEnabledRigs] = createSignal<string[]>([]);
+
+  // Keep enabled rigs in sync with rigs present in loaded sessions: drop
+  // missing ones and default newly-seen rigs to enabled.
+  createEffect(() => {
+    const current = allRigs();
+    const prev = enabledRigs();
+    const prevSet = new Set(prev);
+    const kept = prev.filter((r) => current.includes(r));
+    const added = current.filter((r) => !prevSet.has(r));
+    const next = [...kept, ...added];
+    if (next.length !== prev.length || next.some((r, i) => r !== prev[i])) {
+      setEnabledRigs(next);
+    }
+  });
+
+  const toggleRig = (rig: string) => {
+    setEnabledRigs((prev) =>
+      prev.includes(rig) ? prev.filter((r) => r !== rig) : [...prev, rig]
+    );
+  };
 
   /** Build arrays of labels + per-metric data, with gaps between sessions */
   const chartFrameData = createMemo(() => {
@@ -156,7 +179,12 @@ export default function TargetMetricsChart(props: Props) {
     const datasets: any[] = [];
 
     const multiRig = isMultiRig();
-    const rigs = multiRig ? allRigs() : [null];
+    const activeRigs = multiRig
+      ? allRigs().filter((r) => enabledRigs().includes(r))
+      : [null];
+    // Preserve rig index from the full rig list so dash patterns remain stable
+    // even when some rigs are toggled off.
+    const allRigList = allRigs();
 
     for (const metricKey of enabledMetrics) {
       const def = getMetricDef(metricKey);
@@ -164,8 +192,8 @@ export default function TargetMetricsChart(props: Props) {
       const field = def.frameField as keyof FrameRecord;
       const metricColor = getMetricColor(def.colorVar);
 
-      for (let ri = 0; ri < rigs.length; ri++) {
-        const rig = rigs[ri];
+      for (const rig of activeRigs) {
+        const ri = rig === null ? 0 : allRigList.indexOf(rig);
         const dash = multiRig ? rigDash(ri) : undefined;
         const rigLabel = rig ? ` [${rig}]` : "";
 
@@ -304,6 +332,7 @@ export default function TargetMetricsChart(props: Props) {
     // Track all reactive dependencies
     chartFrameData();
     graphSettings();
+    enabledRigs();
     if (pendingRAF !== null) cancelAnimationFrame(pendingRAF);
     if (props.expanded) {
       pendingRAF = requestAnimationFrame(() => {
@@ -342,8 +371,15 @@ export default function TargetMetricsChart(props: Props) {
         </div>
         <MetricTogglePills availableMetrics={availableMetricKeys()} />
       </div>
-      <div class="mb-3">
+      <div class="mb-3 flex flex-wrap items-center gap-3">
         <FilterTogglePills filters={allFilters()} />
+        <Show when={isMultiRig()}>
+          <RigTogglePills
+            rigs={allRigs()}
+            enabledRigs={enabledRigs()}
+            onToggle={toggleRig}
+          />
+        </Show>
       </div>
       <div style={{ height: "220px" }}>
         <canvas ref={canvasRef} />
