@@ -80,7 +80,7 @@
   <tr>
     <td align="center" width="50%">
       <em>Target Metrics -- quality trends across sessions with multi-metric charting</em><br>
-      <img src="images/screenshots/target-session-metrics.png" alt="Target Metrics" width="100%">
+      <img src="images/screenshots/target-metrics.png" alt="Target Metrics" width="100%">
     </td>
     <td align="center" width="50%">
       <em>Session Metrics -- per-frame data table, session insights, and interactive charts</em><br>
@@ -145,16 +145,9 @@
       <img src="images/screenshots/scan-fits-files.png" alt="Scan and Ingest" width="100%">
     </td>
     <td align="center" width="50%">
-      <em>Filter Settings -- duplicate detection, filter grouping, and per-filter frame counts</em><br>
-      <img src="images/screenshots/filters-config-settings.png" alt="Filter Settings" width="100%">
-    </td>
-  </tr>
-  <tr>
-    <td align="center" width="50%">
       <em>Equipment Settings -- duplicate detection, camera and telescope grouping</em><br>
       <img src="images/screenshots/equipment-config-settings.png" alt="Equipment Settings" width="100%">
     </td>
-    <td></td>
   </tr>
 </table>
 
