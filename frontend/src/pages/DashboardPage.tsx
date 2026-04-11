@@ -7,6 +7,8 @@ import DashboardFilterProvider, { hasFilterParams, ALL_PARAM_KEYS } from "../com
 import SidebarRail from "../components/SidebarRail";
 import SidebarResizeHandle from "../components/SidebarResizeHandle";
 import { sidebarWidth, sidebarCollapsed, resizing, RAIL_WIDTH } from "../components/sidebarLayout";
+import { useSettingsContext } from "../components/SettingsProvider";
+import { contentWidthClass } from "../utils/format";
 
 const SESSION_KEY = "dashboard_params";
 
@@ -14,6 +16,7 @@ export const [sidebarOpen, setSidebarOpen] = createSignal(false);
 
 const DashboardPage: Component = () => {
   const [searchParams, setSearchParams] = useSearchParams();
+  const { contentWidth } = useSettingsContext();
 
   onMount(() => {
     if (!hasFilterParams(searchParams)) {
@@ -79,7 +82,7 @@ const DashboardPage: Component = () => {
           <Sidebar />
         </div>
 
-        <main class="flex-1 min-h-[calc(100vh-57px)]">
+        <main class={`flex-1 min-h-[calc(100vh-57px)] ${contentWidthClass(contentWidth())}`}>
           <ScanFiltersOnboarding variant="global" />
           <TargetFeed />
         </main>
