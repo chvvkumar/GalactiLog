@@ -71,6 +71,19 @@ def run_scan(self, include_calibration: bool = True) -> dict:
 
     fits_root = Path(settings.fits_data_path)
 
+    # Load scan filters from user settings
+    from app.services.scan_filters import ScanFilterConfig
+    with Session(_sync_engine) as session:
+        us = session.execute(
+            select(UserSettings).where(UserSettings.id == SETTINGS_ROW_ID)
+        ).scalar_one_or_none()
+        general = (us.general if us else {}) or {}
+    try:
+        filter_config = ScanFilterConfig.from_settings(general, fits_root)
+    except ValueError as exc:
+        logger.error("Invalid scan filters, scanning with no filters: %s", exc)
+        filter_config = ScanFilterConfig(include_paths=[], exclude_paths=[], name_rules=[])
+
     # Dispatch ingest tasks as files are discovered (parallel discovery + ingestion)
     # Calibration filtering is deferred to the ingest phase to avoid opening
     # every file during discovery (costly on NFS).
@@ -81,13 +94,27 @@ def run_scan(self, include_calibration: bool = True) -> dict:
         """Re-ingest a known file whose size or mtime changed on disk."""
         reingest_changed_file.delay(str(path), include_calibration=include_calibration)
 
-    new_files, changed_files, all_disk_paths = scan_directory(
-        fits_root, known_paths=known_paths, known_file_stats=known_file_stats,
-        on_progress=lambda count: set_discovered_sync(_redis, count),
-        is_cancelled=lambda: is_cancel_requested_sync(_redis),
-        on_new_file=_queue_file,
-        on_changed_file=_queue_changed_file,
-    )
+    new_files: list[Path] = []
+    changed_files: list[Path] = []
+    all_disk_paths: set[str] = set()
+
+    for scan_root in filter_config.roots(fits_root):
+        if is_cancel_requested_sync(_redis):
+            break
+        nf, cf, paths = scan_directory(
+            scan_root,
+            known_paths=known_paths,
+            known_file_stats=known_file_stats,
+            on_progress=lambda count: set_discovered_sync(_redis, count),
+            is_cancelled=lambda: is_cancel_requested_sync(_redis),
+            on_new_file=_queue_file,
+            on_changed_file=_queue_changed_file,
+            filter_config=filter_config,
+            fits_root=fits_root,
+        )
+        new_files.extend(nf)
+        changed_files.extend(cf)
+        all_disk_paths.update(paths)
 
     if is_cancel_requested_sync(_redis):
         set_cancelled_sync(_redis)
@@ -108,10 +135,18 @@ def run_scan(self, include_calibration: bool = True) -> dict:
             "timestamp": time.time(),
         })
 
-    # Detect and remove orphaned DB records (files deleted from disk)
-    orphaned_paths = known_paths - all_disk_paths
+    # Detect and remove orphaned DB records (files deleted from disk).
+    # CRITICAL: only consider rows the walker would have actually visited
+    # under the current filter config. When include_paths or excludes narrow
+    # the scan, out-of-scope rows appear "missing from disk" even though the
+    # walker never looked for them. Those must NOT be treated as orphans.
+    in_scope_known_paths = {
+        p for p in known_paths
+        if p and filter_config.should_include_file(Path(p), fits_root)
+    }
+    orphaned_paths = in_scope_known_paths - all_disk_paths
     removed = 0
-    if orphaned_paths and len(orphaned_paths) < len(known_paths) * 0.5:
+    if orphaned_paths and len(orphaned_paths) < max(1, len(in_scope_known_paths)) * 0.5:
         # Safety: only clean up if less than 50% of files appear missing
         # (protects against unmounted shares / unreachable storage)
         with Session(_sync_engine) as session:
@@ -144,14 +179,14 @@ def run_scan(self, include_calibration: bool = True) -> dict:
             })
     elif orphaned_paths:
         logger.warning(
-            "Skipped orphan cleanup: %d of %d files missing (>50%%) - "
+            "Skipped orphan cleanup: %d of %d in-scope files missing (>50%%) - "
             "possible unmounted share or unreachable storage",
-            len(orphaned_paths), len(known_paths),
+            len(orphaned_paths), len(in_scope_known_paths),
         )
         append_activity_sync(_redis, {
             "type": "orphan_warning",
-            "message": f"Orphan cleanup skipped: {len(orphaned_paths)} of {len(known_paths)} files missing (>50%) - possible unmounted share",
-            "details": {"missing": len(orphaned_paths), "total_known": len(known_paths)},
+            "message": f"Orphan cleanup skipped: {len(orphaned_paths)} of {len(in_scope_known_paths)} in-scope files missing (>50%) - possible unmounted share",
+            "details": {"missing": len(orphaned_paths), "total_known": len(in_scope_known_paths)},
             "timestamp": time.time(),
         })
 
@@ -199,6 +234,12 @@ def auto_scan_tick():
         ).scalar_one_or_none()
 
     if row is None or not (row.general or {}).get("auto_scan_enabled", True):
+        return
+
+    # Gate auto-scan on first boot until the user has reviewed scan filters.
+    # The onboarding banner lets them either configure rules or explicitly
+    # accept defaults, which flips this flag. Manual scans remain unaffected.
+    if not (row.general or {}).get("scan_filters_configured"):
         return
 
     interval_minutes = (row.general or {}).get("auto_scan_interval", 240)

@@ -2,6 +2,7 @@ import { Component, onMount, onCleanup, createSignal } from "solid-js";
 import { useSearchParams } from "@solidjs/router";
 import Sidebar from "../components/Sidebar";
 import TargetFeed from "../components/TargetFeed";
+import ScanFiltersOnboarding from "../components/ScanFiltersOnboarding";
 import DashboardFilterProvider, { hasFilterParams, ALL_PARAM_KEYS } from "../components/DashboardFilterProvider";
 
 const SESSION_KEY = "dashboard_params";
@@ -71,6 +72,9 @@ const DashboardPage: Component = () => {
         </div>
 
         <main class="flex-1 min-h-[calc(100vh-57px)]">
+          <div class="px-4 pt-4">
+            <ScanFiltersOnboarding variant="global" />
+          </div>
           <TargetFeed />
         </main>
       </div>

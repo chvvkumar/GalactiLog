@@ -212,7 +212,11 @@ async def update_general(
 ):
     """Update general settings and return the full settings object."""
     row = await _get_or_create_settings(session)
-    row.general = {**payload.model_dump(), "_migrated": True}
+    row.general = {
+        **(row.general or {}),
+        **payload.model_dump(),
+        "_migrated": True,
+    }
     await session.commit()
     await session.refresh(row)
     return _row_to_response(row)

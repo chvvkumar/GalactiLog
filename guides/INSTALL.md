@@ -87,7 +87,7 @@ curl http://localhost:8080/api/scan/status
 
 ### 5. First Scan
 
-Log in and go to **Settings > Scan & Ingest > Start Scan**. GalactiLog discovers FITS files, extracts metadata, generates thumbnails, resolves targets via SIMBAD, and backfills metrics from any N.I.N.A. CSV files. Progress is shown in real-time.
+Log in and go to **Settings > Library > Scan Directory**. GalactiLog discovers FITS files, extracts metadata, generates thumbnails, resolves targets via SIMBAD, and backfills metrics from any N.I.N.A. CSV files. Progress is shown in real-time.
 
 ## Architecture
 
@@ -170,7 +170,7 @@ ports:
 
 ### SIMBAD resolution timeouts
 
-SIMBAD may be slow or temporarily unavailable. Failed lookups are retried on subsequent scans, and resolved targets are cached locally. You can trigger a backfill from Settings > Scan & Ingest > Backfill Targets.
+SIMBAD may be slow or temporarily unavailable. Failed lookups are retried on subsequent scans, and resolved targets are cached locally. You can trigger a backfill from Settings > Library > Backfill Targets.
 
 ### Database connection errors
 

@@ -14,30 +14,7 @@ const ScanControls: Component<{
   const { isAdmin } = useAuth();
 
   return (
-    <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-4 space-y-3">
-      <div class="flex justify-between items-center flex-wrap gap-2">
-        <h3 class="text-theme-text-primary font-medium">Scan & Ingest</h3>
-        <Show when={isAdmin()}>
-          <div class="flex gap-2 flex-shrink-0">
-            <Show when={props.isActive}>
-              <button
-                onClick={props.onStopScan}
-                disabled={props.stopping}
-                class="px-4 py-1.5 border border-theme-error/50 text-theme-error rounded text-sm font-medium hover:bg-theme-error/20 transition-colors disabled:opacity-50"
-              >
-                {props.stopping ? "Stopping..." : "Stop"}
-              </button>
-            </Show>
-            <button
-              onClick={props.onStartScan}
-              disabled={props.isActive}
-              class="px-4 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded text-sm font-medium disabled:opacity-50 hover:bg-theme-accent/25 transition-colors"
-            >
-              {props.isActive ? (props.stopping ? "Stopping..." : "Scanning...") : "Scan Directory"}
-            </button>
-          </div>
-        </Show>
-      </div>
+    <>
       <div class="flex items-center gap-4 text-sm flex-wrap">
         <span class="text-theme-text-secondary text-xs">Include:</span>
         <label class="flex items-center gap-1.5 cursor-pointer">
@@ -67,7 +44,27 @@ const ScanControls: Component<{
           </span>
         </label>
       </div>
-    </div>
+      <Show when={isAdmin()}>
+        <div class="flex gap-2 flex-shrink-0 ml-auto">
+          <Show when={props.isActive}>
+            <button
+              onClick={props.onStopScan}
+              disabled={props.stopping}
+              class="px-4 py-1.5 border border-theme-error/50 text-theme-error rounded text-sm font-medium hover:bg-theme-error/20 transition-colors disabled:opacity-50"
+            >
+              {props.stopping ? "Stopping..." : "Stop"}
+            </button>
+          </Show>
+          <button
+            onClick={props.onStartScan}
+            disabled={props.isActive}
+            class="px-4 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded text-sm font-medium disabled:opacity-50 hover:bg-theme-accent/25 transition-colors"
+          >
+            {props.isActive ? (props.stopping ? "Stopping..." : "Scanning...") : "Scan Directory"}
+          </button>
+        </div>
+      </Show>
+    </>
   );
 };
 
