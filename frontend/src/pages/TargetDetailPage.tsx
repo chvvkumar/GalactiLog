@@ -74,7 +74,7 @@ const TargetDetailPage: Component = () => {
     const detail = targetDetail();
     if (detail && !chartDatesInitialized) {
       chartDatesInitialized = true;
-      setSelectedChartDates(detail.sessions.map((s) => s.session_date));
+      setSelectedChartDates(detail.sessions.slice(0, 1).map((s) => s.session_date));
     }
   });
 

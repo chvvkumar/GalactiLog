@@ -6,7 +6,20 @@ import { formatTime } from "../utils/dateTime";
 import { METRIC_DEFINITIONS, getMetricColor, getMetricDef, chartFontSize } from "../utils/chartConfig";
 import MetricTogglePills from "./MetricTogglePills";
 import FilterTogglePills from "./FilterTogglePills";
-import { rigColor } from "./RigTogglePills";
+
+/** Dash patterns used to distinguish rigs on the same color-coded line. */
+const RIG_DASH_PATTERNS: number[][] = [
+  [],            // rig 0: solid
+  [6, 3],        // rig 1: long dash
+  [2, 2],        // rig 2: dotted
+  [8, 3, 2, 3],  // rig 3: dash-dot
+  [1, 2],        // rig 4: fine dots
+  [10, 4, 2, 4], // rig 5: long-short
+];
+
+function rigDash(index: number): number[] {
+  return RIG_DASH_PATTERNS[index % RIG_DASH_PATTERNS.length];
+}
 
 Chart.register(LineController, CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Filler);
 
@@ -142,61 +155,29 @@ export default function TargetMetricsChart(props: Props) {
     const { labels, framesByIndex, sessionBoundaries } = chartFrameData();
     const datasets: any[] = [];
 
+    const multiRig = isMultiRig();
+    const rigs = multiRig ? allRigs() : [null];
+
     for (const metricKey of enabledMetrics) {
       const def = getMetricDef(metricKey);
       if (!def) continue;
       const field = def.frameField as keyof FrameRecord;
       const metricColor = getMetricColor(def.colorVar);
 
-      if (isMultiRig()) {
-        const rigs = allRigs();
-        for (let ri = 0; ri < rigs.length; ri++) {
-          const rig = rigs[ri];
-          const color = rigColor(ri);
+      for (let ri = 0; ri < rigs.length; ri++) {
+        const rig = rigs[ri];
+        const dash = multiRig ? rigDash(ri) : undefined;
+        const rigLabel = rig ? ` [${rig}]` : "";
 
-          if (enabledFilters.includes("overall")) {
-            datasets.push({
-              label: `${def.label} (${rig})`,
-              data: framesByIndex.map((f) =>
-                f && f.rig === rig ? ((f[field] as number | null) ?? null) : null
-              ),
-              borderColor: color,
-              backgroundColor: `${color}33`,
-              borderWidth: 1.5,
-              pointRadius: 0,
-              pointHitRadius: 8,
-              tension: 0.3,
-              spanGaps: false,
-              yAxisID: def.yAxisId,
-            });
-          }
+        const matchesRig = (f: FrameRecord | null): f is FrameRecord =>
+          !!f && (rig === null || f.rig === rig);
 
-          for (const filterName of enabledFilters) {
-            if (filterName === "overall") continue;
-            datasets.push({
-              label: `${def.label} (${rig} / ${filterName})`,
-              data: framesByIndex.map((f) =>
-                f && f.rig === rig && f.filter_used === filterName
-                  ? ((f[field] as number | null) ?? null)
-                  : null
-              ),
-              borderColor: color,
-              backgroundColor: `${color}33`,
-              borderWidth: 1.5,
-              pointRadius: 0,
-              pointHitRadius: 8,
-              tension: 0.3,
-              spanGaps: false,
-              yAxisID: def.yAxisId,
-              borderDash: [4, 2],
-            });
-          }
-        }
-      } else {
         if (enabledFilters.includes("overall")) {
           datasets.push({
-            label: def.label,
-            data: framesByIndex.map((f) => f ? ((f[field] as number | null) ?? null) : null),
+            label: `${def.label}${rigLabel}`,
+            data: framesByIndex.map((f) =>
+              matchesRig(f) ? ((f[field] as number | null) ?? null) : null
+            ),
             borderColor: metricColor,
             backgroundColor: `${metricColor}33`,
             borderWidth: 1.5,
@@ -205,6 +186,7 @@ export default function TargetMetricsChart(props: Props) {
             tension: 0.3,
             spanGaps: false,
             yAxisID: def.yAxisId,
+            borderDash: dash,
           });
         }
 
@@ -212,9 +194,11 @@ export default function TargetMetricsChart(props: Props) {
           if (filterName === "overall") continue;
           const fColor = filterColorMap()[filterName] ?? metricColor;
           datasets.push({
-            label: `${def.label} (${filterName})`,
+            label: `${def.label} (${filterName})${rigLabel}`,
             data: framesByIndex.map((f) =>
-              f && f.filter_used === filterName ? ((f[field] as number | null) ?? null) : null
+              matchesRig(f) && f.filter_used === filterName
+                ? ((f[field] as number | null) ?? null)
+                : null
             ),
             borderColor: fColor,
             backgroundColor: `${fColor}33`,
@@ -224,7 +208,7 @@ export default function TargetMetricsChart(props: Props) {
             tension: 0.3,
             spanGaps: false,
             yAxisID: def.yAxisId,
-            borderDash: [4, 2],
+            borderDash: dash ?? [4, 2],
           });
         }
       }
