@@ -10,7 +10,7 @@ import ExportModal from "../components/ExportModal";
 import { useSettingsContext } from "../components/SettingsProvider";
 import { isFieldVisible } from "../utils/displaySettings";
 import { contentWidthClass } from "../utils/format";
-import SettingsHelpSection from "../components/settings/SettingsHelpSection";
+import HelpPopover from "../components/HelpPopover";
 import { timezoneLabel } from "../utils/dateTime";
 
 import { formatIntegration } from "../utils/format";
@@ -173,14 +173,31 @@ const TargetDetailPage: Component = () => {
 
       <Show when={targetDetail()}>
         {(detail) => (
-          <>
+          <div class="px-4 sm:px-6 py-4 sm:py-5">
+            <div class="rounded-[var(--radius-md)] bg-theme-surface border border-theme-border p-4 space-y-6">
             {/* Target Hero */}
-            <div class="px-4 sm:px-6 py-4 sm:py-5 border-b border-theme-border">
-              <div class="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-2">
+            <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
+              <div>
                 <div>
-                  <h1 class="text-2xl font-semibold tracking-tight text-theme-text-primary">
-                    {detail().primary_name}
-                  </h1>
+                  <div class="flex items-center gap-2">
+                    <h1 class="text-2xl font-semibold tracking-tight text-theme-text-primary">
+                      {detail().primary_name}
+                    </h1>
+                    <HelpPopover>
+                      <p class="text-sm text-theme-text-secondary">
+                        The Target Detail page shows everything GalactiLog knows about a single imaging target.
+                      </p>
+                      <p class="text-sm text-theme-text-secondary">
+                        The header displays the resolved object name, coordinates, object type, and angular size from SIMBAD when available.
+                      </p>
+                      <ul class="list-disc list-inside space-y-1 text-sm text-theme-text-secondary">
+                        <li><strong class="text-theme-text-primary">Integration summary</strong> shows total exposure time, frame counts, and filter breakdown.</li>
+                        <li><strong class="text-theme-text-primary">Charts</strong> visualize quality metrics (HFR, FWHM, guiding RMS, etc.) across sessions. Click the chart header to expand or collapse it.</li>
+                        <li><strong class="text-theme-text-primary">Sessions</strong> are listed as expandable cards. Each card shows per-session metrics, and expanding it reveals individual frame details with all recorded FITS header data.</li>
+                        <li>Use the <strong class="text-theme-text-primary">Export</strong> button to generate AstroBin-compatible CSV files for your imaging data.</li>
+                      </ul>
+                    </HelpPopover>
+                  </div>
                   <div class="text-xs text-theme-text-secondary mt-1 flex flex-wrap gap-x-2 gap-y-0.5">
                     <Show when={detail().object_category}>
                       <span>{detail().object_category}</span>
@@ -211,20 +228,6 @@ const TargetDetailPage: Component = () => {
                     <Show when={detail().aliases.length > 1}>
                       <span>· Aliases: {detail().aliases.slice(1).join(", ")}</span>
                     </Show>
-                  </div>
-                </div>
-                <div class="flex items-start gap-2">
-                  <button
-                    class="text-xs px-2.5 py-1 bg-theme-elevated border border-theme-border rounded hover:bg-theme-surface transition-colors text-theme-text-primary"
-                    onClick={() => setShowExport(true)}
-                  >
-                    Export
-                  </button>
-                  <div class="text-left sm:text-right text-xs text-theme-text-secondary">
-                    <div>{detail().session_count} sessions</div>
-                    <div class="mt-0.5">
-                      {detail().first_session_date} → {detail().last_session_date} ({tzLabel()})
-                    </div>
                   </div>
                 </div>
               </div>
@@ -285,29 +288,25 @@ const TargetDetailPage: Component = () => {
                   </div>
                   <div class="text-caption text-theme-text-secondary">Filters Used</div>
                 </div>
+                <div class="ml-auto flex flex-col items-start sm:items-end gap-2 shrink-0 self-center">
+                  <button
+                    class="px-4 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded text-sm font-medium hover:bg-theme-accent/25 transition-colors"
+                    onClick={() => setShowExport(true)}
+                  >
+                    Export
+                  </button>
+                  <div class="text-left sm:text-right text-xs text-theme-text-secondary">
+                    <div>{detail().session_count} sessions</div>
+                    <div class="mt-0.5">
+                      {detail().first_session_date} → {detail().last_session_date} ({tzLabel()})
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
 
-            {/* Help Section */}
-            <div class="px-4 sm:px-6 pt-4">
-              <SettingsHelpSection tabId="target-detail">
-                <p class="text-sm text-theme-text-secondary">
-                  The Target Detail page shows everything GalactiLog knows about a single imaging target.
-                </p>
-                <p class="text-sm text-theme-text-secondary">
-                  The header displays the resolved object name, coordinates, object type, and angular size from SIMBAD when available.
-                </p>
-                <ul class="list-disc list-inside space-y-1 text-sm text-theme-text-secondary">
-                  <li><strong class="text-theme-text-primary">Integration summary</strong> shows total exposure time, frame counts, and filter breakdown.</li>
-                  <li><strong class="text-theme-text-primary">Charts</strong> visualize quality metrics (HFR, FWHM, guiding RMS, etc.) across sessions. Click the chart header to expand or collapse it.</li>
-                  <li><strong class="text-theme-text-primary">Sessions</strong> are listed as expandable cards. Each card shows per-session metrics, and expanding it reveals individual frame details with all recorded FITS header data.</li>
-                  <li>Use the <strong class="text-theme-text-primary">Export</strong> button to generate AstroBin-compatible CSV files for your imaging data.</li>
-                </ul>
-              </SettingsHelpSection>
-            </div>
-
             {/* Target Notes */}
-            <div class="px-4 sm:px-6 pt-4">
+            <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4">
               <button
                 class="flex items-center justify-between w-full py-2 cursor-pointer group"
                 onClick={() => setNotesExpanded((v) => !v)}
@@ -347,7 +346,7 @@ const TargetDetailPage: Component = () => {
 
             {/* Target Metrics Chart */}
             <Show when={targetDetail()}>
-              <div class="px-4 sm:px-6 pt-4">
+              <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4">
                 <button
                   class="flex items-center justify-between w-full py-2 cursor-pointer group"
                   onClick={toggleTargetChart}
@@ -376,7 +375,9 @@ const TargetDetailPage: Component = () => {
             </Show>
 
             {/* Session Table */}
-            <div class="px-4 sm:px-6 py-4 overflow-x-auto">
+            <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
+              <h2 class="text-sm font-semibold text-theme-text-primary">Sessions</h2>
+              <div class="overflow-x-auto">
               <table class="w-full border-collapse min-w-[600px]">
                 <thead>
                   <tr class="text-caption text-theme-text-tertiary uppercase tracking-wider border-b border-theme-border-em">
@@ -453,8 +454,10 @@ const TargetDetailPage: Component = () => {
                   </For>
                 </tbody>
               </table>
+              </div>
             </div>
-          </>
+            </div>
+          </div>
         )}
       </Show>
     </div>

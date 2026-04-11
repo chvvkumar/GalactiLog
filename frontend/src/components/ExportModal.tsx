@@ -14,16 +14,38 @@ function generateTextExport(data: ExportResponse): string {
   lines.push(`Dates: ${data.dates.join(", ")}`);
   lines.push("");
 
-  // Aggregate by (filter, exposure) across all dates
-  const byFilterExp = new Map<string, { frames: number; exposure: number; total: number; gain: number | null; temp: number | null }>();
+  for (const info of aggregateByFilterExposure(data)) {
+    let line = `${info.filter}: ${info.frames} x ${info.exposure}s (${formatIntegration(info.total)})`;
+    if (info.gain != null) line += ` | Gain ${info.gain}`;
+    if (info.temp != null) line += ` | ${info.temp}\u00b0C`;
+    lines.push(line);
+  }
+
+  lines.push("");
+  lines.push(`Total integration: ${formatIntegration(data.total_integration_seconds)}`);
+  return lines.join("\n");
+}
+
+interface AggregatedRow {
+  filter: string;
+  frames: number;
+  exposure: number;
+  total: number;
+  gain: number | null;
+  temp: number | null;
+}
+
+function aggregateByFilterExposure(data: ExportResponse): AggregatedRow[] {
+  const byKey = new Map<string, AggregatedRow>();
   for (const row of data.rows) {
     const key = `${row.filter_name}|${row.exposure}`;
-    const existing = byFilterExp.get(key);
+    const existing = byKey.get(key);
     if (existing) {
       existing.frames += row.frames;
       existing.total += row.total_seconds;
     } else {
-      byFilterExp.set(key, {
+      byKey.set(key, {
+        filter: row.filter_name,
         frames: row.frames,
         exposure: row.exposure,
         total: row.total_seconds,
@@ -32,17 +54,52 @@ function generateTextExport(data: ExportResponse): string {
       });
     }
   }
+  return [...byKey.values()];
+}
 
-  for (const [key, info] of byFilterExp) {
-    const filter = key.split("|")[0];
-    let line = `${filter}: ${info.frames} x ${info.exposure}s (${formatIntegration(info.total)})`;
+function generateMarkdownExport(data: ExportResponse): string {
+  const lines: string[] = [];
+  const name = data.catalog_id ? `${data.target_name} (${data.catalog_id})` : data.target_name;
+  lines.push(`# ${name}`);
+  lines.push("");
+
+  const equipStr = data.equipment.map((e) => `${e.telescope || "?"} + ${e.camera || "?"}`).join(", ");
+  lines.push(`**Equipment:** ${equipStr}`);
+  lines.push(`**Dates:** ${data.dates.join(", ")}`);
+  lines.push(`**Total integration:** ${formatIntegration(data.total_integration_seconds)}`);
+  lines.push("");
+
+  lines.push("| Filter | Frames | Exposure | Total | Gain | Temp |");
+  lines.push("|---|---|---|---|---|---|");
+  for (const info of aggregateByFilterExposure(data)) {
+    const gain = info.gain != null ? String(info.gain) : "";
+    const temp = info.temp != null ? `${info.temp}\u00b0C` : "";
+    lines.push(`| ${info.filter} | ${info.frames} | ${info.exposure}s | ${formatIntegration(info.total)} | ${gain} | ${temp} |`);
+  }
+
+  return lines.join("\n");
+}
+
+function generateBbcodeExport(data: ExportResponse): string {
+  const lines: string[] = [];
+  const name = data.catalog_id ? `${data.target_name} (${data.catalog_id})` : data.target_name;
+  lines.push(`[b]${name}[/b]`);
+
+  const equipStr = data.equipment.map((e) => `${e.telescope || "?"} + ${e.camera || "?"}`).join(", ");
+  lines.push(`Equipment: ${equipStr}`);
+  lines.push(`Dates: ${data.dates.join(", ")}`);
+  lines.push("");
+
+  lines.push("[list]");
+  for (const info of aggregateByFilterExposure(data)) {
+    let line = `[*]${info.filter}: ${info.frames} x ${info.exposure}s (${formatIntegration(info.total)})`;
     if (info.gain != null) line += ` | Gain ${info.gain}`;
     if (info.temp != null) line += ` | ${info.temp}\u00b0C`;
     lines.push(line);
   }
-
+  lines.push("[/list]");
   lines.push("");
-  lines.push(`Total integration: ${formatIntegration(data.total_integration_seconds)}`);
+  lines.push(`[b]Total integration:[/b] ${formatIntegration(data.total_integration_seconds)}`);
   return lines.join("\n");
 }
 
@@ -78,10 +135,43 @@ interface Props {
   onClose: () => void;
 }
 
+type ExportFormat = "text" | "markdown" | "bbcode" | "csv";
+
+const FORMATS: { value: ExportFormat; label: string }[] = [
+  { value: "text", label: "Text" },
+  { value: "markdown", label: "Markdown" },
+  { value: "bbcode", label: "BBCode" },
+  { value: "csv", label: "CSV" },
+];
+
+function renderExport(format: ExportFormat, data: ExportResponse): string {
+  switch (format) {
+    case "markdown": return generateMarkdownExport(data);
+    case "bbcode": return generateBbcodeExport(data);
+    case "csv": return generateCsvExport(data);
+    default: return generateTextExport(data);
+  }
+}
+
+const FORMAT_FILE_EXT: Record<ExportFormat, string> = {
+  text: "txt",
+  markdown: "md",
+  bbcode: "txt",
+  csv: "csv",
+};
+
+const FORMAT_MIME: Record<ExportFormat, string> = {
+  text: "text/plain",
+  markdown: "text/markdown",
+  bbcode: "text/plain",
+  csv: "text/csv",
+};
+
 const ExportModal: Component<Props> = (props) => {
   const [selectedDates, setSelectedDates] = createSignal<Set<string>>(
     new Set(props.sessions.map((s) => s.session_date))
   );
+  const [format, setFormat] = createSignal<ExportFormat>("text");
   const [copied, setCopied] = createSignal(false);
 
   const sessionList = () => selectedDates().size > 0 ? [...selectedDates()] : undefined;
@@ -108,20 +198,22 @@ const ExportModal: Component<Props> = (props) => {
   const copyText = async () => {
     const data = exportData();
     if (!data) return;
-    await navigator.clipboard.writeText(generateTextExport(data));
+    await navigator.clipboard.writeText(renderExport(format(), data));
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const downloadCsv = () => {
+  const downloadFile = () => {
     const data = exportData();
     if (!data) return;
-    const csv = generateCsvExport(data);
-    const blob = new Blob([csv], { type: "text/csv" });
+    const fmt = format();
+    const content = renderExport(fmt, data);
+    const blob = new Blob([content], { type: FORMAT_MIME[fmt] });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `${props.targetName.replace(/[^a-zA-Z0-9]/g, "_")}_acquisition.csv`;
+    const safeName = props.targetName.replace(/[^a-zA-Z0-9]/g, "_");
+    a.download = `${safeName}_acquisition.${FORMAT_FILE_EXT[fmt]}`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -166,11 +258,32 @@ const ExportModal: Component<Props> = (props) => {
             </div>
           </div>
 
+          {/* Format selector */}
+          <div>
+            <div class="text-xs font-medium text-theme-text-secondary uppercase tracking-wide mb-2">Format</div>
+            <div class="flex flex-wrap gap-1">
+              <For each={FORMATS}>
+                {(f) => (
+                  <button
+                    class={`text-xs px-3 py-1 rounded border transition-colors ${
+                      format() === f.value
+                        ? "bg-theme-accent/15 text-theme-accent border-theme-accent/30"
+                        : "bg-theme-elevated text-theme-text-secondary border-theme-border hover:text-theme-text-primary"
+                    }`}
+                    onClick={() => setFormat(f.value)}
+                  >
+                    {f.label}
+                  </button>
+                )}
+              </For>
+            </div>
+          </div>
+
           {/* Preview */}
           <Show when={exportData()}>
             {(data) => (
               <div class="bg-theme-elevated rounded p-3 text-xs text-theme-text-primary font-mono whitespace-pre-wrap max-h-48 overflow-y-auto">
-                {generateTextExport(data())}
+                {renderExport(format(), data())}
               </div>
             )}
           </Show>
@@ -196,9 +309,9 @@ const ExportModal: Component<Props> = (props) => {
           <button
             class="text-xs px-3 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded font-medium hover:bg-theme-accent/25 transition-colors disabled:opacity-50"
             disabled={!exportData() || selectedDates().size === 0}
-            onClick={downloadCsv}
+            onClick={downloadFile}
           >
-            Download CSV
+            Download {format().toUpperCase()}
           </button>
         </div>
       </div>

@@ -79,96 +79,102 @@ const TargetFeed: Component = () => {
         </div>
       </Show>
 
-      {/* Skeleton: shown on initial load (no data yet) */}
-      <Show when={targetData.loading && !displayData()}>
-        {/* Desktop skeleton */}
-        <div class="overflow-x-auto hidden md:block">
-          <table class="w-full text-sm">
-            <thead><tr class="border-b border-theme-border text-left">
-              <th class="p-3 text-xs text-theme-text-secondary">Target</th>
-              <th class="p-3 text-xs text-theme-text-secondary">Designation</th>
-              <th class="p-3 text-xs text-theme-text-secondary">Palette</th>
-              <th class="p-3 text-xs text-theme-text-secondary">Integration</th>
-              <th class="p-3 text-xs text-theme-text-secondary">Equipment</th>
-              <th class="p-3 text-xs text-theme-text-secondary">Last Session</th>
-              <th class="p-3" />
-            </tr></thead>
-            <tbody>
-              <For each={Array(pageSize())}>{() => <SkeletonRow />}</For>
-            </tbody>
-          </table>
-        </div>
-        {/* Mobile skeleton */}
-        <div class="md:hidden">
-          <For each={Array(pageSize())}>{() => <SkeletonCard />}</For>
-        </div>
-      </Show>
-
-      <Show when={displayData()}>
-        {(data) => (
-          <Show
-            when={data().targets.length > 0}
-            fallback={<div class="text-center text-theme-text-secondary py-8">No targets match your filters</div>}
-          >
-            <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 mb-2 px-1">
-              <div class="flex items-center gap-3">
-                <span class="text-xs text-theme-text-tertiary">
-                  Showing {showingRange().start}-{showingRange().end} of {totalCount()} targets
-                </span>
-                <select
-                  value={pageSize()}
-                  onChange={(e) => setPageSize(Number(e.currentTarget.value))}
-                  class="px-2 py-1 text-xs rounded border border-theme-border bg-theme-input text-theme-text-secondary cursor-pointer transition-colors hover:border-theme-border-em"
-                >
-                  <For each={PAGE_SIZES}>
-                    {(size) => <option value={size}>{size} / page</option>}
-                  </For>
-                </select>
+      <Show when={targetData.loading || displayData()}>
+        <div class="space-y-3">
+          {/* Skeleton: shown on initial load (no data yet) */}
+          <Show when={targetData.loading && !displayData()}>
+            <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-3">
+              {/* Desktop skeleton */}
+              <div class="overflow-x-auto hidden md:block">
+                <table class="w-full text-sm">
+                  <thead><tr class="border-b border-theme-border text-left">
+                    <th class="p-3 text-xs text-theme-text-secondary">Target</th>
+                    <th class="p-3 text-xs text-theme-text-secondary">Designation</th>
+                    <th class="p-3 text-xs text-theme-text-secondary">Palette</th>
+                    <th class="p-3 text-xs text-theme-text-secondary">Integration</th>
+                    <th class="p-3 text-xs text-theme-text-secondary">Equipment</th>
+                    <th class="p-3 text-xs text-theme-text-secondary">Last Session</th>
+                    <th class="p-3" />
+                  </tr></thead>
+                  <tbody>
+                    <For each={Array(pageSize())}>{() => <SkeletonRow />}</For>
+                  </tbody>
+                </table>
               </div>
-              <Show when={totalPages() > 1}>
-                <div class="flex items-center gap-1">
-                  <button
-                    onClick={() => setPage(page() - 1)}
-                    disabled={page() <= 1}
-                    class="px-2 py-1 text-xs rounded border border-theme-border text-theme-text-secondary hover:bg-theme-elevated disabled:opacity-30 disabled:cursor-default transition-colors"
-                  >
-                    Prev
-                  </button>
-                  <For each={pageRange()}>
-                    {(p) => (
-                      <Show
-                        when={p !== "..."}
-                        fallback={<span class="px-1 text-xs text-theme-text-tertiary">...</span>}
-                      >
-                        <button
-                          onClick={() => setPage(p as number)}
-                          class={`px-2 py-1 text-xs rounded border transition-colors ${
-                            page() === p
-                              ? "border-theme-accent bg-theme-accent/10 text-theme-accent font-medium"
-                              : "border-theme-border text-theme-text-secondary hover:bg-theme-elevated"
-                          }`}
-                        >
-                          {p}
-                        </button>
-                      </Show>
-                    )}
-                  </For>
-                  <button
-                    onClick={() => setPage(page() + 1)}
-                    disabled={page() >= totalPages()}
-                    class="px-2 py-1 text-xs rounded border border-theme-border text-theme-text-secondary hover:bg-theme-elevated disabled:opacity-30 disabled:cursor-default transition-colors"
-                  >
-                    Next
-                  </button>
-                </div>
-              </Show>
-            </div>
-
-            <div class={targetData.loading && !fetchError() ? "opacity-50 pointer-events-none transition-opacity" : "transition-opacity"}>
-              <TargetTable targets={data().targets} />
+              {/* Mobile skeleton */}
+              <div class="md:hidden">
+                <For each={Array(pageSize())}>{() => <SkeletonCard />}</For>
+              </div>
             </div>
           </Show>
-        )}
+
+          <Show when={displayData()}>
+            {(data) => (
+              <Show
+                when={data().targets.length > 0}
+                fallback={<div class="text-center text-theme-text-secondary py-8">No targets match your filters</div>}
+              >
+                <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+                  <div class="flex items-center gap-3">
+                    <span class="text-xs text-theme-text-tertiary">
+                      Showing {showingRange().start}-{showingRange().end} of {totalCount()} targets
+                    </span>
+                    <select
+                      value={pageSize()}
+                      onChange={(e) => setPageSize(Number(e.currentTarget.value))}
+                      class="px-2 py-1 text-xs rounded border border-theme-border bg-theme-input text-theme-text-secondary cursor-pointer transition-colors hover:border-theme-border-em"
+                    >
+                      <For each={PAGE_SIZES}>
+                        {(size) => <option value={size}>{size} / page</option>}
+                      </For>
+                    </select>
+                  </div>
+                  <Show when={totalPages() > 1}>
+                    <div class="flex items-center gap-1">
+                      <button
+                        onClick={() => setPage(page() - 1)}
+                        disabled={page() <= 1}
+                        class="px-2 py-1 text-xs rounded border border-theme-border text-theme-text-secondary hover:bg-theme-elevated disabled:opacity-30 disabled:cursor-default transition-colors"
+                      >
+                        Prev
+                      </button>
+                      <For each={pageRange()}>
+                        {(p) => (
+                          <Show
+                            when={p !== "..."}
+                            fallback={<span class="px-1 text-xs text-theme-text-tertiary">...</span>}
+                          >
+                            <button
+                              onClick={() => setPage(p as number)}
+                              class={`px-2 py-1 text-xs rounded border transition-colors ${
+                                page() === p
+                                  ? "border-theme-accent bg-theme-accent/10 text-theme-accent font-medium"
+                                  : "border-theme-border text-theme-text-secondary hover:bg-theme-elevated"
+                              }`}
+                            >
+                              {p}
+                            </button>
+                          </Show>
+                        )}
+                      </For>
+                      <button
+                        onClick={() => setPage(page() + 1)}
+                        disabled={page() >= totalPages()}
+                        class="px-2 py-1 text-xs rounded border border-theme-border text-theme-text-secondary hover:bg-theme-elevated disabled:opacity-30 disabled:cursor-default transition-colors"
+                      >
+                        Next
+                      </button>
+                    </div>
+                  </Show>
+                </div>
+
+                <div class={`rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-3 ${targetData.loading && !fetchError() ? "opacity-50 pointer-events-none transition-opacity" : "transition-opacity"}`}>
+                  <TargetTable targets={data().targets} />
+                </div>
+              </Show>
+            )}
+          </Show>
+        </div>
       </Show>
     </div>
   );

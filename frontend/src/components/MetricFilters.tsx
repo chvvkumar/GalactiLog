@@ -5,6 +5,7 @@ import { debounce } from "../utils/debounce";
 
 // Metric field definitions: key -> { label, step, isInt? }
 const METRIC_FIELDS: Record<string, { label: string; step: number; isInt?: boolean }> = {
+  hfr: { label: "HFR", step: 0.1 },
   fwhm: { label: "FWHM", step: 0.1 },
   eccentricity: { label: "Eccentricity", step: 0.01 },
   stars: { label: "Detected Stars", step: 1, isInt: true },
@@ -18,7 +19,7 @@ const METRIC_FIELDS: Record<string, { label: string; step: number; isInt?: boole
 
 // Group definitions: group key -> { label, fields (metric keys) }
 const GROUPS: { key: string; label: string; fields: string[] }[] = [
-  { key: "quality", label: "Quality", fields: ["fwhm", "eccentricity", "stars"] },
+  { key: "quality", label: "Quality", fields: ["hfr", "fwhm", "eccentricity", "stars"] },
   { key: "guiding", label: "Guiding", fields: ["guiding_rms"] },
   { key: "adu", label: "ADU", fields: ["adu_mean"] },
   { key: "focuser", label: "Focuser", fields: ["focuser_temp"] },
@@ -67,7 +68,7 @@ const MetricRow: Component<MetricRowProps> = (props) => {
             apply(e.currentTarget.value, maxVal());
           }}
           placeholder="Min"
-          class="w-full px-2 py-1.5 bg-theme-input border border-theme-border rounded-[var(--radius-sm)] text-xs text-theme-text-primary placeholder:text-theme-text-tertiary focus:ring-1 focus:ring-theme-accent focus:border-theme-accent outline-none"
+          class="w-full px-2 py-1.5 bg-theme-input border border-theme-border rounded-[var(--radius-sm)] text-xs text-theme-text-primary placeholder:text-theme-text-tertiary focus:border-theme-accent outline-none"
         />
         <span class="text-theme-text-secondary text-xs">&ndash;</span>
         <input
@@ -79,7 +80,7 @@ const MetricRow: Component<MetricRowProps> = (props) => {
             apply(minVal(), e.currentTarget.value);
           }}
           placeholder="Max"
-          class="w-full px-2 py-1.5 bg-theme-input border border-theme-border rounded-[var(--radius-sm)] text-xs text-theme-text-primary placeholder:text-theme-text-tertiary focus:ring-1 focus:ring-theme-accent focus:border-theme-accent outline-none"
+          class="w-full px-2 py-1.5 bg-theme-input border border-theme-border rounded-[var(--radius-sm)] text-xs text-theme-text-primary placeholder:text-theme-text-tertiary focus:border-theme-accent outline-none"
         />
       </div>
     </div>
@@ -87,7 +88,7 @@ const MetricRow: Component<MetricRowProps> = (props) => {
 };
 
 const MetricFilters: Component = () => {
-  const { filters, updateMetricFilter } = useDashboardFilters();
+  const { filters, updateMetricFilter, updateQualityFilters } = useDashboardFilters();
   const { displaySettings } = useSettingsContext();
 
   const [groupOpen, setGroupOpen] = createSignal<Record<string, boolean>>({});
@@ -153,6 +154,21 @@ const MetricFilters: Component = () => {
                           {(fieldKey) => {
                             const def = METRIC_FIELDS[fieldKey];
                             if (!def) return null;
+                            if (fieldKey === "hfr") {
+                              const qf = () => filters().qualityFilters;
+                              return (
+                                <MetricRow
+                                  metricKey={fieldKey}
+                                  label={def.label}
+                                  step={def.step}
+                                  initialMin={qf().hfrMin ?? undefined}
+                                  initialMax={qf().hfrMax ?? undefined}
+                                  onChange={(min, max) =>
+                                    updateQualityFilters({ hfrMin: min, hfrMax: max })
+                                  }
+                                />
+                              );
+                            }
                             const current = () => filters().metricFilters[fieldKey];
                             return (
                               <MetricRow

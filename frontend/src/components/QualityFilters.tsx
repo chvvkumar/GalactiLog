@@ -41,7 +41,7 @@ const QualityFilters: Component = () => {
             applyFilters();
           }}
           placeholder="Min"
-          class="w-full px-2 py-1.5 bg-theme-input border border-theme-border rounded-[var(--radius-sm)] text-xs text-theme-text-primary placeholder:text-theme-text-tertiary focus:ring-1 focus:ring-theme-accent focus:border-theme-accent outline-none"
+          class="w-full px-2 py-1.5 bg-theme-input border border-theme-border rounded-[var(--radius-sm)] text-xs text-theme-text-primary placeholder:text-theme-text-tertiary focus:border-theme-accent outline-none"
         />
         <span class="text-theme-text-secondary text-xs">&ndash;</span>
         <input
@@ -54,7 +54,7 @@ const QualityFilters: Component = () => {
             applyFilters();
           }}
           placeholder="Max"
-          class="w-full px-2 py-1.5 bg-theme-input border border-theme-border rounded-[var(--radius-sm)] text-xs text-theme-text-primary placeholder:text-theme-text-tertiary focus:ring-1 focus:ring-theme-accent focus:border-theme-accent outline-none"
+          class="w-full px-2 py-1.5 bg-theme-input border border-theme-border rounded-[var(--radius-sm)] text-xs text-theme-text-primary placeholder:text-theme-text-tertiary focus:border-theme-accent outline-none"
         />
       </div>
     </div>
