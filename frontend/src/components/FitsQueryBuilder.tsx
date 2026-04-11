@@ -57,7 +57,7 @@ const FitsQueryBuilder: Component = () => {
           <select
             value={newKey()}
             onChange={(e) => setNewKey(e.currentTarget.value)}
-            class="flex-1 px-1.5 py-1.5 bg-theme-input border border-theme-border rounded-[var(--radius-sm)] text-xs text-theme-text-primary font-mono focus:ring-1 focus:ring-theme-accent focus:border-theme-accent outline-none"
+            class="flex-1 px-1.5 py-1.5 bg-theme-input border border-theme-border rounded-[var(--radius-sm)] text-xs text-theme-text-primary font-mono focus:border-theme-accent outline-none"
           >
             <option value="" disabled>Header Key</option>
             <Show when={fitsKeys()}>
@@ -69,7 +69,7 @@ const FitsQueryBuilder: Component = () => {
           <select
             value={newOp()}
             onChange={(e) => setNewOp(e.currentTarget.value)}
-            class="w-16 px-1 py-1.5 bg-theme-input border border-theme-border rounded-[var(--radius-sm)] text-xs text-theme-text-primary focus:ring-1 focus:ring-theme-accent focus:border-theme-accent outline-none"
+            class="w-16 px-1 py-1.5 bg-theme-input border border-theme-border rounded-[var(--radius-sm)] text-xs text-theme-text-primary focus:border-theme-accent outline-none"
           >
             <For each={OPERATORS}>{(op) => <option value={op.value}>{op.label}</option>}</For>
           </select>
@@ -81,7 +81,7 @@ const FitsQueryBuilder: Component = () => {
             onInput={(e) => setNewVal(e.currentTarget.value)}
             onKeyDown={onKeyDown}
             placeholder="Value"
-            class="flex-1 px-2 py-1.5 bg-theme-input border border-theme-border rounded-[var(--radius-sm)] text-xs text-theme-text-primary placeholder:text-theme-text-tertiary focus:ring-1 focus:ring-theme-accent focus:border-theme-accent outline-none"
+            class="flex-1 px-2 py-1.5 bg-theme-input border border-theme-border rounded-[var(--radius-sm)] text-xs text-theme-text-primary placeholder:text-theme-text-tertiary focus:border-theme-accent outline-none"
           />
           <button onClick={addRow} class="px-3 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded-[var(--radius-sm)] text-xs font-medium hover:bg-theme-accent/25 transition-colors">+</button>
         </div>

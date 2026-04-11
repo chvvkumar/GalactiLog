@@ -4,7 +4,7 @@ import { api } from "../api/client";
 import type { PanelStats } from "../types";
 import { formatIntegration, contentWidthClass } from "../utils/format";
 import { useSettingsContext } from "../components/SettingsProvider";
-import SettingsHelpSection from "../components/settings/SettingsHelpSection";
+import HelpPopover from "../components/HelpPopover";
 
 const MosaicDetailPage: Component = () => {
   const ctx = useSettingsContext();
@@ -78,39 +78,38 @@ const MosaicDetailPage: Component = () => {
 
       <Show when={mosaic()} fallback={<div class="text-center text-theme-text-secondary py-8">Loading...</div>}>
         {(data) => (
-          <>
+          <div class="rounded-[var(--radius-md)] bg-theme-surface border border-theme-border p-4 space-y-6">
             {/* Header */}
-            <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-4">
-              <h2 class="text-lg font-bold text-theme-text-primary">{data().name}</h2>
-              <div class="flex gap-4 mt-2 text-xs text-theme-text-secondary">
+            <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
+              <div class="flex items-center gap-2">
+                <h2 class="text-sm font-semibold text-theme-text-primary">{data().name}</h2>
+                <HelpPopover>
+                  <p class="text-sm text-theme-text-secondary">
+                    The Mosaic Detail page shows all panels belonging to this mosaic project along with their individual and combined statistics.
+                  </p>
+                  <ul class="list-disc list-inside space-y-1 text-sm text-theme-text-secondary">
+                    <li>The <strong class="text-theme-text-primary">panel table</strong> lists each panel's target, integration time, frame count, and last session date. Click column headers to sort.</li>
+                    <li>Click a panel's target name to navigate to its full Target Detail page.</li>
+                    <li>Use <strong class="text-theme-text-primary">Notes</strong> to record project-level information like imaging goals, completion status, or processing notes.</li>
+                  </ul>
+                </HelpPopover>
+              </div>
+              <div class="flex gap-4 text-xs text-theme-text-secondary">
                 <span>{data().panels.length} panels</span>
                 <span>{formatIntegration(data().total_integration_seconds)} total</span>
                 <span>{data().total_frames} frames</span>
               </div>
             </div>
 
-            {/* Help */}
-            <SettingsHelpSection tabId="mosaic-detail">
-              <p class="text-sm text-theme-text-secondary">
-                The Mosaic Detail page shows all panels belonging to this mosaic project along with their individual and combined statistics.
-              </p>
-              <ul class="list-disc list-inside space-y-1 text-sm text-theme-text-secondary">
-                <li>The <strong class="text-theme-text-primary">panel table</strong> lists each panel's target, integration time, frame count, and last session date. Click column headers to sort.</li>
-                <li>Click a panel's target name to navigate to its full Target Detail page.</li>
-                <li>Use <strong class="text-theme-text-primary">Notes</strong> to record project-level information like imaging goals, completion status, or processing notes.</li>
-              </ul>
-            </SettingsHelpSection>
-
             {/* Notes */}
-            <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-4">
-              <div class="flex items-center justify-between mb-2">
-                <h3 class="text-sm font-medium text-theme-text-primary">Notes</h3>
-                <Show when={notesSaving()}>
+            <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4">
+              <Show when={notesSaving()}>
+                <div class="flex justify-end mb-2">
                   <span class="text-xs text-theme-text-secondary">Saving...</span>
-                </Show>
-              </div>
+                </div>
+              </Show>
               <textarea
-                class="w-full bg-theme-elevated border border-theme-border rounded px-3 py-2 text-sm text-theme-text-primary placeholder-theme-text-secondary resize-y min-h-[50px]"
+                class="block w-full bg-theme-surface border border-theme-border rounded px-3 py-2 text-sm text-theme-text-primary placeholder-theme-text-secondary resize-y min-h-[50px]"
                 placeholder="Add notes about this mosaic project..."
                 value={notes() || data().notes || ""}
                 onInput={(e) => {
@@ -123,8 +122,8 @@ const MosaicDetailPage: Component = () => {
 
             {/* Panel Thumbnails Grid */}
             <Show when={data().panels.some((p: PanelStats) => p.thumbnail_url)}>
-              <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-4">
-                <h3 class="text-sm font-medium text-theme-text-primary mb-3">Panel Layout</h3>
+              <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
+                <h2 class="text-sm font-semibold text-theme-text-primary">Panels</h2>
                 {(() => {
                   const cols = Math.ceil(Math.sqrt(data().panels.length));
                   const maxIntegration = Math.max(...data().panels.map((p: PanelStats) => p.total_integration_seconds));
@@ -183,48 +182,51 @@ const MosaicDetailPage: Component = () => {
             </Show>
 
             {/* Panel Table */}
-            <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] overflow-hidden">
-              <table class="w-full text-xs">
-                <thead>
-                  <tr class="bg-theme-elevated text-theme-text-secondary">
-                    <th class="px-3 py-2 text-left cursor-pointer select-none hover:text-theme-text-primary" onClick={() => toggleSort("panel")}>Panel{sortIndicator("panel")}</th>
-                    <th class="px-3 py-2 text-left cursor-pointer select-none hover:text-theme-text-primary" onClick={() => toggleSort("target")}>Target{sortIndicator("target")}</th>
-                    <th class="px-3 py-2 text-right cursor-pointer select-none hover:text-theme-text-primary" onClick={() => toggleSort("integration")}>Integration{sortIndicator("integration")}</th>
-                    <th class="px-3 py-2 text-right cursor-pointer select-none hover:text-theme-text-primary" onClick={() => toggleSort("frames")}>Frames{sortIndicator("frames")}</th>
-                    <th class="px-3 py-2 text-left">Filters</th>
-                    <th class="px-3 py-2 text-left cursor-pointer select-none hover:text-theme-text-primary" onClick={() => toggleSort("session")}>Session Date{sortIndicator("session")}</th>
-                    <th class="px-3 py-2"></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <For each={sortedPanels()}>
-                    {(panel) => (
-                      <tr class="border-t border-theme-border hover:bg-theme-elevated/50">
-                        <td class="px-3 py-2 text-theme-text-primary">{panel.panel_label}</td>
-                        <td class="px-3 py-2 text-theme-text-primary">{panel.target_name}</td>
-                        <td class="px-3 py-2 text-right text-theme-text-primary">{formatIntegration(panel.total_integration_seconds)}</td>
-                        <td class="px-3 py-2 text-right text-theme-text-secondary">{panel.total_frames}</td>
-                        <td class="px-3 py-2 text-theme-text-secondary">
-                          {Object.entries(panel.filter_distribution)
-                            .map(([f, s]) => `${f}: ${formatIntegration(s)}`)
-                            .join(", ")}
-                        </td>
-                        <td class="px-3 py-2 text-theme-text-secondary">{panel.last_session_date || "\u2014"}</td>
-                        <td class="px-3 py-2">
-                          <A
-                            href={`/targets/${encodeURIComponent(panel.target_id)}`}
-                            class="text-theme-accent hover:underline"
-                          >
-                            Detail
-                          </A>
-                        </td>
-                      </tr>
-                    )}
-                  </For>
-                </tbody>
-              </table>
+            <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
+              <h2 class="text-sm font-semibold text-theme-text-primary">Sessions</h2>
+              <div class="overflow-hidden rounded border border-theme-border">
+                <table class="w-full text-xs">
+                  <thead>
+                    <tr class="bg-theme-surface text-theme-text-secondary">
+                      <th class="px-3 py-2 text-left cursor-pointer select-none hover:text-theme-text-primary" onClick={() => toggleSort("panel")}>Panel{sortIndicator("panel")}</th>
+                      <th class="px-3 py-2 text-left cursor-pointer select-none hover:text-theme-text-primary" onClick={() => toggleSort("target")}>Target{sortIndicator("target")}</th>
+                      <th class="px-3 py-2 text-right cursor-pointer select-none hover:text-theme-text-primary" onClick={() => toggleSort("integration")}>Integration{sortIndicator("integration")}</th>
+                      <th class="px-3 py-2 text-right cursor-pointer select-none hover:text-theme-text-primary" onClick={() => toggleSort("frames")}>Frames{sortIndicator("frames")}</th>
+                      <th class="px-3 py-2 text-left">Filters</th>
+                      <th class="px-3 py-2 text-left cursor-pointer select-none hover:text-theme-text-primary" onClick={() => toggleSort("session")}>Session Date{sortIndicator("session")}</th>
+                      <th class="px-3 py-2"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <For each={sortedPanels()}>
+                      {(panel) => (
+                        <tr class="border-t border-theme-border hover:bg-theme-surface/50">
+                          <td class="px-3 py-2 text-theme-text-primary">{panel.panel_label}</td>
+                          <td class="px-3 py-2 text-theme-text-primary">{panel.target_name}</td>
+                          <td class="px-3 py-2 text-right text-theme-text-primary">{formatIntegration(panel.total_integration_seconds)}</td>
+                          <td class="px-3 py-2 text-right text-theme-text-secondary">{panel.total_frames}</td>
+                          <td class="px-3 py-2 text-theme-text-secondary">
+                            {Object.entries(panel.filter_distribution)
+                              .map(([f, s]) => `${f}: ${formatIntegration(s)}`)
+                              .join(", ")}
+                          </td>
+                          <td class="px-3 py-2 text-theme-text-secondary">{panel.last_session_date || "\u2014"}</td>
+                          <td class="px-3 py-2">
+                            <A
+                              href={`/targets/${encodeURIComponent(panel.target_id)}`}
+                              class="text-theme-accent hover:underline"
+                            >
+                              Detail
+                            </A>
+                          </td>
+                        </tr>
+                      )}
+                    </For>
+                  </tbody>
+                </table>
+              </div>
             </div>
-          </>
+          </div>
         )}
       </Show>
       </div>

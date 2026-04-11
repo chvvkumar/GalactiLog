@@ -109,7 +109,7 @@ export const MergesTab: Component = () => {
             <button
               onClick={handleDetect}
               disabled={detecting()}
-              class="px-3 py-1.5 border border-theme-border-em text-theme-text-secondary rounded text-sm disabled:opacity-50 hover:text-theme-text-primary hover:border-theme-accent transition-colors"
+              class="px-4 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded text-sm font-medium disabled:opacity-50 hover:bg-theme-accent/25 transition-colors"
             >
               {detecting() ? "Detecting..." : "Run Detection"}
             </button>

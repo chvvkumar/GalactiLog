@@ -51,7 +51,7 @@ const ScanFiltersOnboarding: Component<Props> = (props) => {
 
   return (
     <Show when={show()}>
-      <div class="rounded-[var(--radius-md)] border border-theme-accent/40 bg-theme-accent/10 p-4 space-y-3">
+      <div class="mx-4 mt-4 rounded-[var(--radius-md)] border border-theme-accent/40 bg-theme-accent/10 p-4 space-y-3">
         <div class="flex items-start gap-3">
           <svg
             class="w-5 h-5 mt-0.5 text-theme-accent flex-shrink-0"

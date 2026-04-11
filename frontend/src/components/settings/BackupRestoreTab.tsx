@@ -142,11 +142,10 @@ export const BackupRestoreTab: Component = () => {
   };
 
   return (
-    <div class="space-y-8">
-      {/* ── Backup Section ── */}
-      <section>
-        <h3 class="text-lg font-semibold text-theme-text-primary mb-2">Create Backup</h3>
-        <p class="text-sm text-theme-text-secondary mb-4">
+    <div class="rounded-[var(--radius-md)] bg-theme-surface border border-theme-border p-4 space-y-6">
+      <section class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
+        <h2 class="text-sm font-semibold text-theme-text-primary">Create Backup</h2>
+        <p class="text-sm text-theme-text-secondary">
           Download a backup of all your customizations: settings, filter and equipment
           configurations, session notes, custom columns, mosaics, user accounts, and
           display preferences.
@@ -160,12 +159,9 @@ export const BackupRestoreTab: Component = () => {
         </button>
       </section>
 
-      <hr class="border-theme-border" />
-
-      {/* ── Restore Section ── */}
-      <section>
-        <h3 class="text-lg font-semibold text-theme-text-primary mb-2">Restore from Backup</h3>
-        <p class="text-sm text-theme-text-secondary mb-4">
+      <section class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
+        <h2 class="text-sm font-semibold text-theme-text-primary">Restore from Backup</h2>
+        <p class="text-sm text-theme-text-secondary">
           Upload a previously created backup file to restore your customizations.
           You can choose which sections to restore and whether to merge with or replace
           existing data.

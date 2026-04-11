@@ -185,7 +185,7 @@ export const FiltersTab: Component = () => {
           />
           <button
             onClick={addFilter}
-            class="px-3 py-1.5 border border-theme-border text-theme-text-secondary rounded text-sm hover:border-theme-accent hover:text-theme-text-primary transition-colors"
+            class="px-4 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded text-sm font-medium hover:bg-theme-accent/25 transition-colors"
           >
             Add Filter
           </button>

@@ -7,7 +7,6 @@ import ObjectTypeToggles from "./ObjectTypeToggles";
 import DateRangePicker from "./DateRangePicker";
 import FilterToggles from "./FilterToggles";
 import HardwareSelects from "./HardwareSelects";
-import QualityFilters from "./QualityFilters";
 import MetricFilters from "./MetricFilters";
 import FitsQueryBuilder from "./FitsQueryBuilder";
 import CustomColumnFilters from "./CustomColumnFilters";
@@ -36,10 +35,10 @@ const Sidebar: Component = () => {
   };
 
   return (
-    <aside class="w-72 min-h-0 max-h-[calc(100vh-57px)] border-r border-theme-border-em p-4 space-y-6 overflow-y-auto">
+    <aside class="w-72 min-h-0 max-h-[calc(100vh-57px)] border-r border-theme-border-em p-4 space-y-3 overflow-y-auto">
       <Show when={targetData()}>
         {(data) => (
-          <section class="flex flex-wrap gap-x-4 gap-y-1 text-sm">
+          <section class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-3 flex flex-wrap gap-x-4 gap-y-1 text-sm">
             <span class="text-theme-text-secondary">
               Integration <span class="text-theme-text-primary font-semibold">{formatIntegration(data().aggregates.total_integration_seconds)}</span>
             </span>
@@ -55,12 +54,11 @@ const Sidebar: Component = () => {
           </section>
         )}
       </Show>
-      <section><SearchBar /></section>
+      <section class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-3"><SearchBar /></section>
       <CollapsibleSection id="object-type" label="Object Type"><ObjectTypeToggles /></CollapsibleSection>
       <CollapsibleSection id="date-range" label="Date Range"><DateRangePicker /></CollapsibleSection>
       <CollapsibleSection id="filters" label="Filters"><FilterToggles /></CollapsibleSection>
       <CollapsibleSection id="equipment" label="Equipment"><HardwareSelects /></CollapsibleSection>
-      <CollapsibleSection id="quality" label="Quality (HFR)"><QualityFilters /></CollapsibleSection>
       <CollapsibleSection id="metrics" label="Metrics"><MetricFilters /></CollapsibleSection>
       <CollapsibleSection id="fits-query" label="FITS Header Query"><FitsQueryBuilder /></CollapsibleSection>
       <Show when={(customColumns() ?? []).length > 0}>

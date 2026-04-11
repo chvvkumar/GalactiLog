@@ -72,9 +72,7 @@ const DashboardPage: Component = () => {
         </div>
 
         <main class="flex-1 min-h-[calc(100vh-57px)]">
-          <div class="px-4 pt-4">
-            <ScanFiltersOnboarding variant="global" />
-          </div>
+          <ScanFiltersOnboarding variant="global" />
           <TargetFeed />
         </main>
       </div>

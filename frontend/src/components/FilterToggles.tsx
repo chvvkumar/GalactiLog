@@ -48,7 +48,7 @@ const FilterToggles: Component = () => {
         class={`h-6 rounded text-caption font-bold flex items-center justify-center gap-0.5 transition-all duration-150`}
         classList={{
           "ring-1 ring-white/40 brightness-125": active(),
-          "opacity-40 hover:opacity-70": !active(),
+          "opacity-65 hover:opacity-90": !active(),
           "w-6": name.length <= 1 && !badgeStyle().dot && !grouped,
           "px-1.5": name.length > 1 || !!badgeStyle().dot || grouped,
         }}

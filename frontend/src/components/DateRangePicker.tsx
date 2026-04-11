@@ -24,7 +24,7 @@ const DateRangePicker: Component = () => {
           onInput={(e) =>
             updateFilter("dateRange", { ...filters().dateRange, start: e.currentTarget.value || null })
           }
-          class="flex-1 px-2 py-1.5 bg-theme-input border border-theme-border rounded-[var(--radius-sm)] text-xs text-theme-text-primary focus:ring-1 focus:ring-theme-accent focus:border-theme-accent outline-none"
+          class="flex-1 px-2 py-1.5 bg-theme-input border border-theme-border rounded-[var(--radius-sm)] text-xs text-theme-text-primary focus:border-theme-accent outline-none"
         />
         <input
           type="date"
@@ -35,7 +35,7 @@ const DateRangePicker: Component = () => {
           onInput={(e) =>
             updateFilter("dateRange", { ...filters().dateRange, end: e.currentTarget.value || null })
           }
-          class="flex-1 px-2 py-1.5 bg-theme-input border border-theme-border rounded-[var(--radius-sm)] text-xs text-theme-text-primary focus:ring-1 focus:ring-theme-accent focus:border-theme-accent outline-none"
+          class="flex-1 px-2 py-1.5 bg-theme-input border border-theme-border rounded-[var(--radius-sm)] text-xs text-theme-text-primary focus:border-theme-accent outline-none"
         />
       </div>
     </div>
