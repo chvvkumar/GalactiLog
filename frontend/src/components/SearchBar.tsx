@@ -79,7 +79,7 @@ const SearchBar: Component = () => {
         onFocus={() => suggestions().length > 0 && setShowSuggestions(true)}
         onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
         placeholder="M31, NGC 7000..."
-        class="w-full px-3 py-2 bg-theme-input border border-theme-border rounded-[var(--radius-sm)] text-sm text-theme-text-primary placeholder:text-theme-text-tertiary focus:ring-1 focus:ring-theme-accent focus:border-theme-accent outline-none"
+        class="w-full px-3 py-2 bg-theme-input border border-theme-border rounded-[var(--radius-sm)] text-sm text-theme-text-primary placeholder:text-theme-text-tertiary focus:border-theme-accent outline-none"
       />
       <Show when={showSuggestions()}>
         <div class="absolute z-50 w-full mt-1 glass-popover bg-theme-surface shadow-[var(--shadow-md)] border border-theme-border rounded-[var(--radius-sm)] max-h-48 overflow-y-auto">

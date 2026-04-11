@@ -38,7 +38,7 @@ const CollapsibleSection: Component<{ id: string; label: string; children: JSX.E
   };
 
   return (
-    <section>
+    <section class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-3">
       <button
         onClick={toggle}
         class="flex items-center justify-between w-full text-label font-medium uppercase tracking-wider text-theme-text-tertiary hover:text-theme-text-secondary transition-colors cursor-pointer select-none"

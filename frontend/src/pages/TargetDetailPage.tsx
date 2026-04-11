@@ -10,7 +10,7 @@ import ExportModal from "../components/ExportModal";
 import { useSettingsContext } from "../components/SettingsProvider";
 import { isFieldVisible } from "../utils/displaySettings";
 import { contentWidthClass } from "../utils/format";
-import SettingsHelpSection from "../components/settings/SettingsHelpSection";
+import HelpPopover from "../components/HelpPopover";
 import { timezoneLabel } from "../utils/dateTime";
 
 import { formatIntegration } from "../utils/format";
@@ -179,9 +179,25 @@ const TargetDetailPage: Component = () => {
             <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
               <div>
                 <div>
-                  <h1 class="text-2xl font-semibold tracking-tight text-theme-text-primary">
-                    {detail().primary_name}
-                  </h1>
+                  <div class="flex items-center gap-2">
+                    <h1 class="text-2xl font-semibold tracking-tight text-theme-text-primary">
+                      {detail().primary_name}
+                    </h1>
+                    <HelpPopover>
+                      <p class="text-sm text-theme-text-secondary">
+                        The Target Detail page shows everything GalactiLog knows about a single imaging target.
+                      </p>
+                      <p class="text-sm text-theme-text-secondary">
+                        The header displays the resolved object name, coordinates, object type, and angular size from SIMBAD when available.
+                      </p>
+                      <ul class="list-disc list-inside space-y-1 text-sm text-theme-text-secondary">
+                        <li><strong class="text-theme-text-primary">Integration summary</strong> shows total exposure time, frame counts, and filter breakdown.</li>
+                        <li><strong class="text-theme-text-primary">Charts</strong> visualize quality metrics (HFR, FWHM, guiding RMS, etc.) across sessions. Click the chart header to expand or collapse it.</li>
+                        <li><strong class="text-theme-text-primary">Sessions</strong> are listed as expandable cards. Each card shows per-session metrics, and expanding it reveals individual frame details with all recorded FITS header data.</li>
+                        <li>Use the <strong class="text-theme-text-primary">Export</strong> button to generate AstroBin-compatible CSV files for your imaging data.</li>
+                      </ul>
+                    </HelpPopover>
+                  </div>
                   <div class="text-xs text-theme-text-secondary mt-1 flex flex-wrap gap-x-2 gap-y-0.5">
                     <Show when={detail().object_category}>
                       <span>{detail().object_category}</span>
@@ -289,24 +305,6 @@ const TargetDetailPage: Component = () => {
               </div>
             </div>
 
-            {/* Help Section */}
-            <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4">
-              <SettingsHelpSection tabId="target-detail">
-                <p class="text-sm text-theme-text-secondary">
-                  The Target Detail page shows everything GalactiLog knows about a single imaging target.
-                </p>
-                <p class="text-sm text-theme-text-secondary">
-                  The header displays the resolved object name, coordinates, object type, and angular size from SIMBAD when available.
-                </p>
-                <ul class="list-disc list-inside space-y-1 text-sm text-theme-text-secondary">
-                  <li><strong class="text-theme-text-primary">Integration summary</strong> shows total exposure time, frame counts, and filter breakdown.</li>
-                  <li><strong class="text-theme-text-primary">Charts</strong> visualize quality metrics (HFR, FWHM, guiding RMS, etc.) across sessions. Click the chart header to expand or collapse it.</li>
-                  <li><strong class="text-theme-text-primary">Sessions</strong> are listed as expandable cards. Each card shows per-session metrics, and expanding it reveals individual frame details with all recorded FITS header data.</li>
-                  <li>Use the <strong class="text-theme-text-primary">Export</strong> button to generate AstroBin-compatible CSV files for your imaging data.</li>
-                </ul>
-              </SettingsHelpSection>
-            </div>
-
             {/* Target Notes */}
             <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4">
               <button
@@ -377,7 +375,8 @@ const TargetDetailPage: Component = () => {
             </Show>
 
             {/* Session Table */}
-            <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4">
+            <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
+              <h2 class="text-sm font-semibold text-theme-text-primary">Sessions</h2>
               <div class="overflow-x-auto">
               <table class="w-full border-collapse min-w-[600px]">
                 <thead>

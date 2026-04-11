@@ -2,7 +2,7 @@ import { Component, Show, createSignal } from "solid-js";
 import { useStats } from "../store/stats";
 import { useSettingsContext } from "../components/SettingsProvider";
 import { contentWidthClass } from "../utils/format";
-import SettingsHelpSection from "../components/settings/SettingsHelpSection";
+import HelpPopover from "../components/HelpPopover";
 import StatsOverview from "../components/StatsOverview";
 import EquipmentInventory from "../components/EquipmentInventory";
 import EquipmentPerformance from "../components/EquipmentPerformance";
@@ -18,27 +18,28 @@ const StatisticsPage: Component = () => {
 
   return (
     <div class={`p-4 space-y-4 ${contentWidthClass(ctx.contentWidth())}`}>
-      <h1 class="text-xl font-semibold tracking-tight text-theme-text-primary">Statistics</h1>
-
-      <SettingsHelpSection tabId="statistics">
-        <p class="text-sm text-theme-text-secondary">
-          The Statistics page provides an overview of your entire imaging catalog with aggregate metrics and visualizations.
-        </p>
-        <ul class="list-disc list-inside space-y-1">
-          <li class="text-sm text-theme-text-secondary">
-            <strong class="text-theme-text-primary">Overview</strong> shows total integration time, frame count, how long the catalog has been active, average session length (with multi-rig nights counted per rig), and average integration per target.
-          </li>
-          <li class="text-sm text-theme-text-secondary">
-            <strong class="text-theme-text-primary">Equipment Performance</strong> compares imaging quality across telescope/camera combinations.
-          </li>
-          <li class="text-sm text-theme-text-secondary">
-            <strong class="text-theme-text-primary">Filter Usage</strong>, <strong class="text-theme-text-primary">Equipment Inventory</strong>, and <strong class="text-theme-text-primary">Top Targets</strong> give quick breakdowns of what you image most.
-          </li>
-          <li class="text-sm text-theme-text-secondary">
-            <strong class="text-theme-text-primary">Timeline</strong> and <strong class="text-theme-text-primary">Calendar</strong> views show imaging activity over time - useful for tracking seasonal patterns and productivity.
-          </li>
-        </ul>
-      </SettingsHelpSection>
+      <div class="flex items-center gap-2">
+        <h1 class="text-xl font-semibold tracking-tight text-theme-text-primary">Statistics</h1>
+        <HelpPopover>
+          <p class="text-sm text-theme-text-secondary">
+            The Statistics page provides an overview of your entire imaging catalog with aggregate metrics and visualizations.
+          </p>
+          <ul class="list-disc list-inside space-y-1">
+            <li class="text-sm text-theme-text-secondary">
+              <strong class="text-theme-text-primary">Overview</strong> shows total integration time, frame count, how long the catalog has been active, average session length (with multi-rig nights counted per rig), and average integration per target.
+            </li>
+            <li class="text-sm text-theme-text-secondary">
+              <strong class="text-theme-text-primary">Equipment Performance</strong> compares imaging quality across telescope/camera combinations.
+            </li>
+            <li class="text-sm text-theme-text-secondary">
+              <strong class="text-theme-text-primary">Filter Usage</strong>, <strong class="text-theme-text-primary">Equipment Inventory</strong>, and <strong class="text-theme-text-primary">Top Targets</strong> give quick breakdowns of what you image most.
+            </li>
+            <li class="text-sm text-theme-text-secondary">
+              <strong class="text-theme-text-primary">Timeline</strong> and <strong class="text-theme-text-primary">Calendar</strong> views show imaging activity over time - useful for tracking seasonal patterns and productivity.
+            </li>
+          </ul>
+        </HelpPopover>
+      </div>
 
       <Show when={stats.loading && !stats()}>
         <div class="text-center text-theme-text-secondary py-8">Loading analytics...</div>
