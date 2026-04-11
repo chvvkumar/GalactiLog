@@ -10,12 +10,6 @@ interface RailItem {
   icon: () => any;
 }
 
-const icon = (d: string) => () => (
-  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-    <path d={d} />
-  </svg>
-);
-
 // Icons are simple single-path glyphs chosen for legibility at 18px.
 const ITEMS: RailItem[] = [
   { id: "search",         label: "Search",              icon: () => (
