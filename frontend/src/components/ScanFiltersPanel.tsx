@@ -157,6 +157,14 @@ const ScanFiltersPanel: Component<Props> = (props) => {
   };
 
   const applyNow = async () => {
+    if (dirty()) {
+      showToast(
+        "Save your filter changes before running Apply now. It operates on " +
+        "the last saved filters, not unsaved edits.",
+        "error",
+      );
+      return;
+    }
     try {
       const dry = await scanFilters.applyNow(true);
       if (dry.matched === 0) {
@@ -166,11 +174,16 @@ const ScanFiltersPanel: Component<Props> = (props) => {
         );
         return;
       }
+      const sample = (dry.sample_paths ?? []).slice(0, 10);
+      const preview = sample.length > 0
+        ? "\n\nExamples:\n" + sample.join("\n") +
+          (dry.matched > sample.length ? `\n... and ${dry.matched - sample.length} more` : "")
+        : "";
       const ok = window.confirm(
         `This will permanently remove ${dry.matched} image row(s) from the ` +
         `catalog because they are excluded by the saved filters. The files ` +
         `on disk are not touched, and rows will return on the next scan if ` +
-        `the filters are relaxed. Continue?`
+        `the filters are relaxed.${preview}\n\nContinue?`
       );
       if (!ok) return;
       const res = await scanFilters.applyNow(false);
@@ -612,9 +625,14 @@ include rule   ^M\\d+$          (regex, folder)`}
             Revert
           </button>
           <button
-            class="px-4 py-1.5 bg-theme-warning/15 text-theme-warning border border-theme-warning/30 rounded text-sm font-medium hover:bg-theme-warning/25 transition-colors"
+            class="px-4 py-1.5 bg-theme-warning/15 text-theme-warning border border-theme-warning/30 rounded text-sm font-medium disabled:opacity-50 hover:bg-theme-warning/25 transition-colors"
+            disabled={dirty()}
             onClick={applyNow}
-            title="Remove already-ingested image rows that match the current exclude rules. Destructive. Uses the last SAVED filters, not unsaved edits. You will see a confirmation with the row count before anything is deleted."
+            title={
+              dirty()
+                ? "Save your filter changes first. Apply now operates on the last saved filters."
+                : "Remove already-ingested image rows that match the current exclude rules. Destructive. You will see a confirmation with the row count and example paths before anything is deleted."
+            }
           >
             Apply now
           </button>

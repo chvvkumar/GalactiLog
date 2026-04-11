@@ -556,11 +556,15 @@ async def apply_filters_now(
     # Pull file paths and evaluate in Python (keeps rule logic in one place)
     paths_result = await session.execute(select(Image.id, Image.file_path))
     matched_ids: list = []
+    sample_paths: list[str] = []
+    _SAMPLE_LIMIT = 20
     for image_id, file_path in paths_result.all():
         if not file_path:
             continue
         if not cfg.should_include_file(FsPath(file_path), fits_root):
             matched_ids.append(image_id)
+            if len(sample_paths) < _SAMPLE_LIMIT:
+                sample_paths.append(file_path)
 
     if not dry_run and matched_ids:
         await session.execute(
@@ -589,7 +593,11 @@ async def apply_filters_now(
             len(matched_ids), user.username,
         )
 
-    return ApplyNowOut(dry_run=dry_run, matched=len(matched_ids))
+    return ApplyNowOut(
+        dry_run=dry_run,
+        matched=len(matched_ids),
+        sample_paths=sample_paths,
+    )
 
 
 @router.get("/browse", response_model=list[BrowseEntry])
