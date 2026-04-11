@@ -416,8 +416,8 @@ const SessionAccordionCard: Component<{
       {/* Collapsed header row */}
       <tr
         ref={cardRef}
-        class={`border-b border-theme-border cursor-pointer hover:bg-theme-hover transition-all duration-150 text-xs border-l-[3px] ${
-          props.isExpanded ? "bg-theme-elevated border-l-theme-accent font-medium" : "border-l-transparent hover:border-l-theme-accent/50"
+        class={`cursor-pointer hover:bg-theme-hover transition-all duration-150 text-xs border-t-2 border-theme-border-em ${
+          props.isExpanded ? "bg-theme-elevated font-medium" : ""
         }`}
         onClick={props.onToggle}
       >
@@ -513,8 +513,8 @@ const SessionAccordionCard: Component<{
 
       {/* Expanded content row */}
       <Show when={props.isExpanded}>
-        <tr class="bg-theme-elevated">
-          <td colspan="12" class="px-4 pb-4 border-b-2 border-theme-accent/40 border-l-[3px] border-l-theme-accent">
+        <tr class="bg-theme-surface">
+          <td colspan="12" class="px-4 pt-3 pb-4 border-t border-theme-border">
           <Show when={!props.detail}>
             <div class="py-4 text-theme-text-secondary text-sm">Loading session data...</div>
           </Show>
@@ -523,9 +523,9 @@ const SessionAccordionCard: Component<{
             {(detail) => (
               <div class="space-y-3 pt-3">
                 {/* Session Notes */}
-                <div class="bg-theme-base rounded-[var(--radius-md)]">
+                <div class="bg-theme-elevated border border-theme-border-em rounded-[var(--radius-sm)]">
                   <button
-                    class="flex justify-between items-center w-full text-xs py-2 px-3 hover:bg-theme-hover rounded-[var(--radius-md)] hover:text-theme-text-primary transition-colors cursor-pointer"
+                    class="flex justify-between items-center w-full text-xs py-2 px-3 hover:bg-theme-hover rounded-[var(--radius-sm)] hover:text-theme-text-primary transition-colors cursor-pointer"
                     classList={{ "text-theme-text-primary": showNotes(), "text-theme-text-secondary": !showNotes() }}
                     onClick={() => setShowNotes((v) => !v)}
                   >
@@ -565,9 +565,9 @@ const SessionAccordionCard: Component<{
                 </div>
 
                 {/* Session Summary (collapsible) */}
-                <div class="bg-theme-base rounded-[var(--radius-md)]">
+                <div class="bg-theme-elevated border border-theme-border-em rounded-[var(--radius-sm)]">
                   <button
-                    class="flex justify-between items-center w-full text-xs py-2 px-3 hover:bg-theme-hover rounded-[var(--radius-md)] hover:text-theme-text-primary transition-colors cursor-pointer"
+                    class="flex justify-between items-center w-full text-xs py-2 px-3 hover:bg-theme-hover rounded-[var(--radius-sm)] hover:text-theme-text-primary transition-colors cursor-pointer"
                     classList={{ "text-theme-text-primary": showSummary(), "text-theme-text-secondary": !showSummary() }}
                     onClick={() => setShowSummary((v) => !v)}
                   >
@@ -617,12 +617,6 @@ const SessionAccordionCard: Component<{
                         <span><span class="text-theme-text-tertiary">Ecc:</span> <span class="font-bold text-metric-eccentricity">{detail().median_eccentricity?.toFixed(2) ?? "—"}</span></span>
                         <span><span class="text-theme-text-tertiary">FWHM:</span> <span class="font-bold text-metric-fwhm">{detail().median_fwhm?.toFixed(2) ?? "—"}</span></span>
                         <span><span class="text-theme-text-tertiary">RMS:</span> <span class="font-bold text-metric-guiding">{detail().median_guiding_rms !== null ? `${detail().median_guiding_rms?.toFixed(2)}"` : "—"}</span></span>
-                        <button
-                          class="text-tiny px-1.5 py-0.5 border border-theme-border rounded text-theme-text-tertiary hover:text-theme-text-primary hover:border-theme-accent transition-colors cursor-pointer"
-                          onClick={() => copyAstrobinCsv()}
-                        >
-                          {csvCopiedRig() === "__all__" ? "Copied!" : "Astrobin CSV"}
-                        </button>
                       </div>
                       <div class="flex flex-wrap gap-1.5">
                         <For each={detail().filter_details}>
@@ -632,6 +626,14 @@ const SessionAccordionCard: Component<{
                             </span>
                           )}
                         </For>
+                      </div>
+                      <div>
+                        <button
+                          class="text-tiny px-1.5 py-0.5 border border-theme-border rounded text-theme-text-tertiary hover:text-theme-text-primary hover:border-theme-accent transition-colors cursor-pointer"
+                          onClick={() => copyAstrobinCsv()}
+                        >
+                          {csvCopiedRig() === "__all__" ? "Copied!" : "Astrobin CSV"}
+                        </button>
                       </div>
                     </div>
                     <div class="w-[140px] h-[100px] flex-shrink-0 ml-auto rounded overflow-hidden">
@@ -709,6 +711,12 @@ const SessionAccordionCard: Component<{
                 </Show>
 
                 {/* Expandable detail table */}
+                <button
+                  class="text-label text-theme-accent hover:text-theme-text-primary transition-colors cursor-pointer mt-2"
+                  onClick={() => setShowDetails((v) => !v)}
+                >
+                  {showDetails() ? "▾ Hide Details" : "▸ Show Details"}
+                </button>
                 <Show when={showDetails()}>
                   <div class="mt-3 overflow-x-auto">
                     <table class="w-full text-xs" style={{ "border-collapse": "collapse" }}>
@@ -767,21 +775,15 @@ const SessionAccordionCard: Component<{
                     </table>
                   </div>
                 </Show>
-                <button
-                  class="text-label text-theme-accent hover:text-theme-text-primary transition-colors cursor-pointer mt-2"
-                  onClick={() => setShowDetails((v) => !v)}
-                >
-                  {showDetails() ? "▾ Hide Details" : "▸ Show Details"}
-                </button>
                 </div>
                 </Show>
                 </div>
 
                 {/* Session Insights */}
                 <Show when={detail().insights.length > 0}>
-                  <div class="bg-theme-base rounded-[var(--radius-md)]">
+                  <div class="bg-theme-elevated border border-theme-border-em rounded-[var(--radius-sm)]">
                     <button
-                      class="flex justify-between items-center w-full text-xs py-2 px-3 hover:bg-theme-hover rounded-[var(--radius-md)] hover:text-theme-text-primary transition-colors cursor-pointer"
+                      class="flex justify-between items-center w-full text-xs py-2 px-3 hover:bg-theme-hover rounded-[var(--radius-sm)] hover:text-theme-text-primary transition-colors cursor-pointer"
                       classList={{ "text-theme-text-primary": showInsights(), "text-theme-text-secondary": !showInsights() }}
                       onClick={() => setShowInsights((v) => !v)}
                     >
@@ -814,9 +816,9 @@ const SessionAccordionCard: Component<{
                 <SessionMetricsChart detail={detail()} enabledRigs={enabledRigs()} onToggleRig={toggleRig} />
 
                 {/* Row 4: Per-Frame Table (collapsed) */}
-                <div class="bg-theme-base rounded-[var(--radius-md)]">
+                <div class="bg-theme-elevated border border-theme-border-em rounded-[var(--radius-sm)]">
                   <button
-                    class="flex justify-between items-center w-full text-xs py-2 px-3 hover:bg-theme-hover rounded-[var(--radius-md)] hover:text-theme-text-primary transition-colors cursor-pointer"
+                    class="flex justify-between items-center w-full text-xs py-2 px-3 hover:bg-theme-hover rounded-[var(--radius-sm)] hover:text-theme-text-primary transition-colors cursor-pointer"
                     classList={{ "text-theme-text-primary": showFrames(), "text-theme-text-secondary": !showFrames() }}
                     onClick={() => setShowFrames(!showFrames())}
                   >
