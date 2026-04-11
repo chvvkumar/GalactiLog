@@ -409,17 +409,24 @@ def _do_ingest(fits_path: str, include_calibration: bool = True) -> dict:
 
                 extracted = filename_candidate_name
 
-                # Check for existing pending candidate with same extracted name
+                # Look up any existing candidate (pending or dismissed) with same
+                # extracted name. Dismissed means the user rejected this suggestion,
+                # so we must not create a fresh pending row for it on re-ingest.
                 existing = None
+                is_dismissed = False
                 if extracted:
-                    existing = session.execute(
+                    rows = session.execute(
                         _sel(FilenameCandidate).where(
                             FilenameCandidate.extracted_name == extracted,
-                            FilenameCandidate.status == "pending",
+                            FilenameCandidate.status.in_(["pending", "dismissed"]),
                         )
-                    ).scalar_one_or_none()
+                    ).scalars().all()
+                    is_dismissed = any(r.status == "dismissed" for r in rows)
+                    existing = next((r for r in rows if r.status == "pending"), None)
 
-                if existing:
+                if is_dismissed:
+                    pass
+                elif existing:
                     existing.image_ids = list(existing.image_ids or []) + [image.id]
                     existing.file_paths = list(existing.file_paths or []) + [str(path)]
                     existing.file_count = len(existing.image_ids)
@@ -585,10 +592,12 @@ def detect_duplicate_targets():
         if not unresolved:
             return {"candidates_found": 0}
 
-        # Get existing pending/accepted candidates to avoid duplicates
+        # Get existing candidates to avoid duplicates. Include "dismissed" so
+        # suggestions the user explicitly rejected don't come back on re-runs
+        # triggered by scans, manual matches, or smart rebuilds.
         existing = db.execute(
             sa_select(MergeCandidate.source_name).where(
-                MergeCandidate.status.in_(["pending", "accepted"])
+                MergeCandidate.status.in_(["pending", "accepted", "dismissed"])
             )
         )
         existing_names = {row[0] for row in existing.all()}
@@ -1337,15 +1346,26 @@ def detect_filename_targets():
         if not unresolved:
             return {"candidates_found": 0}
 
-        # Get image_ids already tracked by accepted candidates (don't re-process these)
+        # Get image_ids already tracked by accepted or dismissed candidates so
+        # we don't re-process them. Dismissed means the user explicitly
+        # rejected the suggestion - a rescan must not resurrect it.
         existing_candidates = db.execute(
             sa_select(FilenameCandidate.image_ids)
-            .where(FilenameCandidate.status == "accepted")
+            .where(FilenameCandidate.status.in_(["accepted", "dismissed"]))
         ).all()
         tracked_image_ids = set()
         for row in existing_candidates:
             if row[0]:
                 tracked_image_ids.update(row[0])
+
+        # Also collect extracted_names that are currently dismissed, so groups
+        # keyed by directory (no extracted_name) or by new images that weren't
+        # in the original dismissed image_ids still get skipped by name.
+        dismissed_names_rows = db.execute(
+            sa_select(FilenameCandidate.extracted_name)
+            .where(FilenameCandidate.status == "dismissed")
+        ).all()
+        dismissed_names = {row[0] for row in dismissed_names_rows if row[0]}
 
         # Group by extracted name
         groups: dict[str | None, list[tuple]] = {}  # key -> [(image_id, file_path)]
@@ -1364,6 +1384,9 @@ def detect_filename_targets():
 
             is_no_guess = key.startswith("__dir__:")
             extracted_name = None if is_no_guess else key
+
+            if extracted_name and extracted_name in dismissed_names:
+                continue
 
             # Check if a pending candidate with this extracted_name already exists
             if extracted_name:
