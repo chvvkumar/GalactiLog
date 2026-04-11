@@ -3,6 +3,7 @@ import { A, useParams, useSearchParams } from "@solidjs/router";
 import { api } from "../api/client";
 import type { TargetDetailResponse, SessionDetail } from "../types";
 import SessionAccordionCard from "../components/SessionAccordionCard";
+import { showToast } from "../components/Toast";
 import FilterBadges from "../components/FilterBadges";
 import TargetMetricsChart from "../components/TargetMetricsChart";
 import ExportModal from "../components/ExportModal";
@@ -98,8 +99,20 @@ const TargetDetailPage: Component = () => {
 
   const loadSessionDetail = async (date: string) => {
     if (sessionCache()[date]) return;
-    const detail = await api.getSessionDetail(params.targetId, date);
-    setSessionCache((prev) => ({ ...prev, [date]: detail }));
+    try {
+      const detail = await api.getSessionDetail(params.targetId, date);
+      setSessionCache((prev) => ({ ...prev, [date]: detail }));
+    } catch (e: any) {
+      showToast(
+        e?.message ?? `Failed to load session ${date}`,
+        "error",
+      );
+      setExpandedSessions((prev) => {
+        const next = new Set(prev);
+        next.delete(date);
+        return next;
+      });
+    }
   };
 
   // Auto-expand first session or session from query param, and load its data

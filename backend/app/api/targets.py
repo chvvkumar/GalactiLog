@@ -2,7 +2,7 @@ import re
 import uuid
 import statistics
 from collections import defaultdict
-from datetime import date as date_type, datetime, timedelta
+from datetime import date as date_type, datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 import sqlalchemy as sa
@@ -1361,7 +1361,18 @@ async def get_session_detail(
     session: AsyncSession = Depends(get_session),
     user: User = Depends(get_current_user),
 ):
-    """Return detailed session data for a target on a specific date."""
+    """Return detailed session data for a target on a specific date.
+
+    The date string is interpreted as a UTC calendar day to match the
+    listing endpoint, which groups by `capture_date.strftime("%Y-%m-%d")`
+    against the tz-aware (UTC) column value. Passing a naive datetime to
+    a `timestamptz` comparison would make Postgres coerce it via the
+    session TimeZone, which shifts the window at the midnight boundary
+    and returns zero rows for sessions the listing placed on the other
+    side of UTC midnight.
+    """
+    day_start = datetime.fromisoformat(date).replace(tzinfo=timezone.utc)
+    day_end = day_start + timedelta(days=1)
     if target_id == "obj:__uncategorized__":
         target_name = "Uncategorized"
         target_obj = None
@@ -1375,8 +1386,8 @@ async def get_session_detail(
             .where(
                 Image.resolved_target_id.is_(None),
                 _no_object,
-                Image.capture_date >= datetime.fromisoformat(date),
-                Image.capture_date < datetime.fromisoformat(date) + timedelta(days=1),
+                Image.capture_date >= day_start,
+                Image.capture_date < day_end,
             )
             .order_by(Image.capture_date)
         )
@@ -1395,8 +1406,8 @@ async def get_session_detail(
             select(Image)
             .where(
                 Image.raw_headers["OBJECT"].astext == object_name,
-                Image.capture_date >= datetime.fromisoformat(date),
-                Image.capture_date < datetime.fromisoformat(date) + timedelta(days=1),
+                Image.capture_date >= day_start,
+                Image.capture_date < day_end,
                 Image.image_type == "LIGHT",
             )
             .order_by(Image.capture_date)
@@ -1421,8 +1432,8 @@ async def get_session_detail(
             select(Image)
             .where(
                 Image.resolved_target_id == tid,
-                Image.capture_date >= datetime.fromisoformat(date),
-                Image.capture_date < datetime.fromisoformat(date) + timedelta(days=1),
+                Image.capture_date >= day_start,
+                Image.capture_date < day_end,
                 Image.image_type == "LIGHT",
             )
             .order_by(Image.capture_date)
