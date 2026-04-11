@@ -4,6 +4,9 @@ import Sidebar from "../components/Sidebar";
 import TargetFeed from "../components/TargetFeed";
 import ScanFiltersOnboarding from "../components/ScanFiltersOnboarding";
 import DashboardFilterProvider, { hasFilterParams, ALL_PARAM_KEYS } from "../components/DashboardFilterProvider";
+import SidebarRail from "../components/SidebarRail";
+import SidebarResizeHandle from "../components/SidebarResizeHandle";
+import { sidebarWidth, sidebarCollapsed, resizing, RAIL_WIDTH } from "../components/sidebarLayout";
 
 const SESSION_KEY = "dashboard_params";
 
@@ -43,8 +46,13 @@ const DashboardPage: Component = () => {
     <DashboardFilterProvider>
       <div class="flex" data-layout="sidebar-main">
         {/* Desktop sidebar */}
-        <div class="hidden lg:block">
-          <Sidebar />
+        <div
+          class="hidden lg:flex relative border-r border-theme-border-em min-h-[calc(100vh-57px)] shrink-0"
+          classList={{ "transition-[width] duration-[240ms] ease-[cubic-bezier(0.22,0.61,0.36,1)]": !resizing() }}
+          style={{ width: `${sidebarCollapsed() ? RAIL_WIDTH : sidebarWidth()}px` }}
+        >
+          {sidebarCollapsed() ? <SidebarRail /> : <Sidebar />}
+          {!sidebarCollapsed() && <SidebarResizeHandle />}
         </div>
 
         {/* Mobile drawer backdrop */}

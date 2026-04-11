@@ -1,11 +1,25 @@
-import { Component, JSX, Show, createSignal, onMount } from "solid-js";
+import { Component, JSX, Show, createSignal, onMount, createEffect } from "solid-js";
+import { expandRequestId, expandRequestTick } from "./sidebarLayout";
 
-const STORAGE_KEY = "sidebar_collapsed";
+const STORAGE_KEY = "galactilog.sidebar.sections";
+const LEGACY_KEY = "sidebar_collapsed";
 
 function getCollapsedState(): Record<string, boolean> {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : {};
+    if (raw) return JSON.parse(raw);
+    const legacy = localStorage.getItem(LEGACY_KEY);
+    if (legacy) {
+      let parsed: unknown = null;
+      try { parsed = JSON.parse(legacy); } catch { /* ignore */ }
+      const valid = (parsed && typeof parsed === "object" && !Array.isArray(parsed))
+        ? (parsed as Record<string, boolean>)
+        : {};
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(valid));
+      localStorage.removeItem(LEGACY_KEY);
+      return valid;
+    }
+    return {};
   } catch {
     return {};
   }
@@ -19,10 +33,26 @@ function saveCollapsedState(state: Record<string, boolean>) {
 
 const CollapsibleSection: Component<{ id: string; label: string; children: JSX.Element }> = (props) => {
   const [collapsed, setCollapsed] = createSignal(false);
+  let sectionRef: HTMLElement | undefined;
 
   onMount(() => {
     const state = getCollapsedState();
     if (state[props.id]) setCollapsed(true);
+  });
+
+  createEffect(() => {
+    expandRequestTick();
+    if (expandRequestId() === props.id) {
+      if (collapsed()) {
+        setCollapsed(false);
+        const state = getCollapsedState();
+        delete state[props.id];
+        saveCollapsedState(state);
+      }
+      queueMicrotask(() => {
+        sectionRef?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      });
+    }
   });
 
   const toggle = () => {
@@ -38,7 +68,10 @@ const CollapsibleSection: Component<{ id: string; label: string; children: JSX.E
   };
 
   return (
-    <section class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-3">
+    <section
+      ref={(el) => (sectionRef = el)}
+      class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-3"
+    >
       <button
         onClick={toggle}
         class="flex items-center justify-between w-full text-label font-medium uppercase tracking-wider text-theme-text-tertiary hover:text-theme-text-secondary transition-colors cursor-pointer select-none"
