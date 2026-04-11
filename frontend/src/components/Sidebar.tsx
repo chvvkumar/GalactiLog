@@ -13,26 +13,47 @@ import CustomColumnFilters from "./CustomColumnFilters";
 
 import { formatIntegration } from "../utils/format";
 
+export type SidebarSectionId =
+  | "search"
+  | "object-type"
+  | "date-range"
+  | "filters"
+  | "equipment"
+  | "metrics"
+  | "fits-query"
+  | "custom-columns";
+
+export interface ActiveSectionFilters {
+  searchQuery?: string;
+  camera?: string;
+  telescope?: string;
+  opticalFilters: unknown[];
+  objectTypes: unknown[];
+  dateRange: { start?: unknown; end?: unknown };
+  fitsQueries: unknown[];
+  qualityFilters: Record<string, unknown>;
+  metricFilters: Record<string, unknown>;
+  customColumnFilters: unknown[];
+}
+
+export function getActiveSectionIds(f: ActiveSectionFilters): Set<SidebarSectionId> {
+  const ids = new Set<SidebarSectionId>();
+  if (f.searchQuery) ids.add("search");
+  if (f.objectTypes.length > 0) ids.add("object-type");
+  if (f.dateRange.start || f.dateRange.end) ids.add("date-range");
+  if (Object.keys(f.qualityFilters).some((k) => (f.qualityFilters as Record<string, unknown>)[k] != null)) ids.add("filters");
+  if (f.camera || f.telescope || f.opticalFilters.length > 0) ids.add("equipment");
+  if (Object.keys(f.metricFilters).length > 0) ids.add("metrics");
+  if (f.fitsQueries.length > 0) ids.add("fits-query");
+  if (f.customColumnFilters.length > 0) ids.add("custom-columns");
+  return ids;
+}
+
 const Sidebar: Component = () => {
   const { resetFilters, targetData, filters } = useDashboardFilters();
   const { customColumns } = useSettingsContext();
 
-  const hasActiveFilters = () => {
-    const f = filters();
-    return !!(
-      f.searchQuery ||
-      f.camera ||
-      f.telescope ||
-      f.opticalFilters.length > 0 ||
-      f.objectTypes.length > 0 ||
-      f.dateRange.start ||
-      f.dateRange.end ||
-      f.fitsQueries.length > 0 ||
-      Object.keys(f.qualityFilters).some((k) => (f.qualityFilters as Record<string, unknown>)[k] != null) ||
-      Object.keys(f.metricFilters).length > 0 ||
-      f.customColumnFilters.length > 0
-    );
-  };
+  const hasActiveFilters = () => getActiveSectionIds(filters() as unknown as ActiveSectionFilters).size > 0;
 
   return (
     <aside class="w-72 min-h-0 max-h-[calc(100vh-57px)] border-r border-theme-border-em p-4 space-y-3 overflow-y-auto">
