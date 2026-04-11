@@ -122,7 +122,8 @@ const MosaicDetailPage: Component = () => {
 
             {/* Panel Thumbnails Grid */}
             <Show when={data().panels.some((p: PanelStats) => p.thumbnail_url)}>
-              <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4">
+              <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
+                <h2 class="text-sm font-semibold text-theme-text-primary">Panels</h2>
                 {(() => {
                   const cols = Math.ceil(Math.sqrt(data().panels.length));
                   const maxIntegration = Math.max(...data().panels.map((p: PanelStats) => p.total_integration_seconds));
@@ -182,7 +183,7 @@ const MosaicDetailPage: Component = () => {
 
             {/* Panel Table */}
             <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
-              <h2 class="text-sm font-semibold text-theme-text-primary">Panels</h2>
+              <h2 class="text-sm font-semibold text-theme-text-primary">Sessions</h2>
               <div class="overflow-hidden rounded border border-theme-border">
                 <table class="w-full text-xs">
                   <thead>
