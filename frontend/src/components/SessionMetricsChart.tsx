@@ -235,9 +235,9 @@ export default function SessionMetricsChart(props: Props) {
 
   return (
     <div>
-      <div class="bg-theme-base rounded-[var(--radius-md)]">
+      <div class="bg-theme-elevated border border-theme-border-em rounded-[var(--radius-sm)]">
       <button
-        class="flex justify-between items-center w-full text-xs py-2 px-3 hover:bg-theme-hover rounded-[var(--radius-md)] hover:text-theme-text-primary transition-colors cursor-pointer"
+        class="flex justify-between items-center w-full text-xs py-2 px-3 hover:bg-theme-hover rounded-[var(--radius-sm)] hover:text-theme-text-primary transition-colors cursor-pointer"
         classList={{ "text-theme-text-primary": expanded(), "text-theme-text-secondary": !expanded() }}
         onClick={toggleExpanded}
       >
