@@ -6,6 +6,7 @@ const LoginPage: Component = () => {
   const { login } = useAuth();
   const [username, setUsername] = createSignal("");
   const [password, setPassword] = createSignal("");
+  const [remember, setRemember] = createSignal(false);
   const [error, setError] = createSignal("");
   const [submitting, setSubmitting] = createSignal(false);
 
@@ -14,7 +15,7 @@ const LoginPage: Component = () => {
     setError("");
     setSubmitting(true);
     try {
-      await login(username(), password());
+      await login(username(), password(), remember());
       showToast(`Welcome, ${username()}`);
       window.location.href = "/";
     } catch (err: any) {
@@ -62,6 +63,15 @@ const LoginPage: Component = () => {
               required
             />
           </div>
+          <label class="flex items-center gap-2 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={remember()}
+              onChange={(e) => setRemember(e.currentTarget.checked)}
+              class="accent-theme-accent w-3.5 h-3.5"
+            />
+            <span class="text-sm text-theme-text-secondary">Remember me</span>
+          </label>
           <button
             type="submit"
             disabled={submitting()}

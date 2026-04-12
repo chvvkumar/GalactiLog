@@ -220,10 +220,10 @@ function buildTargetQuery(filters: ActiveFilters, page?: number, pageSize?: numb
 
 export const api = {
   // Auth
-  login: (username: string, password: string) =>
+  login: (username: string, password: string, remember: boolean = false) =>
     fetchJson<LoginResponse>("/auth/login", {
       method: "POST",
-      body: JSON.stringify({ username, password }),
+      body: JSON.stringify({ username, password, remember }),
     }),
 
   logout: () =>
