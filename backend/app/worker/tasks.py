@@ -41,15 +41,6 @@ from app.services.scan_state import (
 
 _redis = get_sync_redis()
 
-from celery.signals import worker_ready as _worker_ready
-
-@_worker_ready.connect
-def _start_metrics_probe(sender, **kwargs):
-    from app.metrics import start_queue_depth_probe
-    from app.worker.celery_app import celery_app as _app
-    start_queue_depth_probe(_app, settings.redis_url)
-
-
 @celery_app.task(bind=True)
 def run_scan(self, include_calibration: bool = True) -> dict:
     """Scan the FITS directory and queue ingest tasks for new files.
