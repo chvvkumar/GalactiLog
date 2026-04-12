@@ -26,6 +26,7 @@ export const MosaicsTab: Component = () => {
   // Suggestions state
   const [suggestions, setSuggestions] = createSignal<MosaicSuggestionResponse[]>([]);
   const [detecting, setDetecting] = createSignal(false);
+  const [acceptingId, setAcceptingId] = createSignal<string | null>(null);
 
   // Mosaics state
   const [mosaics, setMosaics] = createSignal<MosaicSummary[]>([]);
@@ -41,6 +42,14 @@ export const MosaicsTab: Component = () => {
 
   // Expanded suggestion
   const [expandedSuggestion, setExpandedSuggestion] = createSignal<string | null>(null);
+
+  // Suggestion filter
+  const [suggestionFilter, setSuggestionFilter] = createSignal("");
+  const filteredSuggestions = () => {
+    const q = suggestionFilter().toLowerCase().trim();
+    if (!q) return suggestions();
+    return suggestions().filter(s => s.suggested_name.toLowerCase().includes(q));
+  };
 
   // Per-suggestion panel selection: map suggestion id -> set of selected panel labels
   const [selectedPanels, setSelectedPanels] = createSignal<Record<string, Set<string>>>({});
@@ -169,21 +178,29 @@ export const MosaicsTab: Component = () => {
 
   // Suggestions
   const handleAccept = async (s: MosaicSuggestionResponse) => {
+    if (acceptingId()) return; // prevent concurrent accepts
     const sel = selectedPanels()[s.id];
     const selected = sel && sel.size < s.panel_labels.length ? [...sel] : undefined;
     if (sel && sel.size === 0) {
       showToast("Select at least one panel", "error");
       return;
     }
+    setAcceptingId(s.id);
     try {
       await api.acceptMosaicSuggestion(s.id, selected);
       showToast(`Created mosaic "${s.suggested_name}"`);
       setExpandedSuggestion(null);
-      // Update both lists independently so one failure doesn't block the other
-      api.getMosaicSuggestions().then(setSuggestions).catch(() => {});
-      api.getMosaics().then(setMosaics).catch(() => {});
+      // Update both lists before allowing next accept
+      const [newSuggestions, newMosaics] = await Promise.all([
+        api.getMosaicSuggestions(),
+        api.getMosaics(),
+      ]);
+      setSuggestions(newSuggestions);
+      setMosaics(newMosaics);
     } catch {
       showToast("Failed to accept suggestion", "error");
+    } finally {
+      setAcceptingId(null);
     }
   };
 
@@ -379,7 +396,7 @@ export const MosaicsTab: Component = () => {
       <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-4 space-y-3">
         <div class="flex justify-between items-center">
           <h3 class="text-theme-text-primary font-medium">
-            Suggestions ({suggestions().length})
+            Suggestions ({suggestionFilter() ? `${filteredSuggestions().length}/` : ""}{suggestions().length})
           </h3>
           <Show when={isAdmin()}>
             <select
@@ -410,6 +427,15 @@ export const MosaicsTab: Component = () => {
         <p class="text-xs text-theme-text-secondary">
           Sessions for the same panel shot more than the selected gap apart are treated as separate campaigns. Re-run detection after changing.
         </p>
+        <Show when={suggestions().length > 4}>
+          <input
+            type="text"
+            value={suggestionFilter()}
+            onInput={(e) => setSuggestionFilter(e.currentTarget.value)}
+            placeholder="Filter suggestions..."
+            class="w-full px-2 py-1.5 text-sm bg-theme-base border border-theme-border rounded-[var(--radius-sm)] text-theme-text-primary placeholder:text-theme-text-secondary/50 focus:outline-none focus:border-theme-accent"
+          />
+        </Show>
         <Show
           when={suggestions().length > 0}
           fallback={
@@ -419,7 +445,7 @@ export const MosaicsTab: Component = () => {
           }
         >
           <div class="space-y-2">
-            <For each={suggestions()}>
+            <For each={filteredSuggestions()}>
               {(s) => {
                 const uniqueTargets = () => [...new Set(s.target_ids)];
                 const totalFrames = () => s.sessions.reduce((a, r) => a + r.frames, 0);
@@ -463,7 +489,9 @@ export const MosaicsTab: Component = () => {
                           <div class="text-xs text-theme-text-secondary mt-0.5">
                             {s.panel_labels.length} panels
                             {" \u00b7 "}
-                            {totalFrames()} frames
+                            <span classList={{ "text-theme-warning": totalFrames() === 0 }}>
+                              {totalFrames()} frames
+                            </span>
                             {" \u00b7 "}
                             {formatIntegration(totalInt())}
                           </div>
@@ -476,9 +504,10 @@ export const MosaicsTab: Component = () => {
                         <div class="flex gap-2 ml-3 shrink-0">
                           <button
                             onClick={(e) => { e.stopPropagation(); handleAccept(s); }}
-                            class="px-4 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded text-sm font-medium hover:bg-theme-accent/25 transition-colors"
+                            disabled={!!acceptingId()}
+                            class="px-4 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded text-sm font-medium hover:bg-theme-accent/25 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                           >
-                            Accept{(() => {
+                            {acceptingId() === s.id ? "Accepting..." : "Accept"}{(() => {
                               const sel = selectedPanels()[s.id];
                               const count = sel?.size ?? s.panel_labels.length;
                               return count < s.panel_labels.length ? ` (${count}/${s.panel_labels.length})` : "";

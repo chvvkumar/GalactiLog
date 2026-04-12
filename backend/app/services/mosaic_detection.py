@@ -3,7 +3,7 @@ import uuid
 from collections import defaultdict
 from datetime import datetime
 
-from sqlalchemy import select, func, cast, Date
+from sqlalchemy import select, func, cast, Date, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Target, UserSettings, SETTINGS_ROW_ID
@@ -80,10 +80,28 @@ async def detect_mosaic_panels(session: AsyncSession, gap_days: int = 0) -> int:
                     seen_panels.add(panel_key)
                     groups[base].append((t, f"Panel {panel_num}", panel_num))
 
-    # Create suggestions for groups with 2+ panels
-    # Skip if a suggestion for this base name already exists
-    existing_q = select(MosaicSuggestion.suggested_name).where(MosaicSuggestion.status == "pending")
-    existing_names = {r[0] for r in (await session.execute(existing_q)).all()}
+    # Collect base names we're about to create suggestions for
+    new_base_names = {base for base, panels in groups.items() if len(panels) >= 2}
+
+    # Delete stale pending suggestions for these base names so re-detection
+    # with different gap settings replaces rather than accumulates.
+    if new_base_names:
+        stale_q = select(MosaicSuggestion.id).where(
+            MosaicSuggestion.status == "pending",
+            MosaicSuggestion.base_name.in_(new_base_names),
+        )
+        stale_ids = [r[0] for r in (await session.execute(stale_q)).all()]
+        if stale_ids:
+            await session.execute(
+                delete(MosaicSuggestion).where(MosaicSuggestion.id.in_(stale_ids))
+            )
+
+    # Skip groups that already have accepted mosaics
+    accepted_q = select(MosaicSuggestion.base_name).where(
+        MosaicSuggestion.status == "accepted",
+        MosaicSuggestion.base_name.in_(new_base_names),
+    )
+    accepted_bases = {r[0] for r in (await session.execute(accepted_q)).all()}
 
     count = 0
 
@@ -119,12 +137,16 @@ async def detect_mosaic_panels(session: AsyncSession, gap_days: int = 0) -> int:
 
             if not all_dates:
                 # No date info found - fall through to non-clustered creation
-                if base_name in existing_names:
+                if base_name in accepted_bases:
                     continue
+                panels_list = [(t, lbl, pn) for t, lbl, pn, _ in panel_dates]
+                panel_patterns = [f"%{base_name}%Panel%{pn}%" for _, _, pn in panels_list]
                 suggestion = MosaicSuggestion(
                     suggested_name=base_name,
-                    target_ids=[t.id for t, _, _, _ in panel_dates],
-                    panel_labels=[lbl for _, lbl, _, _ in panel_dates],
+                    base_name=base_name,
+                    target_ids=[t.id for t, _, _ in panels_list],
+                    panel_labels=[lbl for _, lbl, _ in panels_list],
+                    panel_patterns=panel_patterns,
                 )
                 session.add(suggestion)
                 count += 1
@@ -134,12 +156,16 @@ async def detect_mosaic_panels(session: AsyncSession, gap_days: int = 0) -> int:
 
             if len(clusters) == 1:
                 # Single campaign - use base name as-is
-                if base_name in existing_names:
+                if base_name in accepted_bases:
                     continue
+                panels_list = [(t, lbl, pn) for t, lbl, pn, _ in panel_dates]
+                panel_patterns = [f"%{base_name}%Panel%{pn}%" for _, _, pn in panels_list]
                 suggestion = MosaicSuggestion(
                     suggested_name=base_name,
+                    base_name=base_name,
                     target_ids=[t.id for t, _, _, _ in panel_dates],
                     panel_labels=[lbl for _, lbl, _, _ in panel_dates],
+                    panel_patterns=panel_patterns,
                 )
                 session.add(suggestion)
                 count += 1
@@ -150,23 +176,26 @@ async def detect_mosaic_panels(session: AsyncSession, gap_days: int = 0) -> int:
                     suffix = _year_range_suffix(cluster_dates)
                     campaign_name = f"{base_name} {suffix}"
 
-                    if campaign_name in existing_names:
+                    if base_name in accepted_bases:
                         continue
 
                     # Only include panels that have at least one session in this cluster
                     campaign_panels = [
-                        (t, lbl)
-                        for t, lbl, _, dates in panel_dates
+                        (t, lbl, pn)
+                        for t, lbl, pn, dates in panel_dates
                         if any(d in cluster_set for d in dates)
                     ]
 
                     if len(campaign_panels) < 2:
                         continue
 
+                    panel_patterns = [f"%{base_name}%Panel%{pn}%" for _, _, pn in campaign_panels]
                     suggestion = MosaicSuggestion(
                         suggested_name=campaign_name,
-                        target_ids=[t.id for t, _ in campaign_panels],
-                        panel_labels=[lbl for _, lbl in campaign_panels],
+                        base_name=base_name,
+                        target_ids=[t.id for t, _, _ in campaign_panels],
+                        panel_labels=[lbl for _, lbl, _ in campaign_panels],
+                        panel_patterns=panel_patterns,
                     )
                     session.add(suggestion)
                     count += 1
@@ -176,13 +205,16 @@ async def detect_mosaic_panels(session: AsyncSession, gap_days: int = 0) -> int:
         for base_name, panels in groups.items():
             if len(panels) < 2:
                 continue
-            if base_name in existing_names:
+            if base_name in accepted_bases:
                 continue
 
+            panel_patterns = [f"%{base_name}%Panel%{pn}%" for _, _, pn in panels]
             suggestion = MosaicSuggestion(
                 suggested_name=base_name,
+                base_name=base_name,
                 target_ids=[t.id for t, _, _ in panels],
                 panel_labels=[label for _, label, _ in panels],
+                panel_patterns=panel_patterns,
             )
             session.add(suggestion)
             count += 1
