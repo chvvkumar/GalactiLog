@@ -299,6 +299,9 @@ def save_vizier_cache(
 def enrich_target_from_vizier(session: Session, target: "Target") -> bool:
     """Enrich a target from VizieR. Checks cache first, queries if needed.
 
+    HTTP call is made outside any open transaction to avoid holding DB
+    connections during network I/O.
+
     Returns True if any fields were updated.
     """
     if not target.catalog_id:
@@ -308,7 +311,7 @@ def enrich_target_from_vizier(session: Session, target: "Target") -> bool:
     if determine_vizier_catalog(target.catalog_id) is None:
         return False
 
-    # Check cache
+    # Check cache (read-only)
     cached = get_cached_vizier(target.catalog_id, session)
     if cached is not None:
         # Cached (positive or negative) - apply if positive
@@ -326,17 +329,18 @@ def enrich_target_from_vizier(session: Session, target: "Target") -> bool:
             updated = True
         return updated
 
-    # Query VizieR
+    # Query VizieR (HTTP call - outside transaction)
     viz_id = determine_vizier_catalog(target.catalog_id)[0]
     data = query_vizier(target.catalog_id)
 
-    # Cache the result (even if None - negative cache)
+    # Cache the result in its own mini-transaction (even if None - negative cache)
     save_vizier_cache(session, target.catalog_id, viz_id, data)
-    session.flush()
+    session.commit()
 
     if data is None:
         return False
 
+    # Apply enrichment
     updated = False
     if data.get("size_major") is not None and target.size_major is None:
         target.size_major = data["size_major"]

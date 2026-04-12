@@ -8,8 +8,6 @@ services:
       POSTGRES_DB: ${GALACTILOG_POSTGRES_DB:-galactilog_catalog}
     volumes:
       - ${GALACTILOG_POSTGRES_DATA_HOST_PATH:-postgres_data}:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-galactilog} -d ${POSTGRES_DB:-galactilog_catalog}"]
       interval: 5s
@@ -19,8 +17,7 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
-    ports:
-      - "6379:6379"
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru --save ""
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s

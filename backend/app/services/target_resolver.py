@@ -98,9 +98,10 @@ def _create_target(
         session.add(target)
         session.flush()
         enrich_target_from_openngc(session, target)
+        session.commit()
         if target.size_major is None:
             enrich_target_from_vizier(session, target)
-        session.commit()
+            session.commit()
         return str(target.id)
     except IntegrityError:
         session.rollback()

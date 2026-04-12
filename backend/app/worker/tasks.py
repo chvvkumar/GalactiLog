@@ -41,6 +41,15 @@ from app.services.scan_state import (
 
 _redis = get_sync_redis()
 
+
+def _invalidate_stats_cache():
+    """Delete the stats cache key from Redis so the next stats request is fresh."""
+    try:
+        _redis.delete("galactilog:stats:cache")
+    except Exception:
+        pass
+
+
 @celery_app.task(bind=True)
 def run_scan(self, include_calibration: bool = True) -> dict:
     """Scan the FITS directory and queue ingest tasks for new files.
@@ -213,6 +222,8 @@ def run_scan(self, include_calibration: bool = True) -> dict:
     # (smart_rebuild_targets + detect_mosaic_panels_task are chained from check_complete_sync)
     detect_duplicate_targets.apply_async(countdown=30)
     backfill_dark_hours.apply_async(countdown=45)
+
+    _invalidate_stats_cache()
 
     return {
         "status": "ingesting",
@@ -1041,6 +1052,7 @@ def _smart_rebuild_inner(manual: bool = False) -> dict:
     message = "; ".join(parts) if parts else "No issues found"
 
     set_rebuild_complete_sync(_redis, message, stats)
+    _invalidate_stats_cache()
     if manual:
         append_activity_sync(_redis, {
             "type": "rebuild_complete",
