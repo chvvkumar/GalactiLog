@@ -13,7 +13,6 @@ export const MergesTab: Component = () => {
   const [detecting, setDetecting] = createSignal(false);
   const [view, setView] = createSignal<"suggestions" | "merged" | "unresolved">("suggestions");
   const [unresolvedCount, setUnresolvedCount] = createSignal(0);
-  const [confirmMergeId, setConfirmMergeId] = createSignal<string | null>(null);
   const [confirmRevertId, setConfirmRevertId] = createSignal<string | null>(null);
 
   const refresh = async () => {
@@ -35,7 +34,6 @@ export const MergesTab: Component = () => {
   });
 
   const handleMerge = async (candidate: MergeCandidateResponse) => {
-    setConfirmMergeId(null);
     try {
       await api.mergeTargets(
         candidate.suggested_target_id,
@@ -163,7 +161,7 @@ export const MergesTab: Component = () => {
                     <Show when={isAdmin()}>
                       <div class="flex gap-2">
                         <button
-                          onClick={() => setConfirmMergeId(c.id)}
+                          onClick={() => handleMerge(c)}
                           class="px-2 py-1 text-xs border border-theme-accent/50 text-theme-accent rounded-[var(--radius-sm)] hover:bg-theme-accent/10 transition-colors"
                         >
                           Merge
@@ -174,26 +172,6 @@ export const MergesTab: Component = () => {
                         >
                           Dismiss
                         </button>
-                      </div>
-                    </Show>
-                    <Show when={confirmMergeId() === c.id}>
-                      <div class="w-full mt-2 bg-theme-accent/10 border border-theme-accent/30 rounded-[var(--radius-md)] p-3 space-y-2">
-                        <p class="text-sm text-theme-accent font-medium">Merge "{c.source_name}" into "{c.suggested_target_name}"?</p>
-                        <p class="text-xs text-theme-text-secondary">All images from "{c.source_name}" will be reassigned. This can be reverted later.</p>
-                        <div class="flex gap-2 pt-1">
-                          <button
-                            onClick={() => handleMerge(c)}
-                            class="px-3 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded text-xs font-medium hover:bg-theme-accent/25 transition-colors"
-                          >
-                            Yes, merge
-                          </button>
-                          <button
-                            onClick={() => setConfirmMergeId(null)}
-                            class="px-3 py-1.5 border border-theme-border-em text-theme-text-secondary rounded text-xs hover:text-theme-text-primary transition-colors"
-                          >
-                            Cancel
-                          </button>
-                        </div>
                       </div>
                     </Show>
                   </div>
