@@ -750,6 +750,21 @@ async def delete_mosaic(
     mosaic = await session.get(Mosaic, mosaic_id)
     if not mosaic:
         raise HTTPException(404, "Mosaic not found")
+
+    # Clean up accepted suggestions matching this mosaic name so detection
+    # can re-suggest them. Strip year suffix for base_name matching too.
+    base = re.sub(r'\s*\(\d{4}(?:-\d{4})?\)\s*$', '', mosaic.name)
+    stale_q = select(MosaicSuggestion).where(
+        MosaicSuggestion.status == "accepted",
+        or_(
+            MosaicSuggestion.suggested_name == mosaic.name,
+            MosaicSuggestion.base_name == base,
+        ),
+    )
+    stale_suggestions = (await session.execute(stale_q)).scalars().all()
+    for s in stale_suggestions:
+        await session.delete(s)
+
     await session.delete(mosaic)
     await session.commit()
     return {"status": "ok"}

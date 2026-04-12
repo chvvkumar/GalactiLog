@@ -96,12 +96,18 @@ async def detect_mosaic_panels(session: AsyncSession, gap_days: int = 0) -> int:
                 delete(MosaicSuggestion).where(MosaicSuggestion.id.in_(stale_ids))
             )
 
-    # Skip groups that already have accepted mosaics
-    accepted_q = select(MosaicSuggestion.base_name).where(
-        MosaicSuggestion.status == "accepted",
-        MosaicSuggestion.base_name.in_(new_base_names),
-    )
-    accepted_bases = {r[0] for r in (await session.execute(accepted_q)).all()}
+    # Skip groups that already have an existing mosaic (check actual Mosaic table,
+    # not suggestion status, so deleting a mosaic properly allows re-detection).
+    existing_mosaic_q = select(Mosaic.name)
+    existing_mosaic_names = {r[0].upper() for r in (await session.execute(existing_mosaic_q)).all()}
+    # Build lookup: a base_name is "taken" if any existing mosaic name starts with it
+    accepted_bases: set[str] = set()
+    for base in new_base_names:
+        base_upper = base.upper()
+        for name in existing_mosaic_names:
+            if name == base_upper or name.startswith(base_upper + " ("):
+                accepted_bases.add(base)
+                break
 
     count = 0
 
