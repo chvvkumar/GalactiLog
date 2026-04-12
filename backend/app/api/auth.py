@@ -39,7 +39,17 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _set_auth_cookies(response: Response, access_token: str, refresh_token: str) -> None:
+def _set_auth_cookies(
+    response: Response,
+    access_token: str,
+    refresh_token: str,
+    persistent: bool = False,
+) -> None:
+    # persistent=True  → cookies survive browser restart (max_age set)
+    # persistent=False → session cookies (no max_age, cleared on browser close)
+    access_max_age = settings.access_token_expiry if persistent else None
+    refresh_max_age = settings.refresh_token_expiry if persistent else None
+
     response.set_cookie(
         key="access_token",
         value=access_token,
@@ -47,6 +57,7 @@ def _set_auth_cookies(response: Response, access_token: str, refresh_token: str)
         secure=settings.https,
         samesite="strict",
         path="/",
+        max_age=access_max_age,
     )
     response.set_cookie(
         key="refresh_token",
@@ -55,6 +66,7 @@ def _set_auth_cookies(response: Response, access_token: str, refresh_token: str)
         secure=settings.https,
         samesite="strict",
         path="/api/auth",
+        max_age=refresh_max_age,
     )
 
 
@@ -122,10 +134,10 @@ async def login(
 
     access = create_access_token(user.id, user.role.value)
     refresh = generate_refresh_token()
-    await store_refresh_token(session, user.id, refresh)
+    await store_refresh_token(session, user.id, refresh, persistent=body.remember)
     await session.commit()
 
-    _set_auth_cookies(response, access, refresh)
+    _set_auth_cookies(response, access, refresh, persistent=body.remember)
     audit_log("login", user_id=user.id, username=user.username, source_ip=ip, success=True)
 
     return LoginResponse(username=user.username, role=user.role.value)
@@ -162,10 +174,14 @@ async def refresh(
 
     access = create_access_token(user.id, user.role.value)
     new_refresh = generate_refresh_token()
-    await store_refresh_token(session, user.id, new_refresh, family_id=old_rt.family_id)
+    await store_refresh_token(
+        session, user.id, new_refresh,
+        family_id=old_rt.family_id,
+        persistent=old_rt.persistent,
+    )
     await session.commit()
 
-    _set_auth_cookies(response, access, new_refresh)
+    _set_auth_cookies(response, access, new_refresh, persistent=old_rt.persistent)
     audit_log("refresh", user_id=user.id, source_ip=ip)
     return {"status": "ok"}
 

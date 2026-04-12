@@ -82,6 +82,7 @@ async def store_refresh_token(
     user_id: uuid.UUID,
     token: str,
     family_id: uuid.UUID | None = None,
+    persistent: bool = False,
 ) -> RefreshToken:
     token_hash = hash_token(token)
     if family_id is None:
@@ -91,6 +92,7 @@ async def store_refresh_token(
         token_hash=token_hash,
         family_id=family_id,
         expires_at=datetime.now(timezone.utc) + timedelta(seconds=settings.refresh_token_expiry),
+        persistent=persistent,
     )
     session.add(rt)
     await session.flush()
