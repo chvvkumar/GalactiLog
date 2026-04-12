@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 # Current data version - bump this and add a migration function when
 # code changes affect how stored target data is derived.
-DATA_VERSION = 6
+DATA_VERSION = 7
 
 
 def _migrate_v1_fix_catalog_designations(session: Session) -> str:
@@ -294,6 +294,7 @@ MIGRATIONS: dict[int, tuple[str, Callable[[Session], str]]] = {
     4: ("VizieR enrichment and OpenNGC common name backfill", _migrate_v4_vizier_and_common_names),
     5: ("Strip panel suffixes from target aliases", _migrate_v5_strip_panel_aliases),
     6: ("Clear negative VizieR cache, re-enrich targets, compute constellations", _migrate_v6_clear_negative_cache_and_reenrich),
+    7: ("Re-enrich after VizieR ADQL fix (drop unreferenceable computed columns)", _migrate_v6_clear_negative_cache_and_reenrich),
 }
 
 
