@@ -1,13 +1,15 @@
 import asyncio
+import logging
 import subprocess
 import time
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, Query
+from starlette.responses import Response
 from sqlalchemy import select, func, case
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import settings
+from app.config import settings, async_redis
 from app.database import get_session
 from app.api.deps import get_current_user
 from app.models.user import User
@@ -26,7 +28,12 @@ from app.schemas.stats import (
 )
 # astro_night is no longer imported here - efficiency uses precomputed DB table
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/stats", tags=["stats"])
+
+_STATS_CACHE_KEY = "galactilog:stats:cache"
+_STATS_CACHE_TTL = 300  # 5 minutes
 
 # --- Storage size cache (expensive to compute, updated in background) ---
 _storage_cache: dict[str, int] = {"fits": 0, "thumbnails": 0}
@@ -64,12 +71,23 @@ async def _refresh_storage_cache() -> None:
         _storage_last_update = time.time()
 
 
+_site_coords_cache: SiteCoords | None = None
+_site_coords_ts: float = 0.0
+_SITE_COORDS_TTL = 3600  # 1 hour
+
+
 async def _extract_site_coords(session: AsyncSession) -> SiteCoords | None:
     """Extract the most common lat/lon from FITS raw_headers.
 
     Checks SITELAT/SITELONG (N.I.N.A.), OBSLAT/OBSLONG, and LAT-OBS/LONG-OBS.
     Returns the most frequently occurring coordinate pair, or None.
+    Results are cached in-memory for 1 hour since site coordinates never change
+    between scans.
     """
+    global _site_coords_cache, _site_coords_ts
+    if _site_coords_cache is not None and (time.time() - _site_coords_ts) < _SITE_COORDS_TTL:
+        return _site_coords_cache
+
     lat_keys = ["SITELAT", "OBSLAT", "LAT-OBS"]
     lon_keys = ["SITELONG", "OBSLONG", "LONG-OBS"]
 
@@ -87,7 +105,10 @@ async def _extract_site_coords(session: AsyncSession) -> SiteCoords | None:
         row = result.first()
         if row and row.lat and row.lon:
             try:
-                return SiteCoords(latitude=float(row.lat), longitude=float(row.lon))
+                coords = SiteCoords(latitude=float(row.lat), longitude=float(row.lon))
+                _site_coords_cache = coords
+                _site_coords_ts = time.time()
+                return coords
             except (ValueError, TypeError):
                 continue
     return None
@@ -124,7 +145,17 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
 
     Storage sizes are cached and refreshed in the background every 5 minutes.
     The first request after startup returns 0 for storage while du runs.
+    Stats response is cached in Redis for 5 minutes to avoid repeated full-table scans.
     """
+
+    # Check Redis cache first
+    try:
+        async with async_redis() as r:
+            cached = await r.get(_STATS_CACHE_KEY)
+        if cached:
+            return Response(content=cached, media_type="application/json")
+    except Exception:
+        logger.debug("Redis cache read failed for stats, computing fresh")
 
     # Kick off storage refresh in background (non-blocking)
     if time.time() - _storage_last_update >= _STORAGE_TTL:
@@ -466,10 +497,19 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
     import calendar as cal
 
     dark_map: dict[date_type, float] = {}
-    if site_coords:
+    if site_coords and daily_raw:
+        # Constrain dark hours lookup to the date range we actually have data for
+        min_date_str = daily_raw[0][0]   # daily_raw is sorted by day ascending
+        max_date_str = daily_raw[-1][0]
+        min_date_parts = min_date_str.split("-")
+        max_date_parts = max_date_str.split("-")
+        min_date = date_type(int(min_date_parts[0]), int(min_date_parts[1]), int(min_date_parts[2]))
+        max_date = date_type(int(max_date_parts[0]), int(max_date_parts[1]), int(max_date_parts[2]))
         dark_q = select(SiteDarkHours.date, SiteDarkHours.dark_hours).where(
             SiteDarkHours.latitude == site_coords.latitude,
             SiteDarkHours.longitude == site_coords.longitude,
+            SiteDarkHours.date >= min_date,
+            SiteDarkHours.date <= max_date,
         )
         dark_result = await session.execute(dark_q)
         dark_map = {row[0]: row[1] for row in dark_result.all()}
@@ -515,7 +555,7 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
             period=period, integration_seconds=secs, efficiency_pct=eff,
         ))
 
-    return StatsResponse(
+    response = StatsResponse(
         overview=overview,
         equipment=equipment,
         equipment_performance=equipment_performance,
@@ -530,6 +570,15 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
         storage=storage,
         ingest_history=ingest_history,
     )
+
+    # Cache the computed response in Redis
+    try:
+        async with async_redis() as r:
+            await r.setex(_STATS_CACHE_KEY, _STATS_CACHE_TTL, response.model_dump_json())
+    except Exception:
+        logger.debug("Redis cache write failed for stats")
+
+    return response
 
 
 @router.get("/calendar", response_model=list[CalendarEntry])

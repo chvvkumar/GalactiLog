@@ -168,7 +168,7 @@ const TargetRow: Component<{
             <SessionTable
               sessions={props.target.sessions}
               onDeepDive={(date) => {
-                window.location.href = `/targets/${encodeURIComponent(props.target.target_id)}?session=${date}`;
+                navigate(`/targets/${encodeURIComponent(props.target.target_id)}?session=${date}`);
               }}
             />
           </td>

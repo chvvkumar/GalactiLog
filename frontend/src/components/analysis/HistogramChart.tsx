@@ -1,16 +1,8 @@
 import { Component, createEffect, onCleanup } from "solid-js";
-import {
-  Chart,
-  BarController,
-  BarElement,
-  LinearScale,
-  CategoryScale,
-  Tooltip,
-} from "chart.js";
+import { Chart } from "chart.js";
+import "../../utils/chartRegistry";
 import type { DistributionResponse } from "../../types";
 import { chartFontSize } from "../../utils/chartConfig";
-
-Chart.register(BarController, BarElement, LinearScale, CategoryScale, Tooltip);
 
 interface Props {
   data: DistributionResponse | undefined;

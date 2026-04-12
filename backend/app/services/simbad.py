@@ -519,22 +519,24 @@ def resolve_target_name_cached(
         return None
 
     # Query SIMBAD - try mapped name first (more likely to resolve), fall back to original
-    raw = None
-    if mapped_norm:
-        loop = asyncio.new_event_loop()
-        try:
-            raw = loop.run_until_complete(_query_simbad_raw(mapped))
-        finally:
-            loop.close()
-        if raw:
-            save_simbad_cache(mapped_norm, raw, db_session)
+    async def _resolve_both(mapped_name, original_name):
+        if mapped_name:
+            result = await _query_simbad_raw(mapped_name)
+            if result:
+                return result, True
+        result = await _query_simbad_raw(original_name)
+        return result, False
 
-    if raw is None:
-        loop = asyncio.new_event_loop()
-        try:
-            raw = loop.run_until_complete(_query_simbad_raw(object_name))
-        finally:
-            loop.close()
+    loop = asyncio.new_event_loop()
+    try:
+        raw, used_mapped = loop.run_until_complete(
+            _resolve_both(mapped if mapped_norm else None, object_name)
+        )
+    finally:
+        loop.close()
+
+    if used_mapped and raw:
+        save_simbad_cache(mapped_norm, raw, db_session)
 
     # Cache the result (positive or negative)
     save_simbad_cache(normalized, raw, db_session)

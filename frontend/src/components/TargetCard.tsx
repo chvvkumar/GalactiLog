@@ -1,4 +1,5 @@
 import { Component, Show } from "solid-js";
+import { useNavigate } from "@solidjs/router";
 import type { TargetAggregation } from "../types";
 import FilterBadges from "./FilterBadges";
 import SessionTable from "./SessionTable";
@@ -8,6 +9,7 @@ import { formatIntegration } from "../utils/format";
 
 const TargetCard: Component<{ target: TargetAggregation }> = (props) => {
   const { expandedTargets, toggleExpanded } = useCatalog();
+  const navigate = useNavigate();
   const isOpen = () => expandedTargets().has(props.target.target_id);
 
   return (
@@ -40,7 +42,7 @@ const TargetCard: Component<{ target: TargetAggregation }> = (props) => {
         <SessionTable
           sessions={props.target.sessions}
           onDeepDive={(date) => {
-            window.location.href = `/targets/${encodeURIComponent(props.target.target_id)}?session=${date}`;
+            navigate(`/targets/${encodeURIComponent(props.target.target_id)}?session=${date}`);
           }}
         />
       </Show>

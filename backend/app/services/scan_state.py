@@ -224,6 +224,11 @@ def check_complete_sync(r: sync_redis.Redis) -> None:
             "details": {"completed": snap.completed, "failed": snap.failed, "skipped_calibration": snap.skipped_calibration, "csv_enriched": snap.csv_enriched, "total": snap.total, "removed": snap.removed, "new_files": snap.new_files, "changed_files": snap.changed_files},
             "timestamp": time.time(),
         })
+        # Invalidate stats cache immediately so the next request gets fresh data
+        try:
+            r.delete("galactilog:stats:cache")
+        except Exception:
+            pass
         # Chain post-scan maintenance tasks
         from app.worker.tasks import smart_rebuild_targets, detect_mosaic_panels_task
         smart_rebuild_targets.apply_async(countdown=10)
