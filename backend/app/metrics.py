@@ -128,11 +128,11 @@ def register_celery_signals():
             _redis_client = _redis_mod.from_url(url)
         return _redis_client
 
-    @task_prerun.connect(dispatch_uid="galactilog_task_prerun")
+    @task_prerun.connect(dispatch_uid="galactilog_task_prerun", weak=False)
     def on_task_prerun(task_id, task, *args, **kwargs):
         task.request._metrics_start = time.perf_counter()
 
-    @task_postrun.connect(dispatch_uid="galactilog_task_postrun")
+    @task_postrun.connect(dispatch_uid="galactilog_task_postrun", weak=False)
     def on_task_postrun(task_id, task, *args, **kwargs):
         start = getattr(task.request, "_metrics_start", None)
         if start is None:
@@ -152,7 +152,7 @@ def register_celery_signals():
         except Exception:
             logger.debug("Failed to write task metrics to Redis", exc_info=True)
 
-    @task_failure.connect(dispatch_uid="galactilog_task_failure")
+    @task_failure.connect(dispatch_uid="galactilog_task_failure", weak=False)
     def on_task_failure(task_id, exception, traceback, sender, *args, **kwargs):
         try:
             r = _get_redis()
