@@ -1,13 +1,12 @@
 import time
 import threading
 import logging
-from contextvars import ContextVar
 
 from prometheus_client import Counter, Histogram, Gauge
 
 logger = logging.getLogger(__name__)
 
-_db_query_count: ContextVar[int] = ContextVar("_db_query_count", default=0)
+_request_local = threading.local()
 
 HTTP_REQUEST_DURATION = Histogram(
     "galactilog_http_request_duration_seconds",
@@ -62,10 +61,10 @@ from starlette.requests import Request
 
 class PrometheusMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
-        if request.url.path == "/metrics":
+        if request.url.path == "/api/metrics":
             return await call_next(request)
 
-        _db_query_count.set(0)
+        _request_local.query_count = 0
 
         start = time.perf_counter()
         response = await call_next(request)
@@ -80,7 +79,7 @@ class PrometheusMiddleware(BaseHTTPMiddleware):
         HTTP_REQUEST_DURATION.labels(method=method, endpoint=endpoint, status_code=status).observe(duration)
         HTTP_REQUESTS_TOTAL.labels(method=method, endpoint=endpoint, status_code=status).inc()
 
-        query_count = _db_query_count.get()
+        query_count = getattr(_request_local, 'query_count', 0)
         if query_count > 0:
             DB_QUERIES_PER_REQUEST.labels(endpoint=endpoint).observe(query_count)
 
@@ -104,7 +103,7 @@ def register_db_listeners(sync_engine):
         start = conn.info.pop("query_start", None)
         if start is not None:
             DB_QUERY_DURATION.observe(time.perf_counter() - start)
-        _db_query_count.set(_db_query_count.get() + 1)
+        _request_local.query_count = getattr(_request_local, 'query_count', 0) + 1
 
     pool = sync_engine.pool
 
