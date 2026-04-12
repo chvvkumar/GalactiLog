@@ -31,28 +31,6 @@ GalactiLog exposes a Prometheus-compatible metrics endpoint at `/api/metrics`. T
 | `galactilog_celery_workers_active` | Gauge | (none) | Worker slots processing |
 | `galactilog_celery_workers_total` | Gauge | (none) | Total worker slots |
 
-## Scraping with Telegraf
-
-Add a config file to `/etc/telegraf/telegraf.d/`:
-
-```ini
-# /etc/telegraf/telegraf.d/galactilog.conf
-[[inputs.prometheus]]
-  urls = ["http://astrodb.lan:8080/api/metrics"]
-  interval = "30s"
-  namepass = ["galactilog_*"]
-  [inputs.prometheus.tags]
-    source = "galactilog"
-```
-
-Reload telegraf:
-
-```bash
-sudo systemctl reload telegraf
-```
-
-Metrics flow into InfluxDB under the `telegraf` database with measurement names matching the metric names above.
-
 ## Scraping with Prometheus
 
 Add a scrape target to `prometheus.yml`:
@@ -79,26 +57,28 @@ A pre-built dashboard is available in the GalactiLog folder on Grafana. It inclu
 
 ### Example: Queries Per Request
 
-The `galactilog_db_queries_per_request` metric tracks how many database queries each HTTP request issues. High values indicate N+1 query patterns. Sample InfluxDB query:
+The `galactilog_db_queries_per_request` metric tracks how many database queries each HTTP request issues. High values indicate N+1 query patterns. Sample PromQL:
 
-```sql
-SELECT non_negative_derivative(last("sum"), 1s)
-     / non_negative_derivative(last("count"), 1s)
-FROM "galactilog_db_queries_per_request"
-WHERE ("source" = 'galactilog') AND $timeFilter
-GROUP BY time($__interval), "endpoint"
-fill(null)
+```promql
+# Average queries per request by endpoint (over 5m windows)
+rate(galactilog_db_queries_per_request_sum[5m])
+  / rate(galactilog_db_queries_per_request_count[5m])
 ```
 
 ### Example: Request Latency
 
-```sql
-SELECT non_negative_derivative(last("sum"), 1s)
-     / non_negative_derivative(last("count"), 1s)
-FROM "galactilog_http_request_duration_seconds"
-WHERE ("source" = 'galactilog') AND $timeFilter
-GROUP BY time($__interval), "endpoint"
-fill(null)
+```promql
+# Average request latency by endpoint (over 5m windows)
+rate(galactilog_http_request_duration_seconds_sum[5m])
+  / rate(galactilog_http_request_duration_seconds_count[5m])
+```
+
+### Example: P95 Latency
+
+```promql
+histogram_quantile(0.95,
+  rate(galactilog_http_request_duration_seconds_bucket[5m])
+)
 ```
 
 ## Endpoint Labels
