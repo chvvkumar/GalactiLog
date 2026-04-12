@@ -21,8 +21,8 @@ interface Props {
 
 type LocalPanel = PanelStats & { _row: number; _col: number };
 
-const CELL_PX = 200;
-const GAP_PX = 8;
+const CELL_MAX_PX = 360;
+const GAP_PX = 6;
 
 function buildInitialLayout(panels: PanelStats[]): { cells: LocalPanel[]; rows: number; cols: number } {
   const n = panels.length;
@@ -115,8 +115,12 @@ const MosaicPanelArranger: Component<Props> = (props) => {
     const b = bbox();
     return { minR: b.minR - 1, maxR: b.maxR + 1, minC: b.minC - 1, maxC: b.maxC + 1 };
   });
-  const renderRows = createMemo(() => extBox().maxR - extBox().minR + 1);
-  const renderCols = createMemo(() => extBox().maxC - extBox().minC + 1);
+  // Tight bbox at rest; extended (with 1-cell drop margin) during an active drag.
+  const displayBox = createMemo(() =>
+    activeId() !== null ? extBox() : bbox(),
+  );
+  const renderRows = createMemo(() => displayBox().maxR - displayBox().minR + 1);
+  const renderCols = createMemo(() => displayBox().maxC - displayBox().minC + 1);
 
   const persist = async (panelId: string, patch: Partial<PanelStats>) => {
     setSaving(true);
@@ -234,27 +238,27 @@ const MosaicPanelArranger: Component<Props> = (props) => {
       >
         <DragDropSensors />
         <div
-          class="mx-auto"
+          class="mx-auto w-full"
           style={{
             display: "grid",
-            "grid-template-columns": `repeat(${renderCols()}, ${CELL_PX}px)`,
-            "grid-template-rows": `repeat(${renderRows()}, ${CELL_PX}px)`,
+            "grid-template-columns": `repeat(${renderCols()}, minmax(0, 1fr))`,
+            "grid-auto-rows": "auto",
             gap: `${GAP_PX}px`,
-            width: `${renderCols() * CELL_PX + (renderCols() - 1) * GAP_PX}px`,
+            "max-width": `${renderCols() * CELL_MAX_PX + (renderCols() - 1) * GAP_PX}px`,
           }}
         >
-          {/* Droppable background cells over the extended bounding box. */}
+          {/* Droppable background cells over the display bounding box. */}
           <For each={Array.from({ length: renderRows() * renderCols() }, (_, i) => i)}>
             {(i) => {
-              const r = Math.floor(i / renderCols()) + extBox().minR;
-              const c = (i % renderCols()) + extBox().minC;
+              const r = Math.floor(i / renderCols()) + displayBox().minR;
+              const c = (i % renderCols()) + displayBox().minC;
               const panel = cellAt(r, c);
               return (
                 <DropCell
                   row={r}
                   col={c}
-                  cssRow={r - extBox().minR + 1}
-                  cssCol={c - extBox().minC + 1}
+                  cssRow={r - displayBox().minR + 1}
+                  cssCol={c - displayBox().minC + 1}
                   hasPanel={!!panel}
                   isSource={!!panel && panel.panel_id === activeId()}
                   isDragging={activeId() !== null}
@@ -268,8 +272,8 @@ const MosaicPanelArranger: Component<Props> = (props) => {
             {(panel) => (
               <PanelDraggable
                 panel={panel}
-                extMinR={extBox().minR}
-                extMinC={extBox().minC}
+                extMinR={displayBox().minR}
+                extMinC={displayBox().minC}
                 maxIntegration={maxIntegration()}
                 isActive={activeId() === panel.panel_id}
                 onRotate={rotatePanel}
@@ -308,6 +312,7 @@ const DropCell: Component<{
       style={{
         "grid-row": `${props.cssRow}`,
         "grid-column": `${props.cssCol}`,
+        "aspect-ratio": "1 / 1",
       }}
     >
       <Show when={props.isDragging && (!props.hasPanel || props.isSource)}>
@@ -347,6 +352,7 @@ const PanelDraggable: Component<{
       style={{
         "grid-row": `${props.panel._row - props.extMinR + 1}`,
         "grid-column": `${props.panel._col - props.extMinC + 1}`,
+        "aspect-ratio": "1 / 1",
         "z-index": props.isActive ? 1000 : 2,
         "pointer-events": "auto",
       }}
