@@ -185,6 +185,7 @@ See the [Install Guide](guides/INSTALL.md) for platform-specific paths, version 
 - [N.I.N.A. Setup Guide](guides/NINA-SETUP.md) -- Configuring N.I.N.A. for use with GalactiLog
 - [Configuration Guide](guides/CONFIGURATION.md) -- Environment variables, themes, filter/equipment aliases, and display settings
 - [Security Guide](guides/security.md) -- Authentication, HTTPS, cookie security, and user management
+- [Monitoring Guide](guides/MONITORING.md) -- Prometheus metrics endpoint, Grafana dashboards, and performance tracking
 
 ## Tech Stack
 
