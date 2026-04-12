@@ -117,8 +117,19 @@ const ScanManager: Component = () => {
   fetchRebuildStatus();
 
   const startRebuildPolling = () => {
-    if (rebuildPollTimer) return;
-    fetchRebuildStatus();
+    // Clear any previous timer so we can restart
+    if (rebuildPollTimer) { clearInterval(rebuildPollTimer); rebuildPollTimer = null; }
+    // Set optimistic running state so UI shows feedback immediately
+    // (the Celery task may not have updated Redis yet)
+    setRebuildState((prev) => ({
+      ...prev,
+      state: "running",
+      message: "Starting...",
+      started_at: Date.now() / 1000,
+      completed_at: null,
+    }));
+    // Give the Celery task a moment to pick up before first poll
+    setTimeout(fetchRebuildStatus, 1000);
     rebuildPollTimer = setInterval(fetchRebuildStatus, 2000);
   };
 

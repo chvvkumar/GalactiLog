@@ -420,7 +420,7 @@ async def get_reference_thumbnail(
     if not target or not target.reference_thumbnail_path:
         raise HTTPException(status_code=404, detail="Reference thumbnail not found")
 
-    thumb_path = Path(settings.fits_data_path) / ".galactilog" / "ref_thumbnails" / target.reference_thumbnail_path
+    thumb_path = Path(settings.thumbnails_path) / "reference" / target.reference_thumbnail_path
     if not thumb_path.exists():
         raise HTTPException(status_code=404, detail="Thumbnail file not found")
     return FileResponse(str(thumb_path), media_type="image/jpeg")

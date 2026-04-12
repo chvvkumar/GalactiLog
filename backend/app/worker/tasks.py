@@ -1450,7 +1450,7 @@ def generate_reference_thumbnails(self) -> dict:
     from app.services.skyview import fetch_reference_thumbnail
 
     set_rebuild_running_sync(_redis, "ref_thumbnails", "Finding targets needing thumbnails...")
-    output_dir = Path(settings.fits_data_path) / ".galactilog" / "ref_thumbnails"
+    output_dir = Path(settings.thumbnails_path) / "reference"
 
     with Session(_sync_engine) as session:
         targets = session.execute(
