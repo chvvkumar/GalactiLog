@@ -447,30 +447,52 @@ export const MosaicsTab: Component = () => {
 
                 return (
                   <div class="border border-theme-border rounded-[var(--radius-sm)] overflow-hidden">
-                    <button
-                      onClick={() => {
-                        const next = expandedSuggestion() === s.id ? null : s.id;
-                        setExpandedSuggestion(next);
-                        if (next) initSelection(s);
-                      }}
-                      class="w-full flex items-center justify-between p-3 bg-theme-base/50 text-left hover:bg-theme-base/80 transition-colors"
-                    >
-                      <div class="flex-1">
-                        <span class="text-theme-text-primary text-sm font-medium">
-                          {s.suggested_name}
-                        </span>
-                        <div class="text-xs text-theme-text-secondary mt-0.5">
-                          {s.panel_labels.length} panels
-                          {" \u00b7 "}
-                          {totalFrames()} frames
-                          {" \u00b7 "}
-                          {formatIntegration(totalInt())}
+                    <div class="flex items-center p-3 bg-theme-base/50">
+                      <button
+                        onClick={() => {
+                          const next = expandedSuggestion() === s.id ? null : s.id;
+                          setExpandedSuggestion(next);
+                          if (next) initSelection(s);
+                        }}
+                        class="flex-1 flex items-center justify-between text-left hover:bg-theme-base/80 transition-colors"
+                      >
+                        <div class="flex-1">
+                          <span class="text-theme-text-primary text-sm font-medium">
+                            {s.suggested_name}
+                          </span>
+                          <div class="text-xs text-theme-text-secondary mt-0.5">
+                            {s.panel_labels.length} panels
+                            {" \u00b7 "}
+                            {totalFrames()} frames
+                            {" \u00b7 "}
+                            {formatIntegration(totalInt())}
+                          </div>
                         </div>
-                      </div>
-                      <span class="text-theme-text-secondary text-xs ml-2">
-                        {expandedSuggestion() === s.id ? "\u25B2" : "\u25BC"}
-                      </span>
-                    </button>
+                        <span class="text-theme-text-secondary text-xs ml-2">
+                          {expandedSuggestion() === s.id ? "\u25B2" : "\u25BC"}
+                        </span>
+                      </button>
+                      <Show when={isAdmin()}>
+                        <div class="flex gap-2 ml-3 shrink-0">
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleAccept(s); }}
+                            class="px-4 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded text-sm font-medium hover:bg-theme-accent/25 transition-colors"
+                          >
+                            Accept{(() => {
+                              const sel = selectedPanels()[s.id];
+                              const count = sel?.size ?? s.panel_labels.length;
+                              return count < s.panel_labels.length ? ` (${count}/${s.panel_labels.length})` : "";
+                            })()}
+                          </button>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleDismiss(s); }}
+                            class="px-2.5 py-1.5 text-sm border border-theme-border text-theme-text-secondary rounded-[var(--radius-sm)] hover:text-theme-text-primary transition-colors"
+                          >
+                            Dismiss
+                          </button>
+                        </div>
+                      </Show>
+                    </div>
 
                     <Show when={expandedSuggestion() === s.id}>
                       <div class="border-t border-theme-border">
@@ -539,26 +561,6 @@ export const MosaicsTab: Component = () => {
                           </table>
                         </Show>
 
-                        <Show when={isAdmin()}>
-                          <div class="flex gap-2 px-3 py-2">
-                            <button
-                              onClick={() => handleAccept(s)}
-                              class="px-4 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded text-sm font-medium hover:bg-theme-accent/25 transition-colors"
-                            >
-                              Accept{(() => {
-                                const sel = selectedPanels()[s.id];
-                                const count = sel?.size ?? s.panel_labels.length;
-                                return count < s.panel_labels.length ? ` (${count}/${s.panel_labels.length})` : "";
-                              })()}
-                            </button>
-                            <button
-                              onClick={() => handleDismiss(s)}
-                              class="px-2.5 py-1 text-xs border border-theme-border text-theme-text-secondary rounded-[var(--radius-sm)] hover:text-theme-text-primary transition-colors"
-                            >
-                              Dismiss
-                            </button>
-                          </div>
-                        </Show>
                       </div>
                     </Show>
                   </div>
@@ -639,12 +641,43 @@ export const MosaicsTab: Component = () => {
                         {expandedId() === m.id ? "\u25B2" : "\u25BC"}
                       </span>
                     </button>
-                    <a
-                      href={`/mosaics/${m.id}`}
-                      class="ml-3 px-4 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded text-sm font-medium hover:bg-theme-accent/25 transition-colors shrink-0"
-                    >
-                      Detail
-                    </a>
+                    <div class="flex items-center gap-2 ml-3 shrink-0">
+                      <Show when={isAdmin()}>
+                        <Show
+                          when={confirmDeleteId() === m.id}
+                          fallback={
+                            <button
+                              onClick={() => setConfirmDeleteId(m.id)}
+                              class="px-2 py-1.5 text-sm border border-theme-border text-theme-text-secondary rounded hover:text-theme-danger hover:border-theme-danger transition-colors"
+                            >
+                              Delete
+                            </button>
+                          }
+                        >
+                          <div class="flex items-center gap-2">
+                            <span class="text-xs text-theme-danger">Delete?</span>
+                            <button
+                              onClick={() => handleDeleteMosaic(m.id)}
+                              class="px-2 py-1.5 text-sm border border-theme-error/50 text-theme-error rounded-[var(--radius-sm)] hover:bg-theme-error/10 transition-colors"
+                            >
+                              Confirm
+                            </button>
+                            <button
+                              onClick={() => setConfirmDeleteId(null)}
+                              class="px-2 py-1.5 text-sm border border-theme-border text-theme-text-secondary rounded hover:text-theme-text-primary transition-colors"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </Show>
+                      </Show>
+                      <a
+                        href={`/mosaics/${m.id}`}
+                        class="px-4 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded text-sm font-medium hover:bg-theme-accent/25 transition-colors"
+                      >
+                        Detail
+                      </a>
+                    </div>
                   </div>
 
                   {/* Expanded detail */}
@@ -796,38 +829,6 @@ export const MosaicsTab: Component = () => {
                         </Show>
                       </Show>
 
-                      {/* Footer actions */}
-                      <div class="flex items-center justify-end pt-2 border-t border-theme-border/50">
-                        <Show when={isAdmin()}>
-                          <Show
-                            when={confirmDeleteId() === m.id}
-                            fallback={
-                              <button
-                                onClick={() => setConfirmDeleteId(m.id)}
-                                class="px-2 py-1 text-xs border border-theme-border text-theme-text-secondary rounded hover:text-theme-danger hover:border-theme-danger transition-colors"
-                              >
-                                Delete
-                              </button>
-                            }
-                          >
-                            <div class="flex items-center gap-2">
-                              <span class="text-xs text-theme-danger">Delete this mosaic?</span>
-                              <button
-                                onClick={() => handleDeleteMosaic(m.id)}
-                                class="px-2 py-1 text-xs border border-theme-error/50 text-theme-error rounded-[var(--radius-sm)] hover:bg-theme-error/10 transition-colors"
-                              >
-                                Confirm
-                              </button>
-                              <button
-                                onClick={() => setConfirmDeleteId(null)}
-                                class="px-2 py-1 text-xs border border-theme-border text-theme-text-secondary rounded hover:text-theme-text-primary transition-colors"
-                              >
-                                Cancel
-                              </button>
-                            </div>
-                          </Show>
-                        </Show>
-                      </div>
                     </div>
                   </Show>
                 </div>
