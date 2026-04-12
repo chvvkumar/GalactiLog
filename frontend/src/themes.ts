@@ -611,7 +611,7 @@ export const THEMES: ThemeMeta[] = [
 
 export const THEMES_SORTED = [...THEMES].sort((a, b) => a.order - b.order);
 
-export const DEFAULT_THEME_ID = "deep-neutral";
+export const DEFAULT_THEME_ID = "glass-void";
 
 export interface TextSizePreset {
   id: string;
@@ -626,7 +626,7 @@ export const TEXT_SIZES: TextSizePreset[] = [
   { id: "x-large", label: "Extra Large", fontSize: "18px" },
 ];
 
-export const DEFAULT_TEXT_SIZE = "medium";
+export const DEFAULT_TEXT_SIZE = "large";
 
 export function getThemeById(id: string): ThemeMeta {
   return THEMES.find((t) => t.id === id) ?? THEMES[0];
