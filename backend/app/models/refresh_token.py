@@ -17,6 +17,7 @@ class RefreshToken(Base):
     family_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), default=uuid.uuid4, nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     revoked: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    persistent: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, doc="True when user checked 'Remember me'")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     __table_args__ = (

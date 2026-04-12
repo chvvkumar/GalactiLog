@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 class LoginRequest(BaseModel):
     username: str
     password: str
+    remember: bool = False
 
 
 class LoginResponse(BaseModel):

@@ -5,7 +5,7 @@ import type { AuthUser } from "../types";
 interface AuthContextValue {
   user: () => AuthUser | null;
   loading: () => boolean;
-  login: (username: string, password: string) => Promise<void>;
+  login: (username: string, password: string, remember?: boolean) => Promise<void>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
   isAdmin: () => boolean;
@@ -26,8 +26,8 @@ export const AuthProvider: Component<ParentProps> = (props) => {
     }
   };
 
-  const login = async (username: string, password: string) => {
-    await api.login(username, password);
+  const login = async (username: string, password: string, remember?: boolean) => {
+    await api.login(username, password, remember ?? false);
     await refreshUser();
   };
 
