@@ -1,35 +1,38 @@
-import { createResource } from "solid-js";
+import { createResource, startTransition } from "solid-js";
 import { api } from "../api/client";
 import type { SettingsResponse, GeneralSettings, FilterConfig, EquipmentConfig, DisplaySettings } from "../types";
 
 const [settingsData, { refetch: refetchSettings }] = createResource(() => api.getSettings());
 
+/** Refetch settings without triggering the Suspense boundary */
+const quietRefetch = () => startTransition(() => refetchSettings());
+
 export function useSettings() {
   return {
     settings: settingsData,
-    refetchSettings,
+    refetchSettings: quietRefetch,
 
     async saveGeneral(general: GeneralSettings) {
       const result = await api.updateGeneral(general);
-      refetchSettings();
+      quietRefetch();
       return result;
     },
 
     async saveFilters(filters: Record<string, FilterConfig>) {
       const result = await api.updateFilters(filters);
-      refetchSettings();
+      quietRefetch();
       return result;
     },
 
     async saveEquipment(equipment: EquipmentConfig) {
       const result = await api.updateEquipment(equipment);
-      refetchSettings();
+      quietRefetch();
       return result;
     },
 
     async saveDisplay(display: DisplaySettings) {
       await api.updateDisplay(display);
-      refetchSettings();
+      quietRefetch();
     },
 
     getFilterSuggestions: () => api.getFilterSuggestions(),

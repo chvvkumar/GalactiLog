@@ -1,4 +1,4 @@
-import { createContext, useContext, createEffect, createSignal, createResource, type ParentComponent } from "solid-js";
+import { createContext, useContext, createEffect, createSignal, createResource, startTransition, type ParentComponent } from "solid-js";
 import { useSettings, getFilterColorMap, getFilterAliasMap } from "../store/settings";
 import { useGraphSettings } from "../store/graphSettings";
 import type { SettingsResponse, GeneralSettings, FilterConfig, EquipmentConfig, DisplaySettings, GraphSettings, CustomColumn, ColumnVisibility } from "../types";
@@ -37,7 +37,8 @@ export const SettingsProvider: ParentComponent = (props) => {
   const store = useSettings();
   const graphStore = useGraphSettings();
   const auth = useAuth();
-  const [customColumns, { refetch: refetchCustomColumns }] = createResource(() => api.getCustomColumns());
+  const [customColumns, { refetch: rawRefetchCustomColumns }] = createResource(() => api.getCustomColumns());
+  const refetchCustomColumns = () => startTransition(() => rawRefetchCustomColumns());
   const [columnVisibility, setColumnVisibility] = createSignal<ColumnVisibility | undefined>(undefined);
 
   graphStore.loadGraphSettings();

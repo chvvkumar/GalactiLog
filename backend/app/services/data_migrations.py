@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 # Current data version - bump this and add a migration function when
 # code changes affect how stored target data is derived.
-DATA_VERSION = 5
+DATA_VERSION = 6
 
 
 def _migrate_v1_fix_catalog_designations(session: Session) -> str:
@@ -213,6 +213,78 @@ def _migrate_v5_strip_panel_aliases(session: Session) -> str:
     return f"{updated} targets had panel suffixes stripped from aliases"
 
 
+def _migrate_v6_clear_negative_cache_and_reenrich(session: Session) -> str:
+    """Clear negative VizieR cache, re-run enrichment, and compute constellations.
+
+    After fixing ADQL quoting and LBN coordinate queries, negative cache entries
+    are stale and must be cleared so VizieR enrichment can be retried.
+    """
+    import time
+    from app.models import Target
+    from app.models.vizier_cache import VizierCache
+    from app.services.constellation import coords_to_constellation
+
+    # Step 1: Clear negative cache entries (no size data)
+    neg_deleted = session.execute(
+        text(
+            "DELETE FROM vizier_cache "
+            "WHERE size_major IS NULL AND size_minor IS NULL"
+        )
+    ).rowcount
+    session.flush()
+
+    targets = session.execute(
+        select(Target).where(Target.merged_into_id.is_(None))
+    ).scalars().all()
+
+    # Step 2: Re-run OpenNGC enrichment for all targets
+    openngc_enriched = 0
+    load_openngc_csv(session)
+    for target in targets:
+        if enrich_target_from_openngc(session, target):
+            openngc_enriched += 1
+    session.flush()
+
+    # Step 3: VizieR enrichment for targets still missing size_major
+    vizier_queried = 0
+    vizier_enriched = 0
+    for target in targets:
+        if target.size_major is not None:
+            continue
+        if not target.catalog_id:
+            continue
+        if determine_vizier_catalog(target.catalog_id) is None:
+            continue
+
+        if enrich_target_from_vizier(session, target):
+            vizier_enriched += 1
+        vizier_queried += 1
+        time.sleep(0.3)
+    session.flush()
+
+    # Step 4: Compute constellation for all targets missing it
+    const_added = 0
+    for target in targets:
+        if target.constellation is not None:
+            continue
+        constellation = coords_to_constellation(target.ra, target.dec)
+        if constellation:
+            target.constellation = constellation
+            const_added += 1
+    session.flush()
+
+    parts = []
+    if neg_deleted:
+        parts.append(f"{neg_deleted} negative cache entries cleared")
+    if openngc_enriched:
+        parts.append(f"{openngc_enriched} targets enriched from OpenNGC")
+    if vizier_queried:
+        parts.append(f"VizieR: {vizier_enriched}/{vizier_queried} targets enriched")
+    if const_added:
+        parts.append(f"{const_added} constellations computed")
+    return "; ".join(parts) if parts else "No changes needed"
+
+
 # Registry: version number -> (description, migration function)
 # Version numbers must be sequential starting from 1.
 MIGRATIONS: dict[int, tuple[str, Callable[[Session], str]]] = {
@@ -221,6 +293,7 @@ MIGRATIONS: dict[int, tuple[str, Callable[[Session], str]]] = {
     3: ("Load OpenNGC catalog and enrich targets with size/magnitude", _migrate_v3_load_openngc),
     4: ("VizieR enrichment and OpenNGC common name backfill", _migrate_v4_vizier_and_common_names),
     5: ("Strip panel suffixes from target aliases", _migrate_v5_strip_panel_aliases),
+    6: ("Clear negative VizieR cache, re-enrich targets, compute constellations", _migrate_v6_clear_negative_cache_and_reenrich),
 }
 
 

@@ -1,4 +1,4 @@
-import { createResource, onCleanup, onMount } from "solid-js";
+import { createResource, onCleanup, onMount, startTransition } from "solid-js";
 import { api } from "../api/client";
 
 const [stats, { refetch: refetchStats }] = createResource(() => api.getStats());
@@ -8,7 +8,7 @@ let _pollInterval: ReturnType<typeof setInterval> | null = null;
 
 function _startPoll() {
   if (_pollInterval) return;
-  _pollInterval = setInterval(() => refetchStats(), 30_000);
+  _pollInterval = setInterval(() => startTransition(() => refetchStats()), 30_000);
 }
 
 function _stopPoll() {
@@ -32,5 +32,5 @@ export function useStats() {
     }
   });
 
-  return { stats, refetchStats };
+  return { stats, refetchStats: () => startTransition(() => refetchStats()) };
 }

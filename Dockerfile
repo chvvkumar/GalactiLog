@@ -28,6 +28,7 @@ COPY --from=backend-deps /usr/local/lib/python3.12/site-packages /usr/local/lib/
 COPY --from=backend-deps /usr/local/bin /usr/local/bin
 COPY --from=frontend-builder /app/dist /usr/share/nginx/html
 COPY backend/app/ /app/app/
+COPY backend/data/ /app/data/
 COPY backend/alembic.ini /app/alembic.ini
 COPY backend/alembic/ /app/alembic/
 COPY nginx.conf /etc/nginx/conf.d/default.conf
