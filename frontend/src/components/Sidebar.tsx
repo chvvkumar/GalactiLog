@@ -17,6 +17,7 @@ import { formatIntegration } from "../utils/format";
 export type SidebarSectionId =
   | "search"
   | "object-type"
+  | "catalog"
   | "date-range"
   | "filters"
   | "equipment"
@@ -30,6 +31,7 @@ export interface ActiveSectionFilters {
   telescope?: string;
   opticalFilters: unknown[];
   objectTypes: unknown[];
+  catalog?: string | null;
   dateRange: { start?: unknown; end?: unknown };
   fitsQueries: unknown[];
   qualityFilters: Record<string, unknown>;
@@ -41,6 +43,7 @@ export function getActiveSectionIds(f: ActiveSectionFilters): Set<SidebarSection
   const ids = new Set<SidebarSectionId>();
   if (f.searchQuery) ids.add("search");
   if (f.objectTypes.length > 0) ids.add("object-type");
+  if (f.catalog) ids.add("catalog");
   if (f.dateRange.start || f.dateRange.end) ids.add("date-range");
   if (Object.keys(f.qualityFilters).some((k) => (f.qualityFilters as Record<string, unknown>)[k] != null)) ids.add("filters");
   if (f.camera || f.telescope || f.opticalFilters.length > 0) ids.add("equipment");
@@ -50,8 +53,10 @@ export function getActiveSectionIds(f: ActiveSectionFilters): Set<SidebarSection
   return ids;
 }
 
+const CATALOG_OPTIONS = ["Caldwell", "Herschel 400", "Arp", "Abell"] as const;
+
 const Sidebar: Component = () => {
-  const { resetFilters, targetData, filters } = useDashboardFilters();
+  const { resetFilters, targetData, filters, updateFilter } = useDashboardFilters();
   const { customColumns } = useSettingsContext();
 
   const hasActiveFilters = () => getActiveSectionIds(filters() as unknown as ActiveSectionFilters).size > 0;
@@ -91,6 +96,23 @@ const Sidebar: Component = () => {
       </Show>
       <CollapsibleSection id="search" label="Search"><SearchBar /></CollapsibleSection>
       <CollapsibleSection id="object-type" label="Object Type"><ObjectTypeToggles /></CollapsibleSection>
+      <CollapsibleSection id="catalog" label="Catalog">
+        <div class="flex gap-1.5 flex-wrap">
+          {CATALOG_OPTIONS.map((cat) => (
+            <button
+              onClick={() => updateFilter("catalog", filters().catalog === cat ? null : cat)}
+              class={`px-1.5 h-6 rounded text-caption font-bold flex items-center justify-center transition-all ${
+                filters().catalog === cat
+                  ? "ring-1 ring-theme-accent bg-theme-elevated text-theme-accent brightness-110"
+                  : "ring-1 ring-transparent bg-theme-elevated text-theme-text-secondary hover:brightness-110"
+              }`}
+              title={cat}
+            >
+              {cat}
+            </button>
+          ))}
+        </div>
+      </CollapsibleSection>
       <CollapsibleSection id="date-range" label="Date Range"><DateRangePicker /></CollapsibleSection>
       <CollapsibleSection id="filters" label="Filters"><FilterToggles /></CollapsibleSection>
       <CollapsibleSection id="equipment" label="Equipment"><HardwareSelects /></CollapsibleSection>

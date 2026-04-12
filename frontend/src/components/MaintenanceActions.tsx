@@ -50,6 +50,22 @@ const MaintenanceActions: Component<{
             Regenerate
           </button>
           <button
+            onClick={() => runAction(api.triggerXmatchEnrichment)}
+            disabled={anyDisabled()}
+            title="Runs bulk cross-match enrichment against external catalogs (Caldwell, Herschel 400, Arp, Abell) for all targets."
+            class="px-3 py-1.5 border border-theme-border-em text-theme-text-secondary rounded text-sm disabled:opacity-50 hover:text-theme-text-primary hover:border-theme-accent transition-colors"
+          >
+            {props.rebuildRunning && props.rebuildMode === "xmatch" ? "Running..." : "xMatch Enrichment"}
+          </button>
+          <button
+            onClick={() => runAction(api.triggerReferenceThumbnails)}
+            disabled={anyDisabled()}
+            title="Generates reference thumbnails from catalog imagery for targets that have coordinates but no local thumbnail."
+            class="px-3 py-1.5 border border-theme-border-em text-theme-text-secondary rounded text-sm disabled:opacity-50 hover:text-theme-text-primary hover:border-theme-accent transition-colors"
+          >
+            {props.rebuildRunning && props.rebuildMode === "ref_thumbnails" ? "Running..." : "Reference Thumbnails"}
+          </button>
+          <button
             onClick={() => setShowFullConfirm(true)}
             disabled={anyDisabled()}
             title="Deletes all targets and re-resolves from FITS headers via SIMBAD, SESAME (NED + VizieR), and VizieR enrichment. Cached results make repeat runs fast."

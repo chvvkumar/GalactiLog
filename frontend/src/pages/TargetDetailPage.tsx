@@ -7,6 +7,7 @@ import { showToast } from "../components/Toast";
 import FilterBadges from "../components/FilterBadges";
 import TargetMetricsChart from "../components/TargetMetricsChart";
 import ExportModal from "../components/ExportModal";
+import AladinViewer from "../components/AladinViewer";
 import { useSettingsContext } from "../components/SettingsProvider";
 import { isFieldVisible } from "../utils/displaySettings";
 import { contentWidthClass } from "../utils/format";
@@ -225,10 +226,55 @@ const TargetDetailPage: Component = () => {
                       <span>·</span>
                       <span>SB {detail().surface_brightness!.toFixed(1)}</span>
                     </Show>
+                    <Show when={detail().distance_pc != null}>
+                      <span>·</span>
+                      <span>Distance {detail().distance_pc!.toFixed(0)} pc</span>
+                    </Show>
                     <Show when={detail().aliases.length > 1}>
                       <span>· Aliases: {detail().aliases.slice(1).join(", ")}</span>
                     </Show>
                   </div>
+                  <Show when={detail().ned_morphology || detail().redshift != null || detail().distance_mpc != null || detail().activity_type || detail().hubble_t_type != null || detail().inclination != null}>
+                    <div class="text-xs text-theme-text-secondary mt-1 flex flex-wrap gap-x-2 gap-y-0.5">
+                      <Show when={detail().ned_morphology}>
+                        <span>Morphology: {detail().ned_morphology}</span>
+                      </Show>
+                      <Show when={detail().redshift != null}>
+                        <Show when={detail().ned_morphology}><span>·</span></Show>
+                        <span>z = {detail().redshift!.toFixed(6)}</span>
+                      </Show>
+                      <Show when={detail().distance_mpc != null}>
+                        <span>·</span>
+                        <span>{detail().distance_mpc!.toFixed(1)} Mpc</span>
+                      </Show>
+                      <Show when={detail().activity_type}>
+                        <span>·</span>
+                        <span>Activity: {detail().activity_type}</span>
+                      </Show>
+                      <Show when={detail().hubble_t_type != null}>
+                        <span>·</span>
+                        <span>T-Type {detail().hubble_t_type!.toFixed(1)}</span>
+                      </Show>
+                      <Show when={detail().inclination != null}>
+                        <span>·</span>
+                        <span>Incl. {detail().inclination!.toFixed(1)}°</span>
+                      </Show>
+                    </div>
+                  </Show>
+                  <Show when={detail().catalog_memberships?.length}>
+                    <div class="flex flex-wrap gap-1.5 mt-1">
+                      <For each={detail().catalog_memberships}>
+                        {(m) => (
+                          <span
+                            class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-theme-surface border border-theme-border text-theme-text-secondary"
+                            title={m.metadata ? JSON.stringify(m.metadata) : undefined}
+                          >
+                            {m.catalog_number}
+                          </span>
+                        )}
+                      </For>
+                    </div>
+                  </Show>
                 </div>
               </div>
 
@@ -304,6 +350,46 @@ const TargetDetailPage: Component = () => {
                 </div>
               </div>
             </div>
+
+            {/* SAC Observing Notes */}
+            <Show when={detail().sac_description || detail().sac_notes}>
+              <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border p-4">
+                <div class="text-xs font-medium text-theme-text-tertiary mb-2">Observing Notes</div>
+                <Show when={detail().sac_description}>
+                  <p class="text-sm text-theme-text-primary">{detail().sac_description}</p>
+                </Show>
+                <Show when={detail().sac_notes}>
+                  <p class="text-xs text-theme-text-secondary mt-1">{detail().sac_notes}</p>
+                </Show>
+              </div>
+            </Show>
+
+            {/* Sky View & Reference Thumbnail */}
+            <Show when={detail().ra != null && detail().dec != null}>
+              <details class="group">
+                <summary class="cursor-pointer text-xs font-medium text-theme-text-tertiary hover:text-theme-text-secondary py-2">
+                  Sky View
+                </summary>
+                <div class="mt-1 space-y-3">
+                  <AladinViewer
+                    ra={detail().ra!}
+                    dec={detail().dec!}
+                    fov={detail().size_major ? detail().size_major! * 1.5 / 60 : 0.5}
+                  />
+                  <Show when={detail().reference_thumbnail_path}>
+                    <div class="mt-2">
+                      <div class="text-xs font-medium text-theme-text-tertiary mb-1">DSS Reference</div>
+                      <img
+                        src={`/api/targets/${detail().target_id}/reference-thumbnail`}
+                        alt="DSS reference"
+                        class="rounded-[var(--radius-sm)] border border-theme-border max-w-xs"
+                        loading="lazy"
+                      />
+                    </div>
+                  </Show>
+                </div>
+              </details>
+            </Show>
 
             {/* Target Notes */}
             <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4">

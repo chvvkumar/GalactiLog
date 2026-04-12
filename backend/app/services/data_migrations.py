@@ -285,6 +285,76 @@ def _migrate_v6_clear_negative_cache_and_reenrich(session: Session) -> str:
     return "; ".join(parts) if parts else "No changes needed"
 
 
+def _migrate_v8_tier1_and_catalogs(session: Session) -> str:
+    """Load static catalogs, match memberships, and enrich from NED/HyperLEDA/Gaia/SAC."""
+    import time
+    from app.models import Target
+    from app.services.sac import load_sac_csv, enrich_target_from_sac
+    from app.services.ned import enrich_target_from_ned
+    from app.services.hyperleda import enrich_target_from_hyperleda
+    from app.services.gaia import enrich_target_from_gaia
+    from app.services.catalog_membership import load_catalog_memberships
+
+    parts = []
+
+    # Step 1: Load SAC catalog
+    sac_loaded = load_sac_csv(session)
+    if sac_loaded:
+        parts.append(f"{sac_loaded} SAC entries loaded")
+    session.flush()
+
+    # Step 2: Load static catalogs and match memberships
+    membership_summary = load_catalog_memberships(session)
+    parts.append(membership_summary)
+    session.flush()
+
+    # Step 3: Enrich targets
+    targets = session.execute(
+        select(Target).where(Target.merged_into_id.is_(None))
+    ).scalars().all()
+
+    sac_enriched = 0
+    ned_enriched = 0
+    hyperleda_enriched = 0
+    gaia_enriched = 0
+
+    for i, target in enumerate(targets):
+        # SAC enrichment (all targets)
+        if enrich_target_from_sac(session, target):
+            sac_enriched += 1
+
+        # NED enrichment (galaxy gate inside)
+        if enrich_target_from_ned(session, target):
+            ned_enriched += 1
+        time.sleep(0.5)
+
+        # HyperLEDA enrichment (galaxy gate inside)
+        if enrich_target_from_hyperleda(session, target):
+            hyperleda_enriched += 1
+        time.sleep(0.3)
+
+        # Gaia enrichment (cluster gate inside)
+        if enrich_target_from_gaia(session, target):
+            gaia_enriched += 1
+        time.sleep(0.5)
+
+        if (i + 1) % 10 == 0:
+            logger.info("Enrichment progress: %d/%d targets", i + 1, len(targets))
+
+    session.flush()
+
+    if sac_enriched:
+        parts.append(f"SAC: {sac_enriched} targets enriched")
+    if ned_enriched:
+        parts.append(f"NED: {ned_enriched} galaxies enriched")
+    if hyperleda_enriched:
+        parts.append(f"HyperLEDA: {hyperleda_enriched} galaxies enriched")
+    if gaia_enriched:
+        parts.append(f"Gaia: {gaia_enriched} clusters got distances")
+
+    return "; ".join(parts) if parts else "No changes needed"
+
+
 # Registry: version number -> (description, migration function)
 # Version numbers must be sequential starting from 1.
 MIGRATIONS: dict[int, tuple[str, Callable[[Session], str]]] = {
@@ -294,7 +364,7 @@ MIGRATIONS: dict[int, tuple[str, Callable[[Session], str]]] = {
     4: ("VizieR enrichment and OpenNGC common name backfill", _migrate_v4_vizier_and_common_names),
     5: ("Strip panel suffixes from target aliases", _migrate_v5_strip_panel_aliases),
     6: ("Clear negative VizieR cache, re-enrich targets, compute constellations", _migrate_v6_clear_negative_cache_and_reenrich),
-    7: ("Re-enrich after VizieR ADQL fix (drop unreferenceable computed columns)", _migrate_v6_clear_negative_cache_and_reenrich),
+    7: ("Load Tier 1 catalogs, match memberships, enrich from NED/HyperLEDA/Gaia/SAC", _migrate_v8_tier1_and_catalogs),
 }
 
 

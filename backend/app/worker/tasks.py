@@ -1442,3 +1442,57 @@ def detect_filename_targets():
 
         db.commit()
         return {"candidates_found": candidates_found}
+
+
+@celery_app.task(bind=True)
+def generate_reference_thumbnails(self) -> dict:
+    """Fetch DSS reference thumbnails for all targets."""
+    from app.services.skyview import fetch_reference_thumbnail
+
+    output_dir = Path(settings.fits_data_path) / ".galactilog" / "ref_thumbnails"
+
+    with Session(_sync_engine) as session:
+        targets = session.execute(
+            select(Target).where(
+                Target.merged_into_id.is_(None),
+                Target.ra.isnot(None),
+                Target.dec.isnot(None),
+                Target.reference_thumbnail_path.is_(None),
+            )
+        ).scalars().all()
+
+        fetched = 0
+        for target in targets:
+            path = fetch_reference_thumbnail(target, output_dir)
+            if path:
+                target.reference_thumbnail_path = path
+                fetched += 1
+            time.sleep(1.0)  # Rate limit
+        session.commit()
+
+    _invalidate_stats_cache()
+    return {"fetched": fetched, "total": len(targets)}
+
+
+@celery_app.task(bind=True)
+def run_xmatch_enrichment(self) -> dict:
+    """Run CDS xMatch bulk cross-matching."""
+    from app.services.xmatch import bulk_xmatch_targets
+
+    with Session(_sync_engine) as session:
+        targets = session.execute(
+            select(Target).where(
+                Target.merged_into_id.is_(None),
+                Target.ra.isnot(None),
+                Target.dec.isnot(None),
+            )
+        ).scalars().all()
+
+        target_dicts = [
+            {"id": str(t.id), "ra": t.ra, "dec": t.dec}
+            for t in targets
+        ]
+
+        results = bulk_xmatch_targets(target_dicts, "VII/118/ngc2000", radius_arcsec=60.0)
+
+    return {"matched": len(results), "total": len(target_dicts)}

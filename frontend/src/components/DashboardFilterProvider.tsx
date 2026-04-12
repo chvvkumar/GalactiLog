@@ -45,7 +45,7 @@ export function useDashboardFilters(): DashboardFilterAPI {
 const FILTER_KEYS = [
   "search", "target_id", "camera", "telescope", "filters", "object_type",
   "date_from", "date_to", "hfr_min", "hfr_max",
-  "fits_key", "fits_op", "fits_val", "cc_filters",
+  "fits_key", "fits_op", "fits_val", "cc_filters", "catalog",
 ];
 const METRIC_KEYS = [
   "fwhm", "eccentricity", "stars", "guiding_rms", "adu_mean",
@@ -119,6 +119,7 @@ function deriveFilters(rawSp: RawSearchParams): ActiveFilters {
     qualityFilters,
     metricFilters,
     customColumnFilters,
+    catalog: sp.catalog || null,
   };
 }
 
@@ -239,6 +240,9 @@ const DashboardFilterProvider: Component<{ children: JSX.Element }> = (props) =>
         set({ date_from: dr.start || undefined, date_to: dr.end || undefined });
         break;
       }
+      case "catalog":
+        set({ catalog: value || undefined });
+        break;
       default:
         break;
     }

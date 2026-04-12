@@ -37,6 +37,9 @@ const ScanManager: Component = () => {
   });
   const [autoScanEnabled, setAutoScanEnabled] = createSignal(true);
   const [autoScanInterval, setAutoScanInterval] = createSignal(240);
+  const [observerName, setObserverName] = createSignal<string | null>(null);
+  const [observerLatitude, setObserverLatitude] = createSignal<number | null>(null);
+  const [observerLongitude, setObserverLongitude] = createSignal<number | null>(null);
   let rebuildPollTimer: ReturnType<typeof setInterval> | null = null;
 
   // --- DB Summary ---
@@ -62,6 +65,9 @@ const ScanManager: Component = () => {
       setFrameFilter(s.general.include_calibration ? "all" : "light_only");
       setAutoScanEnabled(s.general.auto_scan_enabled);
       setAutoScanInterval(s.general.auto_scan_interval);
+      setObserverName(s.general.observer_name ?? null);
+      setObserverLatitude(s.general.observer_latitude ?? null);
+      setObserverLongitude(s.general.observer_longitude ?? null);
     }
   });
 
@@ -182,6 +188,71 @@ const ScanManager: Component = () => {
                 </Show>
               </section>
             </Show>
+
+            <section class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
+              <h4 class="text-sm font-medium text-theme-text-primary">Observer Location</h4>
+              <div class="grid grid-cols-3 gap-3">
+                <div class="space-y-1">
+                  <label class="text-xs text-theme-text-secondary">Name</label>
+                  <input
+                    type="text"
+                    class="w-full px-3 py-1.5 bg-theme-input border border-theme-border rounded-[var(--radius-sm)] text-sm text-theme-text-primary focus:ring-1 focus:ring-theme-accent focus:border-theme-accent outline-none"
+                    value={observerName() ?? ""}
+                    onInput={(e) => setObserverName(e.currentTarget.value || null)}
+                    onBlur={async () => {
+                      const current = settings()?.general;
+                      if (current) {
+                        try {
+                          await saveGeneral({ ...current, observer_name: observerName() });
+                        } catch {
+                          showToast("Failed to save observer location", "error");
+                        }
+                      }
+                    }}
+                  />
+                </div>
+                <div class="space-y-1">
+                  <label class="text-xs text-theme-text-secondary">Latitude</label>
+                  <input
+                    type="number"
+                    step="0.0001"
+                    class="w-full px-3 py-1.5 bg-theme-input border border-theme-border rounded-[var(--radius-sm)] text-sm text-theme-text-primary tabular-nums focus:ring-1 focus:ring-theme-accent focus:border-theme-accent outline-none"
+                    value={observerLatitude() ?? ""}
+                    onInput={(e) => setObserverLatitude(e.currentTarget.value ? parseFloat(e.currentTarget.value) : null)}
+                    onBlur={async () => {
+                      const current = settings()?.general;
+                      if (current) {
+                        try {
+                          await saveGeneral({ ...current, observer_latitude: observerLatitude() });
+                        } catch {
+                          showToast("Failed to save observer location", "error");
+                        }
+                      }
+                    }}
+                  />
+                </div>
+                <div class="space-y-1">
+                  <label class="text-xs text-theme-text-secondary">Longitude</label>
+                  <input
+                    type="number"
+                    step="0.0001"
+                    class="w-full px-3 py-1.5 bg-theme-input border border-theme-border rounded-[var(--radius-sm)] text-sm text-theme-text-primary tabular-nums focus:ring-1 focus:ring-theme-accent focus:border-theme-accent outline-none"
+                    value={observerLongitude() ?? ""}
+                    onInput={(e) => setObserverLongitude(e.currentTarget.value ? parseFloat(e.currentTarget.value) : null)}
+                    onBlur={async () => {
+                      const current = settings()?.general;
+                      if (current) {
+                        try {
+                          await saveGeneral({ ...current, observer_longitude: observerLongitude() });
+                        } catch {
+                          showToast("Failed to save observer location", "error");
+                        }
+                      }
+                    }}
+                  />
+                </div>
+              </div>
+            </section>
 
             <ScanFiltersPanel />
 
