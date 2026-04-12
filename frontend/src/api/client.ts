@@ -719,10 +719,10 @@ export const api = {
 
   // Catalog enrichment tasks
   triggerXmatchEnrichment: () =>
-    fetchJson<{ status: string; task_id: string }>("/tasks/xmatch-enrichment", { method: "POST" }),
+    fetchJson<{ status: string; message: string }>("/scan/xmatch-enrichment", { method: "POST" }),
 
   triggerReferenceThumbnails: () =>
-    fetchJson<{ status: string; task_id: string }>("/tasks/generate-reference-thumbnails", { method: "POST" }),
+    fetchJson<{ status: string; message: string }>("/scan/generate-reference-thumbnails", { method: "POST" }),
 
   // Backup / Restore
   createBackup: async (): Promise<Blob> => {

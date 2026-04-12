@@ -142,14 +142,6 @@ export interface TargetDetailResponse {
   avg_guiding_rms_arcsec: number | null;
   avg_detected_stars: number | null;
   notes: string | null;
-  // NED enrichment (galaxies)
-  ned_morphology: string | null;
-  redshift: number | null;
-  distance_mpc: number | null;
-  activity_type: string | null;
-  // HyperLEDA enrichment (galaxies)
-  hubble_t_type: number | null;
-  inclination: number | null;
   // SAC
   sac_description: string | null;
   sac_notes: string | null;

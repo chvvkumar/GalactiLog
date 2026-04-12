@@ -1,8 +1,8 @@
 """Add catalog enrichment tables and target columns for Phase 2.
 
-Creates NED, HyperLEDA, and Gaia cache tables; SAC, Caldwell, Herschel 400,
-Arp, and Abell catalog tables; the target_catalog_memberships join table;
-and new enrichment columns on the targets table.
+Creates Gaia cache table; SAC, Caldwell, Herschel 400, Arp, and Abell
+catalog tables; the target_catalog_memberships join table; and new
+enrichment columns on the targets table.
 """
 from alembic import op
 import sqlalchemy as sa
@@ -35,24 +35,6 @@ def _create_table_if_not_exists(table_name, *columns, **kw):
 
 def upgrade() -> None:
     # -- Cache tables ----------------------------------------------------------
-
-    _create_table_if_not_exists(
-        "ned_cache",
-        sa.Column("catalog_id", sa.String(100), primary_key=True),
-        sa.Column("ned_morphology", sa.String(50), nullable=True),
-        sa.Column("redshift", sa.Float, nullable=True),
-        sa.Column("distance_mpc", sa.Float, nullable=True),
-        sa.Column("activity_type", sa.String(100), nullable=True),
-        sa.Column("fetched_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
-    )
-
-    _create_table_if_not_exists(
-        "hyperleda_cache",
-        sa.Column("catalog_id", sa.String(100), primary_key=True),
-        sa.Column("t_type", sa.Float, nullable=True),
-        sa.Column("inclination", sa.Float, nullable=True),
-        sa.Column("fetched_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
-    )
 
     _create_table_if_not_exists(
         "gaia_cache",
@@ -125,30 +107,6 @@ def upgrade() -> None:
 
     # -- New columns on targets ------------------------------------------------
 
-    _add_column_if_not_exists(
-        "targets", "ned_morphology",
-        sa.Column("ned_morphology", sa.String(50), nullable=True),
-    )
-    _add_column_if_not_exists(
-        "targets", "redshift",
-        sa.Column("redshift", sa.Float, nullable=True),
-    )
-    _add_column_if_not_exists(
-        "targets", "distance_mpc",
-        sa.Column("distance_mpc", sa.Float, nullable=True),
-    )
-    _add_column_if_not_exists(
-        "targets", "activity_type",
-        sa.Column("activity_type", sa.String(100), nullable=True),
-    )
-    _add_column_if_not_exists(
-        "targets", "hubble_t_type",
-        sa.Column("hubble_t_type", sa.Float, nullable=True),
-    )
-    _add_column_if_not_exists(
-        "targets", "inclination",
-        sa.Column("inclination", sa.Float, nullable=True),
-    )
     _add_column_if_not_exists(
         "targets", "sac_description",
         sa.Column("sac_description", sa.Text, nullable=True),

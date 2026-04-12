@@ -26,7 +26,7 @@ from app.services.scan_state import (
     get_activity, clear_activity, append_activity,
 )
 from app.services.simbad import resolve_target_name, normalize_object_name
-from app.worker.tasks import regenerate_thumbnail, run_scan, rebuild_targets, smart_rebuild_targets, retry_unresolved, backfill_csv_metrics
+from app.worker.tasks import regenerate_thumbnail, run_scan, rebuild_targets, smart_rebuild_targets, retry_unresolved, backfill_csv_metrics, generate_reference_thumbnails, run_xmatch_enrichment
 
 logger = logging.getLogger(__name__)
 
@@ -328,6 +328,36 @@ async def trigger_retry_unresolved(user: User = Depends(require_admin)):
 
         retry_unresolved.delay()
         return {"status": "accepted", "message": "Retry unresolved queued as background task"}
+
+
+@router.post("/generate-reference-thumbnails")
+async def trigger_reference_thumbnails(user: User = Depends(require_admin)):
+    """Fetch DSS reference thumbnails from SkyView for all targets with coordinates."""
+    async with async_redis() as r:
+        state = await get_scan_state(r)
+        if state.state in ("scanning", "ingesting"):
+            raise HTTPException(
+                status_code=409,
+                detail="A scan is already running. Wait for it to complete first.",
+            )
+
+        generate_reference_thumbnails.delay()
+        return {"status": "accepted", "message": "Reference thumbnail generation queued as background task"}
+
+
+@router.post("/xmatch-enrichment")
+async def trigger_xmatch_enrichment(user: User = Depends(require_admin)):
+    """Run CDS xMatch bulk cross-matching for all targets."""
+    async with async_redis() as r:
+        state = await get_scan_state(r)
+        if state.state in ("scanning", "ingesting"):
+            raise HTTPException(
+                status_code=409,
+                detail="A scan is already running. Wait for it to complete first.",
+            )
+
+        run_xmatch_enrichment.delay()
+        return {"status": "accepted", "message": "xMatch enrichment queued as background task"}
 
 
 @router.post("/backfill-csv")

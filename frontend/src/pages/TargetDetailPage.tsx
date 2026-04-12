@@ -47,6 +47,7 @@ const TargetDetailPage: Component = () => {
   const [targetChartExpanded, setTargetChartExpanded] = createSignal(graphSettings().target_chart_expanded);
   const [selectedChartDates, setSelectedChartDates] = createSignal<string[]>([]);
 
+  const [skyViewExpanded, setSkyViewExpanded] = createSignal(false);
   const [notesExpanded, setNotesExpanded] = createSignal(false);
   const [targetNotes, setTargetNotes] = createSignal<string>("");
   const [notesSaving, setNotesSaving] = createSignal(false);
@@ -234,33 +235,6 @@ const TargetDetailPage: Component = () => {
                       <span>· Aliases: {detail().aliases.slice(1).join(", ")}</span>
                     </Show>
                   </div>
-                  <Show when={detail().ned_morphology || detail().redshift != null || detail().distance_mpc != null || detail().activity_type || detail().hubble_t_type != null || detail().inclination != null}>
-                    <div class="text-xs text-theme-text-secondary mt-1 flex flex-wrap gap-x-2 gap-y-0.5">
-                      <Show when={detail().ned_morphology}>
-                        <span>Morphology: {detail().ned_morphology}</span>
-                      </Show>
-                      <Show when={detail().redshift != null}>
-                        <Show when={detail().ned_morphology}><span>·</span></Show>
-                        <span>z = {detail().redshift!.toFixed(6)}</span>
-                      </Show>
-                      <Show when={detail().distance_mpc != null}>
-                        <span>·</span>
-                        <span>{detail().distance_mpc!.toFixed(1)} Mpc</span>
-                      </Show>
-                      <Show when={detail().activity_type}>
-                        <span>·</span>
-                        <span>Activity: {detail().activity_type}</span>
-                      </Show>
-                      <Show when={detail().hubble_t_type != null}>
-                        <span>·</span>
-                        <span>T-Type {detail().hubble_t_type!.toFixed(1)}</span>
-                      </Show>
-                      <Show when={detail().inclination != null}>
-                        <span>·</span>
-                        <span>Incl. {detail().inclination!.toFixed(1)}°</span>
-                      </Show>
-                    </div>
-                  </Show>
                   <Show when={detail().catalog_memberships?.length}>
                     <div class="flex flex-wrap gap-1.5 mt-1">
                       <For each={detail().catalog_memberships}>
@@ -366,29 +340,43 @@ const TargetDetailPage: Component = () => {
 
             {/* Sky View & Reference Thumbnail */}
             <Show when={detail().ra != null && detail().dec != null}>
-              <details class="group">
-                <summary class="cursor-pointer text-xs font-medium text-theme-text-tertiary hover:text-theme-text-secondary py-2">
-                  Sky View
-                </summary>
-                <div class="mt-1 space-y-3">
-                  <AladinViewer
-                    ra={detail().ra!}
-                    dec={detail().dec!}
-                    fov={detail().size_major ? detail().size_major! * 1.5 / 60 : 0.5}
-                  />
-                  <Show when={detail().reference_thumbnail_path}>
-                    <div class="mt-2">
-                      <div class="text-xs font-medium text-theme-text-tertiary mb-1">DSS Reference</div>
-                      <img
-                        src={`/api/targets/${detail().target_id}/reference-thumbnail`}
-                        alt="DSS reference"
-                        class="rounded-[var(--radius-sm)] border border-theme-border max-w-xs"
-                        loading="lazy"
-                      />
-                    </div>
-                  </Show>
-                </div>
-              </details>
+              <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4">
+                <button
+                  class="flex items-center justify-between w-full py-2 cursor-pointer group"
+                  onClick={() => setSkyViewExpanded((v) => !v)}
+                >
+                  <h3 class="text-xs font-semibold uppercase tracking-wider text-theme-text-secondary border-l-2 border-theme-accent pl-2 group-hover:text-theme-text-primary transition-colors">
+                    Sky View
+                  </h3>
+                  <svg
+                    class={`w-3.5 h-3.5 transition-transform duration-200 text-theme-text-tertiary ${skyViewExpanded() ? "rotate-180" : ""}`}
+                    viewBox="0 0 20 20"
+                    fill="currentColor"
+                  >
+                    <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
+                  </svg>
+                </button>
+                <Show when={skyViewExpanded()}>
+                  <div class="mt-2 space-y-3">
+                    <AladinViewer
+                      ra={detail().ra!}
+                      dec={detail().dec!}
+                      fov={detail().size_major ? detail().size_major! * 1.5 / 60 : 0.5}
+                    />
+                    <Show when={detail().reference_thumbnail_path}>
+                      <div class="mt-2">
+                        <div class="text-xs font-medium text-theme-text-tertiary mb-1">DSS Reference</div>
+                        <img
+                          src={`/api/targets/${detail().target_id}/reference-thumbnail`}
+                          alt="DSS reference"
+                          class="rounded-[var(--radius-sm)] border border-theme-border max-w-xs"
+                          loading="lazy"
+                        />
+                      </div>
+                    </Show>
+                  </div>
+                </Show>
+              </div>
             </Show>
 
             {/* Target Notes */}

@@ -1,6 +1,7 @@
 """Catalog membership service - load static catalogs and match to targets."""
 from __future__ import annotations
 
+import json
 import logging
 
 from sqlalchemy.orm import Session
@@ -19,17 +20,20 @@ def upsert_membership(
     metadata: dict | None = None,
 ) -> None:
     """Upsert a single TargetCatalogMembership record."""
-    values = {
-        "target_id": target_id,
-        "catalog_name": catalog_name,
-        "catalog_number": catalog_number,
-        "metadata_": metadata,
-    }
-    stmt = pg_insert(TargetCatalogMembership).values(**values).on_conflict_do_update(
+    # pg_insert().values() uses ORM attribute names (metadata_),
+    # but on_conflict_do_update set_ uses DB column names (metadata).
+    # Serialize to JSON string for psycopg2 sync driver compatibility.
+    meta_json = json.dumps(metadata) if metadata is not None else None
+    stmt = pg_insert(TargetCatalogMembership).values(
+        target_id=target_id,
+        catalog_name=catalog_name,
+        catalog_number=catalog_number,
+        metadata_=meta_json,
+    ).on_conflict_do_update(
         constraint="uq_target_catalog",
         set_={
             "catalog_number": catalog_number,
-            "metadata_": metadata,
+            "metadata": meta_json,
         },
     )
     session.execute(stmt)

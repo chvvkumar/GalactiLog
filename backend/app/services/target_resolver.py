@@ -20,8 +20,6 @@ from app.services.sesame import resolve_sesame_cached
 from app.services.openngc import enrich_target_from_openngc
 from app.services.vizier import enrich_target_from_vizier
 from app.services.sac import enrich_target_from_sac
-from app.services.ned import enrich_target_from_ned
-from app.services.hyperleda import enrich_target_from_hyperleda
 
 logger = logging.getLogger(__name__)
 
@@ -106,8 +104,6 @@ def _create_target(
             enrich_target_from_vizier(session, target)
             session.commit()
         enrich_target_from_sac(session, target)
-        enrich_target_from_ned(session, target)
-        enrich_target_from_hyperleda(session, target)
         session.commit()
         return str(target.id)
     except IntegrityError:

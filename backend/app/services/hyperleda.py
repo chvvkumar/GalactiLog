@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -16,7 +17,12 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-HYPERLEDA_URL = "http://leda.univ-lyon1.fr/fG.cgi"
+# The old fG.cgi CSV endpoint is broken on the new HyperLEDA server
+# (leda.univ-lyon1.fr now 302-redirects to atlas.obs-hp.fr/hyperleda, where
+# the $objname virtual column and of=csv output are both non-functional).
+# Use the ledacat.cgi endpoint which returns structured HTML with
+# parameter/value table rows that can be reliably parsed.
+HYPERLEDA_URL = "http://atlas.obs-hp.fr/hyperleda/ledacat.cgi"
 
 _GALAXY_TYPES: frozenset[str] = frozenset({
     "G", "GiG", "GiC", "BiC", "Sy1", "Sy2", "LINER", "AGN",
@@ -29,7 +35,6 @@ def _is_galaxy_type(object_type: str | None) -> bool:
     """Return True if the object_type string contains a galaxy-class token."""
     if not object_type:
         return False
-    import re
     tokens = re.split(r"[,\s|]+", object_type.strip())
     return any(t in _GALAXY_TYPES for t in tokens)
 
@@ -39,51 +44,63 @@ def _hyperleda_name(catalog_id: str) -> str:
     return catalog_id.lower().replace(" ", "")
 
 
+def _extract_param_value(html: str, param_name: str) -> float | None:
+    """Extract a numeric parameter value from HyperLEDA ledacat.cgi HTML.
+
+    The HTML contains table rows like:
+      <td><a href="leda/param/t.html" ...>t</a></td><td>  4.0 &#177; 0.2</td>
+    This extracts the first number from the value cell.
+    """
+    # Match: >param_name</a></td><td>VALUE</td>
+    pattern = rf">{re.escape(param_name)}</a></td><td>([^<]*)</td>"
+    match = re.search(pattern, html)
+    if not match:
+        return None
+    raw_value = match.group(1).strip()
+    if not raw_value:
+        return None
+    # Value may include "+/- error" (as "&#177;" or literal +/-).
+    # Take just the first number token.
+    num_match = re.match(r"([+-]?\s*\d+\.?\d*)", raw_value)
+    if not num_match:
+        return None
+    try:
+        return float(num_match.group(1).replace(" ", ""))
+    except ValueError:
+        return None
+
+
 def query_hyperleda(catalog_id: str) -> dict[str, Any] | None:
     """Query HyperLEDA for morphological type and inclination.
 
     Returns {"t_type": float|None, "inclination": float|None} or None on error.
+    Uses the ledacat.cgi endpoint which returns structured HTML with
+    parameter/value pairs.
     """
     name = _hyperleda_name(catalog_id)
-    sql = f"SELECT pgc,t,incl FROM meandata WHERE objname='{name}'"
 
     try:
-        with httpx.Client(timeout=15.0) as client:
-            resp = client.get(
-                HYPERLEDA_URL,
-                params={
-                    "n": "meandata",
-                    "c": "o",
-                    "of": "csv",
-                    "nrow": "1",
-                    "sql": sql,
-                },
-            )
+        with httpx.Client(timeout=15.0, follow_redirects=True) as client:
+            resp = client.get(HYPERLEDA_URL, params={"o": name})
             resp.raise_for_status()
 
-        lines = resp.text.strip().splitlines()
-        if len(lines) < 2:
+        html = resp.text
+
+        # Check for "no record" response
+        if "returns no record" in html:
             logger.debug("HyperLEDA returned no data for '%s'", catalog_id)
             return None
 
-        # Parse CSV: header on line 0, data on line 1
-        values = [v.strip() for v in lines[1].split(",")]
-        if len(values) < 3:
-            logger.debug("HyperLEDA unexpected row format for '%s': %s", catalog_id, lines[1])
+        t_type = _extract_param_value(html, "t")
+        inclination = _extract_param_value(html, "incl")
+
+        if t_type is None and inclination is None:
+            logger.debug("HyperLEDA returned no t/incl for '%s'", catalog_id)
             return None
 
-        def _to_float(val: str) -> float | None:
-            val = val.strip()
-            if not val:
-                return None
-            try:
-                return float(val)
-            except ValueError:
-                return None
-
         return {
-            "t_type": _to_float(values[1]),
-            "inclination": _to_float(values[2]),
+            "t_type": t_type,
+            "inclination": inclination,
         }
 
     except (httpx.HTTPError, ValueError, IndexError) as e:

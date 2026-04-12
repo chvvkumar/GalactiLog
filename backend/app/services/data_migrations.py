@@ -286,12 +286,10 @@ def _migrate_v6_clear_negative_cache_and_reenrich(session: Session) -> str:
 
 
 def _migrate_v8_tier1_and_catalogs(session: Session) -> str:
-    """Load static catalogs, match memberships, and enrich from NED/HyperLEDA/Gaia/SAC."""
+    """Load static catalogs, match memberships, and enrich from Gaia/SAC."""
     import time
     from app.models import Target
     from app.services.sac import load_sac_csv, enrich_target_from_sac
-    from app.services.ned import enrich_target_from_ned
-    from app.services.hyperleda import enrich_target_from_hyperleda
     from app.services.gaia import enrich_target_from_gaia
     from app.services.catalog_membership import load_catalog_memberships
 
@@ -314,24 +312,12 @@ def _migrate_v8_tier1_and_catalogs(session: Session) -> str:
     ).scalars().all()
 
     sac_enriched = 0
-    ned_enriched = 0
-    hyperleda_enriched = 0
     gaia_enriched = 0
 
     for i, target in enumerate(targets):
         # SAC enrichment (all targets)
         if enrich_target_from_sac(session, target):
             sac_enriched += 1
-
-        # NED enrichment (galaxy gate inside)
-        if enrich_target_from_ned(session, target):
-            ned_enriched += 1
-        time.sleep(0.5)
-
-        # HyperLEDA enrichment (galaxy gate inside)
-        if enrich_target_from_hyperleda(session, target):
-            hyperleda_enriched += 1
-        time.sleep(0.3)
 
         # Gaia enrichment (cluster gate inside)
         if enrich_target_from_gaia(session, target):
@@ -345,10 +331,6 @@ def _migrate_v8_tier1_and_catalogs(session: Session) -> str:
 
     if sac_enriched:
         parts.append(f"SAC: {sac_enriched} targets enriched")
-    if ned_enriched:
-        parts.append(f"NED: {ned_enriched} galaxies enriched")
-    if hyperleda_enriched:
-        parts.append(f"HyperLEDA: {hyperleda_enriched} galaxies enriched")
     if gaia_enriched:
         parts.append(f"Gaia: {gaia_enriched} clusters got distances")
 
@@ -364,7 +346,7 @@ MIGRATIONS: dict[int, tuple[str, Callable[[Session], str]]] = {
     4: ("VizieR enrichment and OpenNGC common name backfill", _migrate_v4_vizier_and_common_names),
     5: ("Strip panel suffixes from target aliases", _migrate_v5_strip_panel_aliases),
     6: ("Clear negative VizieR cache, re-enrich targets, compute constellations", _migrate_v6_clear_negative_cache_and_reenrich),
-    7: ("Load Tier 1 catalogs, match memberships, enrich from NED/HyperLEDA/Gaia/SAC", _migrate_v8_tier1_and_catalogs),
+    7: ("Load Tier 1 catalogs, match memberships, enrich from Gaia/SAC", _migrate_v8_tier1_and_catalogs),
 }
 
 

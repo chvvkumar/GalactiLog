@@ -208,14 +208,6 @@ class TargetDetailResponse(BaseModel):
     avg_guiding_rms_arcsec: float | None = None
     avg_detected_stars: float | None = None
     notes: str | None = None
-    # NED enrichment (galaxies)
-    ned_morphology: str | None = None
-    redshift: float | None = None
-    distance_mpc: float | None = None
-    activity_type: str | None = None
-    # HyperLEDA enrichment (galaxies)
-    hubble_t_type: float | None = None
-    inclination: float | None = None
     # SAC
     sac_description: str | None = None
     sac_notes: str | None = None

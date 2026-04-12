@@ -41,16 +41,29 @@ def _compute_cone_radius(target: Target) -> float:
     return 0.15
 
 
+def _median(values: list[float]) -> float:
+    """Return the median of a sorted list of floats."""
+    values.sort()
+    n = len(values)
+    mid = n // 2
+    if n % 2 == 0:
+        return (values[mid - 1] + values[mid]) / 2.0
+    return values[mid]
+
+
 def query_cluster_distance(
     ra: float, dec: float, radius_deg: float,
 ) -> tuple[float, int] | None:
     """Query Gaia DR3 TAP for median parallax within a cone and compute distance.
 
+    Fetches individual parallax values and computes the median client-side,
+    because the Gaia TAP server does not support PERCENTILE_CONT or MEDIAN
+    aggregate functions in ADQL.
+
     Returns (distance_pc, star_count) or None if insufficient data or error.
     """
     adql = (
-        "SELECT COUNT(parallax) AS n, "
-        "PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY parallax) AS med_parallax "
+        "SELECT parallax "
         "FROM gaiadr3.gaia_source "
         f"WHERE 1=CONTAINS(POINT('ICRS', ra, dec), CIRCLE('ICRS', {ra}, {dec}, {radius_deg})) "
         "AND parallax > 0 AND parallax_over_error > 5"
@@ -73,15 +86,18 @@ def query_cluster_distance(
         if len(lines) < 2:
             return None
 
-        headers = [h.strip() for h in lines[0].split(",")]
-        values = [v.strip() for v in lines[1].split(",")]
-        row = dict(zip(headers, values))
+        # Parse parallax values (skip header row)
+        parallaxes = []
+        for line in lines[1:]:
+            val = line.strip()
+            if val:
+                parallaxes.append(float(val))
 
-        n = int(row["n"])
+        n = len(parallaxes)
         if n < 5:
             return None
 
-        med_parallax = float(row["med_parallax"])
+        med_parallax = _median(parallaxes)
         if med_parallax <= 0:
             return None
 
