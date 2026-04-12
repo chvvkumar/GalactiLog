@@ -352,7 +352,7 @@ const TargetDetailPage: Component = () => {
                   onClick={toggleTargetChart}
                 >
                   <h3 class="text-xs font-semibold uppercase tracking-wider text-theme-text-secondary border-l-2 border-theme-accent pl-2 group-hover:text-theme-text-primary transition-colors">
-                    Target Metrics Across Sessions
+                    Graphs
                   </h3>
                   <svg
                     class={`w-3.5 h-3.5 transition-transform duration-200 text-theme-text-tertiary ${targetChartExpanded() ? "rotate-180" : ""}`}
