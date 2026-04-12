@@ -1449,6 +1449,7 @@ def generate_reference_thumbnails(self) -> dict:
     """Fetch DSS reference thumbnails for all targets."""
     from app.services.skyview import fetch_reference_thumbnail
 
+    set_rebuild_running_sync(_redis, "ref_thumbnails", "Fetching reference thumbnails...")
     output_dir = Path(settings.fits_data_path) / ".galactilog" / "ref_thumbnails"
 
     with Session(_sync_engine) as session:
@@ -1461,23 +1462,34 @@ def generate_reference_thumbnails(self) -> dict:
             )
         ).scalars().all()
 
+        total = len(targets)
         fetched = 0
-        for target in targets:
+        for i, target in enumerate(targets):
             path = fetch_reference_thumbnail(target, output_dir)
             if path:
                 target.reference_thumbnail_path = path
                 fetched += 1
+            if (i + 1) % 5 == 0 or i + 1 == total:
+                set_rebuild_progress_sync(
+                    _redis, f"Reference thumbnails: {i + 1}/{total} ({fetched} fetched)"
+                )
             time.sleep(1.0)  # Rate limit
         session.commit()
 
     _invalidate_stats_cache()
-    return {"fetched": fetched, "total": len(targets)}
+    stats = {"fetched": fetched, "total": total}
+    set_rebuild_complete_sync(
+        _redis, f"Fetched {fetched}/{total} reference thumbnails", stats
+    )
+    return stats
 
 
 @celery_app.task(bind=True)
 def run_xmatch_enrichment(self) -> dict:
     """Run CDS xMatch bulk cross-matching."""
     from app.services.xmatch import bulk_xmatch_targets
+
+    set_rebuild_running_sync(_redis, "xmatch", "Running xMatch enrichment...")
 
     with Session(_sync_engine) as session:
         targets = session.execute(
@@ -1493,6 +1505,13 @@ def run_xmatch_enrichment(self) -> dict:
             for t in targets
         ]
 
+        set_rebuild_progress_sync(
+            _redis, f"Cross-matching {len(target_dicts)} targets..."
+        )
         results = bulk_xmatch_targets(target_dicts, "VII/118/ngc2000", radius_arcsec=60.0)
 
-    return {"matched": len(results), "total": len(target_dicts)}
+    stats = {"matched": len(results), "total": len(target_dicts)}
+    set_rebuild_complete_sync(
+        _redis, f"xMatch: {len(results)}/{len(target_dicts)} matched", stats
+    )
+    return stats
