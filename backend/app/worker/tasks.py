@@ -1484,6 +1484,12 @@ def generate_reference_thumbnails(self) -> dict:
     set_rebuild_complete_sync(
         _redis, f"Fetched {fetched}/{total} reference thumbnails", stats
     )
+    append_activity_sync(_redis, {
+        "type": "ref_thumbnails_complete",
+        "message": f"Reference Thumbnails: fetched {fetched}/{total}",
+        "details": stats,
+        "timestamp": time.time(),
+    })
     return stats
 
 
@@ -1517,4 +1523,10 @@ def run_xmatch_enrichment(self) -> dict:
     set_rebuild_complete_sync(
         _redis, f"xMatch: {len(results)}/{len(target_dicts)} matched", stats
     )
+    append_activity_sync(_redis, {
+        "type": "xmatch_complete",
+        "message": f"xMatch Enrichment: {len(results)}/{len(target_dicts)} matched",
+        "details": stats,
+        "timestamp": time.time(),
+    })
     return stats
