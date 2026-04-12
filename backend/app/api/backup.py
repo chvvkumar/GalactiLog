@@ -109,6 +109,14 @@ async def restore_backup_endpoint(
             acting_user_id=user.id,
         )
         await session.commit()
+        # Invalidate stats cache since restored data changes aggregates
+        try:
+            from app.config import async_redis
+            r = await async_redis()
+            await r.delete("galactilog:stats:cache")
+            await r.aclose()
+        except Exception:
+            pass
         logger.info("backup: restore success user=%s applied=%s", user.username, list(result.get("applied", {}).keys()))
         return result
     except Exception as e:

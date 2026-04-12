@@ -36,6 +36,13 @@ def upgrade() -> None:
         "CREATE INDEX IF NOT EXISTS ix_images_target_id_image_type "
         "ON images (resolved_target_id, image_type)"
     ))
+    # Trigram index for ILIKE pattern matching on OBJECT header
+    # (used by /api/mosaics/suggestions)
+    op.execute(sa.text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
+    op.execute(sa.text(
+        "CREATE INDEX IF NOT EXISTS ix_images_object_name_trgm "
+        "ON images USING gin ((raw_headers->>'OBJECT') gin_trgm_ops)"
+    ))
 
 
 def downgrade() -> None:
@@ -44,6 +51,7 @@ def downgrade() -> None:
         "ix_targets_merged_into_id",
         "ix_targets_active",
         "ix_images_object_name",
+        "ix_images_object_name_trgm",
         "ix_images_target_id_image_type",
     ]:
         op.execute(sa.text(f"DROP INDEX IF EXISTS {name}"))
