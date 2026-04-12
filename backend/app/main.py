@@ -11,6 +11,8 @@ from starlette.responses import JSONResponse
 
 from app.config import settings, limiter
 from app.api.router import api_router
+from app.api.metrics_endpoint import router as metrics_router
+from app.metrics import PrometheusMiddleware
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +65,13 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("Failed to dispatch dark hours backfill: %s", e)
 
+    # Start queue depth probe in the uvicorn process so gauges are visible
+    # at the /metrics endpoint (worker and uvicorn have separate registries)
+    from app.metrics import start_queue_depth_probe, register_celery_collector
+    from app.worker.celery_app import celery_app
+    start_queue_depth_probe(celery_app, settings.redis_url)
+    register_celery_collector(settings.redis_url)
+
     yield
 
 
@@ -94,6 +103,9 @@ def create_app() -> FastAPI:
 
     # API routes
     application.include_router(api_router)
+    application.include_router(metrics_router)
+
+    application.add_middleware(PrometheusMiddleware)
 
     # Serve generated thumbnails as static files
     thumbnails_dir = Path(settings.thumbnails_path)

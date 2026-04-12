@@ -41,7 +41,6 @@ from app.services.scan_state import (
 
 _redis = get_sync_redis()
 
-
 @celery_app.task(bind=True)
 def run_scan(self, include_calibration: bool = True) -> dict:
     """Scan the FITS directory and queue ingest tasks for new files.

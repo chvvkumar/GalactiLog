@@ -35,6 +35,7 @@ CLAUDE.md
 
 # Claude Code / Superpowers tooling
 .claude/
+.mcp.json
 .superpowers/
 .playwright-mcp/
 docs/

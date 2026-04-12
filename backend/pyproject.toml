@@ -20,6 +20,7 @@ dependencies = [
     "pwdlib[argon2]>=0.2.0",
     "PyJWT>=2.9.0",
     "slowapi>=0.1.9",
+    "prometheus-client>=0.21.0",
     "python-multipart>=0.0.9",
     "astropy>=6.0.0",
 ]
