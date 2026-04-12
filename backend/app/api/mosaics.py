@@ -1,3 +1,4 @@
+import re
 import uuid
 from collections import defaultdict
 
@@ -265,7 +266,14 @@ async def get_suggestions(
     from app.schemas.mosaic import SuggestionPanelSession
 
     q = select(MosaicSuggestion).where(MosaicSuggestion.status == "pending")
-    rows = (await session.execute(q)).scalars().all()
+    all_pending = (await session.execute(q)).scalars().all()
+
+    # Filter out suggestions whose name already matches an existing mosaic
+    existing_mosaic_names_q = select(Mosaic.name)
+    existing_mosaic_names = {
+        r[0].upper() for r in (await session.execute(existing_mosaic_names_q)).all()
+    }
+    rows = [r for r in all_pending if r.suggested_name.upper() not in existing_mosaic_names]
 
     # Resolve target names in batch
     all_ids = {t for r in rows for t in r.target_ids}
@@ -280,10 +288,17 @@ async def get_suggestions(
     # Each pattern maps back to (suggestion index, panel label).
     pattern_map: dict[str, list[tuple[int, str]]] = {}  # pattern -> [(row_idx, label)]
     for idx, r in enumerate(rows):
-        for label in r.panel_labels:
-            num = label.split()[-1] if label.startswith("Panel ") else label
-            obj_pattern = f"%{r.suggested_name}%{num}%"
-            pattern_map.setdefault(obj_pattern, []).append((idx, label))
+        if r.panel_patterns:
+            # Use pre-computed patterns stored at detection time
+            for label, pattern in zip(r.panel_labels, r.panel_patterns):
+                pattern_map.setdefault(pattern, []).append((idx, label))
+        else:
+            # Fallback for legacy suggestions without panel_patterns
+            base = r.base_name or r.suggested_name
+            for label in r.panel_labels:
+                num = label.split()[-1] if label.startswith("Panel ") else label
+                obj_pattern = f"%{base}%Panel%{num}%"
+                pattern_map.setdefault(obj_pattern, []).append((idx, label))
 
     # Run one query with all patterns OR'd together
     all_patterns = list(pattern_map.keys())
@@ -332,8 +347,10 @@ async def get_suggestions(
         results.append(MosaicSuggestionResponse(
             id=str(r.id),
             suggested_name=r.suggested_name,
+            base_name=r.base_name,
             target_ids=[str(t) for t in r.target_ids],
             panel_labels=r.panel_labels,
+            panel_patterns=r.panel_patterns,
             target_names={str(t): name_map.get(str(t), "Unknown") for t in set(r.target_ids)},
             sessions=session_rows_by_idx.get(idx, []),
             status=r.status,
@@ -367,10 +384,18 @@ async def accept_suggestion(
     for target_id, label in zip(suggestion.target_ids, suggestion.panel_labels):
         if selected is not None and label not in selected:
             continue
-        # Build OBJECT header pattern for filtering frames per panel
-        # e.g., base "Andromeda Galaxy" + "Panel 3" → "%Andromeda Galaxy%Panel%3%"
-        num = label.split()[-1] if label.startswith("Panel ") else label
-        obj_pattern = f"%{suggestion.suggested_name}%{num}%"
+        # Use pre-computed pattern if available, else derive from base_name
+        panel_idx = None
+        for pi, pl in enumerate(suggestion.panel_labels):
+            if pl == label:
+                panel_idx = pi
+                break
+        if suggestion.panel_patterns and panel_idx is not None and panel_idx < len(suggestion.panel_patterns):
+            obj_pattern = suggestion.panel_patterns[panel_idx]
+        else:
+            base = suggestion.base_name or suggestion.suggested_name
+            num = label.split()[-1] if label.startswith("Panel ") else label
+            obj_pattern = f"%{base}%Panel%{num}%"
         panel = MosaicPanel(
             mosaic_id=mosaic.id,
             target_id=target_id,
@@ -494,7 +519,8 @@ async def create_mosaic(
         obj_pattern = p.object_pattern
         if obj_pattern is None:
             num = p.panel_label.split()[-1] if p.panel_label.startswith("Panel ") else p.panel_label
-            obj_pattern = f"%{mosaic.name}%{num}%"
+            base = re.sub(r'\s*\(\d{4}(?:-\d{4})?\)\s*$', '', mosaic.name)
+            obj_pattern = f"%{base}%Panel%{num}%"
         panel = MosaicPanel(
             mosaic_id=mosaic.id,
             target_id=p.target_id,
@@ -724,6 +750,21 @@ async def delete_mosaic(
     mosaic = await session.get(Mosaic, mosaic_id)
     if not mosaic:
         raise HTTPException(404, "Mosaic not found")
+
+    # Clean up accepted suggestions matching this mosaic name so detection
+    # can re-suggest them. Strip year suffix for base_name matching too.
+    base = re.sub(r'\s*\(\d{4}(?:-\d{4})?\)\s*$', '', mosaic.name)
+    stale_q = select(MosaicSuggestion).where(
+        MosaicSuggestion.status == "accepted",
+        or_(
+            MosaicSuggestion.suggested_name == mosaic.name,
+            MosaicSuggestion.base_name == base,
+        ),
+    )
+    stale_suggestions = (await session.execute(stale_q)).scalars().all()
+    for s in stale_suggestions:
+        await session.delete(s)
+
     await session.delete(mosaic)
     await session.commit()
     return {"status": "ok"}
@@ -756,7 +797,9 @@ async def add_panel(
     obj_pattern = body.object_pattern
     if obj_pattern is None:
         num = body.panel_label.split()[-1] if body.panel_label.startswith("Panel ") else body.panel_label
-        obj_pattern = f"%{mosaic.name}%{num}%"
+        # Strip year suffix from mosaic name for pattern matching
+        base = re.sub(r'\s*\(\d{4}(?:-\d{4})?\)\s*$', '', mosaic.name)
+        obj_pattern = f"%{base}%Panel%{num}%"
 
     panel = MosaicPanel(
         mosaic_id=mosaic_id,

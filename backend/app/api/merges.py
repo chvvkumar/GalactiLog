@@ -10,6 +10,8 @@ from app.models.user import User
 from app.models.target import Target
 from app.models.image import Image
 from app.models.merge_candidate import MergeCandidate
+from app.models.mosaic_panel import MosaicPanel
+from app.models.mosaic_suggestion import MosaicSuggestion
 from app.schemas.target import MergeCandidateResponse, MergedTargetResponse, MergeRequest
 
 router = APIRouter(prefix="/targets", tags=["merges"])
@@ -52,6 +54,21 @@ async def merge_targets(
             if alias not in new_aliases and alias != winner.primary_name:
                 new_aliases.append(alias)
         winner.aliases = new_aliases
+
+        # Update mosaic panels: reassign panels from loser to winner
+        loser_panels_q = select(MosaicPanel).where(MosaicPanel.target_id == loser.id)
+        loser_panels = (await session.execute(loser_panels_q)).scalars().all()
+        for panel in loser_panels:
+            panel.target_id = winner.id
+
+        # Update mosaic suggestions: replace loser id with winner id in target_ids arrays
+        suggestions_q = select(MosaicSuggestion).where(
+            MosaicSuggestion.status == "pending"
+        )
+        all_suggestions = (await session.execute(suggestions_q)).scalars().all()
+        for sug in all_suggestions:
+            if loser.id in sug.target_ids:
+                sug.target_ids = [winner.id if t == loser.id else t for t in sug.target_ids]
 
         # Soft-delete loser
         loser.merged_into_id = winner.id
@@ -156,6 +173,18 @@ async def unmerge_target(
     # Remove loser's names from winner's aliases
     winner_aliases = [a for a in (winner.aliases or []) if a not in loser_names]
     winner.aliases = winner_aliases
+
+    # Revert mosaic panel reassignment: move panels back to loser
+    # Only reassign panels whose object_pattern matches the loser's names
+    winner_panels_q = select(MosaicPanel).where(MosaicPanel.target_id == winner.id)
+    winner_panels = (await session.execute(winner_panels_q)).scalars().all()
+    for panel in winner_panels:
+        if panel.object_pattern:
+            pattern_lower = panel.object_pattern.lower()
+            for name in loser_names:
+                if name.lower() in pattern_lower:
+                    panel.target_id = loser.id
+                    break
 
     # Clear merge fields on loser
     loser.merged_into_id = None

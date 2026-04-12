@@ -86,8 +86,10 @@ class AcceptSuggestionRequest(BaseModel):
 class MosaicSuggestionResponse(BaseModel):
     id: str
     suggested_name: str
+    base_name: str | None = None
     target_ids: list[str]
     panel_labels: list[str]
+    panel_patterns: list[str] | None = None
     target_names: dict[str, str]
     sessions: list[SuggestionPanelSession]
     status: str

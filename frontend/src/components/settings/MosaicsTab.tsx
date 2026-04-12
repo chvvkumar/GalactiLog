@@ -26,6 +26,7 @@ export const MosaicsTab: Component = () => {
   // Suggestions state
   const [suggestions, setSuggestions] = createSignal<MosaicSuggestionResponse[]>([]);
   const [detecting, setDetecting] = createSignal(false);
+  const [acceptingId, setAcceptingId] = createSignal<string | null>(null);
 
   // Mosaics state
   const [mosaics, setMosaics] = createSignal<MosaicSummary[]>([]);
@@ -41,6 +42,14 @@ export const MosaicsTab: Component = () => {
 
   // Expanded suggestion
   const [expandedSuggestion, setExpandedSuggestion] = createSignal<string | null>(null);
+
+  // Suggestion filter
+  const [suggestionFilter, setSuggestionFilter] = createSignal("");
+  const filteredSuggestions = () => {
+    const q = suggestionFilter().toLowerCase().trim();
+    if (!q) return suggestions();
+    return suggestions().filter(s => s.suggested_name.toLowerCase().includes(q));
+  };
 
   // Per-suggestion panel selection: map suggestion id -> set of selected panel labels
   const [selectedPanels, setSelectedPanels] = createSignal<Record<string, Set<string>>>({});
@@ -169,21 +178,29 @@ export const MosaicsTab: Component = () => {
 
   // Suggestions
   const handleAccept = async (s: MosaicSuggestionResponse) => {
+    if (acceptingId()) return; // prevent concurrent accepts
     const sel = selectedPanels()[s.id];
     const selected = sel && sel.size < s.panel_labels.length ? [...sel] : undefined;
     if (sel && sel.size === 0) {
       showToast("Select at least one panel", "error");
       return;
     }
+    setAcceptingId(s.id);
     try {
       await api.acceptMosaicSuggestion(s.id, selected);
       showToast(`Created mosaic "${s.suggested_name}"`);
       setExpandedSuggestion(null);
-      // Update both lists independently so one failure doesn't block the other
-      api.getMosaicSuggestions().then(setSuggestions).catch(() => {});
-      api.getMosaics().then(setMosaics).catch(() => {});
+      // Update both lists before allowing next accept
+      const [newSuggestions, newMosaics] = await Promise.all([
+        api.getMosaicSuggestions(),
+        api.getMosaics(),
+      ]);
+      setSuggestions(newSuggestions);
+      setMosaics(newMosaics);
     } catch {
       showToast("Failed to accept suggestion", "error");
+    } finally {
+      setAcceptingId(null);
     }
   };
 
@@ -195,6 +212,157 @@ export const MosaicsTab: Component = () => {
     } catch {
       showToast("Failed to dismiss suggestion", "error");
     }
+  };
+
+  // Bulk action state
+  const [bulkAction, setBulkAction] = createSignal<string | null>(null); // "accepting" | "dismissing" | "deleting"
+  const [bulkProgress, setBulkProgress] = createSignal({ done: 0, total: 0 });
+  const [selectedSuggestionIds, setSelectedSuggestionIds] = createSignal<Set<string>>(new Set());
+  const [selectedMosaicIds, setSelectedMosaicIds] = createSignal<Set<string>>(new Set());
+
+  const toggleSuggestionSelection = (id: string) => {
+    setSelectedSuggestionIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleAllSuggestions = () => {
+    const visible = filteredSuggestions().map((s) => s.id);
+    const allSelected = visible.length > 0 && visible.every((id) => selectedSuggestionIds().has(id));
+    if (allSelected) {
+      setSelectedSuggestionIds((prev) => {
+        const next = new Set(prev);
+        for (const id of visible) next.delete(id);
+        return next;
+      });
+    } else {
+      setSelectedSuggestionIds((prev) => {
+        const next = new Set(prev);
+        for (const id of visible) next.add(id);
+        return next;
+      });
+    }
+  };
+
+  const selectedSuggestionCount = () => {
+    const visible = new Set(filteredSuggestions().map((s) => s.id));
+    return [...selectedSuggestionIds()].filter((id) => visible.has(id)).length;
+  };
+
+  const toggleMosaicSelection = (id: string) => {
+    setSelectedMosaicIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleAllMosaics = () => {
+    const all = mosaics().map((m) => m.id);
+    const allSelected = selectedMosaicIds().size === all.length;
+    setSelectedMosaicIds(allSelected ? new Set<string>() : new Set(all));
+  };
+
+  const handleBulkAccept = async () => {
+    const sel = selectedSuggestionIds();
+    const items = sel.size > 0
+      ? filteredSuggestions().filter((s) => sel.has(s.id))
+      : filteredSuggestions();
+    if (items.length === 0) return;
+    setBulkAction("accepting");
+    setBulkProgress({ done: 0, total: items.length });
+    let succeeded = 0;
+    for (const s of items) {
+      try {
+        const panelSel = selectedPanels()[s.id];
+        const selected = panelSel && panelSel.size < s.panel_labels.length ? [...panelSel] : undefined;
+        await api.acceptMosaicSuggestion(s.id, selected);
+        succeeded++;
+        setBulkProgress({ done: succeeded, total: items.length });
+        setSuggestions((prev) => prev.filter((x) => x.id !== s.id));
+        setSelectedSuggestionIds((prev) => {
+          const next = new Set(prev);
+          next.delete(s.id);
+          return next;
+        });
+      } catch {
+        // Skip failures, continue with next
+      }
+    }
+    try {
+      const [newSuggestions, newMosaics] = await Promise.all([
+        api.getMosaicSuggestions(),
+        api.getMosaics(),
+      ]);
+      setSuggestions(newSuggestions);
+      setMosaics(newMosaics);
+    } catch {}
+    setBulkAction(null);
+    showToast(`Accepted ${succeeded} of ${items.length} suggestion(s)`);
+  };
+
+  const handleBulkDismiss = async () => {
+    const sel = selectedSuggestionIds();
+    const items = sel.size > 0
+      ? filteredSuggestions().filter((s) => sel.has(s.id))
+      : filteredSuggestions();
+    if (items.length === 0) return;
+    setBulkAction("dismissing");
+    setBulkProgress({ done: 0, total: items.length });
+    let succeeded = 0;
+    for (const s of items) {
+      try {
+        await api.dismissMosaicSuggestion(s.id);
+        succeeded++;
+        setBulkProgress({ done: succeeded, total: items.length });
+        setSuggestions((prev) => prev.filter((x) => x.id !== s.id));
+        setSelectedSuggestionIds((prev) => {
+          const next = new Set(prev);
+          next.delete(s.id);
+          return next;
+        });
+      } catch {
+        // Skip failures, continue with next
+      }
+    }
+    setBulkAction(null);
+    showToast(`Dismissed ${succeeded} of ${items.length} suggestion(s)`);
+  };
+
+  const handleBulkDeleteMosaics = async () => {
+    const ids = [...selectedMosaicIds()];
+    if (ids.length === 0) return;
+    setBulkAction("deleting");
+    setBulkProgress({ done: 0, total: ids.length });
+    let succeeded = 0;
+    for (const id of ids) {
+      try {
+        await api.deleteMosaic(id);
+        succeeded++;
+        setBulkProgress({ done: succeeded, total: ids.length });
+        // Remove from list immediately
+        setMosaics((prev) => prev.filter((m) => m.id !== id));
+        setSelectedMosaicIds((prev) => {
+          const next = new Set(prev);
+          next.delete(id);
+          return next;
+        });
+      } catch {
+        // Skip failures, continue with next
+      }
+    }
+    // Refresh suggestions (some may now be valid again)
+    try {
+      const newSuggestions = await api.getMosaicSuggestions();
+      setSuggestions(newSuggestions);
+    } catch {}
+    setBulkAction(null);
+    setExpandedId(null);
+    showToast(`Deleted ${succeeded} of ${ids.length} mosaic(s)`);
   };
 
   // Expand/collapse mosaic
@@ -379,7 +547,7 @@ export const MosaicsTab: Component = () => {
       <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-4 space-y-3">
         <div class="flex justify-between items-center">
           <h3 class="text-theme-text-primary font-medium">
-            Suggestions ({suggestions().length})
+            Suggestions ({suggestionFilter() ? `${filteredSuggestions().length}/` : ""}{suggestions().length})
           </h3>
           <Show when={isAdmin()}>
             <select
@@ -410,6 +578,31 @@ export const MosaicsTab: Component = () => {
         <p class="text-xs text-theme-text-secondary">
           Sessions for the same panel shot more than the selected gap apart are treated as separate campaigns. Re-run detection after changing.
         </p>
+        <Show when={suggestions().length > 4}>
+          <input
+            type="text"
+            value={suggestionFilter()}
+            onInput={(e) => setSuggestionFilter(e.currentTarget.value)}
+            placeholder="Filter suggestions..."
+            class="w-full px-2 py-1.5 text-sm bg-theme-base border border-theme-border rounded-[var(--radius-sm)] text-theme-text-primary placeholder:text-theme-text-secondary/50 focus:outline-none focus:border-theme-accent"
+          />
+        </Show>
+        {/* Bulk action progress bar */}
+        <Show when={bulkAction() && (bulkAction() === "accepting" || bulkAction() === "dismissing")}>
+          <div class="space-y-1.5">
+            <div class="flex justify-between text-xs text-theme-text-secondary">
+              <span>{bulkAction() === "accepting" ? "Accepting" : "Dismissing"} suggestions...</span>
+              <span>{bulkProgress().done}/{bulkProgress().total}</span>
+            </div>
+            <div class="w-full h-1.5 bg-theme-base rounded-full overflow-hidden">
+              <div
+                class="h-full bg-theme-accent rounded-full transition-all duration-300"
+                style={{ width: `${bulkProgress().total > 0 ? (bulkProgress().done / bulkProgress().total) * 100 : 0}%` }}
+              />
+            </div>
+          </div>
+        </Show>
+
         <Show
           when={suggestions().length > 0}
           fallback={
@@ -418,8 +611,36 @@ export const MosaicsTab: Component = () => {
             </p>
           }
         >
+          {/* Bulk action buttons for suggestions */}
+          <Show when={isAdmin() && filteredSuggestions().length > 0 && !bulkAction()}>
+            <div class="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={filteredSuggestions().length > 0 && filteredSuggestions().every((s) => selectedSuggestionIds().has(s.id))}
+                onChange={toggleAllSuggestions}
+                class="accent-[var(--color-accent)]"
+              />
+              <span class="text-xs text-theme-text-secondary">
+                {selectedSuggestionCount() > 0 ? `${selectedSuggestionCount()} selected` : "Select all"}
+              </span>
+              <div class="flex gap-2 ml-auto">
+                <button
+                  onClick={handleBulkAccept}
+                  class="px-3 py-1.5 text-xs bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded-[var(--radius-sm)] font-medium hover:bg-theme-accent/25 transition-colors"
+                >
+                  Accept {selectedSuggestionCount() > 0 ? `(${selectedSuggestionCount()})` : `All (${filteredSuggestions().length})`}
+                </button>
+                <button
+                  onClick={handleBulkDismiss}
+                  class="px-3 py-1.5 text-xs border border-theme-border text-theme-text-secondary rounded-[var(--radius-sm)] hover:text-theme-danger hover:border-theme-danger transition-colors"
+                >
+                  Dismiss {selectedSuggestionCount() > 0 ? `(${selectedSuggestionCount()})` : `All (${filteredSuggestions().length})`}
+                </button>
+              </div>
+            </div>
+          </Show>
           <div class="space-y-2">
-            <For each={suggestions()}>
+            <For each={filteredSuggestions()}>
               {(s) => {
                 const uniqueTargets = () => [...new Set(s.target_ids)];
                 const totalFrames = () => s.sessions.reduce((a, r) => a + r.frames, 0);
@@ -448,6 +669,14 @@ export const MosaicsTab: Component = () => {
                 return (
                   <div class="border border-theme-border rounded-[var(--radius-sm)] overflow-hidden">
                     <div class="flex items-center p-3 bg-theme-base/50">
+                      <Show when={isAdmin()}>
+                        <input
+                          type="checkbox"
+                          checked={selectedSuggestionIds().has(s.id)}
+                          onChange={() => toggleSuggestionSelection(s.id)}
+                          class="accent-[var(--color-accent)] mr-2 shrink-0"
+                        />
+                      </Show>
                       <button
                         onClick={() => {
                           const next = expandedSuggestion() === s.id ? null : s.id;
@@ -463,7 +692,9 @@ export const MosaicsTab: Component = () => {
                           <div class="text-xs text-theme-text-secondary mt-0.5">
                             {s.panel_labels.length} panels
                             {" \u00b7 "}
-                            {totalFrames()} frames
+                            <span classList={{ "text-theme-warning": totalFrames() === 0 }}>
+                              {totalFrames()} frames
+                            </span>
                             {" \u00b7 "}
                             {formatIntegration(totalInt())}
                           </div>
@@ -476,9 +707,10 @@ export const MosaicsTab: Component = () => {
                         <div class="flex gap-2 ml-3 shrink-0">
                           <button
                             onClick={(e) => { e.stopPropagation(); handleAccept(s); }}
-                            class="px-4 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded text-sm font-medium hover:bg-theme-accent/25 transition-colors"
+                            disabled={!!acceptingId() || !!bulkAction()}
+                            class="px-4 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded text-sm font-medium hover:bg-theme-accent/25 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                           >
-                            Accept{(() => {
+                            {acceptingId() === s.id ? "Accepting..." : "Accept"}{(() => {
                               const sel = selectedPanels()[s.id];
                               const count = sel?.size ?? s.panel_labels.length;
                               return count < s.panel_labels.length ? ` (${count}/${s.panel_labels.length})` : "";
@@ -486,7 +718,8 @@ export const MosaicsTab: Component = () => {
                           </button>
                           <button
                             onClick={(e) => { e.stopPropagation(); handleDismiss(s); }}
-                            class="px-2.5 py-1.5 text-sm border border-theme-border text-theme-text-secondary rounded-[var(--radius-sm)] hover:text-theme-text-primary transition-colors"
+                            disabled={!!bulkAction()}
+                            class="px-2.5 py-1.5 text-sm border border-theme-border text-theme-text-secondary rounded-[var(--radius-sm)] hover:text-theme-text-primary transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                           >
                             Dismiss
                           </button>
@@ -580,14 +813,40 @@ export const MosaicsTab: Component = () => {
             Mosaics ({mosaics().length})
           </h3>
           <Show when={isAdmin()}>
-            <button
-              onClick={() => setShowCreate(!showCreate())}
-              class="px-3 py-1.5 text-sm border border-theme-border text-theme-text-secondary rounded-[var(--radius-sm)] hover:text-theme-text-primary hover:border-theme-accent transition-colors"
-            >
-              {showCreate() ? "Cancel" : "Create Mosaic"}
-            </button>
+            <div class="flex gap-2">
+              <Show when={selectedMosaicIds().size > 0 && !bulkAction()}>
+                <button
+                  onClick={handleBulkDeleteMosaics}
+                  class="px-3 py-1.5 text-sm border border-theme-danger/50 text-theme-danger rounded-[var(--radius-sm)] hover:bg-theme-danger/10 transition-colors"
+                >
+                  Delete Selected ({selectedMosaicIds().size})
+                </button>
+              </Show>
+              <button
+                onClick={() => setShowCreate(!showCreate())}
+                class="px-3 py-1.5 text-sm border border-theme-border text-theme-text-secondary rounded-[var(--radius-sm)] hover:text-theme-text-primary hover:border-theme-accent transition-colors"
+              >
+                {showCreate() ? "Cancel" : "Create Mosaic"}
+              </button>
+            </div>
           </Show>
         </div>
+
+        {/* Bulk delete progress bar */}
+        <Show when={bulkAction() === "deleting"}>
+          <div class="space-y-1.5">
+            <div class="flex justify-between text-xs text-theme-text-secondary">
+              <span>Deleting mosaics...</span>
+              <span>{bulkProgress().done}/{bulkProgress().total}</span>
+            </div>
+            <div class="w-full h-1.5 bg-theme-base rounded-full overflow-hidden">
+              <div
+                class="h-full bg-theme-danger rounded-full transition-all duration-300"
+                style={{ width: `${bulkProgress().total > 0 ? (bulkProgress().done / bulkProgress().total) * 100 : 0}%` }}
+              />
+            </div>
+          </div>
+        </Show>
 
         {/* Create form */}
         <Show when={showCreate()}>
@@ -609,6 +868,19 @@ export const MosaicsTab: Component = () => {
           </div>
         </Show>
 
+        {/* Select all checkbox */}
+        <Show when={isAdmin() && mosaics().length > 1}>
+          <div class="flex items-center gap-2 text-xs text-theme-text-secondary">
+            <input
+              type="checkbox"
+              checked={selectedMosaicIds().size === mosaics().length && mosaics().length > 0}
+              onChange={toggleAllMosaics}
+              class="accent-[var(--color-accent)]"
+            />
+            <span>Select all</span>
+          </div>
+        </Show>
+
         <Show
           when={mosaics().length > 0}
           fallback={
@@ -621,6 +893,14 @@ export const MosaicsTab: Component = () => {
                 <div class="border border-theme-border rounded-[var(--radius-sm)] overflow-hidden">
                   {/* Collapsed header */}
                   <div class="flex items-center p-3 bg-theme-base/50">
+                    <Show when={isAdmin()}>
+                      <input
+                        type="checkbox"
+                        checked={selectedMosaicIds().has(m.id)}
+                        onChange={() => toggleMosaicSelection(m.id)}
+                        class="accent-[var(--color-accent)] mr-2 shrink-0"
+                      />
+                    </Show>
                     <button
                       onClick={() => toggleExpand(m.id)}
                       class="flex-1 flex items-center justify-between text-left hover:bg-theme-base/80 transition-colors"
@@ -648,7 +928,8 @@ export const MosaicsTab: Component = () => {
                           fallback={
                             <button
                               onClick={() => setConfirmDeleteId(m.id)}
-                              class="px-2 py-1.5 text-sm border border-theme-border text-theme-text-secondary rounded hover:text-theme-danger hover:border-theme-danger transition-colors"
+                              disabled={!!bulkAction()}
+                              class="px-2 py-1.5 text-sm border border-theme-border text-theme-text-secondary rounded hover:text-theme-danger hover:border-theme-danger transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                               Delete
                             </button>
