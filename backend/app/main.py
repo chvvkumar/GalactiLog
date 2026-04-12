@@ -11,6 +11,8 @@ from starlette.responses import JSONResponse
 
 from app.config import settings, limiter
 from app.api.router import api_router
+from app.api.metrics_endpoint import router as metrics_router
+from app.metrics import PrometheusMiddleware
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +96,9 @@ def create_app() -> FastAPI:
 
     # API routes
     application.include_router(api_router)
+    application.include_router(metrics_router)
+
+    application.add_middleware(PrometheusMiddleware)
 
     # Serve generated thumbnails as static files
     thumbnails_dir = Path(settings.thumbnails_path)
