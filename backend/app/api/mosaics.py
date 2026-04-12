@@ -3,7 +3,7 @@ from collections import defaultdict
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
-from sqlalchemy import select, func, cast, Date, or_
+from sqlalchemy import select, func, cast, Date, or_, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -141,6 +141,103 @@ async def _panel_stats(panel: MosaicPanel, session: AsyncSession) -> PanelStats:
         rotation=panel.rotation,
         flip_h=panel.flip_h,
     )
+
+
+async def _batch_panel_stats(
+    panels: list[MosaicPanel], session: AsyncSession
+) -> dict[str, PanelStats]:
+    """Compute stats for multiple simple panels (no object_pattern) in 3 bulk queries.
+
+    Returns a dict keyed by str(panel.id).
+    """
+    target_ids = list({p.target_id for p in panels})
+
+    # 1. Aggregation: integration, frames, last session date
+    agg_q = (
+        select(
+            Image.resolved_target_id,
+            func.sum(Image.exposure_time).label("integration"),
+            func.count(Image.id).label("frames"),
+            func.max(cast(Image.capture_date, Date)).label("last_date"),
+        )
+        .where(Image.resolved_target_id.in_(target_ids), Image.image_type == "LIGHT")
+        .group_by(Image.resolved_target_id)
+    )
+    agg_map: dict[str, tuple] = {
+        str(r[0]): (r[1] or 0, r[2] or 0, r[3])
+        for r in (await session.execute(agg_q)).all()
+    }
+
+    # 2. Filter distribution per target
+    filt_q = (
+        select(
+            Image.resolved_target_id,
+            Image.filter_used,
+            func.sum(Image.exposure_time),
+        )
+        .where(
+            Image.resolved_target_id.in_(target_ids),
+            Image.image_type == "LIGHT",
+            Image.filter_used.is_not(None),
+        )
+        .group_by(Image.resolved_target_id, Image.filter_used)
+    )
+    filt_map: dict[str, dict[str, float]] = defaultdict(dict)
+    for r in (await session.execute(filt_q)).all():
+        filt_map[str(r[0])][r[1]] = r[2] or 0
+
+    # 3. Most recent thumbnail per target (with pier side for orientation)
+    thumb_q = text(
+        "SELECT DISTINCT ON (resolved_target_id) "
+        "resolved_target_id, thumbnail_path, raw_headers->>'PIERSIDE' AS pier_side "
+        "FROM images "
+        "WHERE resolved_target_id = ANY(:target_ids) "
+        "AND image_type = 'LIGHT' "
+        "AND thumbnail_path IS NOT NULL "
+        "ORDER BY resolved_target_id, capture_date DESC"
+    )
+    thumb_rows = (await session.execute(thumb_q, {"target_ids": target_ids})).all()
+    thumb_map: dict[str, tuple[str | None, str | None]] = {}
+    for r in thumb_rows:
+        tid = str(r[0])
+        thumb_path = r[1]
+        thumb_url = None
+        if thumb_path:
+            filename = thumb_path.split("/")[-1].split("\\")[-1]
+            thumb_url = f"/thumbnails/{filename}"
+        thumb_map[tid] = (thumb_url, r[2])
+
+    # Build PanelStats for each panel
+    result: dict[str, PanelStats] = {}
+    for p in panels:
+        target = p.target
+        tid = str(p.target_id)
+        agg = agg_map.get(tid, (0, 0, None))
+        filters = filt_map.get(tid, {})
+        thumb_url, thumb_pier_side = thumb_map.get(tid, (None, None))
+
+        result[str(p.id)] = PanelStats(
+            panel_id=str(p.id),
+            target_id=tid,
+            target_name=target.primary_name,
+            panel_label=p.panel_label,
+            sort_order=p.sort_order,
+            ra=target.ra,
+            dec=target.dec,
+            total_integration_seconds=agg[0],
+            total_frames=agg[1],
+            filter_distribution=filters,
+            last_session_date=str(agg[2]) if agg[2] else None,
+            thumbnail_url=thumb_url,
+            thumbnail_pier_side=thumb_pier_side,
+            object_pattern=p.object_pattern,
+            grid_row=p.grid_row,
+            grid_col=p.grid_col,
+            rotation=p.rotation,
+            flip_h=p.flip_h,
+        )
+
+    return result
 
 
 @router.post("/detect")
@@ -321,23 +418,48 @@ async def list_mosaics(
     q = select(Mosaic).options(selectinload(Mosaic.panels)).order_by(Mosaic.name)
     mosaics = (await session.execute(q)).scalars().all()
 
+    # Batch-fetch integration stats for all simple panels (no object_pattern)
+    # to avoid N+1 per-panel queries.
+    simple_panels = [p for m in mosaics for p in m.panels if not p.object_pattern]
+    bulk_rows: dict[str, tuple[float, int]] = {}
+    if simple_panels:
+        target_ids = list({p.target_id for p in simple_panels})
+        bulk_q = (
+            select(
+                Image.resolved_target_id,
+                func.sum(Image.exposure_time).label("integration"),
+                func.count(Image.id).label("frames"),
+            )
+            .where(Image.resolved_target_id.in_(target_ids), Image.image_type == "LIGHT")
+            .group_by(Image.resolved_target_id)
+        )
+        bulk_rows = {
+            str(r[0]): (r[1] or 0, r[2] or 0)
+            for r in (await session.execute(bulk_q)).all()
+        }
+
     results = []
     for m in mosaics:
         total_int = 0
         total_frames = 0
         panel_integrations = []
         for p in m.panels:
-            filters = [
-                Image.resolved_target_id == p.target_id,
-                Image.image_type == "LIGHT",
-            ]
-            if p.object_pattern:
-                filters.append(Image.raw_headers["OBJECT"].astext.ilike(p.object_pattern))
-            iq = select(func.sum(Image.exposure_time), func.count(Image.id)).where(*filters)
-            row = (await session.execute(iq)).one()
-            pi = row[0] or 0
+            if not p.object_pattern:
+                # Use bulk-fetched result
+                pi, pf = bulk_rows.get(str(p.target_id), (0, 0))
+            else:
+                # Fall back to per-panel query for pattern-filtered panels
+                filters = [
+                    Image.resolved_target_id == p.target_id,
+                    Image.image_type == "LIGHT",
+                    Image.raw_headers["OBJECT"].astext.ilike(p.object_pattern),
+                ]
+                iq = select(func.sum(Image.exposure_time), func.count(Image.id)).where(*filters)
+                row = (await session.execute(iq)).one()
+                pi = row[0] or 0
+                pf = row[1] or 0
             total_int += pi
-            total_frames += row[1] or 0
+            total_frames += pf
             panel_integrations.append(pi)
 
         max_panel = max(panel_integrations) if panel_integrations else 0
@@ -406,11 +528,20 @@ async def get_mosaic_detail(
     if not mosaic:
         raise HTTPException(404, "Mosaic not found")
 
+    sorted_panels = sorted(mosaic.panels, key=lambda x: x.sort_order)
+
+    # Separate simple panels (no object_pattern) for batch query
+    simple = [p for p in sorted_panels if not p.object_pattern]
+    batch_stats = await _batch_panel_stats(simple, session) if simple else {}
+
     panels = []
     total_int = 0
     total_frames = 0
-    for p in sorted(mosaic.panels, key=lambda x: x.sort_order):
-        ps = await _panel_stats(p, session)
+    for p in sorted_panels:
+        if str(p.id) in batch_stats:
+            ps = batch_stats[str(p.id)]
+        else:
+            ps = await _panel_stats(p, session)
         total_int += ps.total_integration_seconds
         total_frames += ps.total_frames
         panels.append(ps)

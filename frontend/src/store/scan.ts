@@ -1,4 +1,4 @@
-import { createSignal, onMount } from "solid-js";
+import { createSignal, onCleanup, onMount } from "solid-js";
 import { api } from "../api/client";
 import type { ScanStatus } from "../types";
 
@@ -21,6 +21,7 @@ const [scanStatus, setScanStatus] = createSignal<ScanStatus>({ ...defaultStatus 
 const [scanError, setScanError] = createSignal<string | null>(null);
 const [stopping, setStopping] = createSignal(false);
 
+let _subscribers = 0;
 let pollInterval: ReturnType<typeof setInterval> | null = null;
 
 async function fetchStatus() {
@@ -56,10 +57,19 @@ function stopPolling() {
 export function useScan() {
   // On every mount, check server state - resume polling if scan is active
   onMount(async () => {
+    _subscribers++;
     await fetchStatus();
     const s = scanStatus();
     if (s.state === "scanning" || s.state === "ingesting") {
       startPolling();
+    }
+  });
+
+  onCleanup(() => {
+    _subscribers--;
+    if (_subscribers <= 0) {
+      _subscribers = 0;
+      stopPolling();
     }
   });
 

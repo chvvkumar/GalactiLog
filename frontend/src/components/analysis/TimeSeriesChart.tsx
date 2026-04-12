@@ -1,20 +1,9 @@
 import { Component, createEffect, onCleanup } from "solid-js";
-import {
-  Chart,
-  ScatterController,
-  LineController,
-  LinearScale,
-  TimeScale,
-  PointElement,
-  LineElement,
-  Tooltip,
-  Filler,
-} from "chart.js";
+import { Chart } from "chart.js";
+import "../../utils/chartRegistry";
 import "chartjs-adapter-date-fns";
 import type { TimeSeriesResponse } from "../../types";
 import { chartFontSize } from "../../utils/chartConfig";
-
-Chart.register(ScatterController, LineController, LinearScale, TimeScale, PointElement, LineElement, Tooltip, Filler);
 
 interface Props {
   data: TimeSeriesResponse | undefined;

@@ -443,6 +443,8 @@ async def export_target(
     groups: dict[tuple[str, str, float], list] = defaultdict(list)
     equip_set: set[tuple] = set()
 
+    filter_aliases, _, _ = await load_alias_maps(session)
+
     for img in images:
         date_key = img.capture_date.strftime("%Y-%m-%d")
         if selected_dates and date_key not in selected_dates:
@@ -469,7 +471,6 @@ async def export_target(
         amb_temps = [i.ambient_temp for i in imgs if i.ambient_temp is not None]
 
         # Normalize filter name for AstroBin ID lookup
-        filter_aliases, _, _ = await load_alias_maps(session)
         canonical_filter = normalize_filter(filter_name, filter_aliases)
         ab_id = astrobin_filter_ids.get(canonical_filter) or astrobin_filter_ids.get(filter_name)
 
@@ -1163,7 +1164,12 @@ async def list_targets_aggregated(
     # ---------------------------------------------------------------
     from app.models.mosaic_panel import MosaicPanel
     from app.models.mosaic import Mosaic
-    panel_q = select(MosaicPanel.target_id, Mosaic.id, Mosaic.name).join(Mosaic)
+    page_target_uuids = [uuid.UUID(tk) for tk in page_keys if not tk.startswith("obj:")]
+    panel_q = (
+        select(MosaicPanel.target_id, Mosaic.id, Mosaic.name)
+        .join(Mosaic)
+        .where(MosaicPanel.target_id.in_(page_target_uuids))
+    )
     panel_rows = (await session.execute(panel_q)).all()
     mosaic_map = {str(r[0]): (str(r[1]), r[2]) for r in panel_rows}
 
@@ -1184,6 +1190,34 @@ async def list_targets_aggregated(
             if tid_str not in custom_values_map:
                 custom_values_map[tid_str] = {}
             custom_values_map[tid_str][slug] = val
+
+    # ---------------------------------------------------------------
+    # Phase 4d: Batch pre-fetch custom column session/rig values
+    # ---------------------------------------------------------------
+    _cc_batch_values: dict[str, dict[str, list[tuple[str, str]]]] = {}
+    if has_cc_session_filters:
+        from app.models.custom_column import CustomColumnValue
+        import uuid as _uuid
+        page_uuids = [_uuid.UUID(tk) for tk in page_keys if not tk.startswith("obj:")]
+        col_ids = [
+            _uuid.UUID(col_meta["id"])
+            for col_meta in cc_columns_by_slug.values()
+            if col_meta["applies_to"] in ("session", "rig")
+        ]
+        if page_uuids and col_ids:
+            _batch_q = select(
+                cast(CustomColumnValue.target_id, String),
+                cast(CustomColumnValue.column_id, String),
+                cast(CustomColumnValue.session_date, String),
+                CustomColumnValue.value,
+            ).where(
+                CustomColumnValue.target_id.in_(page_uuids),
+                CustomColumnValue.column_id.in_(col_ids),
+                CustomColumnValue.session_date.isnot(None),
+            )
+            for row in (await session.execute(_batch_q)).all():
+                tid_str, cid_str, sd_str, val = row
+                _cc_batch_values.setdefault(tid_str, {}).setdefault(cid_str, []).append((sd_str, val))
 
     # ---------------------------------------------------------------
     # Phase 5: Assemble the response
@@ -1214,23 +1248,17 @@ async def list_targets_aggregated(
                 col_id = col_meta["id"]
                 col_type = col_meta["column_type"]
 
-                # Query matching session dates for this target + column
-                from app.models.custom_column import CustomColumnValue
-                import uuid as _uuid
-                target_uuid = _uuid.UUID(basics["target_key"])
-                cv_q = select(func.cast(CustomColumnValue.session_date, String)).where(
-                    CustomColumnValue.target_id == target_uuid,
-                    CustomColumnValue.column_id == _uuid.UUID(col_id),
-                    CustomColumnValue.session_date.isnot(None),
-                )
-                if col_type == "text":
-                    escaped = value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-                    cv_q = cv_q.where(CustomColumnValue.value.ilike(f"%{escaped}%"))
-                else:
-                    cv_q = cv_q.where(CustomColumnValue.value == value)
-
-                cv_rows = (await session.execute(cv_q)).all()
-                matching_dates = {str(r[0]) for r in cv_rows}
+                # Look up pre-fetched values for this target + column
+                target_key = basics["target_key"]
+                cv_entries = _cc_batch_values.get(target_key, {}).get(col_id, [])
+                matching_dates: set[str] = set()
+                for sd, val in cv_entries:
+                    if col_type == "text":
+                        if value.lower() in (val or "").lower():
+                            matching_dates.add(sd)
+                    else:
+                        if val == value:
+                            matching_dates.add(sd)
 
                 if cc_matched_dates is None:
                     cc_matched_dates = matching_dates
@@ -1391,12 +1419,10 @@ async def get_session_detail(
             )
             .order_by(Image.capture_date)
         )
-        all_images_query = (
-            select(Image)
-            .where(
-                Image.resolved_target_id.is_(None),
-                _no_object,
-            )
+        avg_hfr_q = select(func.avg(Image.median_hfr)).where(
+            Image.resolved_target_id.is_(None),
+            _no_object,
+            Image.median_hfr.isnot(None),
         )
     elif target_id.startswith("obj:"):
         object_name = target_id[4:]
@@ -1412,12 +1438,10 @@ async def get_session_detail(
             )
             .order_by(Image.capture_date)
         )
-        all_images_query = (
-            select(Image)
-            .where(
-                Image.raw_headers["OBJECT"].astext == object_name,
-                Image.image_type == "LIGHT",
-            )
+        avg_hfr_q = select(func.avg(Image.median_hfr)).where(
+            Image.raw_headers["OBJECT"].astext == object_name,
+            Image.image_type == "LIGHT",
+            Image.median_hfr.isnot(None),
         )
     else:
         try:
@@ -1438,12 +1462,10 @@ async def get_session_detail(
             )
             .order_by(Image.capture_date)
         )
-        all_images_query = (
-            select(Image)
-            .where(
-                Image.resolved_target_id == tid,
-                Image.image_type == "LIGHT",
-            )
+        avg_hfr_q = select(func.avg(Image.median_hfr)).where(
+            Image.resolved_target_id == tid,
+            Image.image_type == "LIGHT",
+            Image.median_hfr.isnot(None),
         )
 
     result = await session.execute(query)
@@ -1452,10 +1474,7 @@ async def get_session_detail(
     if not images:
         raise HTTPException(status_code=404, detail="No images found for this session")
 
-    all_result = await session.execute(all_images_query)
-    all_images = all_result.scalars().all()
-    all_hfr_values = [i.median_hfr for i in all_images if i.median_hfr is not None]
-    target_avg_hfr = statistics.mean(all_hfr_values) if all_hfr_values else None
+    target_avg_hfr = (await session.execute(avg_hfr_q)).scalar()
 
     filter_map, cam_map, tel_map = await load_alias_maps(session)
 

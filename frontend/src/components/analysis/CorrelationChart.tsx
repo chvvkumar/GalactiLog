@@ -1,17 +1,8 @@
 import { Component, createEffect, onCleanup } from "solid-js";
-import {
-  Chart,
-  ScatterController,
-  LinearScale,
-  PointElement,
-  Tooltip,
-  LineElement,
-  Filler,
-} from "chart.js";
+import { Chart } from "chart.js";
+import "../../utils/chartRegistry";
 import type { CorrelationResponse } from "../../types";
 import { chartFontSize } from "../../utils/chartConfig";
-
-Chart.register(ScatterController, LinearScale, PointElement, Tooltip, LineElement, Filler);
 
 const METRIC_LABELS: Record<string, string> = {
   humidity: "Humidity (%)",

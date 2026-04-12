@@ -1,18 +1,8 @@
 import { Component, createEffect, onCleanup } from "solid-js";
-import {
-  Chart,
-  BarController,
-  BarElement,
-  LinearScale,
-  CategoryScale,
-  Tooltip,
-  PointElement,
-  ScatterController,
-} from "chart.js";
+import { Chart } from "chart.js";
+import "../../utils/chartRegistry";
 import type { BoxPlotGroup } from "../../types";
 import { chartFontSize } from "../../utils/chartConfig";
-
-Chart.register(BarController, BarElement, LinearScale, CategoryScale, Tooltip, PointElement, ScatterController);
 
 interface Props {
   groups: BoxPlotGroup[];

@@ -50,7 +50,7 @@ url = settings.database_url.replace('+asyncpg', '+psycopg2')
 eng = create_engine(url)
 with eng.connect() as c:
     row = c.execute(text('SELECT version_num FROM alembic_version')).first()
-    if row and row[0] not in ('0001',):
+    if row and row[0] not in ('0001', '0002', '0003', '0004', '0005'):
         print('yes')
     else:
         print('no')

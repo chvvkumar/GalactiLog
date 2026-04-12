@@ -1,5 +1,6 @@
 import { createMemo, createEffect, createSignal, onCleanup, Show, untrack } from "solid-js";
-import { Chart, LineController, CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Filler } from "chart.js";
+import { Chart } from "chart.js";
+import "../utils/chartRegistry";
 import type { SessionDetail, FrameRecord } from "../types";
 import { useSettingsContext } from "./SettingsProvider";
 import { formatTime } from "../utils/dateTime";
@@ -22,7 +23,7 @@ function rigDash(index: number): number[] {
   return RIG_DASH_PATTERNS[index % RIG_DASH_PATTERNS.length];
 }
 
-Chart.register(LineController, CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Filler);
+
 
 interface Props {
   selectedDates: string[];
