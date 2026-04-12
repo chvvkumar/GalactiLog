@@ -756,6 +756,11 @@ export interface PanelStats {
   last_session_date: string | null;
   thumbnail_url: string | null;
   thumbnail_pier_side: string | null;
+  object_pattern?: string | null;
+  grid_row: number | null;
+  grid_col: number | null;
+  rotation: number;
+  flip_h: boolean;
 }
 
 export interface MosaicSummary {

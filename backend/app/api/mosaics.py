@@ -136,6 +136,10 @@ async def _panel_stats(panel: MosaicPanel, session: AsyncSession) -> PanelStats:
         thumbnail_url=thumb_url,
         thumbnail_pier_side=thumb_pier_side,
         object_pattern=panel.object_pattern,
+        grid_row=panel.grid_row,
+        grid_col=panel.grid_col,
+        rotation=panel.rotation,
+        flip_h=panel.flip_h,
     )
 
 
@@ -651,6 +655,16 @@ async def update_panel(
         panel.sort_order = body.sort_order
     if body.object_pattern is not None:
         panel.object_pattern = body.object_pattern
+    if body.grid_row is not None:
+        panel.grid_row = body.grid_row
+    if body.grid_col is not None:
+        panel.grid_col = body.grid_col
+    if body.rotation is not None:
+        if body.rotation not in (0, 90, 180, 270):
+            raise HTTPException(400, "rotation must be 0, 90, 180, or 270")
+        panel.rotation = body.rotation
+    if body.flip_h is not None:
+        panel.flip_h = body.flip_h
     await session.commit()
     return {"status": "ok"}
 

@@ -621,7 +621,18 @@ export const api = {
       body: JSON.stringify({ target_id: targetId, panel_label: label }),
     }),
 
-  updateMosaicPanel: (mosaicId: string, panelId: string, data: { panel_label?: string; sort_order?: number }) =>
+  updateMosaicPanel: (
+    mosaicId: string,
+    panelId: string,
+    data: {
+      panel_label?: string;
+      sort_order?: number;
+      grid_row?: number | null;
+      grid_col?: number | null;
+      rotation?: number;
+      flip_h?: boolean;
+    },
+  ) =>
     fetchJson<{ status: string }>(`/mosaics/${mosaicId}/panels/${panelId}`, {
       method: "PUT",
       body: JSON.stringify(data),
