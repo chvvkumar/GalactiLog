@@ -3,18 +3,32 @@ import { api } from "../api/client";
 
 const [stats, { refetch: refetchStats }] = createResource(() => api.getStats());
 
-export function useStats() {
-  let pollInterval: ReturnType<typeof setInterval> | null = null;
+let _subscribers = 0;
+let _pollInterval: ReturnType<typeof setInterval> | null = null;
 
-  // Auto-refresh stats every 30 seconds while on the statistics page
+function _startPoll() {
+  if (_pollInterval) return;
+  _pollInterval = setInterval(() => refetchStats(), 30_000);
+}
+
+function _stopPoll() {
+  if (_pollInterval) {
+    clearInterval(_pollInterval);
+    _pollInterval = null;
+  }
+}
+
+export function useStats() {
   onMount(() => {
-    pollInterval = setInterval(() => refetchStats(), 30_000);
+    _subscribers++;
+    _startPoll();
   });
 
   onCleanup(() => {
-    if (pollInterval) {
-      clearInterval(pollInterval);
-      pollInterval = null;
+    _subscribers--;
+    if (_subscribers <= 0) {
+      _subscribers = 0;
+      _stopPoll();
     }
   });
 

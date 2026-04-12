@@ -1,5 +1,6 @@
 import { createMemo, createSignal, createEffect, onCleanup, Show } from "solid-js";
-import { Chart, LineController, CategoryScale, LinearScale, PointElement, LineElement, Tooltip } from "chart.js";
+import { Chart } from "chart.js";
+import "../utils/chartRegistry";
 import type { SessionDetail, FrameRecord } from "../types";
 import { useSettingsContext } from "./SettingsProvider";
 import { formatTime } from "../utils/dateTime";
@@ -8,7 +9,7 @@ import MetricTogglePills from "./MetricTogglePills";
 import FilterTogglePills from "./FilterTogglePills";
 import RigTogglePills, { rigColor } from "./RigTogglePills";
 
-Chart.register(LineController, CategoryScale, LinearScale, PointElement, LineElement, Tooltip);
+
 
 interface Props {
   detail: SessionDetail;

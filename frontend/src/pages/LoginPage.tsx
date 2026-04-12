@@ -1,9 +1,11 @@
 import { Component, createSignal, Show } from "solid-js";
+import { useNavigate } from "@solidjs/router";
 import { useAuth } from "../components/AuthProvider";
 import { showToast } from "../components/Toast";
 
 const LoginPage: Component = () => {
   const { login } = useAuth();
+  const navigate = useNavigate();
   const [username, setUsername] = createSignal("");
   const [password, setPassword] = createSignal("");
   const [remember, setRemember] = createSignal(false);
@@ -17,7 +19,7 @@ const LoginPage: Component = () => {
     try {
       await login(username(), password(), remember());
       showToast(`Welcome, ${username()}`);
-      window.location.href = "/";
+      navigate("/");
     } catch (err: any) {
       setError(err?.message || "Login failed");
       setSubmitting(false);

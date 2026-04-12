@@ -1,17 +1,7 @@
 import { Component, createEffect, onCleanup, onMount } from "solid-js";
-import {
-  Chart,
-  LineController,
-  LineElement,
-  PointElement,
-  LinearScale,
-  CategoryScale,
-  Tooltip,
-  Filler,
-} from "chart.js";
+import { Chart } from "chart.js";
+import "../utils/chartRegistry";
 import { chartFontSize } from "../utils/chartConfig";
-
-Chart.register(LineController, LineElement, PointElement, LinearScale, CategoryScale, Tooltip, Filler);
 
 interface Props {
   history: { date: string; files_added: number }[];
