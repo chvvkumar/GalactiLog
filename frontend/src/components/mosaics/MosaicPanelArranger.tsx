@@ -1,11 +1,11 @@
-import { Component, For, Show, createMemo, createSignal, createEffect } from "solid-js";
+import { Component, For, Show, createMemo, createSignal, createEffect, onCleanup } from "solid-js";
 import { createStore, produce } from "solid-js/store";
 import {
   DragDropProvider,
   DragDropSensors,
   createDraggable,
   createDroppable,
-  mostIntersecting,
+  type CollisionDetector,
   type Draggable,
   type Droppable,
 } from "@thisbeyond/solid-dnd";
@@ -78,6 +78,50 @@ const MosaicPanelArranger: Component<Props> = (props) => {
   const [activeId, setActiveId] = createSignal<string | null>(null);
   const [saving, setSaving] = createSignal(false);
   const [initialized, setInitialized] = createSignal(false);
+  const [pointerPos, setPointerPos] = createSignal<{ x: number; y: number } | null>(null);
+
+  // Track the real pointer position while a drag is active. The built-in
+  // collision detectors (mostIntersecting, closestCenter) use the draggable's
+  // translated bbox, which depends on where inside the tile the user grabbed
+  // -- grabbing near the bottom makes the tile sit above the pointer and the
+  // highlighted cell is one row off. A pointer-driven detector eliminates
+  // that asymmetry.
+  createEffect(() => {
+    if (activeId() === null) {
+      setPointerPos(null);
+      return;
+    }
+    const handler = (e: PointerEvent) => setPointerPos({ x: e.clientX, y: e.clientY });
+    window.addEventListener("pointermove", handler);
+    onCleanup(() => window.removeEventListener("pointermove", handler));
+  });
+
+  const pointerCollisionDetector: CollisionDetector = (_draggable, droppables) => {
+    const pos = pointerPos();
+    if (!pos) return null;
+    // Prefer a droppable whose bbox strictly contains the pointer.
+    for (const d of droppables) {
+      const l = d.layout;
+      if (pos.x >= l.left && pos.x <= l.right && pos.y >= l.top && pos.y <= l.bottom) {
+        return d;
+      }
+    }
+    // Fallback: closest droppable center to pointer (forgiving when the
+    // pointer slips into a gap between cells).
+    let best: Droppable | null = null;
+    let bestDist = Infinity;
+    for (const d of droppables) {
+      const c = d.layout.center;
+      const dx = c.x - pos.x;
+      const dy = c.y - pos.y;
+      const dist = dx * dx + dy * dy;
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = d;
+      }
+    }
+    return best;
+  };
 
   // Seed local state from props once. Subsequent updates are driven by user
   // interaction -- we do NOT re-derive from props.panels because the backend
@@ -234,7 +278,7 @@ const MosaicPanelArranger: Component<Props> = (props) => {
       <DragDropProvider
         onDragStart={({ draggable }: { draggable: Draggable }) => setActiveId(String(draggable.id))}
         onDragEnd={handleDragEnd}
-        collisionDetector={mostIntersecting}
+        collisionDetector={pointerCollisionDetector}
       >
         <DragDropSensors />
         <div
