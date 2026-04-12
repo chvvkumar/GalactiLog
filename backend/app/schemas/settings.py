@@ -8,12 +8,12 @@ class GeneralSettings(BaseModel):
     default_page_size: int = 50
     include_calibration: bool = False
     filter_style: str = "text-only"
-    theme: str = "deep-neutral"
-    text_size: str = "medium"
+    theme: str = "glass-void"
+    text_size: str = "large"
     timezone: str = "UTC"
     astrobin_filter_ids: dict[str, int] = {}
     astrobin_bortle: int | None = None
-    content_width: str = "full"
+    content_width: str = "extra-wide"
     mosaic_keywords: list[str] = ["Panel", "P"]
     mosaic_campaign_gap_days: int = 0
 
