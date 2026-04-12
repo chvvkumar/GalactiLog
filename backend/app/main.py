@@ -65,6 +65,13 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("Failed to dispatch dark hours backfill: %s", e)
 
+    # Start queue depth probe in the uvicorn process so gauges are visible
+    # at the /metrics endpoint (worker and uvicorn have separate registries)
+    from app.metrics import start_queue_depth_probe, register_celery_collector
+    from app.worker.celery_app import celery_app
+    start_queue_depth_probe(celery_app, settings.redis_url)
+    register_celery_collector(settings.redis_url)
+
     yield
 
 
