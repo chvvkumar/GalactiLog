@@ -12,5 +12,13 @@ export default defineConfig({
   },
   build: {
     target: "esnext",
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'chart-vendor': ['chart.js', '@kurkle/color', 'chartjs-adapter-date-fns', 'chartjs-plugin-annotation'],
+          'solid-vendor': ['solid-js', '@solidjs/router'],
+        },
+      },
+    },
   },
 });
