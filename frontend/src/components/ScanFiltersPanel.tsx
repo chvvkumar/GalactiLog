@@ -322,7 +322,7 @@ const ScanFiltersPanel: Component<Props> = (props) => {
     <details
       id="scan-filters-panel"
       open={firstVisit}
-      class="rounded-[var(--radius-sm)] border border-theme-border"
+      class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em"
     >
       <summary class="p-3 cursor-pointer text-sm font-medium text-theme-text-primary">
         Path & name rules — {filters().include_paths.length} include path(s),{" "}
