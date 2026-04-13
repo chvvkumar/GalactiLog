@@ -302,7 +302,7 @@ const SessionAccordionCard: Component<{
         <For each={sortedFrames(frames)}>
           {(frame) => (
             <tr class={`border-b border-theme-border/30 hover:bg-theme-hover transition-colors duration-100 ${isOutlier(frame, medianHfr, medianEcc) ? "bg-theme-error/20" : ""}`}>
-              <td class="py-1 px-2 text-theme-text-primary">{formatTimeUtil(frame.timestamp, settingsCtx.timezone())}</td>
+              <td class="py-1 px-2 text-theme-text-primary">{formatTimeUtil(frame.timestamp, settingsCtx.timezone(), settingsCtx.use24hTime())}</td>
               <td class="py-1 px-2 text-theme-text-primary text-center">{frame.filter_used ?? "—"}</td>
               <td class="py-1 px-2 text-theme-text-primary text-right tabular-nums">{frame.exposure_time ?? "—"}s</td>
               <Show when={visible("quality", "hfr")}>
@@ -601,7 +601,7 @@ const SessionAccordionCard: Component<{
                   <span>
                     <span class="text-theme-text-tertiary">Time:</span>{" "}
                     <span class="font-bold text-metric-time">
-                      {detail().first_frame_time ? `${formatTimeUtil(detail().first_frame_time!, settingsCtx.timezone())} → ${detail().last_frame_time ? formatTimeUtil(detail().last_frame_time!, settingsCtx.timezone()) : ""}` : "—"}
+                      {detail().first_frame_time ? `${formatTimeUtil(detail().first_frame_time!, settingsCtx.timezone(), settingsCtx.use24hTime())} → ${detail().last_frame_time ? formatTimeUtil(detail().last_frame_time!, settingsCtx.timezone(), settingsCtx.use24hTime()) : ""}` : "—"}
                     </span>
                   </span>
                 </div>

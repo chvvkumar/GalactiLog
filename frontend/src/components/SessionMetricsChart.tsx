@@ -38,7 +38,7 @@ export default function SessionMetricsChart(props: Props) {
     );
     const labels = allFrames.map((f) => {
       const d = new Date(f.timestamp);
-      return formatTime(d, settingsCtx.timezone());
+      return formatTime(d, settingsCtx.timezone(), settingsCtx.use24hTime());
     });
 
     const datasets: any[] = [];

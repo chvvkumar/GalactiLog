@@ -529,6 +529,7 @@ export interface GeneralSettings {
   theme: string;
   text_size: string;
   timezone: string;
+  use_24h_time: boolean;
   astrobin_filter_ids?: Record<string, number>;
   astrobin_bortle?: number | null;
   content_width: string;
