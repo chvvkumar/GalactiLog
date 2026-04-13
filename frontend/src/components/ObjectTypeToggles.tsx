@@ -1,10 +1,10 @@
-import { Component, For, Show, createResource } from "solid-js";
+import { Component, For, Show } from "solid-js";
 import { useDashboardFilters } from "./DashboardFilterProvider";
-import { api } from "../api/client";
+import { useFilterOptions } from "../store/filterOptions";
 
 const ObjectTypeToggles: Component = () => {
   const { filters, toggleObjectType } = useDashboardFilters();
-  const [objectTypes] = createResource(() => api.getObjectTypes());
+  const { objectTypes } = useFilterOptions();
 
   const isActive = (t: string) => filters().objectTypes.includes(t);
 

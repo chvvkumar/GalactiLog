@@ -14,23 +14,23 @@ const ActivityFeed: Component<{
 }> = (props) => {
   const settingsCtx = useSettingsContext();
   const [activity, setActivity] = createSignal<ActivityEntry[]>([]);
-  const [prevState, setPrevState] = createSignal<string>("idle");
 
   const fetchActivity = async () => {
     try { setActivity(await api.getActivity()); } catch { /* ignore */ }
   };
 
-  fetchActivity();
-
-  // Refresh activity when scan or rebuild state transitions to complete/idle/error
+  // Track previous composite state to only fetch on real transitions.
+  // Starting with null ensures the first effect run triggers the initial fetch.
+  let prevCompositeState: string | null = null;
   createEffect(() => {
     const scanState = props.scanStatus.state;
     const rebuildState = props.rebuildStatus.state;
-    const prev = prevState();
     const current = `${scanState}:${rebuildState}`;
-    if (current !== prev) {
-      setPrevState(current);
-      if (scanState === "complete" || scanState === "idle" || rebuildState === "complete" || rebuildState === "error") {
+    if (current !== prevCompositeState) {
+      const wasPrev = prevCompositeState;
+      prevCompositeState = current;
+      // Always fetch on first run (wasPrev === null), and on relevant transitions
+      if (wasPrev === null || scanState === "complete" || scanState === "idle" || rebuildState === "complete" || rebuildState === "error") {
         fetchActivity();
       }
     }

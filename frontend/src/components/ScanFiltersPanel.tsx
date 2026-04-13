@@ -2,6 +2,7 @@ import { Component, createSignal, createEffect, Show, For } from "solid-js";
 import { scanFilters } from "../api/scanFilters";
 import type {
   ScanFilters,
+  ScanFiltersResponse,
   NameRule,
   RuleAction,
   RuleType,
@@ -30,6 +31,8 @@ const VERDICT_HINT: Record<Verdict, string> = {
 };
 
 interface Props {
+  /** Pre-fetched scan filters response from the parent, avoids a duplicate GET. */
+  initialData?: ScanFiltersResponse | null;
   onConfigured?: () => void;
 }
 
@@ -100,19 +103,37 @@ const ScanFiltersPanel: Component<Props> = (props) => {
     filters().exclude_paths.some((p) => !pathIsInsideRoot(p));
   const canSave = () => dirty() && !saving() && !anyRuleInvalid() && !anyPathInvalid();
 
+  const applyResponse = (resp: ScanFiltersResponse) => {
+    setFilters(resp.filters);
+    setOriginal(JSON.parse(JSON.stringify(resp.filters)));
+    setFitsRoot(resp.fits_root);
+    setDirty(false);
+  };
+
   const load = async () => {
     try {
-      const resp = await scanFilters.get();
-      setFilters(resp.filters);
-      setOriginal(JSON.parse(JSON.stringify(resp.filters)));
-      setFitsRoot(resp.fits_root);
-      setDirty(false);
+      applyResponse(await scanFilters.get());
     } catch (e: any) {
       showToast(e?.message ?? "Failed to load scan filters", "error");
     }
   };
 
-  createEffect(() => { load(); });
+  // Use parent-provided data when available to avoid a duplicate fetch.
+  // Track whether we've already initialized so the effect only fires once.
+  let initialized = false;
+  createEffect(() => {
+    if (initialized) return;
+    const initial = props.initialData;
+    if (initial) {
+      initialized = true;
+      applyResponse(initial);
+    } else if (initial === undefined) {
+      // No prop provided at all (component used standalone) -- self-fetch
+      initialized = true;
+      load();
+    }
+    // If initial === null, the parent is still loading; wait for next run
+  });
 
   const markDirty = () => setDirty(true);
 
