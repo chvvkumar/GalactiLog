@@ -52,7 +52,8 @@ const StatisticsPage: Component = () => {
       <Show when={stats()}>
         {(data) => (
           <div class="rounded-[var(--radius-md)] bg-theme-surface border border-theme-border p-4 space-y-6">
-            <section class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4">
+            <section class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
+              <h2 class="text-sm font-semibold text-theme-text-primary">Overview</h2>
               <StatsOverview overview={data().overview} />
             </section>
 
