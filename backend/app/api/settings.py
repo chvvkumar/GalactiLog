@@ -1,9 +1,11 @@
+import copy
 import uuid
 from enum import Enum
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select, func as sa_func
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import attributes
 
 from app.config import async_redis
 from app.database import get_session
@@ -278,6 +280,7 @@ async def update_display(
     if "column_visibility_per_user" in existing:
         updated["column_visibility_per_user"] = existing["column_visibility_per_user"]
     row.display = updated
+    attributes.flag_modified(row, "display")
     await session.commit()
     return _row_to_response(row)
 
@@ -448,10 +451,11 @@ async def update_column_visibility(
     user: User = Depends(get_current_user),
 ):
     row = await _get_or_create_settings(session)
-    display = dict(row.display) if row.display else {}
+    display = copy.deepcopy(row.display) if row.display else {}
     per_user = display.get("column_visibility_per_user", {})
     per_user[str(user.id)] = payload.model_dump()
     display["column_visibility_per_user"] = per_user
     row.display = display
+    attributes.flag_modified(row, "display")
     await session.commit()
     return {"ok": True}
