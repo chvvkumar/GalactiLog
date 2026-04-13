@@ -6,9 +6,15 @@ const [stats, { refetch: refetchStats }] = createResource(() => api.getStats());
 let _subscribers = 0;
 let _pollInterval: ReturnType<typeof setInterval> | null = null;
 
+function _poll() {
+  if (document.visibilityState === "visible") {
+    startTransition(() => refetchStats());
+  }
+}
+
 function _startPoll() {
   if (_pollInterval) return;
-  _pollInterval = setInterval(() => startTransition(() => refetchStats()), 30_000);
+  _pollInterval = setInterval(_poll, 120_000);
 }
 
 function _stopPoll() {
