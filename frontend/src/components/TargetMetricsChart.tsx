@@ -127,7 +127,7 @@ export default function TargetMetricsChart(props: Props) {
 
       for (const frame of frames) {
         const d = new Date(frame.timestamp);
-        const timeStr = formatTime(d, settingsCtx.timezone());
+        const timeStr = formatTime(d, settingsCtx.timezone(), settingsCtx.use24hTime());
         labels.push(sortedDates.length > 1 ? `${date.slice(5)} ${timeStr}` : timeStr);
         framesByIndex.push(frame);
       }

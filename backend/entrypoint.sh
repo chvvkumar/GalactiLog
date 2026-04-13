@@ -44,13 +44,18 @@ else
     # longer exists (old incremental migrations were replaced by 0001).
     # If so, re-stamp to the current head.
     STALE=$(python -c "
+from alembic.config import Config
+from alembic.script import ScriptDirectory
 from sqlalchemy import create_engine, text
 from app.config import settings
 url = settings.database_url.replace('+asyncpg', '+psycopg2')
 eng = create_engine(url)
+cfg = Config('alembic.ini')
+scripts = ScriptDirectory.from_config(cfg)
+known = {s.revision for s in scripts.walk_revisions()}
 with eng.connect() as c:
     row = c.execute(text('SELECT version_num FROM alembic_version')).first()
-    if row and row[0] not in ('0001', '0002', '0003', '0004', '0005'):
+    if row and row[0] not in known:
         print('yes')
     else:
         print('no')

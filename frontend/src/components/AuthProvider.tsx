@@ -102,10 +102,17 @@ export const AuthProvider: Component<ParentProps> = (props) => {
 
   const initAuth = async () => {
     try {
-      await refreshUser();
+      // Timeout the initial auth check so a hanging upstream (nginx
+      // connected but backend not ready) falls through to the startup
+      // screen instead of showing "Loading..." forever.
+      const timeout = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("timeout")), 5000),
+      );
+      await Promise.race([refreshUser(), timeout]);
     } catch (e) {
       // 502/503/504 = nginx is up but backend isn't ready yet
       // Network error (not ApiError) = nothing is listening yet
+      // Timeout = upstream accepted connection but never responded
       const serverDown =
         !(e instanceof ApiError) ||
         e.status === 502 || e.status === 503 || e.status === 504;

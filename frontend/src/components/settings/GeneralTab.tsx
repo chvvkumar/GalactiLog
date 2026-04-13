@@ -26,6 +26,7 @@ export const GeneralTab: Component = () => {
     theme: "default-dark",
     text_size: "medium",
     timezone: "UTC",
+    use_24h_time: false,
     content_width: "full",
   });
   const [saving, setSaving] = createSignal(false);

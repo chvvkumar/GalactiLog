@@ -89,7 +89,7 @@ const ActivityFeed: Component<{
   };
 
   const formatTime = (ts: number) =>
-    formatDateTime(new Date(ts * 1000), settingsCtx.timezone()) + " " + timezoneLabel(settingsCtx.timezone());
+    formatDateTime(new Date(ts * 1000), settingsCtx.timezone(), settingsCtx.use24hTime()) + " " + timezoneLabel(settingsCtx.timezone());
 
   return (
     <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-4 flex flex-col h-full min-h-0">

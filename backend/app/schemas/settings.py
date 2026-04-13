@@ -11,6 +11,7 @@ class GeneralSettings(BaseModel):
     theme: str = "glass-void"
     text_size: str = "large"
     timezone: str = "UTC"
+    use_24h_time: bool = False
     astrobin_filter_ids: dict[str, int] = {}
     astrobin_bortle: int | None = None
     content_width: str = "extra-wide"
