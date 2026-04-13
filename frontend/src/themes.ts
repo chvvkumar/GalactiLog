@@ -814,14 +814,14 @@ export function applyTheme(themeId: string): void {
     root.setAttribute("data-theme-style", "glass");
     const isLight = theme.id === "glass-crystal" || theme.id === "daylight";
     root.setAttribute("data-theme-lightness", isLight ? "light" : "dark");
-    applyGlassOrbs(theme.glass.orbs, theme.id === "glass-crystal");
+    applyGlassOrbs(theme.glass.orbs, isLight);
   } else {
     root.style.setProperty("--glass-blur", "0px");
     root.style.setProperty("--glass-saturate", "1");
     root.style.removeProperty("--glass-gradient-from");
     root.style.removeProperty("--glass-gradient-to");
     root.setAttribute("data-theme-style", "solid");
-    const isLight = theme.id === "glass-crystal" || theme.id === "daylight";
+    const isLight = theme.id === "daylight";
     root.setAttribute("data-theme-lightness", isLight ? "light" : "dark");
     applyGlassOrbs(undefined);
   }
