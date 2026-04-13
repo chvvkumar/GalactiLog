@@ -667,8 +667,8 @@ export const MosaicsTab: Component = () => {
                   sortKey() === key ? (sortAsc() ? " \u25B4" : " \u25BE") : "";
 
                 return (
-                  <div class="border border-theme-border rounded-[var(--radius-sm)] overflow-hidden">
-                    <div class="flex items-center p-3 bg-theme-base/50">
+                  <div class="bg-theme-elevated border border-theme-border-em rounded-[var(--radius-sm)] overflow-hidden">
+                    <div class="flex items-center p-3">
                       <Show when={isAdmin()}>
                         <input
                           type="checkbox"
@@ -890,9 +890,9 @@ export const MosaicsTab: Component = () => {
           <div class="space-y-2">
             <For each={mosaics()}>
               {(m) => (
-                <div class="border border-theme-border rounded-[var(--radius-sm)] overflow-hidden">
+                <div class="bg-theme-elevated border border-theme-border-em rounded-[var(--radius-sm)] overflow-hidden">
                   {/* Collapsed header */}
-                  <div class="flex items-center p-3 bg-theme-base/50">
+                  <div class="flex items-center p-3">
                     <Show when={isAdmin()}>
                       <input
                         type="checkbox"
@@ -1008,7 +1008,7 @@ export const MosaicsTab: Component = () => {
                           <div class="space-y-2">
                             <For each={detail().panels}>
                               {(p) => (
-                                <div class="flex items-center justify-between p-2 bg-theme-base/30 border border-theme-border/50 rounded-[var(--radius-sm)]">
+                                <div class="flex items-center justify-between p-2 bg-theme-elevated border border-theme-border-em rounded-[var(--radius-sm)]">
                                   <div class="flex-1">
                                     <span class="text-theme-text-primary text-sm">
                                       {p.panel_label}
@@ -1061,7 +1061,7 @@ export const MosaicsTab: Component = () => {
                             </button>
                           }
                         >
-                          <div class="p-2 bg-theme-base/30 border border-theme-border/50 rounded-[var(--radius-sm)] space-y-2">
+                          <div class="p-2 bg-theme-elevated border border-theme-border-em rounded-[var(--radius-sm)] space-y-2">
                             <div class="relative">
                               <input
                                 type="text"
