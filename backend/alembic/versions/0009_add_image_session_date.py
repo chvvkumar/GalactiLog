@@ -8,8 +8,8 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision = "0009_add_image_session_date"
-down_revision = "0008_add_composite_indexes_for_performance"
+revision = "0009"
+down_revision = "0008"
 branch_labels = None
 depends_on = None
 
