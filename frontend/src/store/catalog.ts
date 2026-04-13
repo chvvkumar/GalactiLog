@@ -2,10 +2,16 @@ import { createSignal, createResource } from "solid-js";
 import { api } from "../api/client";
 import type { EquipmentList } from "../types";
 
-const [equipment] = createResource(() => api.getEquipment());
+const [shouldFetchEquipment, setShouldFetchEquipment] = createSignal(false);
+
+const [equipment] = createResource(
+  () => shouldFetchEquipment() || undefined,
+  () => api.getEquipment(),
+);
 const [expandedTargets, setExpandedTargets] = createSignal<Set<string>>(new Set());
 
 export function useCatalog() {
+  if (!shouldFetchEquipment()) setShouldFetchEquipment(true);
   return {
     equipment,
     expandedTargets,
