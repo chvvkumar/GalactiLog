@@ -1,5 +1,4 @@
-import { Component, Show, For, createSignal, createEffect } from "solid-js";
-import { api } from "../api/client";
+import { Component, Show, For, createSignal } from "solid-js";
 import type { ScanStatus, ActivityEntry, RebuildStatus } from "../types";
 import { useSettingsContext } from "./SettingsProvider";
 import { formatDateTime, timezoneLabel } from "../utils/dateTime";
@@ -9,39 +8,14 @@ const ActivityFeed: Component<{
   rebuildStatus: RebuildStatus;
   stopping: boolean;
   scanError: string | null;
+  activity: ActivityEntry[];
+  onClearActivity: () => void;
   onResetAndRescan: () => void;
   onDismissStalled: () => void;
 }> = (props) => {
   const settingsCtx = useSettingsContext();
-  const [activity, setActivity] = createSignal<ActivityEntry[]>([]);
 
-  const fetchActivity = async () => {
-    try { setActivity(await api.getActivity()); } catch { /* ignore */ }
-  };
-
-  // Track previous composite state to only fetch on real transitions.
-  // Starting with null ensures the first effect run triggers the initial fetch.
-  let prevCompositeState: string | null = null;
-  createEffect(() => {
-    const scanState = props.scanStatus.state;
-    const rebuildState = props.rebuildStatus.state;
-    const current = `${scanState}:${rebuildState}`;
-    if (current !== prevCompositeState) {
-      const wasPrev = prevCompositeState;
-      prevCompositeState = current;
-      // Always fetch on first run (wasPrev === null), and on relevant transitions
-      if (wasPrev === null || scanState === "complete" || scanState === "idle" || rebuildState === "complete" || rebuildState === "error") {
-        fetchActivity();
-      }
-    }
-  });
-
-  const clearLog = async () => {
-    try {
-      await api.clearActivity();
-      setActivity([]);
-    } catch { /* ignore */ }
-  };
+  const clearLog = () => props.onClearActivity();
 
   const isActive = () => {
     const s = props.scanStatus.state;
@@ -95,7 +69,7 @@ const ActivityFeed: Component<{
     <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-4 flex flex-col h-full min-h-0">
       <div class="flex justify-between items-center flex-wrap gap-2 mb-3">
         <h3 class="text-theme-text-primary font-medium">Activity</h3>
-        <Show when={activity().length > 0 && !isActive()}>
+        <Show when={props.activity.length > 0 && !isActive()}>
           <button
             onClick={clearLog}
             class="text-xs text-theme-text-secondary hover:text-theme-text-primary transition-colors"
@@ -216,9 +190,9 @@ const ActivityFeed: Component<{
       </Show>
 
       {/* Historical activity log */}
-      <Show when={activity().length > 0}>
+      <Show when={props.activity.length > 0}>
         <div class="space-y-1">
-          <For each={activity()}>
+          <For each={props.activity}>
             {(entry) => (
               <div class="flex gap-3 text-xs py-1.5 border-t border-theme-border first:border-0">
                 <span class="text-theme-text-secondary flex-shrink-0 min-w-[4.5rem]">
@@ -239,7 +213,7 @@ const ActivityFeed: Component<{
       </Show>
 
       {/* Empty state */}
-      <Show when={!isActive() && props.rebuildStatus.state !== "running" && props.scanStatus.state !== "stalled" && activity().length === 0 && !props.scanError}>
+      <Show when={!isActive() && props.rebuildStatus.state !== "running" && props.scanStatus.state !== "stalled" && props.activity.length === 0 && !props.scanError}>
         <p class="text-xs text-theme-text-secondary">No recent activity</p>
       </Show>
       </div>
