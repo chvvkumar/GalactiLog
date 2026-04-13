@@ -101,6 +101,13 @@ export default function DisplayTab() {
     if (v !== undefined) setUse24h(v);
   });
 
+  const [useImagingNight, setUseImagingNight] = createSignal(false);
+
+  createEffect(() => {
+    const v = ctx.settings()?.general.use_imaging_night;
+    if (v !== undefined) setUseImagingNight(v);
+  });
+
   const handleTimezoneChange = async (tz: string) => {
     setSelectedTimezone(tz);
     const current = ctx.settings()?.general;
@@ -114,6 +121,20 @@ export default function DisplayTab() {
     const current = ctx.settings()?.general;
     if (current) {
       await ctx.saveGeneral({ ...current, use_24h_time: enabled });
+    }
+  };
+
+  const handleImagingNightChange = async (enabled: boolean) => {
+    setUseImagingNight(enabled);
+    const current = ctx.settings()?.general;
+    if (current) {
+      await ctx.saveGeneral({ ...current, use_imaging_night: enabled });
+      showToast(
+        enabled
+          ? "Imaging night grouping enabled. Sessions are being recomputed..."
+          : "Imaging night grouping disabled. Sessions are being recomputed...",
+        "info"
+      );
     }
   };
 
@@ -321,6 +342,24 @@ export default function DisplayTab() {
             onClick={() => handle24hChange(!use24h())}
           >
             <span class={`pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow transition-transform ${use24h() ? "translate-x-4" : "translate-x-0"}`} />
+          </button>
+        </div>
+        <div class="flex items-center justify-between">
+          <div>
+            <span class="text-sm text-theme-text-secondary">Imaging night grouping</span>
+            <p class="text-xs text-theme-text-tertiary mt-0.5">
+              Group sessions by local solar noon instead of UTC midnight.
+              Uses SITELONG from FITS headers, falls back to observer longitude.
+            </p>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={useImagingNight()}
+            class={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${useImagingNight() ? "bg-theme-accent" : "bg-theme-text-tertiary"}`}
+            onClick={() => handleImagingNightChange(!useImagingNight())}
+          >
+            <span class={`pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow transition-transform ${useImagingNight() ? "translate-x-4" : "translate-x-0"}`} />
           </button>
         </div>
       </div>
