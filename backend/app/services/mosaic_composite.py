@@ -347,7 +347,7 @@ async def build_mosaic_composite(
     mosaic_id: str,
     panels: list,
     session: AsyncSession,
-    tile_max_width: int = 800,
+    tile_max_width: int = 400,
 ) -> bytes:
     """Full orchestrator: select frames, check cache, generate composite."""
     panel_frames = []

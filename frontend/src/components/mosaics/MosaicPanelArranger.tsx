@@ -469,6 +469,9 @@ const PanelThumbnail: Component<{ panel: LocalPanel; maxIntegration: number }> =
           class="w-full h-full object-cover rounded border border-theme-border"
           style={{ transform: transform(), "transition": "transform 160ms ease" }}
           draggable={false}
+          loading="lazy"
+          width={360}
+          height={360}
         />
       </Show>
       <span class="absolute bottom-1 left-1 bg-black/60 text-white text-caption px-1.5 py-0.5 rounded pointer-events-none">
