@@ -102,8 +102,12 @@ export const AuthProvider: Component<ParentProps> = (props) => {
 
   const initAuth = async () => {
     // Clean up stale token from prior auth implementation
-    if (localStorage.getItem("token") !== null) {
-      localStorage.removeItem("token");
+    try {
+      if (localStorage.getItem("token") !== null) {
+        localStorage.removeItem("token");
+      }
+    } catch {
+      // localStorage unavailable (private browsing, etc.)
     }
     try {
       // Timeout the initial auth check so a hanging upstream (nginx
@@ -117,13 +121,20 @@ export const AuthProvider: Component<ParentProps> = (props) => {
       // 502/503/504 = nginx is up but backend isn't ready yet
       // Network error (not ApiError) = nothing is listening yet
       // Timeout = upstream accepted connection but never responded
+      // "Session expired" / "Unauthorized" = server is up, user just isn't authenticated
+      const isAuthError =
+        e instanceof Error &&
+        (e.message === "Session expired" || e.message === "Unauthorized");
       const serverDown =
-        !(e instanceof ApiError) ||
-        e.status === 502 || e.status === 503 || e.status === 504;
+        !isAuthError && (
+          !(e instanceof ApiError) ||
+          e.status === 502 || e.status === 503 || e.status === 504
+        );
       if (serverDown) {
         setServerStarting(true);
         return;
       }
+      // Auth errors fall through -- user will be redirected to login by ProtectedRoute
     }
     setLoading(false);
   };
