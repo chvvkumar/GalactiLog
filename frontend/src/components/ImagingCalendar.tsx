@@ -71,8 +71,8 @@ const ImagingCalendar: Component = () => {
   const [tooltip, setTooltip] = createSignal<{ x: number; y: number; text: string } | null>(null);
 
   const [data] = createResource(
-    () => selectedYear(),
-    (year) => api.getCalendar(year ?? undefined),
+    () => ({ year: selectedYear() }),
+    ({ year }) => api.getCalendar(year ?? undefined),
   );
 
   const weeks = createMemo(() => {
@@ -196,7 +196,7 @@ const ImagingCalendar: Component = () => {
           <Show when={tooltip()}>
             {(t) => (
               <div
-                class="absolute pointer-events-none bg-theme-bg border border-theme-border rounded px-2 py-1 text-xs text-white whitespace-nowrap z-50"
+                class="absolute pointer-events-none bg-theme-surface glass-popover border border-theme-border rounded px-2 py-1 text-xs text-white whitespace-nowrap z-50 shadow-lg"
                 style={{
                   left: `${t().x}px`,
                   top: `${t().y - 28}px`,

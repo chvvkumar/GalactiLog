@@ -1,252 +1,34 @@
-// frontend/src/themes.ts
-// ============================================================
-// SINGLE SOURCE OF TRUTH for all GalactiLog themes.
-// To add a new theme: add an entry to THEMES below. Done.
-// ============================================================
+# Glassmorphic Theme Conversion Implementation Plan
 
-export interface ThemeTokens {
-  // Surfaces
-  "bg-base": string;
-  "bg-surface": string;
-  "bg-elevated": string;
-  "bg-hover": string;
-  "bg-input": string;
-  // Borders
-  "border-default": string;
-  "border-emphasis": string;
-  // Text
-  "text-primary": string;
-  "text-secondary": string;
-  "text-tertiary": string;
-  // Accent
-  "accent": string;
-  "accent-hover": string;
-  // Semantic
-  "success": string;
-  "warning": string;
-  "error": string;
-  "info": string;
-  // Metric colors (for data tables)
-  "metric-integration": string;
-  "metric-frames": string;
-  "metric-hfr": string;
-  "metric-eccentricity": string;
-  "metric-fwhm": string;
-  "metric-stars": string;
-  "metric-guiding": string;
-  "metric-temp": string;
-  "metric-gain": string;
-  "metric-time": string;
-  // Best/Worst indicators
-  "metric-best": string;
-  "metric-worst": string;
-  // Badge background (for filter badge styles that need a surface)
-  "badge-bg": string;
-  "badge-text": string;
-  // Filter colors (adjusted per theme for contrast)
-  "filter-ha": string;
-  "filter-oiii": string;
-  "filter-sii": string;
-  "filter-l": string;
-  "filter-r": string;
-  "filter-g": string;
-  "filter-b": string;
-}
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-export interface GlassOrb {
-  color: string;   // e.g. "rgba(79,70,229,0.30)"
-  x: string;       // CSS position, e.g. "-5%"
-  y: string;
-  size: string;    // e.g. "40%"
-}
+**Goal:** Convert all solid themes to glassmorphic designs and add a new Crystal light glass theme.
 
-export interface GlassConfig {
-  blur: string;
-  saturate: string;
-  gradientFrom: string;
-  gradientTo: string;
-  orbs?: GlassOrb[];
-}
+**Architecture:** All theme definitions live in `frontend/src/themes.ts`. Each solid theme gets a `glass` config and rgba token adjustments. Crystal (light glass) additionally requires a CSS override in `frontend/src/index.css` and a `data-theme-lightness` attribute in the `applyTheme()` function.
 
-export interface ThemeMeta {
-  id: string;
-  name: string;
-  description: string;
-  order: number;
-  tokens: ThemeTokens;
-  glass?: GlassConfig;
-}
+**Tech Stack:** SolidJS, TypeScript, Tailwind CSS v4, CSS custom properties
 
-export const THEMES: ThemeMeta[] = [
-  // ── Glass themes (darkest) ──
-  {
-    id: "glass-nebula-cyan",
-    name: "Nebula Cyan",
-    description: "Holographic star-chart glassmorphism",
-    order: 10,
-    glass: {
-      blur: "14px",
-      saturate: "1.8",
-      gradientFrom: "#020617",
-      gradientTo: "#0c1a2e",
-      orbs: [
-        { color: "rgba(79, 70, 229, 0.40)", x: "-5%", y: "-10%", size: "45%" },
-        { color: "rgba(22, 78, 99, 0.35)",  x: "65%", y: "10%",  size: "40%" },
-        { color: "rgba(88, 28, 135, 0.35)", x: "10%", y: "55%",  size: "50%" },
-      ],
-    },
-    tokens: {
-      "bg-base": "transparent",
-      "bg-surface": "rgba(15, 23, 42, 0.35)",
-      "bg-elevated": "rgba(30, 41, 59, 0.40)",
-      "bg-hover": "rgba(255, 255, 255, 0.06)",
-      "bg-input": "rgba(15, 23, 42, 0.55)",
-      "border-default": "rgba(255, 255, 255, 0.12)",
-      "border-emphasis": "rgba(255, 255, 255, 0.18)",
-      "text-primary": "#f8fafc",
-      "text-secondary": "#cbd5e1",
-      "text-tertiary": "#9cb0c8",
-      "accent": "#38bdf8",
-      "accent-hover": "#7dd3fc",
-      "success": "#4ade80",
-      "warning": "#fbbf24",
-      "error": "#f87171",
-      "info": "#60a5fa",
-      "metric-integration": "#60a5fa",
-      "metric-frames": "#4ade80",
-      "metric-hfr": "#fbbf24",
-      "metric-eccentricity": "#c084fc",
-      "metric-fwhm": "#38bdf8",
-      "metric-stars": "#2dd4bf",
-      "metric-guiding": "#fb7185",
-      "metric-temp": "#38bdf8",
-      "metric-gain": "#86efac",
-      "metric-time": "#fca5a5",
-      "metric-best": "#4ade80",
-      "metric-worst": "#f87171",
-      "badge-bg": "rgba(30, 41, 59, 0.50)",
-      "badge-text": "#e2e8f0",
-      "filter-ha": "#e05555",
-      "filter-oiii": "#4a9fe8",
-      "filter-sii": "#e8b84a",
-      "filter-l": "#d8d8d8",
-      "filter-r": "#e86060",
-      "filter-g": "#60c060",
-      "filter-b": "#6080e8",
-    },
-  },
-  {
-    id: "glass-deep-space",
-    name: "Deep Space",
-    description: "True glassmorphic with frosted translucent panels",
-    order: 20,
-    glass: {
-      blur: "20px",
-      saturate: "1.6",
-      gradientFrom: "#060b18",
-      gradientTo: "#0a1628",
-      orbs: [
-        { color: "rgba(30, 58, 138, 0.35)",  x: "-5%", y: "-10%", size: "42%" },
-        { color: "rgba(15, 40, 80, 0.30)",   x: "60%", y: "5%",   size: "38%" },
-        { color: "rgba(49, 46, 129, 0.30)",  x: "15%", y: "55%",  size: "48%" },
-      ],
-    },
-    tokens: {
-      "bg-base": "transparent",
-      "bg-surface": "rgba(16, 28, 56, 0.30)",
-      "bg-elevated": "rgba(22, 38, 72, 0.38)",
-      "bg-hover": "rgba(30, 48, 88, 0.25)",
-      "bg-input": "rgba(10, 18, 40, 0.55)",
-      "border-default": "rgba(100, 160, 255, 0.12)",
-      "border-emphasis": "rgba(100, 160, 255, 0.20)",
-      "text-primary": "#f0f4ff",
-      "text-secondary": "#8aa4cc",
-      "text-tertiary": "#7a96b8",
-      "accent": "#22d3ee",
-      "accent-hover": "#67e8f9",
-      "success": "#34d399",
-      "warning": "#fbbf24",
-      "error": "#f87171",
-      "info": "#38bdf8",
-      "metric-integration": "#38bdf8",
-      "metric-frames": "#34d399",
-      "metric-hfr": "#fbbf24",
-      "metric-eccentricity": "#a78bfa",
-      "metric-fwhm": "#22d3ee",
-      "metric-stars": "#2dd4bf",
-      "metric-guiding": "#fb7185",
-      "metric-temp": "#38bdf8",
-      "metric-gain": "#6ee7b7",
-      "metric-time": "#fca5a5",
-      "metric-best": "#34d399",
-      "metric-worst": "#f87171",
-      "badge-bg": "rgba(16, 28, 56, 0.60)",
-      "badge-text": "#c8d8f0",
-      "filter-ha": "#e05555",
-      "filter-oiii": "#4a9fe8",
-      "filter-sii": "#e8b84a",
-      "filter-l": "#d8d8d8",
-      "filter-r": "#e86060",
-      "filter-g": "#60c060",
-      "filter-b": "#6080e8",
-    },
-  },
-  {
-    id: "glass-void",
-    name: "Void",
-    description: "Dark glass with muted slate and indigo depth",
-    order: 30,
-    glass: {
-      blur: "12px",
-      saturate: "1.0",
-      gradientFrom: "#0a0c14",
-      gradientTo: "#0f1320",
-      orbs: [
-        { color: "rgba(30, 41, 59, 0.40)",  x: "-5%", y: "-10%", size: "45%" },
-        { color: "rgba(15, 23, 42, 0.45)",  x: "60%", y: "50%",  size: "50%" },
-      ],
-    },
-    tokens: {
-      "bg-base": "transparent",
-      "bg-surface": "rgba(16, 18, 25, 0.85)",
-      "bg-elevated": "rgba(24, 27, 38, 0.90)",
-      "bg-hover": "rgba(30, 34, 48, 0.70)",
-      "bg-input": "rgba(12, 14, 20, 0.90)",
-      "border-default": "rgba(255, 255, 255, 0.08)",
-      "border-emphasis": "rgba(255, 255, 255, 0.15)",
-      "text-primary": "#e2e8f0",
-      "text-secondary": "#94a3b8",
-      "text-tertiary": "#7a8ba4",
-      "accent": "#7aa2f7",
-      "accent-hover": "#9dbcff",
-      "success": "#4ade80",
-      "warning": "#fbbf24",
-      "error": "#f87171",
-      "info": "#60a5fa",
-      "metric-integration": "#60a5fa",
-      "metric-frames": "#4ade80",
-      "metric-hfr": "#fbbf24",
-      "metric-eccentricity": "#c084fc",
-      "metric-fwhm": "#38bdf8",
-      "metric-stars": "#2dd4bf",
-      "metric-guiding": "#fb7185",
-      "metric-temp": "#38bdf8",
-      "metric-gain": "#86efac",
-      "metric-time": "#fca5a5",
-      "metric-best": "#4ade80",
-      "metric-worst": "#f87171",
-      "badge-bg": "rgba(24, 27, 38, 0.85)",
-      "badge-text": "#cbd5e1",
-      "filter-ha": "#e05555",
-      "filter-oiii": "#4a9fe8",
-      "filter-sii": "#e8b84a",
-      "filter-l": "#d8d8d8",
-      "filter-r": "#e86060",
-      "filter-g": "#60c060",
-      "filter-b": "#6080e8",
-    },
-  },
-  // ── Solid themes (dark → light) ──
+**Spec:** `guides/superpowers/specs/2026-04-12-glassmorphic-theme-conversion-design.md`
+
+---
+
+## File Map
+
+- **Modify:** `frontend/src/themes.ts` -- add `glass` configs to 7 solid themes, add Crystal theme, update `applyTheme()` for lightness attribute
+- **Modify:** `frontend/src/index.css` -- add light-glass CSS overrides for Crystal theme
+
+---
+
+## Task 1: Convert Default Dark theme to glassmorphic
+
+**Files:**
+- Modify: `frontend/src/themes.ts:250-294` (the `default-dark` theme object)
+
+- [ ] **Step 1: Add glass config and update tokens for Default Dark**
+
+Replace the entire `default-dark` theme object with:
+
+```typescript
   {
     id: "default-dark",
     name: "Dark",
@@ -303,30 +85,55 @@ export const THEMES: ThemeMeta[] = [
       "filter-b": "#6080e8",
     },
   },
+```
+
+- [ ] **Step 2: Verify TypeScript compiles**
+
+Run: `cd frontend && npx tsc --noEmit`
+Expected: No errors
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add frontend/src/themes.ts
+git commit -m "Convert Default Dark theme to glassmorphic"
+```
+
+---
+
+## Task 2: Convert Deep Neutral theme to glassmorphic
+
+**Files:**
+- Modify: `frontend/src/themes.ts` (the `deep-neutral` theme object)
+
+- [ ] **Step 1: Add glass config and update tokens for Deep Neutral**
+
+Replace the entire `deep-neutral` theme object with:
+
+```typescript
   {
     id: "deep-neutral",
     name: "Deep Neutral",
-    description: "Ultra-dark graphite with white-alpha glass panels",
+    description: "Ultra-dark graphite glass, nearly opaque",
     order: 50,
     glass: {
       blur: "10px",
-      saturate: "1.8",
-      gradientFrom: "#0c0c12",
-      gradientTo: "#16161e",
+      saturate: "1.0",
+      gradientFrom: "#0a0a0a",
+      gradientTo: "#141414",
       orbs: [
-        { color: "rgba(60, 50, 130, 0.45)",  x: "-10%", y: "-15%", size: "55%" },
-        { color: "rgba(120, 80, 50, 0.35)",  x: "55%",  y: "40%",  size: "50%" },
-        { color: "rgba(40, 80, 100, 0.30)",  x: "30%",  y: "-5%",  size: "45%" },
+        { color: "rgba(80, 80, 80, 0.25)",  x: "-5%", y: "-10%", size: "45%" },
+        { color: "rgba(90, 85, 75, 0.20)",  x: "60%", y: "50%",  size: "42%" },
       ],
     },
     tokens: {
       "bg-base": "transparent",
-      "bg-surface": "rgba(255, 255, 255, 0.10)",
-      "bg-elevated": "rgba(255, 255, 255, 0.14)",
-      "bg-hover": "rgba(255, 255, 255, 0.06)",
-      "bg-input": "rgba(255, 255, 255, 0.08)",
-      "border-default": "rgba(255, 255, 255, 0.18)",
-      "border-emphasis": "rgba(255, 255, 255, 0.25)",
+      "bg-surface": "rgba(26, 26, 26, 0.75)",
+      "bg-elevated": "rgba(36, 36, 36, 0.80)",
+      "bg-hover": "rgba(255, 255, 255, 0.05)",
+      "bg-input": "rgba(22, 22, 22, 0.80)",
+      "border-default": "rgba(255, 255, 255, 0.08)",
+      "border-emphasis": "rgba(255, 255, 255, 0.14)",
       "text-primary": "#f0f0f0",
       "text-secondary": "#999999",
       "text-tertiary": "#888888",
@@ -348,7 +155,7 @@ export const THEMES: ThemeMeta[] = [
       "metric-time": "#fca5a5",
       "metric-best": "#4ade80",
       "metric-worst": "#f87171",
-      "badge-bg": "rgba(255, 255, 255, 0.12)",
+      "badge-bg": "rgba(36, 36, 36, 0.80)",
       "badge-text": "#d4d4d4",
       "filter-ha": "#e05555",
       "filter-oiii": "#4a9fe8",
@@ -359,6 +166,32 @@ export const THEMES: ThemeMeta[] = [
       "filter-b": "#6080e8",
     },
   },
+```
+
+- [ ] **Step 2: Verify TypeScript compiles**
+
+Run: `cd frontend && npx tsc --noEmit`
+Expected: No errors
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add frontend/src/themes.ts
+git commit -m "Convert Deep Neutral theme to glassmorphic"
+```
+
+---
+
+## Task 3: Convert Slate Blue theme to glassmorphic
+
+**Files:**
+- Modify: `frontend/src/themes.ts` (the `slate-blue` theme object)
+
+- [ ] **Step 1: Add glass config and update tokens for Slate Blue**
+
+Replace the entire `slate-blue` theme object with:
+
+```typescript
   {
     id: "slate-blue",
     name: "Slate Blue",
@@ -415,6 +248,32 @@ export const THEMES: ThemeMeta[] = [
       "filter-b": "#6080e8",
     },
   },
+```
+
+- [ ] **Step 2: Verify TypeScript compiles**
+
+Run: `cd frontend && npx tsc --noEmit`
+Expected: No errors
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add frontend/src/themes.ts
+git commit -m "Convert Slate Blue theme to glassmorphic"
+```
+
+---
+
+## Task 4: Convert Warm Stone theme to glassmorphic
+
+**Files:**
+- Modify: `frontend/src/themes.ts` (the `warm-stone` theme object)
+
+- [ ] **Step 1: Add glass config and update tokens for Warm Stone**
+
+Replace the entire `warm-stone` theme object with:
+
+```typescript
   {
     id: "warm-stone",
     name: "Warm Stone",
@@ -471,6 +330,32 @@ export const THEMES: ThemeMeta[] = [
       "filter-b": "#6080e8",
     },
   },
+```
+
+- [ ] **Step 2: Verify TypeScript compiles**
+
+Run: `cd frontend && npx tsc --noEmit`
+Expected: No errors
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add frontend/src/themes.ts
+git commit -m "Convert Warm Stone theme to glassmorphic"
+```
+
+---
+
+## Task 5: Convert Soft Zinc theme to glassmorphic
+
+**Files:**
+- Modify: `frontend/src/themes.ts` (the `soft-zinc` theme object)
+
+- [ ] **Step 1: Add glass config and update tokens for Soft Zinc**
+
+Replace the entire `soft-zinc` theme object with:
+
+```typescript
   {
     id: "soft-zinc",
     name: "Soft Zinc",
@@ -526,6 +411,32 @@ export const THEMES: ThemeMeta[] = [
       "filter-b": "#6080e8",
     },
   },
+```
+
+- [ ] **Step 2: Verify TypeScript compiles**
+
+Run: `cd frontend && npx tsc --noEmit`
+Expected: No errors
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add frontend/src/themes.ts
+git commit -m "Convert Soft Zinc theme to glassmorphic"
+```
+
+---
+
+## Task 6: Convert Twilight theme to glassmorphic
+
+**Files:**
+- Modify: `frontend/src/themes.ts` (the `twilight-grey` theme object)
+
+- [ ] **Step 1: Add glass config and update tokens for Twilight**
+
+Replace the entire `twilight-grey` theme object with:
+
+```typescript
   {
     id: "twilight-grey",
     name: "Twilight",
@@ -582,6 +493,32 @@ export const THEMES: ThemeMeta[] = [
       "filter-b": "#5878d8",
     },
   },
+```
+
+- [ ] **Step 2: Verify TypeScript compiles**
+
+Run: `cd frontend && npx tsc --noEmit`
+Expected: No errors
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add frontend/src/themes.ts
+git commit -m "Convert Twilight theme to glassmorphic"
+```
+
+---
+
+## Task 7: Convert Silver Mist theme to glassmorphic
+
+**Files:**
+- Modify: `frontend/src/themes.ts` (the `silver-mist` theme object)
+
+- [ ] **Step 1: Add glass config and update tokens for Silver Mist**
+
+Replace the entire `silver-mist` theme object with:
+
+```typescript
   {
     id: "silver-mist",
     name: "Silver Mist",
@@ -637,19 +574,59 @@ export const THEMES: ThemeMeta[] = [
       "filter-b": "#5070d0",
     },
   },
+```
+
+- [ ] **Step 2: Verify TypeScript compiles**
+
+Run: `cd frontend && npx tsc --noEmit`
+Expected: No errors
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add frontend/src/themes.ts
+git commit -m "Convert Silver Mist theme to glassmorphic"
+```
+
+---
+
+## Task 8: Add Crystal light glass theme and CSS overrides
+
+**Files:**
+- Modify: `frontend/src/themes.ts` -- add Crystal theme entry, update `applyTheme()` for lightness
+- Modify: `frontend/src/index.css` -- add light-glass CSS overrides
+
+This task has dependencies between the two files so it must be done sequentially.
+
+- [ ] **Step 1: Add Crystal theme to THEMES array in themes.ts**
+
+Add the following theme object after the `daylight` entry (before the closing `];` of the THEMES array):
+
+```typescript
   {
-    id: "daylight",
-    name: "Daylight",
-    description: "Clean light theme for daytime use",
-    order: 110,
+    id: "glass-crystal",
+    name: "Crystal",
+    description: "Light frosted glass with soft blue-white warmth",
+    order: 115,
+    glass: {
+      blur: "16px",
+      saturate: "1.3",
+      gradientFrom: "#e8ecf4",
+      gradientTo: "#dce4f0",
+      orbs: [
+        { color: "rgba(100, 140, 220, 0.20)", x: "-5%", y: "-10%", size: "45%" },
+        { color: "rgba(140, 120, 200, 0.15)", x: "60%", y: "10%",  size: "40%" },
+        { color: "rgba(200, 140, 160, 0.10)", x: "15%", y: "55%",  size: "45%" },
+      ],
+    },
     tokens: {
-      "bg-base": "#f4f5f7",
-      "bg-surface": "#ffffff",
-      "bg-elevated": "#e8eaee",
-      "bg-hover": "#eceef2",
-      "bg-input": "#ffffff",
-      "border-default": "#d0d4dc",
-      "border-emphasis": "#b8bcc8",
+      "bg-base": "transparent",
+      "bg-surface": "rgba(255, 255, 255, 0.60)",
+      "bg-elevated": "rgba(255, 255, 255, 0.50)",
+      "bg-hover": "rgba(0, 0, 0, 0.04)",
+      "bg-input": "rgba(255, 255, 255, 0.70)",
+      "border-default": "rgba(0, 0, 0, 0.08)",
+      "border-emphasis": "rgba(0, 0, 0, 0.14)",
       "text-primary": "#1a1c20",
       "text-secondary": "#4a5060",
       "text-tertiary": "#788098",
@@ -671,7 +648,7 @@ export const THEMES: ThemeMeta[] = [
       "metric-time": "#c05050",
       "metric-best": "#18a050",
       "metric-worst": "#d03838",
-      "badge-bg": "#e4e6ec",
+      "badge-bg": "rgba(255, 255, 255, 0.55)",
       "badge-text": "#2a2e38",
       "filter-ha": "#c03030",
       "filter-oiii": "#2870c0",
@@ -682,34 +659,42 @@ export const THEMES: ThemeMeta[] = [
       "filter-b": "#3858c0",
     },
   },
-];
+```
 
-export const THEMES_SORTED = [...THEMES].sort((a, b) => a.order - b.order);
+- [ ] **Step 2: Update applyTheme() to set data-theme-lightness attribute**
 
-export const DEFAULT_THEME_ID = "glass-void";
+In the `applyTheme()` function, after the line `root.setAttribute("data-theme-style", "glass");` (inside the `if (theme.glass)` block), add a lightness attribute. The full updated `if (theme.glass)` block should be:
 
-export interface TextSizePreset {
-  id: string;
-  label: string;
-  fontSize: string;
-}
+```typescript
+  if (theme.glass) {
+    root.style.setProperty("--glass-blur", theme.glass.blur);
+    root.style.setProperty("--glass-saturate", theme.glass.saturate);
+    root.style.setProperty("--glass-gradient-from", theme.glass.gradientFrom);
+    root.style.setProperty("--glass-gradient-to", theme.glass.gradientTo);
+    root.setAttribute("data-theme-style", "glass");
+    const isLight = theme.id === "glass-crystal" || theme.id === "daylight";
+    root.setAttribute("data-theme-lightness", isLight ? "light" : "dark");
+    applyGlassOrbs(theme.glass.orbs);
+  } else {
+    root.style.setProperty("--glass-blur", "0px");
+    root.style.setProperty("--glass-saturate", "1");
+    root.style.removeProperty("--glass-gradient-from");
+    root.style.removeProperty("--glass-gradient-to");
+    root.setAttribute("data-theme-style", "solid");
+    const isLight = theme.id === "glass-crystal" || theme.id === "daylight";
+    root.setAttribute("data-theme-lightness", isLight ? "light" : "dark");
+    applyGlassOrbs(undefined);
+  }
+```
 
-export const TEXT_SIZES: TextSizePreset[] = [
-  { id: "small", label: "Small", fontSize: "13px" },
-  { id: "medium", label: "Medium", fontSize: "14px" },
-  { id: "large", label: "Large", fontSize: "16px" },
-  { id: "x-large", label: "Extra Large", fontSize: "18px" },
-];
+- [ ] **Step 3: Update glass orb blend mode for light themes**
 
-export const DEFAULT_TEXT_SIZE = "large";
+In the `applyGlassOrbs()` function, the orbs currently use `mixBlendMode: "screen"` which works for dark backgrounds but washes out on light backgrounds. Update the orb creation loop to accept whether the theme is light. 
 
-export function getThemeById(id: string): ThemeMeta {
-  return THEMES.find((t) => t.id === id) ?? THEMES[0];
-}
+Change the `applyGlassOrbs` function signature and the orb blend mode:
 
-const GLASS_ORBS_ID = "gl-glass-orbs";
-
-function applyGlassOrbs(orbs: GlassOrb[] | undefined): void {
+```typescript
+function applyGlassOrbs(orbs: GlassOrb[] | undefined, lightTheme = false): void {
   const existing = document.getElementById(GLASS_ORBS_ID);
   if (!orbs || orbs.length === 0) {
     existing?.remove();
@@ -736,7 +721,7 @@ function applyGlassOrbs(orbs: GlassOrb[] | undefined): void {
       background: orb.color,
       borderRadius: "50%",
       filter: "blur(120px)",
-      mixBlendMode: "screen",
+      mixBlendMode: lightTheme ? "multiply" : "screen",
     });
     container.appendChild(el);
   }
@@ -744,31 +729,108 @@ function applyGlassOrbs(orbs: GlassOrb[] | undefined): void {
     document.body.prepend(container);
   }
 }
+```
 
-export function applyTheme(themeId: string): void {
-  const theme = getThemeById(themeId);
-  const root = document.documentElement;
-  for (const [token, value] of Object.entries(theme.tokens)) {
-    root.style.setProperty(`--color-${token}`, value);
-  }
-  if (theme.glass) {
-    root.style.setProperty("--glass-blur", theme.glass.blur);
-    root.style.setProperty("--glass-saturate", theme.glass.saturate);
-    root.style.setProperty("--glass-gradient-from", theme.glass.gradientFrom);
-    root.style.setProperty("--glass-gradient-to", theme.glass.gradientTo);
-    root.setAttribute("data-theme-style", "glass");
-    applyGlassOrbs(theme.glass.orbs);
-  } else {
-    root.style.setProperty("--glass-blur", "0px");
-    root.style.setProperty("--glass-saturate", "1");
-    root.style.removeProperty("--glass-gradient-from");
-    root.style.removeProperty("--glass-gradient-to");
-    root.setAttribute("data-theme-style", "solid");
-    applyGlassOrbs(undefined);
-  }
+Then update both call sites in `applyTheme()`:
+
+In the glass branch: `applyGlassOrbs(theme.glass.orbs, theme.id === "glass-crystal");`
+In the else branch: `applyGlassOrbs(undefined);` (unchanged)
+
+- [ ] **Step 4: Add light-glass CSS overrides to index.css**
+
+Add the following CSS after the existing `[data-theme-style="glass"] .bg-theme-input` rule (after line 170):
+
+```css
+/* Light glass themes: invert edge highlights and shadows */
+[data-theme-lightness="light"][data-theme-style="glass"] .bg-theme-surface,
+[data-theme-lightness="light"][data-theme-style="glass"] .bg-theme-elevated {
+  border-color: rgba(255, 255, 255, 0.50);
+  box-shadow:
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.60),
+    0 8px 32px rgba(0, 0, 0, 0.06);
 }
 
-export function applyTextSize(sizeId: string): void {
-  const preset = TEXT_SIZES.find((s) => s.id === sizeId) ?? TEXT_SIZES[1];
-  document.documentElement.style.fontSize = preset.fontSize;
+[data-theme-lightness="light"][data-theme-style="glass"] .glass-popover {
+  background: color-mix(in srgb, var(--glass-gradient-from) 85%, transparent);
+  border-color: rgba(255, 255, 255, 0.50);
 }
+```
+
+- [ ] **Step 5: Verify TypeScript compiles**
+
+Run: `cd frontend && npx tsc --noEmit`
+Expected: No errors
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add frontend/src/themes.ts frontend/src/index.css
+git commit -m "Add Crystal light glass theme with CSS overrides"
+```
+
+---
+
+## Task 9: Update CSS fallback variables in index.css
+
+**Files:**
+- Modify: `frontend/src/index.css:8-50` (the `:root` fallback block)
+
+Since Deep Neutral is now glassmorphic, the CSS fallback variables (which match Deep Neutral) should be updated to use its new rgba values so the page renders correctly before JS executes. However, rgba values with transparency on bg-base won't work without the glass gradient background, so the fallbacks should stay as solid colors (the current values are fine as-is since they provide a visible fallback regardless of theme).
+
+- [ ] **Step 1: No changes needed**
+
+The existing `:root` fallback values are solid hex colors that render correctly before `applyTheme()` runs. Glass-specific effects (backdrop-filter, orbs, gradient) only activate after JS loads. No CSS changes needed.
+
+- [ ] **Step 2: Final full TypeScript check**
+
+Run: `cd frontend && npx tsc --noEmit`
+Expected: No errors
+
+- [ ] **Step 3: Commit any remaining changes**
+
+If no changes were made, skip this step.
+
+---
+
+## Task 10: Visual verification of all themes
+
+**Files:** None (testing only)
+
+- [ ] **Step 1: Start the frontend dev server**
+
+Run: `cd frontend && npm run dev`
+Expected: Dev server starts on port 3000
+
+- [ ] **Step 2: Test each converted theme visually**
+
+Open the app in a browser. Navigate to Settings > Display. Switch through each theme and verify:
+
+1. Glass gradient background renders (not solid black/white)
+2. Glass orbs are visible as soft color blobs behind content
+3. Panels have frosted glass effect (backdrop-filter blur visible)
+4. Text is readable on all surfaces
+5. Borders show subtle glass edge highlights
+6. Input fields have reduced blur effect
+7. Popovers/dropdowns render with glass effect
+8. Badge backgrounds are semi-transparent
+
+Themes to check:
+- Dark (violet depth)
+- Deep Neutral (near-opaque graphite)
+- Slate Blue (oceanic blue)
+- Warm Stone (amber warmth)
+- Soft Zinc (studio matte)
+- Twilight (dusk sky)
+- Silver Mist (bright chrome)
+- Crystal (light frosted -- white panels, light gradient, dark text)
+- Daylight stays solid (no glass effects)
+- Existing glass themes (Nebula Cyan, Deep Space, Void) unchanged
+
+- [ ] **Step 3: Commit any visual fixes**
+
+If adjustments are needed (opacity, blur, orb placement), make them and commit:
+
+```bash
+git add frontend/src/themes.ts frontend/src/index.css
+git commit -m "Adjust theme values after visual testing"
+```
