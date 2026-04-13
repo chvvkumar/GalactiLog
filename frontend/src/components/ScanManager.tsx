@@ -4,7 +4,9 @@ import { useSettingsContext } from "./SettingsProvider";
 import { useAuth } from "./AuthProvider";
 import { useStats } from "../store/stats";
 import { api } from "../api/client";
+import { scanFilters as scanFiltersApi } from "../api/scanFilters";
 import type { RebuildStatus } from "../types";
+import type { ScanFiltersResponse } from "../api/scanFilters";
 import DatabaseOverview from "./DatabaseOverview";
 import CaptureActivity from "./CaptureActivity";
 import ScanControls from "./ScanControls";
@@ -40,17 +42,35 @@ const ScanManager: Component = () => {
   const [observerName, setObserverName] = createSignal<string | null>(null);
   const [observerLatitude, setObserverLatitude] = createSignal<number | null>(null);
   const [observerLongitude, setObserverLongitude] = createSignal<number | null>(null);
+  const [scanFiltersData, setScanFiltersData] = createSignal<ScanFiltersResponse | null>(null);
   let rebuildPollTimer: ReturnType<typeof setInterval> | null = null;
+
+  // --- Scan filters (shared between ScanFiltersPanel & ScanFiltersOnboarding) ---
+  const loadScanFilters = async () => {
+    try { setScanFiltersData(await scanFiltersApi.get()); } catch { /* ignore */ }
+  };
+  loadScanFilters();
+
+  const onScanFiltersConfigured = () => loadScanFilters();
+  window.addEventListener("scan-filters-configured", onScanFiltersConfigured);
+  onCleanup(() => window.removeEventListener("scan-filters-configured", onScanFiltersConfigured));
 
   // --- DB Summary ---
   const refreshDbSummary = async () => {
     try { setDbSummary(await api.getDbSummary()); } catch { /* ignore */ }
   };
-  refreshDbSummary();
 
+  // Track previous scan state to only refresh on transitions, not on every
+  // signal update.  The initial value of null ensures the first effect run
+  // triggers a fetch (transition from null → idle).
+  let prevScanState: string | null = null;
   createEffect(() => {
     const s = scanStatus().state;
-    if (s === "complete" || s === "idle") refreshDbSummary();
+    if (s !== prevScanState) {
+      const wasPrev = prevScanState;
+      prevScanState = s;
+      if (wasPrev === null || s === "complete" || s === "idle") refreshDbSummary();
+    }
   });
 
   // Refresh when merges change (dismiss/merge/revert on targets tab)
@@ -156,6 +176,7 @@ const ScanManager: Component = () => {
         {/* Left column: controls */}
         <div class="space-y-4 min-w-0">
           <ScanFiltersOnboarding
+            configured={scanFiltersData()?.configured ?? true}
             onReview={() => {
               const el = document.getElementById("scan-filters-panel");
               if (el instanceof HTMLDetailsElement) el.open = true;
@@ -265,7 +286,7 @@ const ScanManager: Component = () => {
               </div>
             </section>
 
-            <ScanFiltersPanel />
+            <ScanFiltersPanel initialData={scanFiltersData()} />
 
             <div class="flex flex-wrap items-center gap-4 justify-end pt-2 border-t border-theme-border">
               <ScanControls

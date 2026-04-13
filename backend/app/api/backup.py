@@ -113,7 +113,7 @@ async def restore_backup_endpoint(
         try:
             from app.config import async_redis
             r = await async_redis()
-            await r.delete("galactilog:stats:cache")
+            await r.delete("galactilog:stats:cache", "galactilog:fits_keys")
             await r.aclose()
         except Exception:
             pass

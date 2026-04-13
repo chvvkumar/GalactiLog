@@ -43,18 +43,68 @@ const AladinViewer: Component<AladinViewerProps> = (props) => {
     setLoading(false);
   };
 
-  onMount(() => {
-    if (window.A) {
-      initAladin();
-    } else {
-      const check = setInterval(() => {
-        if (window.A) {
+  const loadAladinLibrary = (): Promise<void> => {
+    return new Promise((resolve, reject) => {
+      // Load CSS if not already present
+      if (!document.querySelector('link[href*="aladin.min.css"]')) {
+        const link = document.createElement("link");
+        link.rel = "stylesheet";
+        link.href =
+          "https://aladin.cds.unistra.fr/AladinLite/api/v3/latest/aladin.min.css";
+        document.head.appendChild(link);
+      }
+
+      // Load JS if not already present
+      if (window.A) {
+        resolve();
+        return;
+      }
+
+      if (document.querySelector('script[src*="aladin.js"]')) {
+        // Script tag exists but hasn't finished loading yet
+        const check = setInterval(() => {
+          if (window.A) {
+            clearInterval(check);
+            resolve();
+          }
+        }, 200);
+        setTimeout(() => {
           clearInterval(check);
-          initAladin();
-        }
-      }, 200);
-      setTimeout(() => clearInterval(check), 10000);
-    }
+          reject(new Error("Aladin script load timeout"));
+        }, 15000);
+        return;
+      }
+
+      const script = document.createElement("script");
+      script.type = "module";
+      script.src =
+        "https://aladin.cds.unistra.fr/AladinLite/api/v3/latest/aladin.js";
+      script.charset = "utf-8";
+      script.onload = () => {
+        // window.A may not be available immediately after script load
+        const check = setInterval(() => {
+          if (window.A) {
+            clearInterval(check);
+            resolve();
+          }
+        }, 100);
+        setTimeout(() => {
+          clearInterval(check);
+          reject(new Error("Aladin init timeout"));
+        }, 15000);
+      };
+      script.onerror = () => reject(new Error("Failed to load Aladin script"));
+      document.head.appendChild(script);
+    });
+  };
+
+  onMount(() => {
+    loadAladinLibrary()
+      .then(() => initAladin())
+      .catch((err) => {
+        console.error("Aladin failed to load:", err);
+        setLoading(false);
+      });
   });
 
   onCleanup(() => {

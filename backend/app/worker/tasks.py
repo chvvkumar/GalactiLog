@@ -45,7 +45,7 @@ _redis = get_sync_redis()
 def _invalidate_stats_cache():
     """Delete the stats cache key from Redis so the next stats request is fresh."""
     try:
-        _redis.delete("galactilog:stats:cache")
+        _redis.delete("galactilog:stats:cache", "galactilog:fits_keys")
     except Exception:
         pass
 

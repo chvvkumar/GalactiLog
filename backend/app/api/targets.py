@@ -1,3 +1,5 @@
+import json
+import logging
 import re
 import uuid
 import statistics
@@ -7,13 +9,14 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
+from starlette.responses import Response
 import sqlalchemy as sa
 from sqlalchemy import select, or_, and_, func, cast, Float, Date, String, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
 from app.api.deps import get_current_user
-from app.config import settings
+from app.config import settings, async_redis
 from app.models import Target, Image
 from app.models.catalog_membership import TargetCatalogMembership
 from app.services.simbad import COMMON_NAME_MAP
@@ -28,7 +31,12 @@ from app.schemas.target import (
 )
 from app.schemas.export import ExportResponse, ExportFilterRow, ExportEquipment, ExportCalibration
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/targets", tags=["targets"])
+
+_FITS_KEYS_CACHE_KEY = "galactilog:fits_keys"
+_FITS_KEYS_CACHE_TTL = 3600  # 1 hour
 
 
 def _build_rig_details(
@@ -370,10 +378,28 @@ async def get_equipment(session: AsyncSession = Depends(get_session), user: User
 @router.get("/fits-keys", response_model=list[str])
 async def get_fits_keys(session: AsyncSession = Depends(get_session), user: User = Depends(get_current_user)):
     """Return distinct FITS header keys found across all images."""
+    # Check Redis cache first
+    try:
+        async with async_redis() as r:
+            cached = await r.get(_FITS_KEYS_CACHE_KEY)
+        if cached:
+            return Response(content=cached, media_type="application/json")
+    except Exception:
+        logger.debug("Redis cache read failed for fits-keys, computing fresh")
+
     result = await session.execute(
         text("SELECT DISTINCT key FROM images, jsonb_object_keys(raw_headers) AS key ORDER BY key")
     )
-    return [row[0] for row in result.all()]
+    keys = [row[0] for row in result.all()]
+
+    # Cache the result in Redis
+    try:
+        async with async_redis() as r:
+            await r.setex(_FITS_KEYS_CACHE_KEY, _FITS_KEYS_CACHE_TTL, json.dumps(keys))
+    except Exception:
+        logger.debug("Redis cache write failed for fits-keys")
+
+    return keys
 
 
 # --- 2c. Object types (before path-parameter routes) ---
@@ -1052,7 +1078,9 @@ async def list_targets_aggregated(
                sum(coalesce(i.exposure_time, 0)) AS total_integration,
                count(i.id) AS total_frames,
                count(distinct CAST(i.capture_date AS DATE)) AS session_count,
-               max(CAST(i.capture_date AS DATE)) AS last_session_date
+               max(CAST(i.capture_date AS DATE)) AS last_session_date,
+               min(CAST(i.capture_date AS DATE)) AS oldest_date,
+               max(CAST(i.capture_date AS DATE)) AS newest_date
         FROM images i LEFT JOIN targets t ON i.resolved_target_id = t.id
         WHERE {where_sql}
         GROUP BY {gk}
@@ -1060,13 +1088,8 @@ async def list_targets_aggregated(
     ),
     agg AS (
         SELECT count(*) AS target_count, sum(total_integration) AS total_integration,
-               sum(total_frames) AS total_frames FROM grouped
-    ),
-    date_range AS (
-        SELECT min(CAST(i.capture_date AS DATE)) AS oldest,
-               max(CAST(i.capture_date AS DATE)) AS newest
-        FROM images i LEFT JOIN targets t ON i.resolved_target_id = t.id
-        WHERE {where_sql}
+               sum(total_frames) AS total_frames,
+               min(oldest_date) AS oldest, max(newest_date) AS newest FROM grouped
     ),
     page AS (
         SELECT * FROM grouped ORDER BY {_sort_clause(sort_by, sort_dir)}
@@ -1075,8 +1098,8 @@ async def list_targets_aggregated(
     SELECT (SELECT target_count FROM agg) AS agg_target_count,
            (SELECT total_integration FROM agg) AS agg_total_integration,
            (SELECT total_frames FROM agg) AS agg_total_frames,
-           (SELECT oldest FROM date_range) AS agg_oldest,
-           (SELECT newest FROM date_range) AS agg_newest,
+           (SELECT oldest FROM agg) AS agg_oldest,
+           (SELECT newest FROM agg) AS agg_newest,
            p.target_key, p.primary_name, p.total_integration, p.total_frames, p.session_count
     FROM page p
     """)

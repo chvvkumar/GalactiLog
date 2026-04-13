@@ -1,5 +1,6 @@
-import { createSignal } from "solid-js";
+import { createSignal, createEffect } from "solid-js";
 import { api } from "../api/client";
+import { useSettings } from "./settings";
 import type { GraphSettings } from "../types";
 
 const DEFAULT_GRAPH_SETTINGS: GraphSettings = {
@@ -13,20 +14,24 @@ const [graphSettings, setGraphSettings] = createSignal<GraphSettings>(DEFAULT_GR
 let loaded = false;
 
 export function useGraphSettings() {
+  const store = useSettings();
+
   return {
     graphSettings,
 
-    async loadGraphSettings() {
+    loadGraphSettings() {
       if (loaded) return;
-      try {
-        const resp = await api.getSettings();
-        if (resp.graph) {
-          setGraphSettings(resp.graph);
+      // Use a reactive effect to pick up the shared settings resource
+      // once it resolves, avoiding a duplicate /api/settings fetch.
+      createEffect(() => {
+        const s = store.settings();
+        if (!s) return;
+        if (loaded) return;
+        if (s.graph) {
+          setGraphSettings(s.graph);
         }
         loaded = true;
-      } catch {
-        // Use defaults on error
-      }
+      });
     },
 
     async saveGraphSettings(updates: Partial<GraphSettings>) {

@@ -1,6 +1,6 @@
-import { Component, For, Show, createSignal, createResource } from "solid-js";
+import { Component, For, Show, createSignal } from "solid-js";
 import { useDashboardFilters } from "./DashboardFilterProvider";
-import { api } from "../api/client";
+import { useFilterOptions } from "../store/filterOptions";
 
 const OPERATORS = [
   { value: "eq", label: "=" },
@@ -17,7 +17,7 @@ const FitsQueryBuilder: Component = () => {
   const [newKey, setNewKey] = createSignal("");
   const [newOp, setNewOp] = createSignal("eq");
   const [newVal, setNewVal] = createSignal("");
-  const [fitsKeys] = createResource(() => api.getFitsKeys());
+  const { fitsKeys } = useFilterOptions();
 
   const addRow = () => {
     const key = newKey().trim();

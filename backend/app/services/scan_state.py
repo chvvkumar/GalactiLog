@@ -226,7 +226,7 @@ def check_complete_sync(r: sync_redis.Redis) -> None:
         })
         # Invalidate stats cache immediately so the next request gets fresh data
         try:
-            r.delete("galactilog:stats:cache")
+            r.delete("galactilog:stats:cache", "galactilog:fits_keys")
         except Exception:
             pass
         # Chain post-scan maintenance tasks
