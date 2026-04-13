@@ -681,6 +681,62 @@ export const THEMES: ThemeMeta[] = [
       "filter-b": "#3858c0",
     },
   },
+  {
+    id: "glass-crystal",
+    name: "Crystal",
+    description: "Light frosted glass with soft blue-white warmth",
+    order: 115,
+    glass: {
+      blur: "16px",
+      saturate: "1.3",
+      gradientFrom: "#e8ecf4",
+      gradientTo: "#dce4f0",
+      orbs: [
+        { color: "rgba(100, 140, 220, 0.20)", x: "-5%", y: "-10%", size: "45%" },
+        { color: "rgba(140, 120, 200, 0.15)", x: "60%", y: "10%",  size: "40%" },
+        { color: "rgba(200, 140, 160, 0.10)", x: "15%", y: "55%",  size: "45%" },
+      ],
+    },
+    tokens: {
+      "bg-base": "transparent",
+      "bg-surface": "rgba(255, 255, 255, 0.60)",
+      "bg-elevated": "rgba(255, 255, 255, 0.50)",
+      "bg-hover": "rgba(0, 0, 0, 0.04)",
+      "bg-input": "rgba(255, 255, 255, 0.70)",
+      "border-default": "rgba(0, 0, 0, 0.08)",
+      "border-emphasis": "rgba(0, 0, 0, 0.14)",
+      "text-primary": "#1a1c20",
+      "text-secondary": "#4a5060",
+      "text-tertiary": "#788098",
+      "accent": "#4f6ae8",
+      "accent-hover": "#3a56d8",
+      "success": "#18a050",
+      "warning": "#c08800",
+      "error": "#d03838",
+      "info": "#2878d0",
+      "metric-integration": "#2878d0",
+      "metric-frames": "#18a050",
+      "metric-hfr": "#c08800",
+      "metric-eccentricity": "#8050c0",
+      "metric-fwhm": "#1890c0",
+      "metric-stars": "#18a088",
+      "metric-guiding": "#c83850",
+      "metric-temp": "#1890c0",
+      "metric-gain": "#20a860",
+      "metric-time": "#c05050",
+      "metric-best": "#18a050",
+      "metric-worst": "#d03838",
+      "badge-bg": "rgba(255, 255, 255, 0.55)",
+      "badge-text": "#2a2e38",
+      "filter-ha": "#c03030",
+      "filter-oiii": "#2870c0",
+      "filter-sii": "#b89020",
+      "filter-l": "#606060",
+      "filter-r": "#c03838",
+      "filter-g": "#308030",
+      "filter-b": "#3858c0",
+    },
+  },
 ];
 
 export const THEMES_SORTED = [...THEMES].sort((a, b) => a.order - b.order);
@@ -708,7 +764,7 @@ export function getThemeById(id: string): ThemeMeta {
 
 const GLASS_ORBS_ID = "gl-glass-orbs";
 
-function applyGlassOrbs(orbs: GlassOrb[] | undefined): void {
+function applyGlassOrbs(orbs: GlassOrb[] | undefined, lightTheme = false): void {
   const existing = document.getElementById(GLASS_ORBS_ID);
   if (!orbs || orbs.length === 0) {
     existing?.remove();
@@ -735,7 +791,7 @@ function applyGlassOrbs(orbs: GlassOrb[] | undefined): void {
       background: orb.color,
       borderRadius: "50%",
       filter: "blur(120px)",
-      mixBlendMode: "screen",
+      mixBlendMode: lightTheme ? "multiply" : "screen",
     });
     container.appendChild(el);
   }
@@ -756,13 +812,17 @@ export function applyTheme(themeId: string): void {
     root.style.setProperty("--glass-gradient-from", theme.glass.gradientFrom);
     root.style.setProperty("--glass-gradient-to", theme.glass.gradientTo);
     root.setAttribute("data-theme-style", "glass");
-    applyGlassOrbs(theme.glass.orbs);
+    const isLight = theme.id === "glass-crystal" || theme.id === "daylight";
+    root.setAttribute("data-theme-lightness", isLight ? "light" : "dark");
+    applyGlassOrbs(theme.glass.orbs, theme.id === "glass-crystal");
   } else {
     root.style.setProperty("--glass-blur", "0px");
     root.style.setProperty("--glass-saturate", "1");
     root.style.removeProperty("--glass-gradient-from");
     root.style.removeProperty("--glass-gradient-to");
     root.setAttribute("data-theme-style", "solid");
+    const isLight = theme.id === "glass-crystal" || theme.id === "daylight";
+    root.setAttribute("data-theme-lightness", isLight ? "light" : "dark");
     applyGlassOrbs(undefined);
   }
 }
