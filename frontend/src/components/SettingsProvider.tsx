@@ -24,6 +24,7 @@ interface SettingsContextValue {
   toggleFilter: (filter: string) => void;
   saveGraphSettings: (updates: Partial<GraphSettings>) => Promise<void>;
   timezone: () => string;
+  use24hTime: () => boolean;
   contentWidth: () => string;
   customColumns: Resource<CustomColumn[] | undefined>;
   refetchCustomColumns: () => void;
@@ -67,6 +68,7 @@ export const SettingsProvider: ParentComponent = (props) => {
     filterAliasMap: () => getFilterAliasMap(store.settings()),
     filterBadgeStyle: () => (store.settings()?.general.filter_style as FilterBadgeStyle) || "text-only",
     timezone: () => store.settings()?.general.timezone ?? "UTC",
+    use24hTime: () => store.settings()?.general.use_24h_time ?? false,
     contentWidth: () => store.settings()?.general.content_width ?? "full",
     saveGeneral: store.saveGeneral,
     saveFilters: store.saveFilters,
