@@ -43,6 +43,7 @@ def fetch_reference_thumbnail(
         "Position": f"{target.ra},{target.dec}",
         "Size": str(fov),
         "Pixels": "512",
+        "Scaling": "Log",
         "Return": "JPEG",
     }
 

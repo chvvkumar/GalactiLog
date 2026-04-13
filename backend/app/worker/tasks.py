@@ -1445,7 +1445,7 @@ def detect_filename_targets():
 
 
 @celery_app.task(bind=True)
-def generate_reference_thumbnails(self) -> dict:
+def generate_reference_thumbnails(self, force: bool = False) -> dict:
     """Fetch DSS reference thumbnails for all targets."""
     from app.services.skyview import fetch_reference_thumbnail
 
@@ -1453,14 +1453,14 @@ def generate_reference_thumbnails(self) -> dict:
     output_dir = Path(settings.thumbnails_path) / "reference"
 
     with Session(_sync_engine) as session:
-        targets = session.execute(
-            select(Target).where(
-                Target.merged_into_id.is_(None),
-                Target.ra.isnot(None),
-                Target.dec.isnot(None),
-                Target.reference_thumbnail_path.is_(None),
-            )
-        ).scalars().all()
+        q = select(Target).where(
+            Target.merged_into_id.is_(None),
+            Target.ra.isnot(None),
+            Target.dec.isnot(None),
+        )
+        if not force:
+            q = q.where(Target.reference_thumbnail_path.is_(None))
+        targets = session.execute(q).scalars().all()
 
         total = len(targets)
         set_rebuild_progress_sync(

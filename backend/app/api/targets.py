@@ -1635,11 +1635,35 @@ async def get_session_detail(
 
     is_best_hfr = False
     if median_hfr is not None:
+        # Query HFR data across all sessions for this target
+        if target_id == "obj:__uncategorized__":
+            all_hfr_q = select(Image.capture_date, Image.median_hfr).where(
+                Image.resolved_target_id.is_(None),
+                or_(
+                    ~Image.raw_headers.has_key("OBJECT"),
+                    Image.raw_headers["OBJECT"].astext == "",
+                    Image.raw_headers["OBJECT"].is_(None),
+                ),
+                Image.median_hfr.isnot(None),
+            )
+        elif target_id.startswith("obj:"):
+            all_hfr_q = select(Image.capture_date, Image.median_hfr).where(
+                Image.raw_headers["OBJECT"].astext == target_id[4:],
+                Image.image_type == "LIGHT",
+                Image.median_hfr.isnot(None),
+            )
+        else:
+            all_hfr_q = select(Image.capture_date, Image.median_hfr).where(
+                Image.resolved_target_id == tid,
+                Image.image_type == "LIGHT",
+                Image.median_hfr.isnot(None),
+            )
+        all_hfr_rows = (await session.execute(all_hfr_q)).all()
         all_session_dates: dict[str, list[float]] = defaultdict(list)
-        for img in all_images:
-            if img.median_hfr is not None and img.capture_date:
-                dk = img.capture_date.strftime("%Y-%m-%d")
-                all_session_dates[dk].append(img.median_hfr)
+        for capture_date, hfr_val in all_hfr_rows:
+            if capture_date:
+                dk = capture_date.strftime("%Y-%m-%d")
+                all_session_dates[dk].append(hfr_val)
         all_session_medians = [statistics.median(v) for v in all_session_dates.values() if v]
         if all_session_medians:
             is_best_hfr = median_hfr <= min(all_session_medians)

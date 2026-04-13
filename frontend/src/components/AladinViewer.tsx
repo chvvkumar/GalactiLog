@@ -69,8 +69,8 @@ const AladinViewer: Component<AladinViewerProps> = (props) => {
   };
 
   return (
-    <div class="relative">
-      <div class="flex items-center gap-2 mb-2">
+    <div class="relative flex flex-col flex-1">
+      <div class="flex items-center gap-2 mb-2 flex-shrink-0">
         <select
           class="text-xs bg-theme-surface border border-theme-border rounded px-2 py-1 text-theme-text-secondary"
           value={survey()}
@@ -83,8 +83,8 @@ const AladinViewer: Component<AladinViewerProps> = (props) => {
       </div>
       <div
         ref={containerRef}
-        class="w-full h-64 rounded-[var(--radius-sm)] overflow-hidden border border-theme-border"
-        style={{ "min-height": "256px" }}
+        class="w-full h-full rounded-[var(--radius-sm)] overflow-hidden border border-theme-border"
+        style={{ "min-height": "300px" }}
       />
       {loading() && (
         <div class="absolute inset-0 flex items-center justify-center bg-theme-surface/80 rounded-[var(--radius-sm)]">

@@ -721,8 +721,8 @@ export const api = {
   triggerXmatchEnrichment: () =>
     fetchJson<{ status: string; message: string }>("/scan/xmatch-enrichment", { method: "POST" }),
 
-  triggerReferenceThumbnails: () =>
-    fetchJson<{ status: string; message: string }>("/scan/generate-reference-thumbnails", { method: "POST" }),
+  triggerReferenceThumbnails: (force = false) =>
+    fetchJson<{ status: string; message: string }>(`/scan/generate-reference-thumbnails${force ? "?force=true" : ""}`, { method: "POST" }),
 
   // Backup / Restore
   createBackup: async (): Promise<Blob> => {

@@ -331,7 +331,7 @@ async def trigger_retry_unresolved(user: User = Depends(require_admin)):
 
 
 @router.post("/generate-reference-thumbnails")
-async def trigger_reference_thumbnails(user: User = Depends(require_admin)):
+async def trigger_reference_thumbnails(force: bool = False, user: User = Depends(require_admin)):
     """Fetch DSS reference thumbnails from SkyView for all targets with coordinates."""
     async with async_redis() as r:
         state = await get_scan_state(r)
@@ -341,7 +341,7 @@ async def trigger_reference_thumbnails(user: User = Depends(require_admin)):
                 detail="A scan is already running. Wait for it to complete first.",
             )
 
-        generate_reference_thumbnails.delay()
+        generate_reference_thumbnails.delay(force=force)
         return {"status": "accepted", "message": "Reference thumbnail generation queued as background task"}
 
 

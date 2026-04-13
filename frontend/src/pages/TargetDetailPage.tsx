@@ -234,6 +234,9 @@ const TargetDetailPage: Component = () => {
                     <Show when={detail().aliases.length > 1}>
                       <span>· Aliases: {detail().aliases.slice(1).join(", ")}</span>
                     </Show>
+                    <Show when={detail().sac_description || detail().sac_notes}>
+                      <span>· {detail().sac_description}{detail().sac_description && detail().sac_notes ? " — " : ""}{detail().sac_notes}</span>
+                    </Show>
                   </div>
                   <Show when={detail().catalog_memberships?.length}>
                     <div class="flex flex-wrap gap-1.5 mt-1">
@@ -253,90 +256,79 @@ const TargetDetailPage: Component = () => {
               </div>
 
               {/* Cumulative stats bar */}
-              <div class="flex flex-wrap gap-3 mt-4 items-center">
-                <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-3 text-center min-w-[80px] sm:min-w-[100px]">
-                  <div class="text-lg font-semibold text-metric-integration">{formatIntegration(detail().total_integration_seconds)}</div>
-                  <div class="text-caption text-theme-text-secondary">Total Integration</div>
+              <div class="mt-4 space-y-3">
+                <div class="grid grid-cols-[repeat(auto-fit,minmax(100px,1fr))] gap-2">
+                  <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-3 text-center">
+                    <div class="text-lg font-semibold text-metric-integration">{formatIntegration(detail().total_integration_seconds)}</div>
+                    <div class="text-caption text-theme-text-secondary">Total Integration</div>
+                  </div>
+                  <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-3 text-center">
+                    <div class="text-lg font-semibold text-metric-frames">{detail().total_frames.toLocaleString()}</div>
+                    <div class="text-caption text-theme-text-secondary">Total Frames</div>
+                  </div>
+                  <Show when={visible("quality", "hfr")}>
+                    <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-3 text-center">
+                      <div class="text-lg font-semibold text-metric-hfr">
+                        {detail().avg_hfr?.toFixed(2) ?? "—"}
+                      </div>
+                      <div class="text-caption text-theme-text-secondary">Avg HFR</div>
+                    </div>
+                  </Show>
+                  <Show when={visible("quality", "eccentricity")}>
+                    <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-3 text-center">
+                      <div class="text-lg font-semibold text-metric-eccentricity">
+                        {detail().avg_eccentricity?.toFixed(2) ?? "—"}
+                      </div>
+                      <div class="text-caption text-theme-text-secondary">Avg Eccentricity</div>
+                    </div>
+                  </Show>
+                  <Show when={visible("quality", "fwhm")}>
+                    <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-3 text-center">
+                      <div class="text-lg font-semibold text-theme-info">
+                        {detail().avg_fwhm?.toFixed(2) ?? "—"}
+                      </div>
+                      <div class="text-caption text-theme-text-secondary">Avg FWHM</div>
+                    </div>
+                  </Show>
+                  <Show when={visible("quality", "detected_stars")}>
+                    <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-3 text-center">
+                      <div class="text-lg font-semibold text-metric-stars">
+                        {detail().avg_detected_stars?.toFixed(0) ?? "—"}
+                      </div>
+                      <div class="text-caption text-theme-text-secondary">Avg Stars</div>
+                    </div>
+                  </Show>
+                  <Show when={visible("guiding", "rms_total")}>
+                    <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-3 text-center">
+                      <div class="text-lg font-semibold text-metric-guiding">
+                        {detail().avg_guiding_rms_arcsec !== null ? `${detail().avg_guiding_rms_arcsec?.toFixed(2)}"` : "—"}
+                      </div>
+                      <div class="text-caption text-theme-text-secondary">Avg Guide RMS</div>
+                    </div>
+                  </Show>
+                  <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-3 text-center flex flex-col items-center justify-center">
+                    <div class="mb-1">
+                      <FilterBadges distribution={Object.fromEntries(detail().filters_used.map(f => [f, 0]))} compact />
+                    </div>
+                    <div class="text-caption text-theme-text-secondary">Filters Used</div>
+                  </div>
                 </div>
-                <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-3 text-center min-w-[80px] sm:min-w-[100px]">
-                  <div class="text-lg font-semibold text-metric-frames">{detail().total_frames.toLocaleString()}</div>
-                  <div class="text-caption text-theme-text-secondary">Total Frames</div>
-                </div>
-                <Show when={visible("quality", "hfr")}>
-                  <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-3 text-center min-w-[80px] sm:min-w-[100px]">
-                    <div class="text-lg font-semibold text-metric-hfr">
-                      {detail().avg_hfr?.toFixed(2) ?? "—"}
-                    </div>
-                    <div class="text-caption text-theme-text-secondary">Avg HFR</div>
+                <div class="flex items-center justify-end gap-4">
+                  <div class="text-right text-xs text-theme-text-secondary">
+                    <span>{detail().session_count} sessions</span>
+                    <span class="mx-1.5">·</span>
+                    <span>{detail().first_session_date} → {detail().last_session_date} ({tzLabel()})</span>
                   </div>
-                </Show>
-                <Show when={visible("quality", "eccentricity")}>
-                  <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-3 text-center min-w-[80px] sm:min-w-[100px]">
-                    <div class="text-lg font-semibold text-metric-eccentricity">
-                      {detail().avg_eccentricity?.toFixed(2) ?? "—"}
-                    </div>
-                    <div class="text-caption text-theme-text-secondary">Avg Eccentricity</div>
-                  </div>
-                </Show>
-                <Show when={visible("quality", "fwhm")}>
-                  <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-3 text-center min-w-[80px] sm:min-w-[100px]">
-                    <div class="text-lg font-semibold text-theme-info">
-                      {detail().avg_fwhm?.toFixed(2) ?? "—"}
-                    </div>
-                    <div class="text-caption text-theme-text-secondary">Avg FWHM</div>
-                  </div>
-                </Show>
-                <Show when={visible("quality", "detected_stars")}>
-                  <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-3 text-center min-w-[80px] sm:min-w-[100px]">
-                    <div class="text-lg font-semibold text-metric-stars">
-                      {detail().avg_detected_stars?.toFixed(0) ?? "—"}
-                    </div>
-                    <div class="text-caption text-theme-text-secondary">Avg Stars</div>
-                  </div>
-                </Show>
-                <Show when={visible("guiding", "rms_total")}>
-                  <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-3 text-center min-w-[80px] sm:min-w-[100px]">
-                    <div class="text-lg font-semibold text-metric-guiding">
-                      {detail().avg_guiding_rms_arcsec !== null ? `${detail().avg_guiding_rms_arcsec?.toFixed(2)}"` : "—"}
-                    </div>
-                    <div class="text-caption text-theme-text-secondary">Avg Guide RMS</div>
-                  </div>
-                </Show>
-                <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-3 text-center flex flex-col items-center justify-center min-w-[80px] sm:min-w-[100px]">
-                  <div class="mb-1">
-                    <FilterBadges distribution={Object.fromEntries(detail().filters_used.map(f => [f, 0]))} compact />
-                  </div>
-                  <div class="text-caption text-theme-text-secondary">Filters Used</div>
-                </div>
-                <div class="ml-auto flex flex-col items-start sm:items-end gap-2 shrink-0 self-center">
                   <button
-                    class="px-4 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded text-sm font-medium hover:bg-theme-accent/25 transition-colors"
+                    class="px-4 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded text-sm font-medium hover:bg-theme-accent/25 transition-colors shrink-0"
                     onClick={() => setShowExport(true)}
                   >
                     Export
                   </button>
-                  <div class="text-left sm:text-right text-xs text-theme-text-secondary">
-                    <div>{detail().session_count} sessions</div>
-                    <div class="mt-0.5">
-                      {detail().first_session_date} → {detail().last_session_date} ({tzLabel()})
-                    </div>
-                  </div>
                 </div>
               </div>
             </div>
 
-            {/* SAC Observing Notes */}
-            <Show when={detail().sac_description || detail().sac_notes}>
-              <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border p-4">
-                <div class="text-xs font-medium text-theme-text-tertiary mb-2">Observing Notes</div>
-                <Show when={detail().sac_description}>
-                  <p class="text-sm text-theme-text-primary">{detail().sac_description}</p>
-                </Show>
-                <Show when={detail().sac_notes}>
-                  <p class="text-xs text-theme-text-secondary mt-1">{detail().sac_notes}</p>
-                </Show>
-              </div>
-            </Show>
 
             {/* Sky View & Reference Thumbnail */}
             <Show when={detail().ra != null && detail().dec != null}>
@@ -357,19 +349,21 @@ const TargetDetailPage: Component = () => {
                   </svg>
                 </button>
                 <Show when={skyViewExpanded()}>
-                  <div class="mt-2 space-y-3">
-                    <AladinViewer
-                      ra={detail().ra!}
-                      dec={detail().dec!}
-                      fov={detail().size_major ? detail().size_major! * 1.5 / 60 : 0.5}
-                    />
+                  <div class="mt-2 flex gap-3 items-stretch">
+                    <div class="w-[60%] min-w-0 flex flex-col">
+                      <AladinViewer
+                        ra={detail().ra!}
+                        dec={detail().dec!}
+                        fov={detail().size_major ? detail().size_major! * 1.5 / 60 : 0.5}
+                      />
+                    </div>
                     <Show when={detail().reference_thumbnail_path}>
-                      <div class="mt-2">
+                      <div class="w-[40%] min-w-0">
                         <div class="text-xs font-medium text-theme-text-tertiary mb-1">DSS Reference</div>
                         <img
                           src={`/api/targets/${detail().target_id}/reference-thumbnail`}
                           alt="DSS reference"
-                          class="rounded-[var(--radius-sm)] border border-theme-border max-w-xs"
+                          class="rounded-[var(--radius-sm)] border border-theme-border w-full h-auto"
                           loading="lazy"
                         />
                       </div>
