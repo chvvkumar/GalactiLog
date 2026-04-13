@@ -348,8 +348,9 @@ export default function DisplayTab() {
           <div>
             <span class="text-sm text-theme-text-secondary">Imaging night grouping</span>
             <p class="text-xs text-theme-text-tertiary mt-0.5">
-              Group sessions by local solar noon instead of UTC midnight.
-              Uses SITELONG from FITS headers, falls back to observer longitude.
+              Keep a full night of imaging together as one session, even when
+              it crosses midnight. Uses your location from FITS headers to
+              determine the boundary.
             </p>
           </div>
           <button
