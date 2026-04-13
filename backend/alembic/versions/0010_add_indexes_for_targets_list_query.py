@@ -10,8 +10,8 @@ Adds indexes to speed up the /api/targets endpoint:
 """
 from alembic import op
 
-revision = "0009"
-down_revision = "0008"
+revision = "0010"
+down_revision = "0009"
 branch_labels = None
 depends_on = None
 
