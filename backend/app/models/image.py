@@ -1,7 +1,7 @@
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 
-from sqlalchemy import String, Float, Integer, BigInteger, DateTime, ForeignKey, Index
+from sqlalchemy import String, Float, Integer, BigInteger, Date, DateTime, ForeignKey, Index
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -15,6 +15,7 @@ class Image(Base):
     file_path: Mapped[str] = mapped_column(String(1024), nullable=False, unique=True)
     file_name: Mapped[str] = mapped_column(String(255), nullable=False)
     capture_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    session_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     thumbnail_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     resolved_target_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("targets.id"), nullable=True
@@ -84,6 +85,7 @@ class Image(Base):
 
     __table_args__ = (
         Index("ix_images_capture_date", "capture_date"),
+        Index("ix_images_session_date", "session_date"),
         Index("ix_images_filter_used", "filter_used"),
         Index("ix_images_resolved_target_id", "resolved_target_id"),
         Index("ix_images_image_type", "image_type"),

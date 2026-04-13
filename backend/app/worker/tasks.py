@@ -1,9 +1,10 @@
 import logging
 import time
+from datetime import datetime
 from pathlib import Path
 
 import fitsio
-from sqlalchemy import create_engine, select, text, update as sa_update
+from sqlalchemy import create_engine, func, select, text, update as sa_update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -19,6 +20,8 @@ from app.services.simbad import (
 from app.services.target_resolver import resolve_target, normalize_sql_expr
 from app.services.thumbnail import generate_thumbnail
 from app.services.xisf_parser import extract_xisf_metadata, generate_xisf_thumbnail
+from app.services.session_date import compute_session_date, extract_longitude
+from app.schemas.settings import GeneralSettings
 from app.worker.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
@@ -353,6 +356,22 @@ def _do_ingest(fits_path: str, include_calibration: bool = True) -> dict:
         file_size = None
         file_mtime = None
 
+    # Compute session_date from capture_date + longitude
+    raw_hdrs = meta.get("raw_headers", {})
+    site_lon = extract_longitude(raw_hdrs)
+
+    # Load imaging night setting (cached per-process via module-level settings row)
+    with Session(_sync_engine) as settings_session:
+        settings_row = settings_session.get(UserSettings, SETTINGS_ROW_ID)
+        general = GeneralSettings(**(settings_row.general if settings_row and settings_row.general else {}))
+
+    effective_lon = site_lon if site_lon is not None else general.observer_longitude
+    session_date_val = compute_session_date(
+        meta.get("capture_date"),
+        use_imaging_night=general.use_imaging_night,
+        longitude=effective_lon,
+    )
+
     try:
         with Session(_sync_engine) as session:
             image = Image(
@@ -361,6 +380,7 @@ def _do_ingest(fits_path: str, include_calibration: bool = True) -> dict:
                 file_size=file_size,
                 file_mtime=file_mtime,
                 capture_date=meta.get("capture_date"),
+                session_date=session_date_val,
                 thumbnail_path=str(thumb_path) if thumb_path else None,
                 resolved_target_id=target_id,
                 exposure_time=meta.get("exposure_time"),
@@ -1271,9 +1291,9 @@ def backfill_dark_hours() -> dict:
             existing_dates = {row[0] for row in session.execute(existing_q).all()}
 
             all_dates_q = select(
-                text("DISTINCT capture_date::date")
-            ).select_from(Image.__table__).where(
-                Image.capture_date.isnot(None),
+                func.distinct(Image.session_date)
+            ).where(
+                Image.session_date.isnot(None),
                 Image.image_type == "LIGHT",
             )
             all_imaging_dates = {row[0] for row in session.execute(all_dates_q).all()}
@@ -1530,3 +1550,120 @@ def run_xmatch_enrichment(self) -> dict:
         "timestamp": time.time(),
     })
     return stats
+
+
+@celery_app.task(name="recompute_session_dates", bind=True)
+def recompute_session_dates(self):
+    """Recompute session_date for all images and re-key session notes/custom values."""
+    from collections import Counter
+    from datetime import date as date_type, timedelta
+    from app.models.session_note import SessionNote
+    from app.models.custom_column import CustomColumnValue
+
+    with Session(_sync_engine) as session:
+        # Load settings
+        settings_row = session.get(UserSettings, SETTINGS_ROW_ID)
+        general = GeneralSettings(**(settings_row.general if settings_row and settings_row.general else {}))
+        fallback_lon = general.observer_longitude
+        use_night = general.use_imaging_night
+
+        # Phase 1: Recompute all image session_dates in batches
+        BATCH = 5000
+        offset = 0
+        total = 0
+        while True:
+            rows = session.execute(
+                select(Image.id, Image.capture_date, Image.raw_headers)
+                .where(Image.capture_date.isnot(None))
+                .order_by(Image.id)
+                .offset(offset)
+                .limit(BATCH)
+            ).all()
+            if not rows:
+                break
+
+            for img_id, capture_date, raw_headers in rows:
+                site_lon = extract_longitude(raw_headers)
+                effective_lon = site_lon if site_lon is not None else fallback_lon
+                new_date = compute_session_date(
+                    capture_date,
+                    use_imaging_night=use_night,
+                    longitude=effective_lon,
+                )
+                session.execute(
+                    sa_update(Image)
+                    .where(Image.id == img_id)
+                    .values(session_date=new_date)
+                )
+
+            session.commit()
+            total += len(rows)
+            offset += BATCH
+            self.update_state(state="PROGRESS", meta={"images_updated": total})
+
+        # Phase 2: Re-key SessionNote rows
+        notes = session.execute(select(SessionNote)).scalars().all()
+        for note in notes:
+            old_date = note.session_date
+            window_start = datetime.combine(old_date - timedelta(days=1), datetime.min.time())
+            window_end = datetime.combine(old_date + timedelta(days=2), datetime.min.time())
+            img_dates = session.execute(
+                select(Image.session_date)
+                .where(
+                    Image.resolved_target_id == note.target_id,
+                    Image.capture_date >= window_start,
+                    Image.capture_date < window_end,
+                    Image.session_date.isnot(None),
+                )
+            ).scalars().all()
+            if img_dates:
+                most_common = Counter(img_dates).most_common(1)[0][0]
+                if most_common != note.session_date:
+                    existing = session.execute(
+                        select(SessionNote.id).where(
+                            SessionNote.target_id == note.target_id,
+                            SessionNote.session_date == most_common,
+                            SessionNote.id != note.id,
+                        )
+                    ).scalar_one_or_none()
+                    if existing is None:
+                        note.session_date = most_common
+
+        session.commit()
+
+        # Phase 3: Re-key CustomColumnValue rows
+        cvs = session.execute(
+            select(CustomColumnValue).where(CustomColumnValue.session_date.isnot(None))
+        ).scalars().all()
+        for cv in cvs:
+            old_date = cv.session_date
+            window_start = datetime.combine(old_date - timedelta(days=1), datetime.min.time())
+            window_end = datetime.combine(old_date + timedelta(days=2), datetime.min.time())
+            img_dates = session.execute(
+                select(Image.session_date)
+                .where(
+                    Image.resolved_target_id == cv.target_id,
+                    Image.capture_date >= window_start,
+                    Image.capture_date < window_end,
+                    Image.session_date.isnot(None),
+                )
+            ).scalars().all()
+            if img_dates:
+                from sqlalchemy import func
+                most_common = Counter(img_dates).most_common(1)[0][0]
+                if most_common != cv.session_date:
+                    existing = session.execute(
+                        select(CustomColumnValue.id).where(
+                            CustomColumnValue.column_id == cv.column_id,
+                            CustomColumnValue.target_id == cv.target_id,
+                            func.coalesce(CustomColumnValue.session_date, date_type(1970, 1, 1)) == most_common,
+                            CustomColumnValue.id != cv.id,
+                        )
+                    ).scalar_one_or_none()
+                    if existing is None:
+                        cv.session_date = most_common
+
+        session.commit()
+
+        logger.info("recompute_session_dates: updated %d images", total)
+        return {"status": "done", "images_updated": total}
