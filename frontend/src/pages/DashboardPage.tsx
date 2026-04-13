@@ -50,7 +50,7 @@ const DashboardPage: Component = () => {
       <div class="flex" data-layout="sidebar-main">
         {/* Desktop sidebar */}
         <div
-          class="hidden lg:flex relative border-r border-theme-border-em min-h-[calc(100vh-57px)] shrink-0"
+          class="hidden lg:flex relative border-r border-theme-border-em h-[calc(100vh-57px)] sticky top-[57px] self-start shrink-0"
           classList={{ "transition-[width] duration-[240ms] ease-[cubic-bezier(0.22,0.61,0.36,1)]": !resizing() }}
           style={{ width: `${sidebarCollapsed() ? RAIL_WIDTH : sidebarWidth()}px` }}
         >

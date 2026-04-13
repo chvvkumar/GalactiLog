@@ -31,7 +31,7 @@ function saveCollapsedState(state: Record<string, boolean>) {
   } catch { /* ignore */ }
 }
 
-const CollapsibleSection: Component<{ id: string; label: string; children: JSX.Element }> = (props) => {
+const CollapsibleSection: Component<{ id: string; label: string; active?: boolean; children: JSX.Element }> = (props) => {
   const [collapsed, setCollapsed] = createSignal(false);
   let sectionRef: HTMLElement | undefined;
 
@@ -76,7 +76,12 @@ const CollapsibleSection: Component<{ id: string; label: string; children: JSX.E
         onClick={toggle}
         class="flex items-center justify-between w-full text-label font-medium uppercase tracking-wider text-theme-text-tertiary hover:text-theme-text-secondary transition-colors cursor-pointer select-none"
       >
-        {props.label}
+        <span class="flex items-center gap-1.5">
+          {props.label}
+          <Show when={props.active}>
+            <span class="w-1.5 h-1.5 rounded-full bg-theme-accent shrink-0" />
+          </Show>
+        </span>
         <span class={`text-caption transition-transform ${collapsed() ? "-rotate-90" : ""}`}>&#9660;</span>
       </button>
       <Show when={!collapsed()}>
