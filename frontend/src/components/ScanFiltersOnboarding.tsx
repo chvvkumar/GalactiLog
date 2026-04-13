@@ -5,6 +5,8 @@ import { showToast } from "./Toast";
 
 interface Props {
   variant?: "inline" | "global";
+  /** When provided, the component uses this value instead of fetching itself. */
+  configured?: boolean;
   onReview?: () => void;
 }
 
@@ -13,14 +15,26 @@ const ScanFiltersOnboarding: Component<Props> = (props) => {
   const [saving, setSaving] = createSignal(false);
   const variant = () => props.variant ?? "inline";
 
-  const load = async () => {
-    try {
-      const r = await scanFilters.get();
-      setShow(!r.configured);
-    } catch { /* ignore */ }
-  };
+  // When `configured` prop is provided by the parent, derive visibility from
+  // it reactively.  Fall back to fetching only when prop is not supplied
+  // (e.g. the global variant used on the Dashboard).
+  const hasProp = () => props.configured !== undefined;
 
-  createEffect(() => { load(); });
+  createEffect(() => {
+    if (hasProp()) {
+      setShow(!props.configured);
+    }
+  });
+
+  // Self-fetch only when no prop is provided (global / dashboard usage)
+  createEffect(() => {
+    if (!hasProp()) {
+      scanFilters.get().then(
+        (r) => setShow(!r.configured),
+        () => { /* ignore */ },
+      );
+    }
+  });
 
   const onConfigured = () => setShow(false);
   window.addEventListener("scan-filters-configured", onConfigured);

@@ -14,23 +14,23 @@ const ActivityFeed: Component<{
 }> = (props) => {
   const settingsCtx = useSettingsContext();
   const [activity, setActivity] = createSignal<ActivityEntry[]>([]);
-  const [prevState, setPrevState] = createSignal<string>("idle");
 
   const fetchActivity = async () => {
     try { setActivity(await api.getActivity()); } catch { /* ignore */ }
   };
 
-  fetchActivity();
-
-  // Refresh activity when scan or rebuild state transitions to complete/idle/error
+  // Track previous composite state to only fetch on real transitions.
+  // Starting with null ensures the first effect run triggers the initial fetch.
+  let prevCompositeState: string | null = null;
   createEffect(() => {
     const scanState = props.scanStatus.state;
     const rebuildState = props.rebuildStatus.state;
-    const prev = prevState();
     const current = `${scanState}:${rebuildState}`;
-    if (current !== prev) {
-      setPrevState(current);
-      if (scanState === "complete" || scanState === "idle" || rebuildState === "complete" || rebuildState === "error") {
+    if (current !== prevCompositeState) {
+      const wasPrev = prevCompositeState;
+      prevCompositeState = current;
+      // Always fetch on first run (wasPrev === null), and on relevant transitions
+      if (wasPrev === null || scanState === "complete" || scanState === "idle" || rebuildState === "complete" || rebuildState === "error") {
         fetchActivity();
       }
     }
@@ -170,6 +170,14 @@ const ActivityFeed: Component<{
         <div class="flex items-center gap-2 border border-theme-border-em rounded-[var(--radius-md)] p-3">
           <span class="w-2 h-2 bg-theme-accent rounded-full animate-pulse flex-shrink-0" />
           <span class="text-xs text-theme-text-primary">{props.rebuildStatus.message || "Running..."}</span>
+        </div>
+      </Show>
+
+      {/* Rebuild completion summary */}
+      <Show when={props.rebuildStatus.state === "complete" && props.rebuildStatus.message}>
+        <div class="flex items-center gap-2 border border-theme-success/30 rounded-[var(--radius-md)] p-3">
+          <span class="w-2 h-2 bg-theme-success rounded-full flex-shrink-0" />
+          <span class="text-xs text-theme-text-primary">{props.rebuildStatus.message}</span>
         </div>
       </Show>
 

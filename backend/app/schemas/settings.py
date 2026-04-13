@@ -16,6 +16,9 @@ class GeneralSettings(BaseModel):
     content_width: str = "extra-wide"
     mosaic_keywords: list[str] = ["Panel", "P"]
     mosaic_campaign_gap_days: int = 0
+    observer_latitude: float | None = None
+    observer_longitude: float | None = None
+    observer_name: str | None = None
 
 
 class FilterConfig(BaseModel):

@@ -4,7 +4,9 @@ import { useSettingsContext } from "./SettingsProvider";
 import { useAuth } from "./AuthProvider";
 import { useStats } from "../store/stats";
 import { api } from "../api/client";
+import { scanFilters as scanFiltersApi } from "../api/scanFilters";
 import type { RebuildStatus } from "../types";
+import type { ScanFiltersResponse } from "../api/scanFilters";
 import DatabaseOverview from "./DatabaseOverview";
 import CaptureActivity from "./CaptureActivity";
 import ScanControls from "./ScanControls";
@@ -37,17 +39,38 @@ const ScanManager: Component = () => {
   });
   const [autoScanEnabled, setAutoScanEnabled] = createSignal(true);
   const [autoScanInterval, setAutoScanInterval] = createSignal(240);
+  const [observerName, setObserverName] = createSignal<string | null>(null);
+  const [observerLatitude, setObserverLatitude] = createSignal<number | null>(null);
+  const [observerLongitude, setObserverLongitude] = createSignal<number | null>(null);
+  const [scanFiltersData, setScanFiltersData] = createSignal<ScanFiltersResponse | null>(null);
   let rebuildPollTimer: ReturnType<typeof setInterval> | null = null;
+
+  // --- Scan filters (shared between ScanFiltersPanel & ScanFiltersOnboarding) ---
+  const loadScanFilters = async () => {
+    try { setScanFiltersData(await scanFiltersApi.get()); } catch { /* ignore */ }
+  };
+  loadScanFilters();
+
+  const onScanFiltersConfigured = () => loadScanFilters();
+  window.addEventListener("scan-filters-configured", onScanFiltersConfigured);
+  onCleanup(() => window.removeEventListener("scan-filters-configured", onScanFiltersConfigured));
 
   // --- DB Summary ---
   const refreshDbSummary = async () => {
     try { setDbSummary(await api.getDbSummary()); } catch { /* ignore */ }
   };
-  refreshDbSummary();
 
+  // Track previous scan state to only refresh on transitions, not on every
+  // signal update.  The initial value of null ensures the first effect run
+  // triggers a fetch (transition from null → idle).
+  let prevScanState: string | null = null;
   createEffect(() => {
     const s = scanStatus().state;
-    if (s === "complete" || s === "idle") refreshDbSummary();
+    if (s !== prevScanState) {
+      const wasPrev = prevScanState;
+      prevScanState = s;
+      if (wasPrev === null || s === "complete" || s === "idle") refreshDbSummary();
+    }
   });
 
   // Refresh when merges change (dismiss/merge/revert on targets tab)
@@ -62,6 +85,9 @@ const ScanManager: Component = () => {
       setFrameFilter(s.general.include_calibration ? "all" : "light_only");
       setAutoScanEnabled(s.general.auto_scan_enabled);
       setAutoScanInterval(s.general.auto_scan_interval);
+      setObserverName(s.general.observer_name ?? null);
+      setObserverLatitude(s.general.observer_latitude ?? null);
+      setObserverLongitude(s.general.observer_longitude ?? null);
     }
   });
 
@@ -111,8 +137,19 @@ const ScanManager: Component = () => {
   fetchRebuildStatus();
 
   const startRebuildPolling = () => {
-    if (rebuildPollTimer) return;
-    fetchRebuildStatus();
+    // Clear any previous timer so we can restart
+    if (rebuildPollTimer) { clearInterval(rebuildPollTimer); rebuildPollTimer = null; }
+    // Set optimistic running state so UI shows feedback immediately
+    // (the Celery task may not have updated Redis yet)
+    setRebuildState((prev) => ({
+      ...prev,
+      state: "running",
+      message: "Starting...",
+      started_at: Date.now() / 1000,
+      completed_at: null,
+    }));
+    // Give the Celery task a moment to pick up before first poll
+    setTimeout(fetchRebuildStatus, 1000);
     rebuildPollTimer = setInterval(fetchRebuildStatus, 2000);
   };
 
@@ -139,6 +176,7 @@ const ScanManager: Component = () => {
         {/* Left column: controls */}
         <div class="space-y-4 min-w-0">
           <ScanFiltersOnboarding
+            configured={scanFiltersData()?.configured ?? true}
             onReview={() => {
               const el = document.getElementById("scan-filters-panel");
               if (el instanceof HTMLDetailsElement) el.open = true;
@@ -183,7 +221,72 @@ const ScanManager: Component = () => {
               </section>
             </Show>
 
-            <ScanFiltersPanel />
+            <section class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
+              <h4 class="text-sm font-medium text-theme-text-primary">Observer Location</h4>
+              <div class="grid grid-cols-3 gap-3">
+                <div class="space-y-1">
+                  <label class="text-xs text-theme-text-secondary">Name</label>
+                  <input
+                    type="text"
+                    class="w-full px-3 py-1.5 bg-theme-input border border-theme-border rounded-[var(--radius-sm)] text-sm text-theme-text-primary focus:ring-1 focus:ring-theme-accent focus:border-theme-accent outline-none"
+                    value={observerName() ?? ""}
+                    onInput={(e) => setObserverName(e.currentTarget.value || null)}
+                    onBlur={async () => {
+                      const current = settings()?.general;
+                      if (current) {
+                        try {
+                          await saveGeneral({ ...current, observer_name: observerName() });
+                        } catch {
+                          showToast("Failed to save observer location", "error");
+                        }
+                      }
+                    }}
+                  />
+                </div>
+                <div class="space-y-1">
+                  <label class="text-xs text-theme-text-secondary">Latitude</label>
+                  <input
+                    type="number"
+                    step="0.0001"
+                    class="w-full px-3 py-1.5 bg-theme-input border border-theme-border rounded-[var(--radius-sm)] text-sm text-theme-text-primary tabular-nums focus:ring-1 focus:ring-theme-accent focus:border-theme-accent outline-none"
+                    value={observerLatitude() ?? ""}
+                    onInput={(e) => setObserverLatitude(e.currentTarget.value ? parseFloat(e.currentTarget.value) : null)}
+                    onBlur={async () => {
+                      const current = settings()?.general;
+                      if (current) {
+                        try {
+                          await saveGeneral({ ...current, observer_latitude: observerLatitude() });
+                        } catch {
+                          showToast("Failed to save observer location", "error");
+                        }
+                      }
+                    }}
+                  />
+                </div>
+                <div class="space-y-1">
+                  <label class="text-xs text-theme-text-secondary">Longitude</label>
+                  <input
+                    type="number"
+                    step="0.0001"
+                    class="w-full px-3 py-1.5 bg-theme-input border border-theme-border rounded-[var(--radius-sm)] text-sm text-theme-text-primary tabular-nums focus:ring-1 focus:ring-theme-accent focus:border-theme-accent outline-none"
+                    value={observerLongitude() ?? ""}
+                    onInput={(e) => setObserverLongitude(e.currentTarget.value ? parseFloat(e.currentTarget.value) : null)}
+                    onBlur={async () => {
+                      const current = settings()?.general;
+                      if (current) {
+                        try {
+                          await saveGeneral({ ...current, observer_longitude: observerLongitude() });
+                        } catch {
+                          showToast("Failed to save observer location", "error");
+                        }
+                      }
+                    }}
+                  />
+                </div>
+              </div>
+            </section>
+
+            <ScanFiltersPanel initialData={scanFiltersData()} />
 
             <div class="flex flex-wrap items-center gap-4 justify-end pt-2 border-t border-theme-border">
               <ScanControls

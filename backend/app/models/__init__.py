@@ -17,5 +17,12 @@ from .mosaic_panel import MosaicPanel
 from .mosaic_suggestion import MosaicSuggestion
 from .custom_column import CustomColumn, CustomColumnValue, ColumnType, AppliesTo
 from .filename_candidate import FilenameCandidate
+from .gaia_cache import GaiaCache
+from .sac_catalog import SACEntry
+from .caldwell_catalog import CaldwellEntry
+from .herschel400_catalog import Herschel400Entry
+from .arp_catalog import ArpEntry
+from .abell_catalog import AbellEntry
+from .catalog_membership import TargetCatalogMembership
 
-__all__ = ["Base", "Target", "Image", "UserSettings", "SETTINGS_ROW_ID", "MergeCandidate", "SimbadCache", "SesameCache", "User", "UserRole", "RefreshToken", "AppMetadata", "OpenNGCEntry", "VizierCache", "SiteDarkHours", "SessionNote", "Mosaic", "MosaicPanel", "MosaicSuggestion", "CustomColumn", "CustomColumnValue", "ColumnType", "AppliesTo", "FilenameCandidate"]
+__all__ = ["Base", "Target", "Image", "UserSettings", "SETTINGS_ROW_ID", "MergeCandidate", "SimbadCache", "SesameCache", "User", "UserRole", "RefreshToken", "AppMetadata", "OpenNGCEntry", "VizierCache", "SiteDarkHours", "SessionNote", "Mosaic", "MosaicPanel", "MosaicSuggestion", "CustomColumn", "CustomColumnValue", "ColumnType", "AppliesTo", "FilenameCandidate", "GaiaCache", "SACEntry", "CaldwellEntry", "Herschel400Entry", "ArpEntry", "AbellEntry", "TargetCatalogMembership"]

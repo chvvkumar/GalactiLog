@@ -14,6 +14,7 @@ from .custom_columns import router as custom_columns_router
 from .filename_resolution import router as filename_resolution_router
 from .tasks import router as tasks_router
 from .backup import router as backup_router
+from .planning import router as planning_router
 from app.database import async_session
 from app.config import async_redis
 
@@ -30,6 +31,7 @@ api_router.include_router(custom_columns_router)
 api_router.include_router(filename_resolution_router)
 api_router.include_router(tasks_router)
 api_router.include_router(backup_router)
+api_router.include_router(planning_router)
 
 
 @api_router.get("/health")

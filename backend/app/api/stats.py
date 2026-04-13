@@ -10,7 +10,7 @@ from sqlalchemy import select, func, case
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings, async_redis
-from app.database import get_session
+from app.database import get_session, async_session
 from app.api.deps import get_current_user
 from app.models.user import User
 from app.models import Image, Target
@@ -161,32 +161,205 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
     if time.time() - _storage_last_update >= _STORAGE_TTL:
         asyncio.create_task(_refresh_storage_cache())
 
-    # --- All DB queries below are fast (indexed) ---
+    # --- All DB queries below run in parallel where possible ---
+    # Each parallel branch uses its own session (asyncpg requires it).
 
     filter_map, cam_map, tel_map = await load_alias_maps(session)
 
-    # Overview
-    capture_date_col = func.cast(Image.capture_date, Date)
-    overview_q = select(
-        func.coalesce(func.sum(Image.exposure_time), 0),
-        func.count(func.distinct(Image.resolved_target_id)),
-        func.count(Image.id),
-        func.count(func.distinct(
-            func.concat(
-                capture_date_col,
-                "|",
-                func.coalesce(Image.telescope, ""),
-                "|",
-                func.coalesce(Image.camera, ""),
-            )
-        )),
-        func.min(capture_date_col),
-        func.max(capture_date_col),
-    ).where(
-        Image.image_type == "LIGHT",
-        Image.capture_date.isnot(None),
+    # --- Define parallel query coroutines (each opens its own session) ---
+
+    async def _query_overview():
+        capture_date_col = func.cast(Image.capture_date, Date)
+        q = select(
+            func.coalesce(func.sum(Image.exposure_time), 0),
+            func.count(func.distinct(Image.resolved_target_id)),
+            func.count(Image.id),
+            func.count(func.distinct(
+                func.concat(
+                    capture_date_col,
+                    "|",
+                    func.coalesce(Image.telescope, ""),
+                    "|",
+                    func.coalesce(Image.camera, ""),
+                )
+            )),
+            func.min(capture_date_col),
+            func.max(capture_date_col),
+        ).where(
+            Image.image_type == "LIGHT",
+            Image.capture_date.isnot(None),
+        )
+        async with async_session() as s:
+            return (await s.execute(q)).one()
+
+    async def _query_cameras():
+        q = select(Image.camera, func.count(Image.id)).where(
+            Image.camera.isnot(None)
+        ).group_by(Image.camera).order_by(func.count(Image.id).desc())
+        async with async_session() as s:
+            return (await s.execute(q)).all()
+
+    async def _query_telescopes():
+        q = select(Image.telescope, func.count(Image.id)).where(
+            Image.telescope.isnot(None)
+        ).group_by(Image.telescope).order_by(func.count(Image.id).desc())
+        async with async_session() as s:
+            return (await s.execute(q)).all()
+
+    async def _query_equipment_perf():
+        hfr_nz = func.nullif(Image.median_hfr, 0)
+        ecc_nz = func.nullif(Image.eccentricity, 0)
+        fwhm_nz = func.nullif(Image.fwhm, 0)
+        q = select(
+            Image.telescope,
+            Image.camera,
+            Image.filter_used,
+            func.count(Image.id).label("frame_count"),
+            func.coalesce(func.sum(Image.exposure_time), 0).label("total_seconds"),
+            func.percentile_cont(0.5).within_group(hfr_nz).label("med_hfr"),
+            func.min(hfr_nz).label("best_hfr"),
+            func.percentile_cont(0.5).within_group(ecc_nz).label("med_ecc"),
+            func.percentile_cont(0.5).within_group(fwhm_nz).label("med_fwhm"),
+        ).where(
+            Image.image_type == "LIGHT",
+            Image.telescope.isnot(None),
+            Image.camera.isnot(None),
+        ).group_by(Image.telescope, Image.camera, Image.filter_used)
+        async with async_session() as s:
+            return (await s.execute(q)).all()
+
+    async def _query_filter_usage():
+        q = select(
+            Image.filter_used, func.coalesce(func.sum(Image.exposure_time), 0)
+        ).where(
+            Image.filter_used.isnot(None), Image.image_type == "LIGHT"
+        ).group_by(Image.filter_used)
+        async with async_session() as s:
+            return (await s.execute(q)).all()
+
+    async def _query_timeline_monthly():
+        month_label = func.to_char(Image.capture_date, 'YYYY-MM').label('month')
+        q = select(
+            month_label,
+            func.coalesce(func.sum(Image.exposure_time), 0),
+        ).where(
+            Image.capture_date.isnot(None), Image.image_type == "LIGHT"
+        ).group_by(month_label).order_by(month_label)
+        async with async_session() as s:
+            return (await s.execute(q)).all()
+
+    async def _query_site_coords():
+        async with async_session() as s:
+            return await _extract_site_coords(s)
+
+    async def _query_timeline_weekly():
+        week_label = func.to_char(Image.capture_date, 'IYYY-"W"IW').label('week')
+        q = select(
+            week_label,
+            func.coalesce(func.sum(Image.exposure_time), 0),
+        ).where(
+            Image.capture_date.isnot(None), Image.image_type == "LIGHT"
+        ).group_by(week_label).order_by(week_label)
+        async with async_session() as s:
+            return (await s.execute(q)).all()
+
+    async def _query_timeline_daily():
+        day_label = func.to_char(Image.capture_date, 'YYYY-MM-DD').label('day')
+        q = select(
+            day_label,
+            func.coalesce(func.sum(Image.exposure_time), 0),
+        ).where(
+            Image.capture_date.isnot(None), Image.image_type == "LIGHT"
+        ).group_by(day_label).order_by(day_label)
+        async with async_session() as s:
+            return (await s.execute(q)).all()
+
+    async def _query_top_targets():
+        q = select(
+            Target.primary_name, func.coalesce(func.sum(Image.exposure_time), 0)
+        ).join(Target, Image.resolved_target_id == Target.id).where(
+            Image.image_type == "LIGHT"
+        ).group_by(Target.primary_name).order_by(
+            func.sum(Image.exposure_time).desc()
+        ).limit(20)
+        async with async_session() as s:
+            return (await s.execute(q)).all()
+
+    async def _query_data_quality():
+        q = select(
+            func.avg(Image.median_hfr),
+            func.avg(Image.eccentricity),
+            func.min(Image.median_hfr),
+        ).where(Image.image_type == "LIGHT")
+        async with async_session() as s:
+            return (await s.execute(q)).one()
+
+    async def _query_hfr_buckets():
+        bucket_ranges = [(0, 1.0), (1.0, 1.5), (1.5, 2.0), (2.0, 2.5), (2.5, 3.0), (3.0, 4.0), (4.0, 5.0), (5.0, 100)]
+        bucket_cases = [
+            func.count(Image.id).filter(
+                Image.median_hfr >= low, Image.median_hfr < high
+            ).label(f"b{i}")
+            for i, (low, high) in enumerate(bucket_ranges)
+        ]
+        q = select(*bucket_cases).where(Image.image_type == "LIGHT")
+        async with async_session() as s:
+            return (await s.execute(q)).one()
+
+    async def _query_db_size():
+        q = select(func.pg_database_size(func.current_database()))
+        async with async_session() as s:
+            try:
+                return (await s.execute(q)).scalar_one()
+            except Exception:
+                return 0
+
+    async def _query_ingest_history():
+        capture_day = func.date(Image.capture_date).label('capture_day')
+        q = select(
+            capture_day, func.count(Image.id)
+        ).where(
+            Image.capture_date.isnot(None)
+        ).group_by(capture_day).order_by(capture_day.desc()).limit(30)
+        async with async_session() as s:
+            return (await s.execute(q)).all()
+
+    # --- Run all queries in parallel ---
+    (
+        ov_row,
+        cam_rows,
+        tel_rows,
+        perf_rows,
+        filter_rows,
+        monthly_rows,
+        site_coords,
+        weekly_rows,
+        daily_rows,
+        top_rows,
+        quality_row,
+        bucket_row,
+        db_bytes,
+        ingest_rows,
+    ) = await asyncio.gather(
+        _query_overview(),
+        _query_cameras(),
+        _query_telescopes(),
+        _query_equipment_perf(),
+        _query_filter_usage(),
+        _query_timeline_monthly(),
+        _query_site_coords(),
+        _query_timeline_weekly(),
+        _query_timeline_daily(),
+        _query_top_targets(),
+        _query_data_quality(),
+        _query_hfr_buckets(),
+        _query_db_size(),
+        _query_ingest_history(),
     )
-    ov = await session.execute(overview_q)
+
+    # --- Post-processing (sequential, CPU-only) ---
+
+    # Overview
     (
         total_seconds,
         target_count,
@@ -194,7 +367,7 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
         session_count,
         first_capture_date,
         last_capture_date,
-    ) = ov.one()
+    ) = ov_row
 
     overview = OverviewStats(
         total_integration_seconds=float(total_seconds),
@@ -206,26 +379,19 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
         last_capture_date=last_capture_date.isoformat() if last_capture_date else None,
     )
 
-    # Equipment
-    cam_q = select(Image.camera, func.count(Image.id)).where(
-        Image.camera.isnot(None)
-    ).group_by(Image.camera).order_by(func.count(Image.id).desc())
-    cam_result = await session.execute(cam_q)
+    # Equipment - cameras
     raw_cam_counts: dict[str, int] = {}
     cam_raw_names: dict[str, set[str]] = {}
-    for r in cam_result.all():
+    for r in cam_rows:
         canonical = normalize_equipment(r[0], cam_map) or r[0]
         raw_cam_counts[canonical] = raw_cam_counts.get(canonical, 0) + r[1]
         cam_raw_names.setdefault(canonical, set()).add(r[0])
     cameras = [EquipmentItem(name=name, frame_count=count, grouped=len(cam_raw_names[name]) > 1) for name, count in sorted(raw_cam_counts.items(), key=lambda x: x[1], reverse=True)]
 
-    tel_q = select(Image.telescope, func.count(Image.id)).where(
-        Image.telescope.isnot(None)
-    ).group_by(Image.telescope).order_by(func.count(Image.id).desc())
-    tel_result = await session.execute(tel_q)
+    # Equipment - telescopes
     raw_tel_counts: dict[str, int] = {}
     tel_raw_names: dict[str, set[str]] = {}
-    for r in tel_result.all():
+    for r in tel_rows:
         canonical = normalize_equipment(r[0], tel_map) or r[0]
         raw_tel_counts[canonical] = raw_tel_counts.get(canonical, 0) + r[1]
         tel_raw_names.setdefault(canonical, set()).add(r[0])
@@ -233,31 +399,9 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
 
     equipment = EquipmentStats(cameras=cameras, telescopes=telescopes)
 
-    # Equipment Performance - metrics per telescope+camera+filter combo
-    # Use nullif to treat 0 as missing data for all metrics
-    hfr_nz = func.nullif(Image.median_hfr, 0)
-    ecc_nz = func.nullif(Image.eccentricity, 0)
-    fwhm_nz = func.nullif(Image.fwhm, 0)
-    perf_q = select(
-        Image.telescope,
-        Image.camera,
-        Image.filter_used,
-        func.count(Image.id).label("frame_count"),
-        func.coalesce(func.sum(Image.exposure_time), 0).label("total_seconds"),
-        func.percentile_cont(0.5).within_group(hfr_nz).label("med_hfr"),
-        func.min(hfr_nz).label("best_hfr"),
-        func.percentile_cont(0.5).within_group(ecc_nz).label("med_ecc"),
-        func.percentile_cont(0.5).within_group(fwhm_nz).label("med_fwhm"),
-    ).where(
-        Image.image_type == "LIGHT",
-        Image.telescope.isnot(None),
-        Image.camera.isnot(None),
-    ).group_by(Image.telescope, Image.camera, Image.filter_used)
-    perf_result = await session.execute(perf_q)
-
-    # Aggregate by normalized telescope+camera, with per-filter breakdown
+    # Equipment Performance - aggregate by normalized telescope+camera
     combo_data: dict[tuple[str, str], dict] = {}
-    for r in perf_result.all():
+    for r in perf_rows:
         tel = normalize_equipment(r.telescope, tel_map) or r.telescope
         cam = normalize_equipment(r.camera, cam_map) or r.camera
         filt = normalize_filter(r.filter_used, filter_map) or r.filter_used
@@ -294,7 +438,6 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
         if r.med_fwhm is not None:
             cd["fwhm_vals"].append((r.med_fwhm, r.frame_count))
 
-        # Per-filter breakdown (skip rows without a filter name)
         if filt is None:
             continue
         cd["filters"].add(filt)
@@ -341,9 +484,9 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
     def safe_round(v: float | None) -> float | None:
         return round(float(v), 2) if v is not None else None
 
-    def build_filter_metrics(filter_rows: dict) -> list[EquipmentFilterMetrics]:
+    def build_filter_metrics(filter_rows_dict: dict) -> list[EquipmentFilterMetrics]:
         result = []
-        for fname, fr in sorted(filter_rows.items(), key=lambda x: x[1]["frame_count"], reverse=True):
+        for fname, fr in sorted(filter_rows_dict.items(), key=lambda x: x[1]["frame_count"], reverse=True):
             result.append(EquipmentFilterMetrics(
                 filter_name=fname,
                 frame_count=fr["frame_count"],
@@ -371,89 +514,31 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
             filter_breakdown=build_filter_metrics(cd["filter_rows"]),
         ))
 
-    # Filter usage (total seconds per optical filter)
-    filter_q = select(
-        Image.filter_used, func.coalesce(func.sum(Image.exposure_time), 0)
-    ).where(
-        Image.filter_used.isnot(None), Image.image_type == "LIGHT"
-    ).group_by(Image.filter_used)
-    filter_result = await session.execute(filter_q)
-    raw_filter_usage = {r[0]: float(r[1]) for r in filter_result.all() if r[0]}
+    # Filter usage
+    raw_filter_usage = {r[0]: float(r[1]) for r in filter_rows if r[0]}
     normalized_usage: dict[str, float] = {}
     for name, seconds in raw_filter_usage.items():
         canonical = normalize_filter(name, filter_map) or name
         normalized_usage[canonical] = normalized_usage.get(canonical, 0.0) + seconds
     filter_usage = normalized_usage
 
-    # Timeline - monthly (backward compat)
-    month_label = func.to_char(Image.capture_date, 'YYYY-MM').label('month')
-    timeline_q = select(
-        month_label,
-        func.coalesce(func.sum(Image.exposure_time), 0),
-    ).where(
-        Image.capture_date.isnot(None), Image.image_type == "LIGHT"
-    ).group_by(month_label).order_by(month_label)
-    timeline_result = await session.execute(timeline_q)
-    timeline = [TimelineEntry(month=r[0], integration_seconds=float(r[1])) for r in timeline_result.all()]
+    # Timeline - monthly
+    timeline = [TimelineEntry(month=r[0], integration_seconds=float(r[1])) for r in monthly_rows]
 
-    # Site coordinates (for efficiency calc)
-    site_coords = await _extract_site_coords(session)
-
-    # Timeline - weekly (raw data only, efficiency computed after DB work)
-    week_label = func.to_char(Image.capture_date, 'IYYY-"W"IW').label('week')
-    weekly_q = select(
-        week_label,
-        func.coalesce(func.sum(Image.exposure_time), 0),
-    ).where(
-        Image.capture_date.isnot(None), Image.image_type == "LIGHT"
-    ).group_by(week_label).order_by(week_label)
-    weekly_result = await session.execute(weekly_q)
-    weekly_raw = [(r[0], float(r[1])) for r in weekly_result.all()]
-
-    # Timeline - daily (raw data only)
-    day_label = func.to_char(Image.capture_date, 'YYYY-MM-DD').label('day')
-    daily_q = select(
-        day_label,
-        func.coalesce(func.sum(Image.exposure_time), 0),
-    ).where(
-        Image.capture_date.isnot(None), Image.image_type == "LIGHT"
-    ).group_by(day_label).order_by(day_label)
-    daily_result = await session.execute(daily_q)
-    daily_raw = [(r[0], float(r[1])) for r in daily_result.all()]
+    # Timeline - weekly / daily raw
+    weekly_raw = [(r[0], float(r[1])) for r in weekly_rows]
+    daily_raw = [(r[0], float(r[1])) for r in daily_rows]
 
     # Top targets
-    top_q = select(
-        Target.primary_name, func.coalesce(func.sum(Image.exposure_time), 0)
-    ).join(Target, Image.resolved_target_id == Target.id).where(
-        Image.image_type == "LIGHT"
-    ).group_by(Target.primary_name).order_by(
-        func.sum(Image.exposure_time).desc()
-    ).limit(20)
-    top_result = await session.execute(top_q)
-    top_targets = [TopTarget(name=r[0], integration_seconds=float(r[1])) for r in top_result.all()]
+    top_targets = [TopTarget(name=r[0], integration_seconds=float(r[1])) for r in top_rows]
 
     # Data quality
-    quality_q = select(
-        func.avg(Image.median_hfr),
-        func.avg(Image.eccentricity),
-        func.min(Image.median_hfr),
-    ).where(Image.image_type == "LIGHT")
-    quality_result = await session.execute(quality_q)
-    avg_hfr, avg_ecc, best_hfr = quality_result.one()
+    avg_hfr, avg_ecc, best_hfr = quality_row
 
-    # HFR distribution buckets (single query using CASE expressions)
     bucket_ranges = [(0, 1.0), (1.0, 1.5), (1.5, 2.0), (2.0, 2.5), (2.5, 3.0), (3.0, 4.0), (4.0, 5.0), (5.0, 100)]
-    bucket_cases = [
-        func.count(Image.id).filter(
-            Image.median_hfr >= low, Image.median_hfr < high
-        ).label(f"b{i}")
-        for i, (low, high) in enumerate(bucket_ranges)
-    ]
-    bucket_q = select(*bucket_cases).where(Image.image_type == "LIGHT")
-    bucket_result = (await session.execute(bucket_q)).one()
     hfr_buckets = []
     for i, (low, high) in enumerate(bucket_ranges):
-        count = bucket_result[i] or 0
+        count = bucket_row[i] or 0
         if count > 0:
             label = f"{low:.1f}-{high:.1f}" if high < 100 else f"{low:.1f}+"
             hfr_buckets.append(HfrBucket(bucket=label, count=count))
@@ -465,41 +550,26 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
         hfr_distribution=hfr_buckets,
     )
 
-    # Storage - use cached values (background task refreshes them)
-    db_size_q = select(func.pg_database_size(func.current_database()))
-    try:
-        db_result = await session.execute(db_size_q)
-        db_bytes = db_result.scalar_one()
-    except Exception:
-        db_bytes = 0
-
+    # Storage
     storage = StorageStats(
         fits_bytes=_storage_cache["fits"],
         thumbnail_bytes=_storage_cache["thumbnails"],
         database_bytes=db_bytes,
     )
 
-    # Ingest history (images grouped by capture date)
-    capture_day = func.date(Image.capture_date).label('capture_day')
-    ingest_q = select(
-        capture_day, func.count(Image.id)
-    ).where(
-        Image.capture_date.isnot(None)
-    ).group_by(capture_day).order_by(capture_day.desc()).limit(30)
-    ingest_result = await session.execute(ingest_q)
+    # Ingest history
     ingest_history = [
-        IngestEntry(date=str(r[0]), files_added=r[1]) for r in ingest_result.all()
+        IngestEntry(date=str(r[0]), files_added=r[1]) for r in ingest_rows
     ]
 
-    # --- Efficiency from precomputed site_dark_hours table (instant DB lookup) ---
+    # --- Dark hours lookup (depends on site_coords + daily_raw) ---
     from datetime import date as date_type, timedelta
     from app.models.site_dark_hours import SiteDarkHours
     import calendar as cal
 
     dark_map: dict[date_type, float] = {}
     if site_coords and daily_raw:
-        # Constrain dark hours lookup to the date range we actually have data for
-        min_date_str = daily_raw[0][0]   # daily_raw is sorted by day ascending
+        min_date_str = daily_raw[0][0]
         max_date_str = daily_raw[-1][0]
         min_date_parts = min_date_str.split("-")
         max_date_parts = max_date_str.split("-")
@@ -511,8 +581,9 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
             SiteDarkHours.date >= min_date,
             SiteDarkHours.date <= max_date,
         )
-        dark_result = await session.execute(dark_q)
-        dark_map = {row[0]: row[1] for row in dark_result.all()}
+        async with async_session() as s:
+            dark_result = await s.execute(dark_q)
+            dark_map = {row[0]: row[1] for row in dark_result.all()}
 
     def _eff_for_dates(dates: list[date_type], integration_secs: float) -> float | None:
         total_dark = sum(dark_map.get(d, 0.0) for d in dates)

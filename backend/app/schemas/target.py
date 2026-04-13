@@ -175,6 +175,12 @@ class TargetAggregationResponse(BaseModel):
     page_size: int
 
 
+class CatalogMembershipEntry(BaseModel):
+    catalog_name: str
+    catalog_number: str
+    metadata: dict | None = None
+
+
 class TargetDetailResponse(BaseModel):
     target_id: str
     primary_name: str
@@ -202,6 +208,15 @@ class TargetDetailResponse(BaseModel):
     avg_guiding_rms_arcsec: float | None = None
     avg_detected_stars: float | None = None
     notes: str | None = None
+    # SAC
+    sac_description: str | None = None
+    sac_notes: str | None = None
+    # SkyView
+    reference_thumbnail_path: str | None = None
+    # Gaia DR3
+    distance_pc: float | None = None
+    # Catalog memberships
+    catalog_memberships: list[CatalogMembershipEntry] = []
 
 
 class SessionDetailResponse(BaseModel):

@@ -1,13 +1,13 @@
-import { Component, For, Show, createResource } from "solid-js";
+import { Component, For, Show } from "solid-js";
 import { useDashboardFilters } from "./DashboardFilterProvider";
 import { useSettingsContext } from "./SettingsProvider";
-import { api } from "../api/client";
+import { useFilterOptions } from "../store/filterOptions";
 import { getFilterBadgeStyle } from "../utils/filterStyles";
 
 const FilterToggles: Component = () => {
   const { filters, toggleOpticalFilter } = useDashboardFilters();
   const { settings, filterColorMap, filterAliasMap, filterBadgeStyle } = useSettingsContext();
-  const [discovered] = createResource(() => api.getDiscovered("filters").then((r) => r.items));
+  const { discoveredFilters: discovered } = useFilterOptions();
 
   const isActive = (f: string) => filters().opticalFilters.includes(f);
 

@@ -1,4 +1,4 @@
-import { Component, For, Show, createSignal, createEffect } from "solid-js";
+import { Component, For, Show, createSignal } from "solid-js";
 import { useDashboardFilters } from "./DashboardFilterProvider";
 import { useSettingsContext } from "./SettingsProvider";
 import { debounce } from "../utils/debounce";
@@ -91,106 +91,61 @@ const MetricFilters: Component = () => {
   const { filters, updateMetricFilter, updateQualityFilters } = useDashboardFilters();
   const { displaySettings } = useSettingsContext();
 
-  const [groupOpen, setGroupOpen] = createSignal<Record<string, boolean>>({});
-
-  const toggleGroup = (key: string) => {
-    setGroupOpen((prev) => ({ ...prev, [key]: !prev[key] }));
-  };
-
-  const visibleGroups = () => {
+  const allVisibleFields = () => {
     const ds = displaySettings();
     if (!ds) return [];
-    return GROUPS.filter((g) => {
-      const groupSettings = ds[g.key as keyof typeof ds];
-      if (!groupSettings || !groupSettings.enabled) return false;
-      // Only include if at least one matching field is enabled
-      return g.fields.some((fieldKey) => {
-        // Map metric key to display settings field key (stars -> detected_stars, guiding_rms -> guiding_rms_arcsec, etc.)
+    const result: string[] = [];
+    for (const group of GROUPS) {
+      const groupSettings = ds[group.key as keyof typeof ds];
+      if (!groupSettings || !groupSettings.enabled) continue;
+      for (const fieldKey of group.fields) {
         const dsFieldKey = metricToDisplayField(fieldKey);
-        return groupSettings.fields[dsFieldKey] === true || groupSettings.fields[fieldKey] === true;
-      });
-    });
-  };
-
-  const visibleFields = (group: { key: string; fields: string[] }) => {
-    const ds = displaySettings();
-    if (!ds) return [];
-    const groupSettings = ds[group.key as keyof typeof ds];
-    if (!groupSettings) return [];
-    return group.fields.filter((fieldKey) => {
-      const dsFieldKey = metricToDisplayField(fieldKey);
-      return groupSettings.fields[dsFieldKey] === true || groupSettings.fields[fieldKey] === true;
-    });
+        if (groupSettings.fields[dsFieldKey] === true || groupSettings.fields[fieldKey] === true) {
+          result.push(fieldKey);
+        }
+      }
+    }
+    return result;
   };
 
   return (
-    <Show when={visibleGroups().length > 0}>
-      <div class="space-y-3">
-            <For each={visibleGroups()}>
-              {(group) => {
-                const fields = visibleFields(group);
-                if (fields.length === 0) return null;
-                return (
-                  <div class="space-y-2">
-                    {/* Sub-section header */}
-                    <button
-                      class="w-full flex items-center justify-between text-xs text-theme-text-secondary hover:text-theme-text-primary transition-colors"
-                      onClick={() => toggleGroup(group.key)}
-                    >
-                      <span>{group.label}</span>
-                      <svg
-                        class={`w-3 h-3 transition-transform ${groupOpen()[group.key] ? "rotate-180" : ""}`}
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
-                      </svg>
-                    </button>
-
-                    <Show when={groupOpen()[group.key]}>
-                      <div class="space-y-2 pl-1">
-                        <For each={fields}>
-                          {(fieldKey) => {
-                            const def = METRIC_FIELDS[fieldKey];
-                            if (!def) return null;
-                            if (fieldKey === "hfr") {
-                              const qf = () => filters().qualityFilters;
-                              return (
-                                <MetricRow
-                                  metricKey={fieldKey}
-                                  label={def.label}
-                                  step={def.step}
-                                  initialMin={qf().hfrMin ?? undefined}
-                                  initialMax={qf().hfrMax ?? undefined}
-                                  onChange={(min, max) =>
-                                    updateQualityFilters({ hfrMin: min, hfrMax: max })
-                                  }
-                                />
-                              );
-                            }
-                            const current = () => filters().metricFilters[fieldKey];
-                            return (
-                              <MetricRow
-                                metricKey={fieldKey}
-                                label={def.label}
-                                step={def.step}
-                                isInt={def.isInt}
-                                initialMin={current()?.min}
-                                initialMax={current()?.max}
-                                onChange={(min, max) =>
-                                  updateMetricFilter(fieldKey, { min, max })
-                                }
-                              />
-                            );
-                          }}
-                        </For>
-                      </div>
-                    </Show>
-                  </div>
-                );
-              }}
-            </For>
+    <Show when={allVisibleFields().length > 0}>
+      <div class="space-y-2">
+        <For each={allVisibleFields()}>
+          {(fieldKey) => {
+            const def = METRIC_FIELDS[fieldKey];
+            if (!def) return null;
+            if (fieldKey === "hfr") {
+              const qf = () => filters().qualityFilters;
+              return (
+                <MetricRow
+                  metricKey={fieldKey}
+                  label={def.label}
+                  step={def.step}
+                  initialMin={qf().hfrMin ?? undefined}
+                  initialMax={qf().hfrMax ?? undefined}
+                  onChange={(min, max) =>
+                    updateQualityFilters({ hfrMin: min, hfrMax: max })
+                  }
+                />
+              );
+            }
+            const current = () => filters().metricFilters[fieldKey];
+            return (
+              <MetricRow
+                metricKey={fieldKey}
+                label={def.label}
+                step={def.step}
+                isInt={def.isInt}
+                initialMin={current()?.min}
+                initialMax={current()?.max}
+                onChange={(min, max) =>
+                  updateMetricFilter(fieldKey, { min, max })
+                }
+              />
+            );
+          }}
+        </For>
       </div>
     </Show>
   );

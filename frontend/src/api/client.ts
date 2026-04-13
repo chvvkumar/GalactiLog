@@ -214,6 +214,7 @@ function buildTargetQuery(filters: ActiveFilters, page?: number, pageSize?: numb
   if (filters.customColumnFilters.length > 0) {
     params.set("custom_filters", JSON.stringify(filters.customColumnFilters));
   }
+  if (filters.catalog) params.set("catalog", filters.catalog);
   params.set("include_custom", "true");
   return params.toString();
 }
@@ -707,6 +708,21 @@ export const api = {
       method: "PUT",
       body: JSON.stringify(body),
     }),
+
+  // Planning
+  getNightEphemeris: (date: string) =>
+    fetchJson<import("../types").NightEphemeris>(`/planning/night?date=${date}`),
+
+  // Reference thumbnails
+  getReferenceThumbnailUrl: (targetId: string) =>
+    `${API_BASE}/targets/${encodeURIComponent(targetId)}/reference-thumbnail`,
+
+  // Catalog enrichment tasks
+  triggerXmatchEnrichment: () =>
+    fetchJson<{ status: string; message: string }>("/scan/xmatch-enrichment", { method: "POST" }),
+
+  triggerReferenceThumbnails: (force = false) =>
+    fetchJson<{ status: string; message: string }>(`/scan/generate-reference-thumbnails${force ? "?force=true" : ""}`, { method: "POST" }),
 
   // Backup / Restore
   createBackup: async (): Promise<Blob> => {

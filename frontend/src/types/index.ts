@@ -142,6 +142,15 @@ export interface TargetDetailResponse {
   avg_guiding_rms_arcsec: number | null;
   avg_detected_stars: number | null;
   notes: string | null;
+  // SAC
+  sac_description: string | null;
+  sac_notes: string | null;
+  // SkyView
+  reference_thumbnail_path: string | null;
+  // Gaia DR3
+  distance_pc: number | null;
+  // Catalog memberships
+  catalog_memberships: CatalogMembershipEntry[];
 }
 
 export interface RigDetail {
@@ -240,6 +249,7 @@ export interface ActiveFilters {
   qualityFilters: { hfrMin?: number; hfrMax?: number };
   metricFilters: Record<string, { min?: number; max?: number }>;
   customColumnFilters: { slug: string; value: string }[];
+  catalog: string | null;
 }
 
 // === Scan (unchanged) ===
@@ -472,6 +482,27 @@ export interface CalendarEntry {
   frame_count: number;
 }
 
+// === Catalog Memberships ===
+
+export interface CatalogMembershipEntry {
+  catalog_name: string;
+  catalog_number: string;
+  metadata: Record<string, any> | null;
+}
+
+// === Night Ephemeris (Planning) ===
+
+export interface NightEphemeris {
+  date: string;
+  astro_dusk: string | null;
+  astro_dawn: string | null;
+  moon_phase: string | null;
+  moon_illumination: number | null;
+  moon_rise: string | null;
+  moon_set: string | null;
+  source_available: boolean;
+}
+
 // === Settings ===
 
 export interface MetricGroupSettings {
@@ -503,6 +534,9 @@ export interface GeneralSettings {
   content_width: string;
   mosaic_keywords?: string[];
   mosaic_campaign_gap_days?: number;
+  observer_latitude?: number | null;
+  observer_longitude?: number | null;
+  observer_name?: string | null;
 }
 
 export interface FilterConfig {

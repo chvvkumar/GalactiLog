@@ -54,7 +54,8 @@ const Sidebar: Component = () => {
   const { resetFilters, targetData, filters } = useDashboardFilters();
   const { customColumns } = useSettingsContext();
 
-  const hasActiveFilters = () => getActiveSectionIds(filters() as unknown as ActiveSectionFilters).size > 0;
+  const activeSections = () => getActiveSectionIds(filters() as unknown as ActiveSectionFilters);
+  const hasActiveFilters = () => activeSections().size > 0;
 
   return (
     <aside class="w-full min-h-0 max-h-[calc(100vh-57px)] p-4 space-y-3 overflow-y-auto">
@@ -89,15 +90,15 @@ const Sidebar: Component = () => {
           </section>
         )}
       </Show>
-      <CollapsibleSection id="search" label="Search"><SearchBar /></CollapsibleSection>
-      <CollapsibleSection id="object-type" label="Object Type"><ObjectTypeToggles /></CollapsibleSection>
-      <CollapsibleSection id="date-range" label="Date Range"><DateRangePicker /></CollapsibleSection>
-      <CollapsibleSection id="filters" label="Filters"><FilterToggles /></CollapsibleSection>
-      <CollapsibleSection id="equipment" label="Equipment"><HardwareSelects /></CollapsibleSection>
-      <CollapsibleSection id="metrics" label="Metrics"><MetricFilters /></CollapsibleSection>
-      <CollapsibleSection id="fits-query" label="FITS Header Query"><FitsQueryBuilder /></CollapsibleSection>
+      <CollapsibleSection id="search" label="Search" active={activeSections().has("search")}><SearchBar /></CollapsibleSection>
+      <CollapsibleSection id="object-type" label="Object Type" active={activeSections().has("object-type")}><ObjectTypeToggles /></CollapsibleSection>
+      <CollapsibleSection id="date-range" label="Date Range" active={activeSections().has("date-range")}><DateRangePicker /></CollapsibleSection>
+      <CollapsibleSection id="filters" label="Filters" active={activeSections().has("filters")}><FilterToggles /></CollapsibleSection>
+      <CollapsibleSection id="equipment" label="Equipment" active={activeSections().has("equipment")}><HardwareSelects /></CollapsibleSection>
+      <CollapsibleSection id="metrics" label="Metrics Quality" active={activeSections().has("metrics")}><MetricFilters /></CollapsibleSection>
+      <CollapsibleSection id="fits-query" label="FITS Header Query" active={activeSections().has("fits-query")}><FitsQueryBuilder /></CollapsibleSection>
       <Show when={(customColumns() ?? []).length > 0}>
-        <CollapsibleSection id="custom-columns" label="Custom Columns"><CustomColumnFilters /></CollapsibleSection>
+        <CollapsibleSection id="custom-columns" label="Custom Columns" active={activeSections().has("custom-columns")}><CustomColumnFilters /></CollapsibleSection>
       </Show>
       <button
         onClick={resetFilters}

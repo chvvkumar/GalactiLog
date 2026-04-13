@@ -1,0 +1,110 @@
+catalog_id,ngc_ic_id,object_type,constellation,common_name
+C1,NGC 188,OC,Cep,
+C2,NGC 40,PN,Cep,Bow-Tie Nebula
+C3,NGC 4236,Gx,Dra,
+C4,NGC 7023,Nb,Cep,Iris Nebula
+C5,IC 342,Gx,Cam,
+C6,NGC 6543,PN,Dra,Cat's Eye Nebula
+C7,NGC 2403,Gx,Cam,
+C8,NGC 559,OC,Cas,
+C9,Sh2-155,Nb,Cep,Cave Nebula
+C10,NGC 663,OC,Cas,
+C11,NGC 7635,Nb,Cas,Bubble Nebula
+C12,NGC 6946,Gx,Cep,Fireworks Galaxy
+C13,NGC 457,OC,Cas,Owl Cluster
+C14,NGC 869,OC,Per,Double Cluster
+C15,NGC 6826,PN,Cyg,Blinking Planetary
+C16,NGC 7243,OC,Lac,
+C17,NGC 147,Gx,Cas,
+C18,NGC 185,Gx,Cas,
+C19,IC 5146,Nb,Cyg,Cocoon Nebula
+C20,NGC 7000,Nb,Cyg,North America Nebula
+C21,NGC 4449,Gx,CVn,
+C22,NGC 7662,PN,And,Blue Snowball Nebula
+C23,NGC 891,Gx,And,
+C24,NGC 1275,Gx,Per,Perseus A
+C25,NGC 2419,GC,Lyn,Intergalactic Wanderer
+C26,NGC 4244,Gx,CVn,Silver Needle Galaxy
+C27,NGC 6888,Nb,Cyg,Crescent Nebula
+C28,NGC 752,OC,And,
+C29,NGC 5005,Gx,CVn,
+C30,NGC 7331,Gx,Peg,
+C31,IC 405,Nb,Aur,Flaming Star Nebula
+C32,NGC 4631,Gx,CVn,Whale Galaxy
+C33,NGC 6992,SNR,Cyg,Eastern Veil Nebula
+C34,NGC 6960,SNR,Cyg,Western Veil Nebula
+C35,NGC 4889,Gx,Com,
+C36,NGC 4559,Gx,Com,
+C37,NGC 6885,OC,Vul,
+C38,NGC 4565,Gx,Com,Needle Galaxy
+C39,NGC 2392,PN,Gem,Eskimo Nebula
+C40,NGC 3626,Gx,Leo,
+C41,Mel 25,OC,Tau,Hyades
+C42,NGC 7006,GC,Del,
+C43,NGC 7814,Gx,Peg,
+C44,NGC 7479,Gx,Peg,
+C45,NGC 5248,Gx,Boo,
+C46,NGC 2261,Nb,Mon,Hubble's Variable Nebula
+C47,NGC 6934,GC,Del,
+C48,NGC 2775,Gx,Cnc,
+C49,NGC 2237,Nb,Mon,Rosette Nebula
+C50,NGC 2244,OC,Mon,
+C51,IC 1613,Gx,Cet,
+C52,NGC 4697,Gx,Vir,
+C53,NGC 3115,Gx,Sex,Spindle Galaxy
+C54,NGC 2506,OC,Mon,
+C55,NGC 7009,PN,Aqr,Saturn Nebula
+C56,NGC 246,PN,Cet,Skull Nebula
+C57,NGC 6822,Gx,Sgr,Barnard's Galaxy
+C58,NGC 2360,OC,CMa,
+C59,NGC 3242,PN,Hya,Ghost of Jupiter
+C60,NGC 4038,Gx,Crv,Antennae Galaxies
+C61,NGC 4039,Gx,Crv,Antennae Galaxies
+C62,NGC 247,Gx,Cet,
+C63,NGC 7293,PN,Aqr,Helix Nebula
+C64,NGC 2362,OC,CMa,Tau Canis Majoris Cluster
+C65,NGC 253,Gx,Scl,Sculptor Galaxy
+C66,NGC 5694,GC,Hya,
+C67,NGC 1097,Gx,For,
+C68,NGC 6729,Nb,CrA,
+C69,NGC 6302,PN,Sco,Bug Nebula
+C70,NGC 300,Gx,Scl,
+C71,NGC 2477,OC,Pup,
+C72,NGC 55,Gx,Scl,
+C73,NGC 1851,GC,Col,
+C74,NGC 3132,PN,Vel,Eight-Burst Nebula
+C75,NGC 6124,OC,Sco,
+C76,NGC 6231,OC,Sco,
+C77,NGC 5128,Gx,Cen,Centaurus A
+C78,NGC 6541,GC,CrA,
+C79,NGC 3201,GC,Vel,
+C80,NGC 5139,GC,Cen,Omega Centauri
+C81,NGC 6352,GC,Ara,
+C82,NGC 6193,OC,Ara,
+C83,NGC 4945,Gx,Cen,
+C84,NGC 5286,GC,Cen,
+C85,IC 2391,OC,Vel,Omicron Velorum Cluster
+C86,NGC 6397,GC,Ara,
+C87,NGC 1261,GC,Hor,
+C88,NGC 5823,OC,Cir,
+C89,NGC 6087,OC,Nor,S Normae Cluster
+C90,NGC 2867,PN,Car,
+C91,NGC 3532,OC,Car,Wishing Well Cluster
+C92,NGC 3372,Nb,Car,Eta Carinae Nebula
+C93,NGC 6752,GC,Pav,
+C94,NGC 4755,OC,Cru,Jewel Box
+C95,NGC 6025,OC,TrA,
+C96,NGC 2516,OC,Car,
+C97,NGC 3766,OC,Cen,Pearl Cluster
+C98,NGC 4609,OC,Cru,
+C99,NGC 3532,OC,Car,
+C100,IC 2944,OC,Cen,Lambda Centauri Nebula
+C101,NGC 6744,Gx,Pav,
+C102,IC 2602,OC,Car,Theta Carinae Cluster
+C103,NGC 2070,Nb,Dor,Tarantula Nebula
+C104,NGC 362,GC,Tuc,
+C105,NGC 4833,GC,Mus,
+C106,NGC 104,GC,Tuc,47 Tucanae
+C107,NGC 6101,GC,Aps,
+C108,NGC 4372,GC,Mus,
+C109,NGC 3195,PN,Cha,
