@@ -1,4 +1,5 @@
 import { Component, createSignal, createEffect, Show, For } from "solid-js";
+import { createStore, reconcile, unwrap } from "solid-js/store";
 import { scanFilters } from "../api/scanFilters";
 import type {
   ScanFilters,
@@ -37,7 +38,7 @@ interface Props {
 }
 
 const ScanFiltersPanel: Component<Props> = (props) => {
-  const [filters, setFilters] = createSignal<ScanFilters>(EMPTY);
+  const [filters, setFilters] = createStore<ScanFilters>(structuredClone(EMPTY));
   const [original, setOriginal] = createSignal<ScanFilters>(EMPTY);
   const [fitsRoot, setFitsRoot] = createSignal<string>("");
   const [dirty, setDirty] = createSignal(false);
@@ -52,7 +53,7 @@ const ScanFiltersPanel: Component<Props> = (props) => {
   const [testing, setTesting] = createSignal(false);
 
   const describeRule = (id: string): string => {
-    const r = filters().name_rules.find((x) => x.id === id);
+    const r = filters.name_rules.find((x) => x.id === id);
     if (!r) return id.slice(0, 8);
     return `${r.action} ${r.type} on ${r.target}: ${r.pattern}`;
   };
@@ -83,7 +84,7 @@ const ScanFiltersPanel: Component<Props> = (props) => {
   };
 
   createEffect(() => {
-    for (const r of filters().name_rules) {
+    for (const r of filters.name_rules) {
       if (r.type === "regex" && r.pattern.trim()) validatePattern(r.pattern);
     }
   });
@@ -97,14 +98,14 @@ const ScanFiltersPanel: Component<Props> = (props) => {
     }
     return null;
   };
-  const anyRuleInvalid = () => filters().name_rules.some((r) => ruleIsInvalid(r) !== null);
+  const anyRuleInvalid = () => filters.name_rules.some((r) => ruleIsInvalid(r) !== null);
   const anyPathInvalid = () =>
-    filters().include_paths.some((p) => !pathIsInsideRoot(p)) ||
-    filters().exclude_paths.some((p) => !pathIsInsideRoot(p));
+    filters.include_paths.some((p) => !pathIsInsideRoot(p)) ||
+    filters.exclude_paths.some((p) => !pathIsInsideRoot(p));
   const canSave = () => dirty() && !saving() && !anyRuleInvalid() && !anyPathInvalid();
 
   const applyResponse = (resp: ScanFiltersResponse) => {
-    setFilters(resp.filters);
+    setFilters(reconcile(resp.filters));
     setOriginal(JSON.parse(JSON.stringify(resp.filters)));
     setFitsRoot(resp.fits_root);
     setDirty(false);
@@ -138,15 +139,15 @@ const ScanFiltersPanel: Component<Props> = (props) => {
   const markDirty = () => setDirty(true);
 
   const updateFilters = (patch: Partial<ScanFilters>) => {
-    setFilters({ ...filters(), ...patch });
+    setFilters(reconcile({ ...unwrap(filters), ...patch }));
     markDirty();
   };
 
   const save = async () => {
     setSaving(true);
     try {
-      const resp = await scanFilters.put(filters());
-      setFilters(resp.filters);
+      const resp = await scanFilters.put(unwrap(filters));
+      setFilters(reconcile(resp.filters));
       setOriginal(JSON.parse(JSON.stringify(resp.filters)));
       setDirty(false);
       showToast("Scan filters saved");
@@ -160,7 +161,7 @@ const ScanFiltersPanel: Component<Props> = (props) => {
   };
 
   const revert = () => {
-    setFilters(JSON.parse(JSON.stringify(original())));
+    setFilters(reconcile(JSON.parse(JSON.stringify(original()))));
     setDirty(false);
   };
 
@@ -325,9 +326,9 @@ const ScanFiltersPanel: Component<Props> = (props) => {
       class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em"
     >
       <summary class="p-3 cursor-pointer text-sm font-medium text-theme-text-primary">
-        Path & name rules — {filters().include_paths.length} include path(s),{" "}
-        {filters().exclude_paths.length} exclude path(s),{" "}
-        {filters().name_rules.length} name rule(s)
+        Path & name rules — {filters.include_paths.length} include path(s),{" "}
+        {filters.exclude_paths.length} exclude path(s),{" "}
+        {filters.name_rules.length} name rule(s)
         <Show when={dirty()}>
           <span class="ml-2 text-xs text-amber-400">unsaved</span>
         </Show>
@@ -391,24 +392,24 @@ include rule   ^M\\d+$          (regex, folder)`}
         <PathList
           label="Include paths"
           help="When empty, scans the entire configured data path. When set, scans only these folders (each must resolve inside the data root)."
-          values={filters().include_paths}
+          values={filters.include_paths}
           onRemove={(idx) => {
-            const next = filters().include_paths.filter((_, i) => i !== idx);
+            const next = filters.include_paths.filter((_, i) => i !== idx);
             updateFilters({ include_paths: next });
           }}
-          onAdd={(v) => updateFilters({ include_paths: [...filters().include_paths, v] })}
+          onAdd={(v) => updateFilters({ include_paths: [...filters.include_paths, v] })}
           onBrowse={() => setBrowsing("include")}
         />
 
         <PathList
           label="Exclude paths"
           help="Subtrees to skip entirely. Exclude always wins over include."
-          values={filters().exclude_paths}
+          values={filters.exclude_paths}
           onRemove={(idx) => {
-            const next = filters().exclude_paths.filter((_, i) => i !== idx);
+            const next = filters.exclude_paths.filter((_, i) => i !== idx);
             updateFilters({ exclude_paths: next });
           }}
-          onAdd={(v) => updateFilters({ exclude_paths: [...filters().exclude_paths, v] })}
+          onAdd={(v) => updateFilters({ exclude_paths: [...filters.exclude_paths, v] })}
           onBrowse={() => setBrowsing("exclude")}
         />
 
@@ -438,16 +439,15 @@ include rule   ^M\\d+$          (regex, folder)`}
                 </tr>
               </thead>
               <tbody>
-                <For each={filters().name_rules}>{(rule, i) => (
+                <For each={filters.name_rules}>{(rule, i) => (
                   <tr class="border-t border-theme-border">
                     <td class="p-1">
                       <input
                         type="checkbox"
                         checked={rule.enabled}
                         onChange={(e) => {
-                          const next = [...filters().name_rules];
-                          next[i()] = { ...rule, enabled: e.currentTarget.checked };
-                          updateFilters({ name_rules: next });
+                          setFilters("name_rules", i(), "enabled", e.currentTarget.checked);
+                          markDirty();
                         }}
                       />
                     </td>
@@ -455,9 +455,8 @@ include rule   ^M\\d+$          (regex, folder)`}
                       <select
                         value={rule.action}
                         onChange={(e) => {
-                          const next = [...filters().name_rules];
-                          next[i()] = { ...rule, action: e.currentTarget.value as RuleAction };
-                          updateFilters({ name_rules: next });
+                          setFilters("name_rules", i(), "action", e.currentTarget.value as RuleAction);
+                          markDirty();
                         }}
                         class="bg-theme-input border border-theme-border rounded px-1"
                       >
@@ -469,9 +468,8 @@ include rule   ^M\\d+$          (regex, folder)`}
                       <select
                         value={rule.type}
                         onChange={(e) => {
-                          const next = [...filters().name_rules];
-                          next[i()] = { ...rule, type: e.currentTarget.value as RuleType };
-                          updateFilters({ name_rules: next });
+                          setFilters("name_rules", i(), "type", e.currentTarget.value as RuleType);
+                          markDirty();
                         }}
                         class="bg-theme-input border border-theme-border rounded px-1"
                       >
@@ -484,9 +482,8 @@ include rule   ^M\\d+$          (regex, folder)`}
                       <select
                         value={rule.target}
                         onChange={(e) => {
-                          const next = [...filters().name_rules];
-                          next[i()] = { ...rule, target: e.currentTarget.value as RuleTarget };
-                          updateFilters({ name_rules: next });
+                          setFilters("name_rules", i(), "target", e.currentTarget.value as RuleTarget);
+                          markDirty();
                         }}
                         class="bg-theme-input border border-theme-border rounded px-1"
                       >
@@ -503,9 +500,8 @@ include rule   ^M\\d+$          (regex, folder)`}
                           rule.type === "regex" ? "^M\\d+$" : "rejected"
                         }
                         onInput={(e) => {
-                          const next = [...filters().name_rules];
-                          next[i()] = { ...rule, pattern: e.currentTarget.value };
-                          updateFilters({ name_rules: next });
+                          setFilters("name_rules", i(), "pattern", e.currentTarget.value);
+                          markDirty();
                         }}
                         class={`w-full px-1 py-0.5 bg-theme-input border rounded font-mono ${
                           ruleIsInvalid(rule) ? "border-theme-error" : "border-theme-border"
@@ -517,7 +513,7 @@ include rule   ^M\\d+$          (regex, folder)`}
                       <button
                         class="text-red-400"
                         onClick={() => {
-                          const next = filters().name_rules.filter((_, idx) => idx !== i());
+                          const next = filters.name_rules.filter((_, idx) => idx !== i());
                           updateFilters({ name_rules: next });
                         }}
                         aria-label="Remove rule"
@@ -541,7 +537,7 @@ include rule   ^M\\d+$          (regex, folder)`}
                 target: "file",
                 enabled: true,
               };
-              updateFilters({ name_rules: [...filters().name_rules, newRule] });
+              updateFilters({ name_rules: [...filters.name_rules, newRule] });
             }}
           >
             Add rule
@@ -613,7 +609,7 @@ include rule   ^M\\d+$          (regex, folder)`}
                   <Show
                     when={
                       testResult()!.verdict === "included" &&
-                      filters().name_rules.some((r) => r.action === "exclude")
+                      filters.name_rules.some((r) => r.action === "exclude")
                     }
                   >
                     {" "}None of your exclude rules matched this path. If you
@@ -672,14 +668,14 @@ include rule   ^M\\d+$          (regex, folder)`}
         }
         existing={
           browsing() === "include"
-            ? filters().include_paths
-            : filters().exclude_paths
+            ? filters.include_paths
+            : filters.exclude_paths
         }
         onCancel={() => setBrowsing(null)}
         onConfirm={(paths) => {
           const key =
             browsing() === "include" ? "include_paths" : "exclude_paths";
-          const current = filters()[key];
+          const current = filters[key];
           const merged = Array.from(new Set([...current, ...paths]));
           updateFilters({ [key]: merged } as Partial<ScanFilters>);
           setBrowsing(null);
