@@ -1,5 +1,5 @@
 import { Component, Show, For } from "solid-js";
-import { useDashboardFilters } from "./DashboardFilterProvider";
+import { useDashboardFilters, type SortKey } from "./DashboardFilterProvider";
 import TargetTable from "./TargetTable";
 
 const SkeletonRow: Component = () => (
@@ -33,8 +33,15 @@ const SkeletonCard: Component = () => (
 );
 
 const TargetFeed: Component = () => {
-  const { targetData, refetchTargets, fetchError, page, totalPages, totalCount, setPage, pageSize, setPageSize } = useDashboardFilters();
+  const { targetData, refetchTargets, fetchError, page, totalPages, totalCount, setPage, pageSize, setPageSize, sortKey, sortDir, toggleSort } = useDashboardFilters();
   const PAGE_SIZES = [10, 25, 50, 100, 250];
+
+  const SORT_LABELS: Record<SortKey, string> = {
+    name: "Name",
+    integration: "Integration",
+    lastSession: "Last Session",
+    equipment: "Equipment",
+  };
 
 
   const pageRange = () => {
@@ -115,7 +122,7 @@ const TargetFeed: Component = () => {
                 fallback={<div class="text-center text-theme-text-secondary py-8">No targets match your filters</div>}
               >
                 <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
-                  <div class="flex items-center gap-3">
+                  <div class="flex items-center gap-3 flex-wrap">
                     <span class="text-xs text-theme-text-tertiary">
                       Showing {showingRange().start}-{showingRange().end} of {totalCount()} targets
                     </span>
@@ -128,6 +135,25 @@ const TargetFeed: Component = () => {
                         {(size) => <option value={size}>{size} / page</option>}
                       </For>
                     </select>
+                    {/* Mobile sort controls - hidden on md+ where table headers handle sorting */}
+                    <div class="flex items-center gap-1 md:hidden">
+                      <select
+                        value={sortKey()}
+                        onChange={(e) => toggleSort(e.currentTarget.value as SortKey)}
+                        class="px-2 py-1 text-xs rounded border border-theme-border bg-theme-input text-theme-text-secondary cursor-pointer transition-colors hover:border-theme-border-em"
+                      >
+                        <For each={(Object.keys(SORT_LABELS) as SortKey[])}>
+                          {(key) => <option value={key}>{SORT_LABELS[key]}</option>}
+                        </For>
+                      </select>
+                      <button
+                        onClick={() => toggleSort(sortKey())}
+                        class="px-2 py-1 text-xs rounded border border-theme-border text-theme-text-secondary hover:bg-theme-elevated transition-colors"
+                        title={sortDir() === "asc" ? "Ascending" : "Descending"}
+                      >
+                        {sortDir() === "asc" ? "\u2191" : "\u2193"}
+                      </button>
+                    </div>
                   </div>
                   <Show when={totalPages() > 1}>
                     <div class="flex items-center gap-1">

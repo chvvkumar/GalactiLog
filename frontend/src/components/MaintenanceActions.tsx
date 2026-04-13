@@ -44,14 +44,6 @@ const MaintenanceActions: Component<{
             {props.rebuildRunning && props.rebuildMode === "retry" ? "Running..." : "Re-resolve"}
           </button>
           <button
-            onClick={() => props.onRegenThumbnails()}
-            disabled={anyDisabled()}
-            title="Re-creates all thumbnails using current stretch settings. Does not affect database records."
-            class="px-3 py-1.5 border border-theme-border-em text-theme-text-secondary rounded text-sm disabled:opacity-50 hover:text-theme-text-primary hover:border-theme-accent transition-colors"
-          >
-            Regen Thumbs
-          </button>
-          <button
             onClick={() => runAction(api.triggerXmatchEnrichment)}
             disabled={anyDisabled()}
             title="Runs bulk cross-match enrichment against external catalogs (Caldwell, Herschel 400, Arp, Abell) for all targets."
@@ -66,6 +58,14 @@ const MaintenanceActions: Component<{
             class="px-3 py-1.5 border border-theme-border-em text-theme-text-secondary rounded text-sm disabled:opacity-50 hover:text-theme-text-primary hover:border-theme-accent transition-colors"
           >
             {props.rebuildRunning && props.rebuildMode === "ref_thumbnails" ? "Running..." : "Fetch DSS"}
+          </button>
+          <button
+            onClick={() => props.onRegenThumbnails()}
+            disabled={anyDisabled()}
+            title="Re-creates all thumbnails using current stretch settings. Does not affect database records."
+            class="px-3 py-1.5 bg-theme-warning/15 text-theme-warning border border-theme-warning/30 rounded text-sm font-medium disabled:opacity-50 hover:bg-theme-warning/25 transition-colors"
+          >
+            Regen Thumbs
           </button>
           <button
             onClick={() => setShowFullConfirm(true)}
