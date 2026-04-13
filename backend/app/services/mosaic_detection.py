@@ -122,7 +122,7 @@ async def detect_mosaic_panels(session: AsyncSession, gap_days: int = 0) -> int:
                 # Build a pattern that matches the original name used for this panel
                 obj_pattern = f"%{base_name}%{panel_num}%"
                 dates_q = select(
-                    func.distinct(cast(Image.capture_date, Date))
+                    func.distinct(Image.session_date)
                 ).where(
                     Image.image_type == "LIGHT",
                     Image.raw_headers["OBJECT"].astext.ilike(obj_pattern),

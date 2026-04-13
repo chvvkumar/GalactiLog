@@ -63,7 +63,7 @@ async def _panel_stats(panel: MosaicPanel, session: AsyncSession) -> PanelStats:
         select(
             func.sum(Image.exposure_time).label("integration"),
             func.count(Image.id).label("frames"),
-            func.max(cast(Image.capture_date, Date)).label("last_date"),
+            func.max(Image.session_date).label("last_date"),
         )
         .where(*base_filter)
     )
@@ -159,7 +159,7 @@ async def _batch_panel_stats(
             Image.resolved_target_id,
             func.sum(Image.exposure_time).label("integration"),
             func.count(Image.id).label("frames"),
-            func.max(cast(Image.capture_date, Date)).label("last_date"),
+            func.max(Image.session_date).label("last_date"),
         )
         .where(Image.resolved_target_id.in_(target_ids), Image.image_type == "LIGHT")
         .group_by(Image.resolved_target_id)
@@ -309,7 +309,7 @@ async def get_suggestions(
         sq = (
             select(
                 obj_col.label("obj"),
-                cast(Image.capture_date, Date).label("night"),
+                Image.session_date.label("night"),
                 Image.filter_used,
                 func.count(Image.id).label("frames"),
                 func.sum(Image.exposure_time).label("integration"),
