@@ -1,7 +1,7 @@
 import math
 import statistics
 from collections import defaultdict
-from datetime import datetime
+from datetime import date as date_type, datetime
 
 from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy import select, func, cast, Date, distinct
@@ -92,9 +92,9 @@ async def _apply_filters(
     if filter_used:
         q = q.where(Image.filter_used == filter_used)
     if date_from:
-        q = q.where(Image.capture_date >= datetime.fromisoformat(date_from))
+        q = q.where(Image.session_date >= date_type.fromisoformat(date_from))
     if date_to:
-        q = q.where(Image.capture_date <= datetime.fromisoformat(date_to + "T23:59:59"))
+        q = q.where(Image.session_date <= date_type.fromisoformat(date_to))
     return q
 
 
@@ -301,7 +301,7 @@ async def get_correlation(
         select(
             x_col.label("x_val"),
             y_col.label("y_val"),
-            cast(Image.capture_date, Date).label("night"),
+            Image.session_date.label("night"),
             Image.resolved_target_id,
         )
         .where(Image.image_type == "LIGHT")
@@ -383,7 +383,7 @@ async def get_distribution(
 
     col = METRIC_MAP[metric]
     q = (
-        select(col.label("val"), cast(Image.capture_date, Date).label("night"), Image.resolved_target_id)
+        select(col.label("val"), Image.session_date.label("night"), Image.resolved_target_id)
         .where(Image.image_type == "LIGHT")
         .where(col.is_not(None))
         .where(Image.capture_date.is_not(None))
@@ -533,7 +533,7 @@ async def get_timeseries(
     q = (
         select(
             col.label("val"),
-            cast(Image.capture_date, Date).label("night"),
+            Image.session_date.label("night"),
             Image.resolved_target_id,
         )
         .where(Image.image_type == "LIGHT")
@@ -669,9 +669,9 @@ async def get_compare(
             .where(Image.capture_date.is_not(None))
         )
         if date_from:
-            q = q.where(Image.capture_date >= datetime.fromisoformat(date_from))
+            q = q.where(Image.session_date >= date_type.fromisoformat(date_from))
         if date_to:
-            q = q.where(Image.capture_date <= datetime.fromisoformat(date_to + "T23:59:59"))
+            q = q.where(Image.session_date <= date_type.fromisoformat(date_to))
 
         if mode == "equipment":
             parts = group.split("|||")
