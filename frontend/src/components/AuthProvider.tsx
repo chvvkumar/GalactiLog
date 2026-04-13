@@ -101,6 +101,10 @@ export const AuthProvider: Component<ParentProps> = (props) => {
   const isAdmin = () => user()?.role === "admin";
 
   const initAuth = async () => {
+    // Clean up stale token from prior auth implementation
+    if (localStorage.getItem("token") !== null) {
+      localStorage.removeItem("token");
+    }
     try {
       // Timeout the initial auth check so a hanging upstream (nginx
       // connected but backend not ready) falls through to the startup
