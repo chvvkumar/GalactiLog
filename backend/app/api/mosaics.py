@@ -24,6 +24,13 @@ from app.services.mosaic_composite import build_mosaic_composite
 router = APIRouter(prefix="/mosaics", tags=["mosaics"])
 
 
+def _ilike_to_regex(pattern: str):
+    """Convert a SQL ILIKE pattern (%, _) to a compiled Python regex."""
+    escaped = re.escape(pattern)
+    escaped = escaped.replace(r"\%", ".*").replace(r"\_", ".")
+    return re.compile(f"^{escaped}$", re.IGNORECASE)
+
+
 def _parse_sexa_ra(s: str) -> float | None:
     """Parse sexagesimal RA 'HH MM SS' to degrees."""
     try:
@@ -463,6 +470,53 @@ async def list_mosaics(
             for r in (await session.execute(bulk_q)).all()
         }
 
+    # Batch-fetch integration stats for all pattern panels using a single query
+    # with per-(target_id, object_pattern) case expressions to avoid N+1.
+    pattern_panels = [p for m in mosaics for p in m.panels if p.object_pattern]
+    # Key: (str(target_id), object_pattern) -> (integration, frames)
+    pattern_rows: dict[tuple[str, str], tuple[float, int]] = {}
+    if pattern_panels:
+        # Build one OR condition per unique (target_id, pattern) pair
+        unique_pairs = list({(p.target_id, p.object_pattern) for p in pattern_panels})
+        conditions = or_(*(
+            (Image.resolved_target_id == tid) &
+            (Image.raw_headers["OBJECT"].astext.ilike(pat))
+            for tid, pat in unique_pairs
+        ))
+        # Fetch all matching rows in one query; aggregate by (target_id, pattern) in Python
+        # since ILIKE patterns can't be used directly in GROUP BY.
+        raw_q = (
+            select(
+                Image.resolved_target_id,
+                Image.raw_headers["OBJECT"].astext.label("object_name"),
+                Image.exposure_time,
+            )
+            .where(Image.image_type == "LIGHT", conditions)
+        )
+        raw_rows = (await session.execute(raw_q)).all()
+
+        # Aggregate in Python: for each row, find which (target_id, pattern) it belongs to.
+        # Build a lookup: target_id -> list of (compiled regex, pattern string) per target_id.
+        pair_regexes = {(str(tid), pat): _ilike_to_regex(pat) for tid, pat in unique_pairs}
+        # Group patterns by target_id for efficient lookup
+        patterns_by_target: dict[str, list[tuple[str, object]]] = defaultdict(list)
+        for (tid_str, pat), rx in pair_regexes.items():
+            patterns_by_target[tid_str].append((pat, rx))
+
+        accum: dict[tuple[str, str], list[float]] = {
+            (str(tid), pat): [] for tid, pat in unique_pairs
+        }
+        for row in raw_rows:
+            tid_str = str(row.resolved_target_id)
+            obj_name = row.object_name or ""
+            exp = row.exposure_time or 0.0
+            for pat, rx in patterns_by_target.get(tid_str, []):
+                if rx.match(obj_name):
+                    accum[(tid_str, pat)].append(exp)
+
+        for key, exposures in accum.items():
+            pattern_rows[key] = (sum(exposures), len(exposures))
+
     results = []
     for m in mosaics:
         total_int = 0
@@ -473,16 +527,8 @@ async def list_mosaics(
                 # Use bulk-fetched result
                 pi, pf = bulk_rows.get(str(p.target_id), (0, 0))
             else:
-                # Fall back to per-panel query for pattern-filtered panels
-                filters = [
-                    Image.resolved_target_id == p.target_id,
-                    Image.image_type == "LIGHT",
-                    Image.raw_headers["OBJECT"].astext.ilike(p.object_pattern),
-                ]
-                iq = select(func.sum(Image.exposure_time), func.count(Image.id)).where(*filters)
-                row = (await session.execute(iq)).one()
-                pi = row[0] or 0
-                pf = row[1] or 0
+                # Use batch-fetched result for pattern panels
+                pi, pf = pattern_rows.get((str(p.target_id), p.object_pattern), (0, 0))
             total_int += pi
             total_frames += pf
             panel_integrations.append(pi)
