@@ -19,6 +19,7 @@ from app.services.simbad import (
 from app.services.sesame import resolve_sesame_cached
 from app.services.openngc import enrich_target_from_openngc
 from app.services.vizier import enrich_target_from_vizier
+from app.services.sac import enrich_target_from_sac
 
 logger = logging.getLogger(__name__)
 
@@ -102,6 +103,8 @@ def _create_target(
         if target.size_major is None:
             enrich_target_from_vizier(session, target)
             session.commit()
+        enrich_target_from_sac(session, target)
+        session.commit()
         return str(target.id)
     except IntegrityError:
         session.rollback()

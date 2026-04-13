@@ -3,15 +3,19 @@ import uuid
 import statistics
 from collections import defaultdict
 from datetime import date as date_type, datetime, timedelta, timezone
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import FileResponse
 import sqlalchemy as sa
 from sqlalchemy import select, or_, and_, func, cast, Float, Date, String, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
 from app.api.deps import get_current_user
+from app.config import settings
 from app.models import Target, Image
+from app.models.catalog_membership import TargetCatalogMembership
 from app.services.simbad import COMMON_NAME_MAP
 from app.models.session_note import SessionNote
 from app.models.user import User
@@ -403,7 +407,26 @@ async def get_object_types(
     )
 
 
-# --- 2d. Export (before path-parameter routes) ---
+# --- 2d. Reference thumbnail ---
+
+@router.get("/{target_id}/reference-thumbnail")
+async def get_reference_thumbnail(
+    target_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    """Stream the DSS reference thumbnail for a target."""
+    target = await session.get(Target, target_id)
+    if not target or not target.reference_thumbnail_path:
+        raise HTTPException(status_code=404, detail="Reference thumbnail not found")
+
+    thumb_path = Path(settings.thumbnails_path) / "reference" / target.reference_thumbnail_path
+    if not thumb_path.exists():
+        raise HTTPException(status_code=404, detail="Thumbnail file not found")
+    return FileResponse(str(thumb_path), media_type="image/jpeg")
+
+
+# --- 2e. Export (before path-parameter routes) ---
 
 @router.get("/{target_id}/export", response_model=ExportResponse)
 async def export_target(
@@ -709,6 +732,17 @@ async def get_target_detail(
 
     sorted_dates = sorted(sessions_map.keys())
 
+    # Fetch catalog memberships
+    catalog_memberships = []
+    if target_obj:
+        memberships_result = await session.execute(
+            select(TargetCatalogMembership).where(TargetCatalogMembership.target_id == target_obj.id)
+        )
+        catalog_memberships = [
+            {"catalog_name": m.catalog_name, "catalog_number": m.catalog_number, "metadata": m.metadata_}
+            for m in memberships_result.scalars().all()
+        ]
+
     return TargetDetailResponse(
         target_id=target_id,
         primary_name=target_name,
@@ -730,6 +764,11 @@ async def get_target_detail(
         avg_guiding_rms_arcsec=statistics.mean(all_guiding_rms) if all_guiding_rms else None,
         avg_detected_stars=statistics.mean(all_detected_stars) if all_detected_stars else None,
         notes=target_obj.notes if target_obj else None,
+        sac_description=target_obj.sac_description if target_obj else None,
+        sac_notes=target_obj.sac_notes if target_obj else None,
+        reference_thumbnail_path=target_obj.reference_thumbnail_path if target_obj else None,
+        distance_pc=target_obj.distance_pc if target_obj else None,
+        catalog_memberships=catalog_memberships,
     )
 
 
@@ -783,6 +822,7 @@ async def list_targets_aggregated(
     humidity_max: float | None = Query(None),
     airmass_min: float | None = Query(None),
     airmass_max: float | None = Query(None),
+    catalog: str | None = Query(None, description="Filter to targets in a specific catalog (e.g. Messier, NGC)"),
     sort_by: str = Query("integration", pattern="^(integration|lastSession|name)$"),
     sort_dir: str = Query("desc", pattern="^(asc|desc)$"),
     page: int = Query(1, ge=1),
@@ -940,6 +980,13 @@ async def list_targets_aggregated(
             where_parts.append(f"({' OR '.join(type_conds)})")
         elif has_unresolved:
             where_parts.append("i.resolved_target_id IS NULL")
+
+    if catalog:
+        where_parts.append("""EXISTS (
+            SELECT 1 FROM target_catalog_memberships tcm
+            WHERE tcm.target_id = t.id AND tcm.catalog_name = :catalog_name
+        )""")
+        params["catalog_name"] = catalog
 
     if fits_key and fits_op and fits_val:
         for idx, (key, op_str, val) in enumerate(zip(fits_key, fits_op, fits_val)):
@@ -1588,11 +1635,35 @@ async def get_session_detail(
 
     is_best_hfr = False
     if median_hfr is not None:
+        # Query HFR data across all sessions for this target
+        if target_id == "obj:__uncategorized__":
+            all_hfr_q = select(Image.capture_date, Image.median_hfr).where(
+                Image.resolved_target_id.is_(None),
+                or_(
+                    ~Image.raw_headers.has_key("OBJECT"),
+                    Image.raw_headers["OBJECT"].astext == "",
+                    Image.raw_headers["OBJECT"].is_(None),
+                ),
+                Image.median_hfr.isnot(None),
+            )
+        elif target_id.startswith("obj:"):
+            all_hfr_q = select(Image.capture_date, Image.median_hfr).where(
+                Image.raw_headers["OBJECT"].astext == target_id[4:],
+                Image.image_type == "LIGHT",
+                Image.median_hfr.isnot(None),
+            )
+        else:
+            all_hfr_q = select(Image.capture_date, Image.median_hfr).where(
+                Image.resolved_target_id == tid,
+                Image.image_type == "LIGHT",
+                Image.median_hfr.isnot(None),
+            )
+        all_hfr_rows = (await session.execute(all_hfr_q)).all()
         all_session_dates: dict[str, list[float]] = defaultdict(list)
-        for img in all_images:
-            if img.median_hfr is not None and img.capture_date:
-                dk = img.capture_date.strftime("%Y-%m-%d")
-                all_session_dates[dk].append(img.median_hfr)
+        for capture_date, hfr_val in all_hfr_rows:
+            if capture_date:
+                dk = capture_date.strftime("%Y-%m-%d")
+                all_session_dates[dk].append(hfr_val)
         all_session_medians = [statistics.median(v) for v in all_session_dates.values() if v]
         if all_session_medians:
             is_best_hfr = median_hfr <= min(all_session_medians)

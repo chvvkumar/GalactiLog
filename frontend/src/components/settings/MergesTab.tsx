@@ -13,7 +13,7 @@ export const MergesTab: Component = () => {
   const [detecting, setDetecting] = createSignal(false);
   const [view, setView] = createSignal<"suggestions" | "merged" | "unresolved">("suggestions");
   const [unresolvedCount, setUnresolvedCount] = createSignal(0);
-  const [confirmRevertId, setConfirmRevertId] = createSignal<string | null>(null);
+
 
   const refresh = async () => {
     try {
@@ -201,31 +201,11 @@ export const MergesTab: Component = () => {
                     </div>
                     <Show when={isAdmin()}>
                       <button
-                        onClick={() => setConfirmRevertId(c.id)}
+                        onClick={() => handleRevert(c)}
                         class="px-2 py-1 text-xs border border-theme-border text-theme-text-secondary rounded-[var(--radius-sm)] hover:text-theme-text-primary transition-colors"
                       >
                         Revert
                       </button>
-                    </Show>
-                    <Show when={confirmRevertId() === c.id}>
-                      <div class="w-full mt-2 bg-theme-warning/10 border border-theme-warning/30 rounded-[var(--radius-md)] p-3 space-y-2">
-                        <p class="text-sm text-theme-warning font-medium">Revert merge of "{c.source_name}"?</p>
-                        <p class="text-xs text-theme-text-secondary">Images will be unlinked from "{c.suggested_target_name}" and restored to their original target.</p>
-                        <div class="flex gap-2 pt-1">
-                          <button
-                            onClick={() => handleRevert(c)}
-                            class="px-3 py-1.5 bg-theme-warning/15 text-theme-warning border border-theme-warning/30 rounded text-xs font-medium hover:bg-theme-warning/25 transition-colors"
-                          >
-                            Yes, revert
-                          </button>
-                          <button
-                            onClick={() => setConfirmRevertId(null)}
-                            class="px-3 py-1.5 border border-theme-border-em text-theme-text-secondary rounded text-xs hover:text-theme-text-primary transition-colors"
-                          >
-                            Cancel
-                          </button>
-                        </div>
-                      </div>
                     </Show>
                   </div>
                 )}

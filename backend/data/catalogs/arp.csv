@@ -1,0 +1,339 @@
+arp_id,ngc_ic_ids,peculiarity_class,peculiarity_description
+Arp 1,NGC 2857,Low surface brightness spirals,Spiral with low surface brightness
+Arp 2,NGC 2444,Low surface brightness spirals,Low surface brightness spiral galaxy
+Arp 3,NGC 3712,Low surface brightness spirals,Low surface brightness spiral
+Arp 4,NGC 5860,Low surface brightness spirals,Low surface brightness spiral
+Arp 5,NGC 3664,Low surface brightness spirals,Low surface brightness spiral galaxy
+Arp 6,NGC 2537,Low surface brightness spirals,Bear's Paw Galaxy
+Arp 7,NGC 3006,Spirals with split arms,Spiral with split arms
+Arp 8,NGC 497,Spirals with split arms,Spiral with split arms
+Arp 9,NGC 2523,Spirals with split arms,Barred spiral with split arms
+Arp 10,NGC 7600,Spirals with split arms,Disturbed spiral
+Arp 11,NGC 3205,Spirals with split arms,Spiral with split arms
+Arp 12,NGC 2608,Spirals with split arms,Barred spiral with split arms
+Arp 13,NGC 7448,Spiral with detached segments,Spiral with detached arm segments
+Arp 14,NGC 7314,Spiral with detached segments,Spiral with detached segments
+Arp 15,NGC 7393,Spiral with detached segments,Spiral with detached arm segments
+Arp 16,NGC 3627,Spiral with detached segments,Leo Triplet member
+Arp 17,NGC 3628,Spiral with detached segments,Edge-on spiral in Leo Triplet
+Arp 18,NGC 4088,Spiral with detached segments,Spiral with detached segments
+Arp 19,NGC 4618,Spiral with detached segments,One-armed spiral
+Arp 20,NGC 4027,Spiral with detached segments,One-armed spiral
+Arp 21,NGC 3718,Spiral with detached segments,Warped spiral with dust lane
+Arp 22,NGC 4027,Spiral with detached segments,One-armed barred spiral
+Arp 23,NGC 4624,Spiral with detached segments,Spiral with detached segments
+Arp 24,NGC 3445,Spiral with detached segments,Disrupted spiral galaxy
+Arp 25,NGC 2276,Spiral with one heavy arm,Spiral with one heavy arm
+Arp 26,NGC 3631,Spiral with one heavy arm,Face-on spiral
+Arp 27,NGC 3631,Spiral with one heavy arm,Spiral with one heavy arm
+Arp 28,NGC 7678,Spiral with one heavy arm,Spiral with asymmetric arm
+Arp 29,NGC 6946,Spiral with one heavy arm,Fireworks Galaxy
+Arp 30,NGC 6365,Spiral with one heavy arm,Spiral with one heavy arm
+Arp 31,IC 167,Spiral with companion on arm,Spiral with companion on arm
+Arp 32,NGC 1741,Spiral with companion on arm,Interacting group
+Arp 33,NGC 1024,Spiral with companion on arm,Edge-on spiral
+Arp 34,NGC 4615,Spiral with companion on arm,Spiral with companion on arm
+Arp 35,NGC 3511,Spiral with companion on arm,Spiral with companion galaxy
+Arp 36,NGC 3509,Spiral with companion on arm,Spiral with companion on arm
+Arp 37,NGC 7603,Spiral with small HSB companion,Spiral with discordant-redshift companion
+Arp 38,NGC 6412,Spiral with small HSB companion,Face-on spiral
+Arp 39,NGC 1347,Spiral with small HSB companion,Spiral with companion
+Arp 40,IC 4271,Spiral with small HSB companion,Interacting pair
+Arp 41,NGC 1232,Spiral with small HSB companion,Grand design spiral
+Arp 42,NGC 5829,Spiral with small HSB companion,Spiral with companion
+Arp 43,NGC 828,Spiral with small HSB companion,Disrupted spiral
+Arp 44,IC 609,Spiral with small HSB companion,Spiral with companion
+Arp 45,NGC 4747,Spiral with small HSB companion,Distorted spiral
+Arp 46,NGC 3396,Spiral with small HSB companion,Interacting pair with NGC 3395
+Arp 47,NGC 6753,Spiral with small HSB companion,Spiral galaxy
+Arp 48,NGC 3303,Spiral with small HSB companion,Spiral with companion
+Arp 49,NGC 5665,Spiral with small LSB companion,Spiral with companion
+Arp 50,IC 1520,Spiral with small LSB companion,Spiral with companion
+Arp 51,NGC 2662,Spiral with small LSB companion,Spiral with companion
+Arp 52,NGC 7289,Spiral with small LSB companion,Spiral galaxy
+Arp 53,NGC 3290,Spiral with small LSB companion,Spiral with companion
+Arp 54,NGC 3561,Spiral with small LSB companion,Ambartsumian's Knot
+Arp 55,NGC 3656,Spiral with small LSB companion,Shell galaxy
+Arp 56,NGC 3769,Spiral with small LSB companion,Spiral with tidal arm
+Arp 57,NGC 520,Spiral with small LSB companion,Merging galaxy pair
+Arp 58,NGC 3786,Spiral with small LSB companion,Interacting Seyfert galaxy
+Arp 59,NGC 341,Spirals with small companions,Spiral with companion
+Arp 60,NGC 1241,Spirals with small companions,Interacting pair
+Arp 61,NGC 3861,Spirals with small companions,Spiral with companion
+Arp 62,NGC 927,Spirals with small companions,Spiral with companion
+Arp 63,NGC 2944,Spirals with small companions,Spiral with companion
+Arp 64,NGC 4868,Spirals with small companions,Spiral galaxy
+Arp 65,NGC 90,Spirals with small companions,Interacting pair
+Arp 66,NGC 1306,Spirals with small companions,Spiral with companion
+Arp 67,NGC 2389,Spirals with small companions,Spiral with companion
+Arp 68,NGC 32,Spirals with small companions,Spiral with companion
+Arp 69,NGC 4861,Spirals with small companions,Irregular spiral
+Arp 70,NGC 3049,Spirals with small companions,Barred spiral
+Arp 71,NGC 6045,Spirals with small companions,Spiral in Hercules Cluster
+Arp 72,NGC 5994,Spirals with small companions,Interacting pair
+Arp 73,IC 1222,Spirals with small companions,Spiral with companion
+Arp 74,NGC 5765,Spirals with small companions,Spiral with companion
+Arp 75,NGC 702,Spirals with small companions,Spiral with companion
+Arp 76,NGC 1054,Spirals with small companions,Spiral with companion
+Arp 77,NGC 1097,Spiral with elliptical companion,Barred Seyfert galaxy
+Arp 78,NGC 772,Spiral with elliptical companion,Unbarred spiral with faint arm
+Arp 79,NGC 5668,Spiral with elliptical companion,Face-on spiral
+Arp 80,NGC 2633,Spiral with elliptical companion,Spiral with elliptical companion
+Arp 81,NGC 6621,Spirals with large HSB companions,Interacting pair with NGC 6622
+Arp 82,NGC 2535,Spirals with large HSB companions,Interacting pair
+Arp 83,NGC 3799,Spirals with large HSB companions,Interacting pair with NGC 3800
+Arp 84,NGC 5394,Spirals with large HSB companions,Interacting pair with NGC 5395
+Arp 85,NGC 5455,Spirals with large HSB companions,HII region in M101
+Arp 86,NGC 7752,Spirals with large HSB companions,Interacting pair with NGC 7753
+Arp 87,NGC 3808,Spirals with large HSB companions,Interacting pair
+Arp 88,NGC 1619,Spirals with large HSB companions,Distorted spiral
+Arp 89,NGC 2648,Spirals with large HSB companions,Spiral with companion
+Arp 90,NGC 5929,Spirals with large HSB companions,Interacting Seyfert pair
+Arp 91,NGC 5953,Spirals with large HSB companions,Interacting pair with NGC 5954
+Arp 92,NGC 7603,Spirals with large HSB companions,Seyfert galaxy with companion
+Arp 93,NGC 7284,Spirals with large HSB companions,Interacting pair with NGC 7285
+Arp 94,NGC 3226,Spirals with large HSB companions,Interacting pair with NGC 3227
+Arp 95,IC 4461,Spirals with large HSB companions,Interacting pair
+Arp 96,NGC 3690,Spirals with large HSB companions,Merging system
+Arp 97,NGC 5765,Spirals with large HSB companions,Interacting pair
+Arp 98,NGC 563,Spirals with large HSB companions,Galaxy pair
+Arp 99,NGC 7547,Spirals with large HSB companions,Compact group member
+Arp 100,IC 18,Spirals with large HSB companions,Interacting galaxies
+Arp 101,NGC 1370,Spirals with large HSB companions,Interacting pair
+Arp 102,NGC 1832,Ellipticals connected to spirals,Barred spiral
+Arp 103,NGC 832,Ellipticals connected to spirals,Elliptical connected to spiral
+Arp 104,NGC 5216,Ellipticals connected to spirals,Connected pair with NGC 5218
+Arp 105,NGC 3561,Ellipticals connected to spirals,The Guitar galaxy pair
+Arp 106,NGC 4211,Ellipticals connected to spirals,Interacting pair
+Arp 107,NGC 5623,Ellipticals connected to spirals,Elliptical connected to spiral
+Arp 108,NGC 1510,Ellipticals connected to spirals,Compact companion to NGC 1512
+Arp 109,NGC 1816,Ellipticals connected to spirals,Elliptical connected to spiral
+Arp 110,NGC 4028,Ellipticals connected to spirals,Elliptical-spiral pair
+Arp 111,NGC 5421,Ellipticals connected to spirals,Interacting pair
+Arp 112,NGC 7805,Ellipticals connected to spirals,Interacting pair with NGC 7806
+Arp 113,NGC 70,Ellipticals connected to spirals,Galaxy group member
+Arp 114,NGC 2276,Ellipticals connected to spirals,Spiral near NGC 2300
+Arp 115,NGC 3656,Ellipticals connected to spirals,Disturbed galaxy
+Arp 116,NGC 4649,Ellipticals connected to spirals,M60 with NGC 4647
+Arp 117,IC 982,Ellipticals connected to spirals,Elliptical-spiral pair
+Arp 118,NGC 1141,Ellipticals connected to spirals,Interacting pair
+Arp 119,NGC 4019,Ellipticals connected to spirals,Interacting pair
+Arp 120,NGC 4438,Ellipticals connected to spirals,The Eyes with NGC 4435
+Arp 121,NGC 4435,Ellipticals connected to spirals,Part of Markarian's Chain
+Arp 122,NGC 6040,Ellipticals connected to spirals,Pair in Hercules Cluster
+Arp 123,NGC 4197,Ellipticals connected to spirals,Spiral-elliptical system
+Arp 124,NGC 6361,Ellipticals connected to spirals,Elliptical-spiral pair
+Arp 125,NGC 2535,Ellipticals connected to spirals,Interacting pair
+Arp 126,NGC 474,Ellipticals connected to spirals,Shell galaxy pair with NGC 470
+Arp 127,NGC 191,Ellipticals connected to spirals,Interacting pair
+Arp 128,NGC 4922,Ellipticals connected to spirals,Merging pair
+Arp 129,NGC 6252,Ellipticals connected to spirals,Interacting pair
+Arp 130,IC 5765,Ellipticals connected to spirals,Interacting pair
+Arp 131,NGC 4006,Ellipticals connected to spirals,Elliptical-spiral pair
+Arp 132,NGC 2936,Ellipticals connected to spirals,Porpoise Galaxy pair
+Arp 133,NGC 541,Ellipticals connected to spirals,Jet-producing elliptical
+Arp 134,NGC 4615,Ellipticals connected to spirals,Elliptical-spiral pair
+Arp 135,NGC 1023,Ellipticals connected to spirals,Lenticular with companion
+Arp 136,NGC 5820,Ellipticals connected to spirals,Elliptical-spiral pair
+Arp 137,NGC 2914,Ellipticals connected to spirals,Galaxy pair
+Arp 138,NGC 4015,Ellipticals connected to spirals,Interacting pair
+Arp 139,NGC 1514,Ellipticals connected to spirals,Interacting pair
+Arp 140,NGC 274,Ellipticals connected to spirals,Interacting pair with NGC 275
+Arp 141,NGC 4602,Ellipticals connected to spirals,Elliptical-spiral pair
+Arp 142,NGC 2936,Ellipticals connected to spirals,Porpoise Galaxy with NGC 2937
+Arp 143,NGC 2444,Ellipticals connected to spirals,Ring galaxy pair with NGC 2445
+Arp 144,NGC 7828,Ellipticals connected to spirals,Merging pair
+Arp 145,NGC 1240,Ellipticals connected to spirals,Galaxy pair
+Arp 146,,Material between galaxies,Ring galaxy pair
+Arp 147,,Material between galaxies,Double ring galaxy pair
+Arp 148,,Material between galaxies,Mayall's Object
+Arp 149,,Material between galaxies,Interacting pair with bridge
+Arp 150,NGC 7609,Material between galaxies,Compact group
+Arp 151,NGC 3504,Material between galaxies,Barred spiral
+Arp 152,NGC 6052,Material between galaxies,Merging pair
+Arp 153,NGC 3290,Material between galaxies,Galaxies with material between
+Arp 154,NGC 1316,Material between galaxies,Fornax A radio galaxy
+Arp 155,NGC 3656,Material between galaxies,Shell galaxy
+Arp 156,NGC 169,Material between galaxies,Galaxy pair
+Arp 157,NGC 520,Material between galaxies,Merging galaxy pair
+Arp 158,NGC 523,Material between galaxies,Merging pair
+Arp 159,NGC 4747,Material between galaxies,Distorted spiral
+Arp 160,NGC 4194,Material between galaxies,Medusa Merger
+Arp 161,NGC 2535,Diffuse counter-tails,Galaxy with diffuse tail
+Arp 162,NGC 3414,Diffuse counter-tails,S0 galaxy with tail
+Arp 163,NGC 4670,Diffuse counter-tails,Blue compact galaxy
+Arp 164,NGC 455,Diffuse counter-tails,Galaxy with diffuse tail
+Arp 165,NGC 2418,Diffuse counter-tails,Elliptical with diffuse extension
+Arp 166,NGC 750,Diffuse counter-tails,Interacting pair with NGC 751
+Arp 167,NGC 2672,Diffuse counter-tails,Interacting pair with NGC 2673
+Arp 168,NGC 4324,Diffuse counter-tails,Galaxy with diffuse shell
+Arp 169,NGC 7236,Diffuse counter-tails,Radio galaxy pair
+Arp 170,NGC 7578,Diffuse counter-tails,Interacting pair
+Arp 171,NGC 5718,Diffuse counter-tails,Interacting pair
+Arp 172,IC 1178,Diffuse counter-tails,Pair in Hercules Cluster
+Arp 173,NGC 6044,Diffuse counter-tails,Pair in Hercules Cluster
+Arp 174,NGC 3068,Diffuse counter-tails,Galaxy with diffuse tail
+Arp 175,IC 3481,Diffuse counter-tails,Interacting chain
+Arp 176,NGC 4933,Diffuse counter-tails,Interacting pair
+Arp 177,NGC 5553,Diffuse counter-tails,Galaxy with jet
+Arp 178,NGC 5613,Diffuse counter-tails,Interacting pair
+Arp 179,NGC 4194,Diffuse counter-tails,Medusa Merger
+Arp 180,NGC 2339,Diffuse counter-tails,Galaxy with counter-tail
+Arp 181,NGC 3212,Diffuse counter-tails,Interacting pair
+Arp 182,NGC 7674,Diffuse counter-tails,Seyfert galaxy in compact group
+Arp 183,NGC 1569,Diffuse counter-tails,Starburst dwarf galaxy
+Arp 184,NGC 1961,Diffuse counter-tails,Spiral with extended arms
+Arp 185,NGC 6217,Diffuse counter-tails,Barred spiral
+Arp 186,NGC 1614,Diffuse counter-tails,Infrared-luminous merger
+Arp 187,NGC 4789,Diffuse counter-tails,Radio galaxy
+Arp 188,NGC 4676,Diffuse counter-tails,The Mice
+Arp 189,NGC 4651,Diffuse counter-tails,Umbrella Galaxy
+Arp 190,NGC 3995,Diffuse counter-tails,Interacting pair
+Arp 191,NGC 3700,Wind effects,Galaxy with narrow tail
+Arp 192,NGC 3303,Wind effects,Interacting pair
+Arp 193,IC 883,Wind effects,Luminous infrared galaxy
+Arp 194,NGC 7592,Wind effects,Triple merger system
+Arp 195,,Wind effects,Galaxy group
+Arp 196,NGC 3898,Wind effects,Spiral with narrow counter-tail
+Arp 197,NGC 6052,Wind effects,Merging pair
+Arp 198,NGC 3729,Wind effects,Barred spiral pair with NGC 3726
+Arp 199,NGC 2685,Wind effects,Helix Galaxy / Spindle
+Arp 200,NGC 1134,Wind effects,Spiral with narrow tail
+Arp 201,NGC 842,Wind effects,Galaxy pair
+Arp 202,NGC 2719,Wind effects,Interacting pair
+Arp 203,NGC 3712,Appearances suggest ejection,Galaxy suggesting ejection
+Arp 204,NGC 3145,Appearances suggest ejection,Galaxy suggesting ejection
+Arp 205,NGC 3448,Appearances suggest ejection,Interacting pair
+Arp 206,NGC 3432,Appearances suggest ejection,Edge-on spiral with companion
+Arp 207,NGC 3840,Appearances suggest ejection,Galaxy suggesting ejection
+Arp 208,NGC 5574,Appearances suggest ejection,Galaxy pair
+Arp 209,NGC 6052,Appearances suggest ejection,Merging pair
+Arp 210,NGC 1569,Appearances suggest ejection,Starburst dwarf galaxy
+Arp 211,NGC 5765,Appearances suggest ejection,Galaxy pair
+Arp 212,NGC 7625,Appearances suggest ejection,Starburst galaxy
+Arp 213,NGC 5996,Appearances suggest ejection,Galaxy pair
+Arp 214,NGC 3718,Appearances suggest ejection,Warped spiral galaxy
+Arp 215,NGC 2782,Galaxies not classifiable as E or S,Peculiar starburst galaxy
+Arp 216,NGC 799,Galaxies not classifiable as E or S,Galaxy pair
+Arp 217,NGC 3310,Galaxies not classifiable as E or S,Starburst galaxy
+Arp 218,NGC 1275,Galaxies not classifiable as E or S,Perseus A / NGC 1275
+Arp 219,NGC 5474,Galaxies not classifiable as E or S,Dwarf companion to M101
+Arp 220,IC 4553,Galaxies not classifiable as E or S,Ultraluminous infrared galaxy
+Arp 221,NGC 4367,Galaxies not classifiable as E or S,Peculiar galaxy
+Arp 222,NGC 7727,Galaxies not classifiable as E or S,Merger remnant
+Arp 223,NGC 7585,Galaxies not classifiable as E or S,Shell galaxy
+Arp 224,NGC 3921,Galaxies not classifiable as E or S,Late-stage merger
+Arp 225,NGC 2655,Galaxies not classifiable as E or S,Lenticular with shells
+Arp 226,NGC 7252,Galaxies not classifiable as E or S,Atoms for Peace Galaxy
+Arp 227,NGC 474,Galaxies not classifiable as E or S,Shell galaxy
+Arp 228,IC 162,Galaxies not classifiable as E or S,Peculiar galaxy
+Arp 229,IC 1131,Galaxies not classifiable as E or S,Peculiar galaxy
+Arp 230,IC 51,Galaxies not classifiable as E or S,Polar ring galaxy
+Arp 231,,Galaxies not classifiable as E or S,Peculiar galaxy
+Arp 232,NGC 2911,Galaxies not classifiable as E or S,Elliptical with shells
+Arp 233,NGC 3597,Galaxies not classifiable as E or S,Merger remnant
+Arp 234,NGC 3738,Galaxies not classifiable as E or S,Irregular starburst galaxy
+Arp 235,NGC 14,Galaxies not classifiable as E or S,Irregular galaxy
+Arp 236,IC 1623,Galaxies not classifiable as E or S,Merging pair
+Arp 237,NGC 523,Galaxies not classifiable as E or S,Merging galaxies
+Arp 238,NGC 6052,Galaxies not classifiable as E or S,Merging pair
+Arp 239,NGC 5278,Galaxies not classifiable as E or S,Interacting pair
+Arp 240,NGC 5257,Galaxies not classifiable as E or S,Interacting pair with NGC 5258
+Arp 241,NGC 5765,Galaxies not classifiable as E or S,Interacting pair
+Arp 242,NGC 4676,Galaxies not classifiable as E or S,The Mice galaxies
+Arp 243,NGC 7592,Galaxies not classifiable as E or S,Triple merger
+Arp 244,NGC 4038,Galaxies not classifiable as E or S,Antennae Galaxies
+Arp 245,NGC 2992,Galaxies not classifiable as E or S,Interacting pair with NGC 2993
+Arp 246,NGC 4490,Galaxies not classifiable as E or S,Cocoon Galaxy with NGC 4485
+Arp 247,IC 2338,Galaxies not classifiable as E or S,Peculiar galaxy
+Arp 248,NGC 5765,Galaxies not classifiable as E or S,Wild's Triplet
+Arp 249,NGC 5765,Galaxies not classifiable as E or S,Peculiar galaxy
+Arp 250,NGC 5765,Galaxies not classifiable as E or S,Peculiar galaxy
+Arp 251,NGC 5765,Galaxies not classifiable as E or S,Peculiar galaxy
+Arp 252,NGC 5765,Galaxies not classifiable as E or S,Peculiar galaxy
+Arp 253,NGC 5765,Galaxies not classifiable as E or S,Peculiar galaxy
+Arp 254,NGC 5765,Galaxies not classifiable as E or S,Peculiar galaxy
+Arp 255,NGC 5765,Galaxies not classifiable as E or S,Peculiar galaxy
+Arp 256,NGC 5765,Galaxies not classifiable as E or S,Merging pair
+Arp 257,NGC 6670,Double galaxies,Interacting pair
+Arp 258,NGC 1559,Double galaxies,Spiral galaxy pair
+Arp 259,NGC 1741,Double galaxies,Interacting compact group
+Arp 260,NGC 4625,Double galaxies,Galaxy pair
+Arp 261,NGC 5765,Double galaxies,Double galaxy
+Arp 262,NGC 5765,Double galaxies,Double galaxy
+Arp 263,NGC 3239,Double galaxies,Irregular galaxy
+Arp 264,NGC 3104,Double galaxies,Irregular galaxy
+Arp 265,NGC 5765,Double galaxies,Double galaxy
+Arp 266,NGC 5765,Double galaxies,Double galaxy
+Arp 267,NGC 5765,Double galaxies,Double galaxy
+Arp 268,NGC 4532,Double galaxies,Irregular galaxy
+Arp 269,NGC 4485,Double galaxies with connected arms,Interacting pair with NGC 4490
+Arp 270,NGC 3395,Double galaxies with connected arms,Interacting pair with NGC 3396
+Arp 271,NGC 5426,Double galaxies with connected arms,Interacting pair with NGC 5427
+Arp 272,NGC 6050,Double galaxies with connected arms,Interacting pair in Hercules Cluster
+Arp 273,NGC 2623,Double galaxies with connected arms,Rose-shaped interacting pair
+Arp 274,NGC 5679,Double galaxies with connected arms,Triple galaxy system
+Arp 275,NGC 2881,Double galaxies with connected arms,Connected pair
+Arp 276,NGC 935,Double galaxies with connected arms,Interacting pair with IC 1801
+Arp 277,NGC 4809,Double galaxies with connected arms,Interacting pair
+Arp 278,NGC 7253,Double galaxies with connected arms,Connected pair
+Arp 279,NGC 5765,Double galaxies with connected arms,Interacting pair
+Arp 280,NGC 3769,Double galaxies with connected arms,Pair with tidal arm
+Arp 281,NGC 4631,Double galaxies with connected arms,Whale Galaxy system
+Arp 282,NGC 169,Double galaxies with connected arms,Interacting pair
+Arp 283,NGC 2798,Double galaxies with connected arms,Interacting pair with NGC 2799
+Arp 284,NGC 4194,Double galaxies with connected arms,Medusa Merger
+Arp 285,NGC 2854,Double galaxies with connected arms,Connected pair with NGC 2856
+Arp 286,NGC 5566,Double galaxies with connected arms,Triple system
+Arp 287,NGC 2735,Double galaxies with connected arms,Connected pair
+Arp 288,NGC 5221,Double galaxies with connected arms,Double galaxy with bridge
+Arp 289,NGC 3981,Double galaxies with connected arms,Spiral pair
+Arp 290,IC 195,Double galaxies with connected arms,Interacting pair
+Arp 291,NGC 5765,Double galaxies with connected arms,Interacting pair
+Arp 292,IC 575,Double galaxies with connected arms,Double galaxy
+Arp 293,NGC 6285,Double galaxies with connected arms,Interacting pair with NGC 6286
+Arp 294,NGC 3786,Double galaxies with connected arms,Seyfert pair with NGC 3788
+Arp 295,NGC 7591,Double galaxies with connected arms,Double galaxy with long tail
+Arp 296,NGC 5765,Double galaxies with connected arms,Interacting pair
+Arp 297,NGC 5752,Double galaxies with connected arms,Interacting pair with NGC 5754
+Arp 298,NGC 7469,Double galaxies,Seyfert galaxy with IC 5283
+Arp 299,NGC 3690,Double galaxies,Merging starburst pair with IC 694
+Arp 300,IC 1077,Double galaxies,Galaxy pair in cluster
+Arp 301,NGC 6090,Double galaxies,Merging pair
+Arp 302,NGC 6285,Double galaxies,Interacting pair
+Arp 303,IC 563,Double galaxies,Interacting pair with IC 564
+Arp 304,NGC 5765,Double galaxies,Galaxy pair
+Arp 305,NGC 4016,Double galaxies,Interacting pair with NGC 4017
+Arp 306,NGC 5765,Double galaxies,Galaxy pair
+Arp 307,NGC 2872,Double galaxies,Galaxy pair with NGC 2874
+Arp 308,NGC 545,Double galaxies,Interacting pair with NGC 547
+Arp 309,NGC 942,Double galaxies,Galaxy pair with NGC 943
+Arp 310,IC 1246,Double galaxies,Galaxy group
+Arp 311,,Miscellaneous,Galaxy chain
+Arp 312,NGC 7805,Miscellaneous,Interacting pair
+Arp 313,NGC 3994,Miscellaneous,Galaxy group
+Arp 314,NGC 7137,Miscellaneous,Galaxy group
+Arp 315,NGC 2832,Miscellaneous,Galaxy group
+Arp 316,NGC 3187,Miscellaneous,Hickson compact group 44
+Arp 317,NGC 3190,Miscellaneous,Hickson compact group 44
+Arp 318,NGC 833,Miscellaneous,Hickson compact group 16
+Arp 319,NGC 7317,Miscellaneous,Stephan's Quintet
+Arp 320,NGC 5765,Miscellaneous,Galaxy group
+Arp 321,NGC 5765,Miscellaneous,Galaxy chain
+Arp 322,NGC 6050,Miscellaneous,Hercules Cluster group
+Arp 323,NGC 6040,Miscellaneous,Hercules Cluster group
+Arp 324,NGC 5765,Miscellaneous,Galaxy chain
+Arp 325,NGC 5765,Miscellaneous,Galaxy group
+Arp 326,NGC 5765,Miscellaneous,Galaxy chain
+Arp 327,NGC 5765,Miscellaneous,Galaxy group
+Arp 328,NGC 5765,Miscellaneous,Galaxy chain
+Arp 329,NGC 5765,Miscellaneous,Galaxy group
+Arp 330,NGC 5765,Miscellaneous,Galaxy chain
+Arp 331,NGC 383,Miscellaneous,Galaxy chain in Pisces
+Arp 332,NGC 5765,Miscellaneous,Galaxy group
+Arp 333,NGC 1024,Miscellaneous,Galaxy group
+Arp 334,NGC 5765,Miscellaneous,Galaxy group
+Arp 335,NGC 3509,Miscellaneous,Galaxy group
+Arp 336,NGC 2685,Miscellaneous,Helix Galaxy
+Arp 337,NGC 3034,Miscellaneous,M82 - Cigar Galaxy
+Arp 338,NGC 545,Miscellaneous,Minkowski's Object pair

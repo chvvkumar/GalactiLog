@@ -1442,3 +1442,91 @@ def detect_filename_targets():
 
         db.commit()
         return {"candidates_found": candidates_found}
+
+
+@celery_app.task(bind=True)
+def generate_reference_thumbnails(self, force: bool = False) -> dict:
+    """Fetch DSS reference thumbnails for all targets."""
+    from app.services.skyview import fetch_reference_thumbnail
+
+    set_rebuild_running_sync(_redis, "ref_thumbnails", "Finding targets needing thumbnails...")
+    output_dir = Path(settings.thumbnails_path) / "reference"
+
+    with Session(_sync_engine) as session:
+        q = select(Target).where(
+            Target.merged_into_id.is_(None),
+            Target.ra.isnot(None),
+            Target.dec.isnot(None),
+        )
+        if not force:
+            q = q.where(Target.reference_thumbnail_path.is_(None))
+        targets = session.execute(q).scalars().all()
+
+        total = len(targets)
+        set_rebuild_progress_sync(
+            _redis, f"Fetching reference thumbnails 0/{total}..."
+        )
+        fetched = 0
+        for i, target in enumerate(targets):
+            path = fetch_reference_thumbnail(target, output_dir)
+            if path:
+                target.reference_thumbnail_path = path
+                fetched += 1
+            if (i + 1) % 5 == 0 or i + 1 == total:
+                set_rebuild_progress_sync(
+                    _redis, f"Reference thumbnails: {i + 1}/{total} ({fetched} fetched)"
+                )
+            time.sleep(1.0)  # Rate limit
+        session.commit()
+
+    _invalidate_stats_cache()
+    stats = {"fetched": fetched, "total": total}
+    set_rebuild_complete_sync(
+        _redis, f"Fetched {fetched}/{total} reference thumbnails", stats
+    )
+    append_activity_sync(_redis, {
+        "type": "ref_thumbnails_complete",
+        "message": f"Reference Thumbnails: fetched {fetched}/{total}",
+        "details": stats,
+        "timestamp": time.time(),
+    })
+    return stats
+
+
+@celery_app.task(bind=True)
+def run_xmatch_enrichment(self) -> dict:
+    """Run CDS xMatch bulk cross-matching."""
+    from app.services.xmatch import bulk_xmatch_targets
+
+    set_rebuild_running_sync(_redis, "xmatch", "Running xMatch enrichment...")
+
+    with Session(_sync_engine) as session:
+        targets = session.execute(
+            select(Target).where(
+                Target.merged_into_id.is_(None),
+                Target.ra.isnot(None),
+                Target.dec.isnot(None),
+            )
+        ).scalars().all()
+
+        target_dicts = [
+            {"id": str(t.id), "ra": t.ra, "dec": t.dec}
+            for t in targets
+        ]
+
+        set_rebuild_progress_sync(
+            _redis, f"Cross-matching {len(target_dicts)} targets..."
+        )
+        results = bulk_xmatch_targets(target_dicts, "VII/118/ngc2000", radius_arcsec=60.0)
+
+    stats = {"matched": len(results), "total": len(target_dicts)}
+    set_rebuild_complete_sync(
+        _redis, f"xMatch: {len(results)}/{len(target_dicts)} matched", stats
+    )
+    append_activity_sync(_redis, {
+        "type": "xmatch_complete",
+        "message": f"xMatch Enrichment: {len(results)}/{len(target_dicts)} matched",
+        "details": stats,
+        "timestamp": time.time(),
+    })
+    return stats

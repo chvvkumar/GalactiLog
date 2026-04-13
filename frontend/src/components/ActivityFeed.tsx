@@ -173,6 +173,14 @@ const ActivityFeed: Component<{
         </div>
       </Show>
 
+      {/* Rebuild completion summary */}
+      <Show when={props.rebuildStatus.state === "complete" && props.rebuildStatus.message}>
+        <div class="flex items-center gap-2 border border-theme-success/30 rounded-[var(--radius-md)] p-3">
+          <span class="w-2 h-2 bg-theme-success rounded-full flex-shrink-0" />
+          <span class="text-xs text-theme-text-primary">{props.rebuildStatus.message}</span>
+        </div>
+      </Show>
+
       {/* Stalled warning */}
       <Show when={props.scanStatus.state === "stalled"}>
         <div class="bg-theme-warning/20 border border-theme-warning/50 rounded-[var(--radius-md)] p-3 space-y-2">

@@ -29,6 +29,14 @@ class Target(Base):
     merged_into_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("targets.id"), nullable=True)
     merged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
+    # SAC (all DSOs)
+    sac_description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sac_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # SkyView reference thumbnails
+    reference_thumbnail_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    # Gaia DR3 (star clusters)
+    distance_pc: Mapped[float | None] = mapped_column(Float, nullable=True)
+
     images: Mapped[list["Image"]] = relationship(back_populates="target")
 
     __table_args__ = (

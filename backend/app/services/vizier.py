@@ -25,6 +25,7 @@ _CATALOG_MAP: list[tuple[re.Pattern, str, str, str]] = [
     (re.compile(r"^SH\s*2[\s-](\d+)$", re.IGNORECASE), "VII/20", '"VII/20/catalog"', "Sh2"),
     (re.compile(r"^Sh\s*2[\s-](\d+)$", re.IGNORECASE), "VII/20", '"VII/20/catalog"', "Sh2"),
     (re.compile(r"^LBN\s+(\d+)$", re.IGNORECASE), "VII/9", '"VII/9/catalog"', "LBN"),
+    (re.compile(r"^LBN\s+(\d+\.\d+[+-]\d+\.\d+)$", re.IGNORECASE), "VII/9", '"VII/9/catalog"', "LBN_COORD"),
     (re.compile(r"^RCW\s+(\d+)$", re.IGNORECASE), "VII/216", '"VII/216/rcw"', "RCW"),
     (re.compile(r"^vdB\s*(\d+)$", re.IGNORECASE), "VII/21", '"VII/21/catalog"', "VdB"),
     (re.compile(r"^LDN\s+(\d+)$", re.IGNORECASE), "VII/7A", '"VII/7A/ldn"', "LDN"),
@@ -76,40 +77,59 @@ def build_adql_query(catalog_id: str | None) -> str | None:
     viz_id, table, num_col = result
     number = _extract_number(catalog_id)
 
+    # Note: VizieR computed columns (_RA_icrs, _DE_icrs) appear in SELECT *
+    # output but cannot be explicitly named in ADQL.  We only need size data
+    # from VizieR (targets already have J2000 coords from SIMBAD), so we
+    # select only size-related columns.
+
     if viz_id == "VII/20":
         # Sharpless: Sh2 is integer, Diam in arcmin
-        return f'SELECT Sh2, Diam, RA1900, DE1900 FROM {table} WHERE Sh2={number}'
+        return f'SELECT Sh2, Diam FROM {table} WHERE Sh2={number}'
+
+    elif viz_id == "VII/9" and num_col == "LBN_COORD":
+        # LBN coordinate-format ID like "LBN 080.79+03.15" - search by galactic coords
+        coord_str = catalog_id.strip().split(None, 1)[1]  # "080.79+03.15"
+        m = re.match(r"(\d+\.\d+)([+-])(\d+\.\d+)", coord_str)
+        if m:
+            glon = float(m.group(1))
+            sign = m.group(2)
+            glat = float(f"{sign}{m.group(3)}")
+            return (
+                f'SELECT Seq, Diam1, Diam2 FROM {table} '
+                f'WHERE ABS(GLON - {glon}) < 0.05 AND ABS(GLAT - {glat}) < 0.05'
+            )
+        return None
 
     elif viz_id == "VII/9":
         # LBN: Seq is integer, Diam1/Diam2 in arcmin
-        return f'SELECT Seq, Diam1, Diam2, "_RA_icrs", "_DE_icrs" FROM {table} WHERE Seq={number}'
+        return f'SELECT Seq, Diam1, Diam2 FROM {table} WHERE Seq={number}'
 
     elif viz_id == "VII/216":
         # RCW: RCW is integer, MajAxis/MinAxis in arcmin
-        return f'SELECT RCW, MajAxis, MinAxis, "_RA_icrs", "_DE_icrs" FROM {table} WHERE RCW={number}'
+        return f'SELECT RCW, MajAxis, MinAxis FROM {table} WHERE RCW={number}'
 
     elif viz_id == "VII/21":
         # vdB: VdB is integer, BRadMax in arcmin (radius, need to double)
-        return f'SELECT VdB, BRadMax, RRadMax, "_RA_icrs", "_DE_icrs" FROM {table} WHERE VdB={number}'
+        return f'SELECT VdB, BRadMax, RRadMax FROM {table} WHERE VdB={number}'
 
     elif viz_id == "VII/7A":
         # LDN: LDN is integer, Area in sq deg
-        return f'SELECT LDN, Area, "_RA_icrs", "_DE_icrs" FROM {table} WHERE LDN={number}'
+        return f'SELECT LDN, Area FROM {table} WHERE LDN={number}'
 
     elif viz_id == "VII/220A":
         # Barnard: Barn is CHAR(4), space-padded - use TRIM
-        return f"SELECT Barn, Diam, \"_RA_icrs\", \"_DE_icrs\" FROM {table} WHERE TRIM(Barn)='{number}'"
+        return f"SELECT Barn, Diam FROM {table} WHERE TRIM(Barn)='{number}'"
 
     elif viz_id == "VII/231":
         # Cederblad: Ced is string
         ced_num = catalog_id.split()[-1].strip() if " " in catalog_id else number
-        return f"SELECT Ced, Dim1, Dim2, \"_RA_icrs\", \"_DE_icrs\" FROM {table} WHERE TRIM(Ced)='{ced_num}'"
+        return f"SELECT Ced, Dim1, Dim2 FROM {table} WHERE TRIM(Ced)='{ced_num}'"
 
     elif viz_id == "V/84":
         # Planetary nebulae (Abell PNe): query by Name containing "A <number>"
         # Join with diam table for optical diameter
         return (
-            f'SELECT m."Name", d.oDiam, m."_RA_icrs", m."_DE_icrs" '
+            f'SELECT m."Name", d.oDiam '
             f'FROM "V/84/main" AS m '
             f'LEFT JOIN "V/84/diam" AS d ON m."PNG"=d."PNG" '
             f"WHERE m.\"Name\" LIKE '%A {number}%'"
@@ -118,7 +138,7 @@ def build_adql_query(catalog_id: str | None) -> str | None:
     elif viz_id == "B/ocl":
         # Open clusters: Cluster is string like "Collinder 399"
         cluster_name = catalog_id.strip()
-        return f"SELECT \"Cluster\", Diam, RAJ2000, DEJ2000 FROM {table} WHERE \"Cluster\"='{cluster_name}'"
+        return f"SELECT \"Cluster\", Diam FROM {table} WHERE \"Cluster\"='{cluster_name}'"
 
     return None
 
@@ -147,25 +167,17 @@ def _parse_vizier_response(viz_id: str, lines: list[str]) -> dict[str, Any] | No
 
     size_major = None
     size_minor = None
-    ra = None
-    dec = None
 
     if viz_id == "VII/20":
         size_major = _float("Diam")
-        ra = _float("RA1900")  # Approximate - B1900 coords
-        dec = _float("DE1900")
 
     elif viz_id == "VII/9":
         size_major = _float("Diam1")
         size_minor = _float("Diam2")
-        ra = _float("_RA_icrs")
-        dec = _float("_DE_icrs")
 
     elif viz_id == "VII/216":
         size_major = _float("MajAxis")
         size_minor = _float("MinAxis")
-        ra = _float("_RA_icrs")
-        dec = _float("_DE_icrs")
 
     elif viz_id == "VII/21":
         # vdB stores radius, double for diameter
@@ -175,8 +187,6 @@ def _parse_vizier_response(viz_id: str, lines: list[str]) -> dict[str, Any] | No
         rrad = _float("RRadMax")
         if rrad is not None:
             size_minor = rrad * 2
-        ra = _float("_RA_icrs")
-        dec = _float("_DE_icrs")
 
     elif viz_id == "VII/7A":
         # LDN: Area in sq deg, convert to approximate diameter in arcmin
@@ -187,31 +197,20 @@ def _parse_vizier_response(viz_id: str, lines: list[str]) -> dict[str, Any] | No
             diam_deg = 2 * math.sqrt(area / math.pi)
             size_major = diam_deg * 60  # Convert degrees to arcmin
 
-        ra = _float("_RA_icrs")
-        dec = _float("_DE_icrs")
-
     elif viz_id == "VII/220A":
         size_major = _float("Diam")
-        ra = _float("_RA_icrs")
-        dec = _float("_DE_icrs")
 
     elif viz_id == "VII/231":
         size_major = _float("Dim1")
         size_minor = _float("Dim2")
-        ra = _float("_RA_icrs")
-        dec = _float("_DE_icrs")
 
     elif viz_id == "V/84":
         odiam = _float("oDiam")
         if odiam is not None:
             size_major = odiam / 60  # Convert arcsec to arcmin
-        ra = _float("_RA_icrs")
-        dec = _float("_DE_icrs")
 
     elif viz_id == "B/ocl":
         size_major = _float("Diam")
-        ra = _float("RAJ2000")
-        dec = _float("DEJ2000")
 
     if size_major is None and size_minor is None:
         return None
@@ -219,25 +218,17 @@ def _parse_vizier_response(viz_id: str, lines: list[str]) -> dict[str, Any] | No
     return {
         "size_major": size_major,
         "size_minor": size_minor,
-        "ra": ra,
-        "dec": dec,
     }
 
 
 def _coords_to_constellation(ra: float | None, dec: float | None) -> str | None:
     """Derive IAU constellation abbreviation from J2000 coordinates.
 
-    Uses a simple lookup of the 88 constellation boundaries.
+    Uses astropy's constellation boundary lookup (Roman 1987).
     Returns None if coords are missing - constellation enrichment is best-effort.
     """
-    # Skip if no coordinates
-    if ra is None or dec is None:
-        return None
-
-    # Use a simplified approach: try the target's existing constellation
-    # (most targets already have constellation from OpenNGC or SIMBAD coords)
-    # Full constellation boundary lookup is complex; defer to existing data
-    return None
+    from app.services.constellation import coords_to_constellation
+    return coords_to_constellation(ra, dec)
 
 
 def query_vizier(catalog_id: str) -> dict[str, Any] | None:
@@ -347,6 +338,9 @@ def enrich_target_from_vizier(session: Session, target: "Target") -> bool:
         updated = True
     if data.get("size_minor") is not None and target.size_minor is None:
         target.size_minor = data["size_minor"]
+        updated = True
+    if data.get("constellation") is not None and target.constellation is None:
+        target.constellation = data["constellation"]
         updated = True
 
     return updated
