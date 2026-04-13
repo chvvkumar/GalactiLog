@@ -19,6 +19,8 @@ from app.services.simbad import (
 from app.services.target_resolver import resolve_target, normalize_sql_expr
 from app.services.thumbnail import generate_thumbnail
 from app.services.xisf_parser import extract_xisf_metadata, generate_xisf_thumbnail
+from app.services.session_date import compute_session_date, extract_longitude
+from app.schemas.settings import GeneralSettings
 from app.worker.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
@@ -353,6 +355,22 @@ def _do_ingest(fits_path: str, include_calibration: bool = True) -> dict:
         file_size = None
         file_mtime = None
 
+    # Compute session_date from capture_date + longitude
+    raw_hdrs = meta.get("raw_headers", {})
+    site_lon = extract_longitude(raw_hdrs)
+
+    # Load imaging night setting (cached per-process via module-level settings row)
+    with Session(_sync_engine) as settings_session:
+        settings_row = settings_session.get(UserSettings, SETTINGS_ROW_ID)
+        general = GeneralSettings(**(settings_row.general if settings_row and settings_row.general else {}))
+
+    effective_lon = site_lon if site_lon is not None else general.observer_longitude
+    session_date_val = compute_session_date(
+        meta.get("capture_date"),
+        use_imaging_night=general.use_imaging_night,
+        longitude=effective_lon,
+    )
+
     try:
         with Session(_sync_engine) as session:
             image = Image(
@@ -361,6 +379,7 @@ def _do_ingest(fits_path: str, include_calibration: bool = True) -> dict:
                 file_size=file_size,
                 file_mtime=file_mtime,
                 capture_date=meta.get("capture_date"),
+                session_date=session_date_val,
                 thumbnail_path=str(thumb_path) if thumb_path else None,
                 resolved_target_id=target_id,
                 exposure_time=meta.get("exposure_time"),

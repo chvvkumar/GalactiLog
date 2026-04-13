@@ -538,6 +538,7 @@ export interface GeneralSettings {
   observer_latitude?: number | null;
   observer_longitude?: number | null;
   observer_name?: string | null;
+  use_imaging_night?: boolean;
 }
 
 export interface FilterConfig {

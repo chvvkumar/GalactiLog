@@ -20,6 +20,7 @@ class GeneralSettings(BaseModel):
     observer_latitude: float | None = None
     observer_longitude: float | None = None
     observer_name: str | None = None
+    use_imaging_night: bool = False
 
 
 class FilterConfig(BaseModel):
