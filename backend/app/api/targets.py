@@ -495,7 +495,7 @@ async def export_target(
     filter_aliases, _, _ = await load_alias_maps(session)
 
     for img in images:
-        date_key = img.capture_date.strftime("%Y-%m-%d")
+        date_key = str(img.session_date) if img.session_date else "unknown"
         if selected_dates and date_key not in selected_dates:
             continue
         filter_name = img.filter_used or "Unknown"
@@ -655,7 +655,7 @@ async def get_target_detail(
     total_exp = 0.0
 
     for img in images:
-        date_key = img.capture_date.strftime("%Y-%m-%d") if img.capture_date else "unknown"
+        date_key = str(img.session_date) if img.session_date else "unknown"
         sessions_map[date_key].append(img)
         total_exp += img.exposure_time or 0
         if img.median_hfr is not None:
@@ -951,11 +951,11 @@ async def list_targets_aggregated(
         where_parts.append("i.filter_used = ANY(:filter_variants)")
         params["filter_variants"] = all_filter_variants
     if date_from:
-        where_parts.append("i.capture_date >= :date_from")
+        where_parts.append("i.session_date >= :date_from")
         params["date_from"] = datetime.strptime(date_from, "%Y-%m-%d").date()
     if date_to:
-        where_parts.append("i.capture_date <= :date_to")
-        params["date_to"] = datetime.strptime(date_to, "%Y-%m-%d").date() + timedelta(days=1)
+        where_parts.append("i.session_date <= :date_to")
+        params["date_to"] = datetime.strptime(date_to, "%Y-%m-%d").date()
     if target_id:
         where_parts.append("i.resolved_target_id = CAST(:exact_target_id AS uuid)")
         params["exact_target_id"] = target_id
@@ -1077,10 +1077,10 @@ async def list_targets_aggregated(
                coalesce(min(t.primary_name), min(i.raw_headers->>'OBJECT'), 'Uncategorized') AS primary_name,
                sum(coalesce(i.exposure_time, 0)) AS total_integration,
                count(i.id) AS total_frames,
-               count(distinct CAST(i.capture_date AS DATE)) AS session_count,
-               max(CAST(i.capture_date AS DATE)) AS last_session_date,
-               min(CAST(i.capture_date AS DATE)) AS oldest_date,
-               max(CAST(i.capture_date AS DATE)) AS newest_date
+               count(distinct i.session_date) AS session_count,
+               max(i.session_date) AS last_session_date,
+               min(i.session_date) AS oldest_date,
+               max(i.session_date) AS newest_date
         FROM images i LEFT JOIN targets t ON i.resolved_target_id = t.id
         WHERE {where_sql}
         GROUP BY {gk}
@@ -1174,7 +1174,7 @@ async def list_targets_aggregated(
     detail_sql = text(f"""
         SELECT CAST(i.resolved_target_id AS VARCHAR) AS target_uuid,
                i.raw_headers->>'OBJECT' AS fits_object,
-               i.exposure_time, i.filter_used, i.camera, i.telescope, i.capture_date
+               i.exposure_time, i.filter_used, i.camera, i.telescope, i.capture_date, i.session_date
         FROM images i LEFT JOIN targets t ON i.resolved_target_id = t.id
         WHERE {where_sql} AND {key_filter}
     """)
@@ -1215,7 +1215,7 @@ async def list_targets_aggregated(
         if row.fits_object:
             aliases_map[tk].add(row.fits_object)
 
-        date_key = row.capture_date.strftime("%Y-%m-%d") if row.capture_date else "unknown"
+        date_key = str(row.session_date) if row.session_date else "unknown"
         if date_key not in sessions_detail[tk]:
             sessions_detail[tk][date_key] = {
                 "session_date": date_key,
@@ -1462,15 +1462,9 @@ async def get_session_detail(
     """Return detailed session data for a target on a specific date.
 
     The date string is interpreted as a UTC calendar day to match the
-    listing endpoint, which groups by `capture_date.strftime("%Y-%m-%d")`
-    against the tz-aware (UTC) column value. Passing a naive datetime to
-    a `timestamptz` comparison would make Postgres coerce it via the
-    session TimeZone, which shifts the window at the midnight boundary
-    and returns zero rows for sessions the listing placed on the other
-    side of UTC midnight.
+    listing endpoint, which groups by `session_date`.
     """
-    day_start = datetime.fromisoformat(date).replace(tzinfo=timezone.utc)
-    day_end = day_start + timedelta(days=1)
+    session_date_val = date_type.fromisoformat(date)
     if target_id == "obj:__uncategorized__":
         target_name = "Uncategorized"
         target_obj = None
@@ -1484,8 +1478,7 @@ async def get_session_detail(
             .where(
                 Image.resolved_target_id.is_(None),
                 _no_object,
-                Image.capture_date >= day_start,
-                Image.capture_date < day_end,
+                Image.session_date == session_date_val,
             )
             .order_by(Image.capture_date)
         )
@@ -1502,8 +1495,7 @@ async def get_session_detail(
             select(Image)
             .where(
                 Image.raw_headers["OBJECT"].astext == object_name,
-                Image.capture_date >= day_start,
-                Image.capture_date < day_end,
+                Image.session_date == session_date_val,
                 Image.image_type == "LIGHT",
             )
             .order_by(Image.capture_date)
@@ -1526,8 +1518,7 @@ async def get_session_detail(
             select(Image)
             .where(
                 Image.resolved_target_id == tid,
-                Image.capture_date >= day_start,
-                Image.capture_date < day_end,
+                Image.session_date == session_date_val,
                 Image.image_type == "LIGHT",
             )
             .order_by(Image.capture_date)
@@ -1660,7 +1651,7 @@ async def get_session_detail(
     if median_hfr is not None:
         # Query HFR data across all sessions for this target
         if target_id == "obj:__uncategorized__":
-            all_hfr_q = select(Image.capture_date, Image.median_hfr).where(
+            all_hfr_q = select(Image.session_date, Image.median_hfr).where(
                 Image.resolved_target_id.is_(None),
                 or_(
                     ~Image.raw_headers.has_key("OBJECT"),
@@ -1670,23 +1661,22 @@ async def get_session_detail(
                 Image.median_hfr.isnot(None),
             )
         elif target_id.startswith("obj:"):
-            all_hfr_q = select(Image.capture_date, Image.median_hfr).where(
+            all_hfr_q = select(Image.session_date, Image.median_hfr).where(
                 Image.raw_headers["OBJECT"].astext == target_id[4:],
                 Image.image_type == "LIGHT",
                 Image.median_hfr.isnot(None),
             )
         else:
-            all_hfr_q = select(Image.capture_date, Image.median_hfr).where(
+            all_hfr_q = select(Image.session_date, Image.median_hfr).where(
                 Image.resolved_target_id == tid,
                 Image.image_type == "LIGHT",
                 Image.median_hfr.isnot(None),
             )
         all_hfr_rows = (await session.execute(all_hfr_q)).all()
         all_session_dates: dict[str, list[float]] = defaultdict(list)
-        for capture_date, hfr_val in all_hfr_rows:
-            if capture_date:
-                dk = capture_date.strftime("%Y-%m-%d")
-                all_session_dates[dk].append(hfr_val)
+        for session_date_val, hfr_val in all_hfr_rows:
+            if session_date_val:
+                all_session_dates[str(session_date_val)].append(hfr_val)
         all_session_medians = [statistics.median(v) for v in all_session_dates.values() if v]
         if all_session_medians:
             is_best_hfr = median_hfr <= min(all_session_medians)
