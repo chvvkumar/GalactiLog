@@ -1,19 +1,20 @@
 // frontend/src/pages/SettingsPage.tsx
-import { Show, type Component } from "solid-js";
+import { Show, Suspense, lazy, type Component } from "solid-js";
 import { useSearchParams } from "@solidjs/router";
-import { FiltersTab } from "../components/settings/FiltersTab";
-import { EquipmentTab } from "../components/settings/EquipmentTab";
-import { MergesTab } from "../components/settings/MergesTab";
-import { UsersTab } from "../components/settings/UsersTab";
-import { BackupRestoreTab } from "../components/settings/BackupRestoreTab";
-import ScanManager from "../components/ScanManager";
-import DisplayTab from "../components/DisplayTab";
-import AstroBinTab from "../components/settings/AstroBinTab";
-import CustomColumnsTab from "../components/CustomColumnsTab";
 import { useAuth } from "../components/AuthProvider";
 import { useSettingsContext } from "../components/SettingsProvider";
 import { contentWidthClass } from "../utils/format";
 import HelpPopover from "../components/HelpPopover";
+
+const FiltersTab = lazy(() => import("../components/settings/FiltersTab").then(m => ({ default: m.FiltersTab })));
+const EquipmentTab = lazy(() => import("../components/settings/EquipmentTab").then(m => ({ default: m.EquipmentTab })));
+const MergesTab = lazy(() => import("../components/settings/MergesTab").then(m => ({ default: m.MergesTab })));
+const UsersTab = lazy(() => import("../components/settings/UsersTab").then(m => ({ default: m.UsersTab })));
+const BackupRestoreTab = lazy(() => import("../components/settings/BackupRestoreTab").then(m => ({ default: m.BackupRestoreTab })));
+const ScanManager = lazy(() => import("../components/ScanManager"));
+const DisplayTab = lazy(() => import("../components/DisplayTab"));
+const AstroBinTab = lazy(() => import("../components/settings/AstroBinTab"));
+const CustomColumnsTab = lazy(() => import("../components/CustomColumnsTab"));
 
 const ALL_TABS = [
   { id: "scan", label: "Library" },
@@ -130,39 +131,41 @@ export const SettingsPage: Component = () => {
       </div>
 
       {/* Tab content */}
-      <Show when={activeTab() === "scan"}>
-        <ScanManager />
-      </Show>
-      <Show when={activeTab() === "equipment"}>
-        <div class="rounded-[var(--radius-md)] bg-theme-surface border border-theme-border p-4 space-y-6">
-          <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
-            <h2 class="text-sm font-semibold text-theme-text-primary">Filters</h2>
-            <FiltersTab />
+      <Suspense fallback={<div class="text-theme-text-secondary text-sm p-4">Loading...</div>}>
+        <Show when={activeTab() === "scan"}>
+          <ScanManager />
+        </Show>
+        <Show when={activeTab() === "equipment"}>
+          <div class="rounded-[var(--radius-md)] bg-theme-surface border border-theme-border p-4 space-y-6">
+            <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
+              <h2 class="text-sm font-semibold text-theme-text-primary">Filters</h2>
+              <FiltersTab />
+            </div>
+            <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
+              <h2 class="text-sm font-semibold text-theme-text-primary">Equipment Grouping</h2>
+              <EquipmentTab />
+            </div>
           </div>
-          <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
-            <h2 class="text-sm font-semibold text-theme-text-primary">Equipment Grouping</h2>
-            <EquipmentTab />
-          </div>
-        </div>
-      </Show>
-      <Show when={activeTab() === "display"}>
-        <DisplayTab />
-      </Show>
-      <Show when={activeTab() === "astrobin"}>
-        <AstroBinTab />
-      </Show>
-      <Show when={activeTab() === "targets"}>
-        <TargetManagementTab />
-      </Show>
-      <Show when={activeTab() === "custom-columns"}>
-        <CustomColumnsTab />
-      </Show>
-      <Show when={activeTab() === "backup" && isAdmin()}>
-        <BackupRestoreTab />
-      </Show>
-      <Show when={activeTab() === "users" && isAdmin()}>
-        <UsersTab />
-      </Show>
+        </Show>
+        <Show when={activeTab() === "display"}>
+          <DisplayTab />
+        </Show>
+        <Show when={activeTab() === "astrobin"}>
+          <AstroBinTab />
+        </Show>
+        <Show when={activeTab() === "targets"}>
+          <TargetManagementTab />
+        </Show>
+        <Show when={activeTab() === "custom-columns"}>
+          <CustomColumnsTab />
+        </Show>
+        <Show when={activeTab() === "backup" && isAdmin()}>
+          <BackupRestoreTab />
+        </Show>
+        <Show when={activeTab() === "users" && isAdmin()}>
+          <UsersTab />
+        </Show>
+      </Suspense>
     </div>
   );
 };
