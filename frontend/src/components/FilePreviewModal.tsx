@@ -16,6 +16,64 @@ export function FilePreviewModal(props: Props) {
   const [error, setError] = createSignal<string | null>(null);
   const [zoomUrl, setZoomUrl] = createSignal<string | null>(null);
 
+  const [scale, setScale] = createSignal(1);
+  const [tx, setTx] = createSignal(0);
+  const [ty, setTy] = createSignal(0);
+  let dragging = false;
+  let dragStartX = 0;
+  let dragStartY = 0;
+  let panStartX = 0;
+  let panStartY = 0;
+  let viewportEl: HTMLDivElement | undefined;
+
+  const resetTransform = () => {
+    setScale(1);
+    setTx(0);
+    setTy(0);
+  };
+
+  const onWheel = (e: WheelEvent) => {
+    e.preventDefault();
+    if (!viewportEl) return;
+    const rect = viewportEl.getBoundingClientRect();
+    const cx = e.clientX - rect.left - rect.width / 2;
+    const cy = e.clientY - rect.top - rect.height / 2;
+    const factor = Math.exp(-e.deltaY * 0.0015);
+    const oldScale = scale();
+    const newScale = Math.min(20, Math.max(1, oldScale * factor));
+    if (newScale === oldScale) return;
+    const ratio = newScale / oldScale;
+    setTx(cx - (cx - tx()) * ratio);
+    setTy(cy - (cy - ty()) * ratio);
+    setScale(newScale);
+    if (newScale === 1) {
+      setTx(0);
+      setTy(0);
+    }
+  };
+
+  const onPointerDown = (e: PointerEvent) => {
+    if (scale() <= 1) return;
+    dragging = true;
+    dragStartX = e.clientX;
+    dragStartY = e.clientY;
+    panStartX = tx();
+    panStartY = ty();
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+  };
+  const onPointerMove = (e: PointerEvent) => {
+    if (!dragging) return;
+    setTx(panStartX + (e.clientX - dragStartX));
+    setTy(panStartY + (e.clientY - dragStartY));
+  };
+  const onPointerUp = (e: PointerEvent) => {
+    dragging = false;
+    try {
+      (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+    } catch {}
+  };
+  const onDoubleClick = () => resetTransform();
+
   const previewResolution = () => settings()?.general.preview_resolution ?? 2400;
 
   const handleEscape = (e: KeyboardEvent) => {
@@ -30,6 +88,7 @@ export function FilePreviewModal(props: Props) {
     setZoomUrl(null);
     setLoading(true);
     setError(null);
+    resetTransform();
     const url = `/api/preview/${props.imageId}?resolution=${previewResolution()}`;
     try {
       const resp = await fetch(url);
@@ -71,7 +130,17 @@ export function FilePreviewModal(props: Props) {
           </button>
           <div class="mb-2 text-xs text-neutral-400 truncate max-w-[80ch]">{props.filePath}</div>
 
-          <div class="relative flex items-center justify-center min-h-[200px]">
+          <div
+            ref={viewportEl}
+            class="relative flex items-center justify-center min-h-[200px] overflow-hidden touch-none select-none"
+            onWheel={onWheel}
+            onPointerDown={onPointerDown}
+            onPointerMove={onPointerMove}
+            onPointerUp={onPointerUp}
+            onPointerCancel={onPointerUp}
+            onDblClick={onDoubleClick}
+            style={{ cursor: scale() > 1 ? (dragging ? "grabbing" : "grab") : "zoom-in" }}
+          >
             <Show
               when={zoomed() && zoomUrl()}
               fallback={
@@ -81,11 +150,23 @@ export function FilePreviewModal(props: Props) {
                     <div class="text-neutral-500 italic">No thumbnail available. Click Zoom to render.</div>
                   }
                 >
-                  <img src={props.thumbnailUrl!} alt="Thumbnail" class="max-h-[70vh] max-w-full" />
+                  <img
+                    src={props.thumbnailUrl!}
+                    alt="Thumbnail"
+                    draggable={false}
+                    class="max-h-[70vh] max-w-full"
+                    style={{ transform: `translate(${tx()}px, ${ty()}px) scale(${scale()})`, "transform-origin": "center center", "will-change": "transform" }}
+                  />
                 </Show>
               }
             >
-              <img src={zoomUrl()!} alt="Preview" class="max-h-[80vh] max-w-full" />
+              <img
+                src={zoomUrl()!}
+                alt="Preview"
+                draggable={false}
+                class="max-h-[80vh] max-w-full"
+                style={{ transform: `translate(${tx()}px, ${ty()}px) scale(${scale()})`, "transform-origin": "center center", "will-change": "transform" }}
+              />
             </Show>
 
             <Show when={loading()}>
