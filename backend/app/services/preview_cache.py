@@ -36,21 +36,33 @@ class PreviewCache:
     def record(self, key: str, size: int) -> None:
         """Register a just-written cache file.
 
-        Evicts oldest entries first if needed to fit within cap.
+        Evicts oldest entries first if needed to fit within cap. Safe to call
+        with an already-tracked key (updates size and accounting atomically).
         """
         self.ensure_capacity_for(size)
-        self.redis.zadd(LRU_KEY, {key: time.time()})
-        self.redis.hset(SIZES_KEY, key, size)
-        self.redis.incrby(TOTAL_KEY, size)
+        old = self.redis.hget(SIZES_KEY, key)
+        old_size = int(old) if old else 0
+        pipe = self.redis.pipeline()
+        pipe.zadd(LRU_KEY, {key: time.time()})
+        pipe.hset(SIZES_KEY, key, size)
+        pipe.incrby(TOTAL_KEY, size - old_size)
+        pipe.execute()
 
     def ensure_capacity_for(self, new_size: int) -> None:
-        """Evict oldest entries until `total + new_size <= cap`."""
+        """Evict oldest entries until `total + new_size <= cap`.
+
+        Breaks out if no progress is made (guards against metadata drift).
+        """
         while self.total_bytes() + new_size > self.cap_bytes:
             oldest = self.redis.zrange(LRU_KEY, 0, 0)
             if not oldest:
                 return
             key = oldest[0]
+            before = self.total_bytes()
             self._evict(key)
+            if self.total_bytes() >= before:
+                # No progress — likely size metadata drift. Stop evicting.
+                return
 
     def _evict(self, key: str) -> None:
         size_str = self.redis.hget(SIZES_KEY, key)
@@ -60,6 +72,8 @@ class PreviewCache:
             path.unlink(missing_ok=True)
         except OSError:
             pass
-        self.redis.zrem(LRU_KEY, key)
-        self.redis.hdel(SIZES_KEY, key)
-        self.redis.decrby(TOTAL_KEY, size)
+        pipe = self.redis.pipeline()
+        pipe.zrem(LRU_KEY, key)
+        pipe.hdel(SIZES_KEY, key)
+        pipe.decrby(TOTAL_KEY, size)
+        pipe.execute()

@@ -73,3 +73,28 @@ def test_evict_noop_when_within_cap(redis_client, cache_dir):
     cache.record("a.jpg", 100)
     cache.ensure_capacity_for(500)
     assert (cache_dir / "a.jpg").exists()
+
+
+def test_record_same_key_twice_no_double_count(redis_client, cache_dir):
+    cache = PreviewCache(redis_client, cache_dir, cap_bytes=10_000)
+    _make_file(cache_dir, "a.jpg", 100)
+    cache.record("a.jpg", 100)
+    cache.record("a.jpg", 150)  # re-record with new size
+    assert cache.total_bytes() == 150
+    assert redis_client.hget("preview:sizes", "a.jpg") == "150"
+
+
+def test_ensure_capacity_stops_when_no_progress(redis_client, cache_dir):
+    """Drift scenario: TOTAL_KEY is high but no SIZES_KEY entries exist.
+
+    Eviction cannot reduce TOTAL_KEY, so the loop must bail rather than
+    drain the entire LRU set.
+    """
+    cache = PreviewCache(redis_client, cache_dir, cap_bytes=100)
+    # Inject drift: LRU + TOTAL out of sync with SIZES (no size entries)
+    redis_client.zadd("preview:lru", {"ghost1.jpg": 1.0, "ghost2.jpg": 2.0})
+    redis_client.set("preview:total_bytes", 500)
+    cache.ensure_capacity_for(50)
+    # Loop should have evicted at most one entry before bailing
+    remaining = redis_client.zcard("preview:lru")
+    assert remaining >= 1  # did not drain the entire set
