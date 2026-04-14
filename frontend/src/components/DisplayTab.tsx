@@ -450,12 +450,24 @@ export default function DisplayTab() {
             min={100}
             max={51200}
             onBlur={(e) => {
-              const v = Math.min(51200, Math.max(100, Number(e.currentTarget.value) || 2048));
+              const raw = e.currentTarget.value.trim();
+              const parsed = Number(raw);
+              if (!raw || Number.isNaN(parsed)) {
+                e.currentTarget.value = String(previewCacheMb());
+                return;
+              }
+              const v = Math.min(51200, Math.max(100, parsed));
               handlePreviewCacheMbChange(v);
             }}
             onKeyDown={(e) => {
               if (e.key === "Enter") {
-                const v = Math.min(51200, Math.max(100, Number(e.currentTarget.value) || 2048));
+                const raw = e.currentTarget.value.trim();
+                const parsed = Number(raw);
+                if (!raw || Number.isNaN(parsed)) {
+                  e.currentTarget.value = String(previewCacheMb());
+                  return;
+                }
+                const v = Math.min(51200, Math.max(100, parsed));
                 handlePreviewCacheMbChange(v);
               }
             }}
