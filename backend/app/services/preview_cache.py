@@ -86,7 +86,7 @@ class PreviewCache:
         Returns a dict summary.
         """
         if not self.cache_dir.exists():
-            return {"removed_orphan_metadata": 0, "removed_orphan_files": 0}
+            return {"removed_orphan_metadata": 0, "removed_orphan_files": 0, "total_bytes": 0}
 
         tracked_keys = set(self.redis.hkeys(SIZES_KEY))
         on_disk = {p.name for p in self.cache_dir.iterdir() if p.is_file() and not p.name.startswith(".")}
