@@ -17,11 +17,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from astropy.wcs import WCS
 
 from app.models.image import Image
-from app.services.thumbnail import (
-    _read_decimated,
-    _normalize_to_unit,
-    _resize_array,
-    _stretch_channel,
+from app.services.thumbnail import _read_decimated
+from app.services.stretch import (
+    normalize_to_unit,
+    resize_array,
+    stretch_channel,
 )
 
 logger = logging.getLogger(__name__)
@@ -142,19 +142,19 @@ def generate_panel_thumbnail(
     data = _read_decimated(fits_path, max_width)
 
     if data.ndim == 2:
-        data = _normalize_to_unit(data)
+        data = normalize_to_unit(data)
         flipped = np.flipud(data)
-        resized = _resize_array(flipped, max_width)
-        stretched = _stretch_channel(resized)
+        resized = resize_array(flipped, max_width)
+        stretched = stretch_channel(resized)
         img = PILImage.fromarray(stretched, mode="L").convert("RGB")
         return img, native_width
     elif data.ndim == 3 and data.shape[0] == 3:
         channels = []
         for i in range(3):
-            ch = _normalize_to_unit(data[i])
+            ch = normalize_to_unit(data[i])
             flipped = np.flipud(ch)
-            resized = _resize_array(flipped, max_width)
-            stretched = _stretch_channel(resized)
+            resized = resize_array(flipped, max_width)
+            stretched = stretch_channel(resized)
             channels.append(stretched)
         rgb = np.stack(channels, axis=-1)
         img = PILImage.fromarray(rgb, mode="RGB")

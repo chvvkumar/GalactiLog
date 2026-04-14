@@ -18,7 +18,7 @@ import numpy as np
 from PIL import Image as PILImage
 
 from app.services.csv_metadata import get_csv_metrics
-from app.services.thumbnail import _normalize_to_unit, _resize_array, _stretch_channel
+from app.services.stretch import normalize_to_unit, resize_array, stretch_channel
 
 XISF_SIGNATURE = b"XISF0100"
 XISF_NS = "http://www.pixinsight.com/xisf"
@@ -206,17 +206,17 @@ def generate_xisf_thumbnail(
         data = data.squeeze()
 
     if data.ndim == 2:
-        data = _normalize_to_unit(data)
-        resized = _resize_array(data, max_width)
-        stretched = _stretch_channel(resized)
+        data = normalize_to_unit(data)
+        resized = resize_array(data, max_width)
+        stretched = stretch_channel(resized)
         img = PILImage.fromarray(stretched, mode="L")
     elif data.ndim == 3 and data.shape[2] == 3:
         # Channels-last [H, W, 3] - process each channel independently
         channels = []
         for i in range(3):
-            ch = _normalize_to_unit(data[:, :, i])
-            resized = _resize_array(ch, max_width)
-            stretched = _stretch_channel(resized)
+            ch = normalize_to_unit(data[:, :, i])
+            resized = resize_array(ch, max_width)
+            stretched = stretch_channel(resized)
             channels.append(stretched)
         rgb = np.stack(channels, axis=-1)
         img = PILImage.fromarray(rgb, mode="RGB")
@@ -224,9 +224,9 @@ def generate_xisf_thumbnail(
         # Channels-first [3, H, W] fallback
         channels = []
         for i in range(3):
-            ch = _normalize_to_unit(data[i])
-            resized = _resize_array(ch, max_width)
-            stretched = _stretch_channel(resized)
+            ch = normalize_to_unit(data[i])
+            resized = resize_array(ch, max_width)
+            stretched = stretch_channel(resized)
             channels.append(stretched)
         rgb = np.stack(channels, axis=-1)
         img = PILImage.fromarray(rgb, mode="RGB")
