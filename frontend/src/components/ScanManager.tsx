@@ -342,6 +342,7 @@ const ScanManager: Component = () => {
               <ScanControls
                 isActive={isActive()}
                 stopping={stopping()}
+                rebuildRunning={rebuildState().state === "running"}
                 frameFilter={frameFilter()}
                 onFrameFilterChange={setFrameFilter}
                 onStartScan={() => startScan({ includeCalibration: frameFilter() === "all" })}

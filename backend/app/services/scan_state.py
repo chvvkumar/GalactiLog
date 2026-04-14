@@ -394,3 +394,19 @@ def set_rebuild_complete_sync(r: sync_redis.Redis, message: str, details: dict) 
         "details": json.dumps(details),
     })
     r.expire(REBUILD_KEY, REBUILD_EXPIRE)
+
+
+def set_rebuild_cancelled_sync(
+    r: sync_redis.Redis,
+    message: str = "Cancelled by user",
+    details: dict | None = None,
+) -> None:
+    import json
+    r.hset(REBUILD_KEY, mapping={
+        "state": "cancelled",
+        "message": message,
+        "completed_at": time.time(),
+        "details": json.dumps(details or {}),
+    })
+    r.expire(REBUILD_KEY, EXPIRE_AFTER_COMPLETE)
+    clear_cancel_sync(r)

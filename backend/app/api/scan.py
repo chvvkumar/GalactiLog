@@ -136,13 +136,16 @@ async def scan_status(user: User = Depends(get_current_user)):
 
 @router.post("/stop")
 async def stop_scan(user: User = Depends(require_admin)):
-    """Request cancellation of the current scan."""
+    """Request cancellation of the current scan or rebuild-family task."""
     async with async_redis() as r:
         state = await get_scan_state(r)
-        if state.state not in ("scanning", "ingesting"):
+        rebuild = await get_rebuild_state(r)
+        scan_active = state.state in ("scanning", "ingesting")
+        rebuild_active = rebuild.state == "running"
+        if not scan_active and not rebuild_active:
             return {"status": "not_running", "state": state.state}
         await request_cancel(r)
-        return {"status": "stopping", "message": "Cancel requested - scan will stop shortly"}
+        return {"status": "stopping", "message": "Cancel requested - task will stop shortly"}
 
 
 @router.get("/activity")

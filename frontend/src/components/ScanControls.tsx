@@ -6,6 +6,7 @@ type FrameFilter = "all" | "light_only";
 const ScanControls: Component<{
   isActive: boolean;
   stopping: boolean;
+  rebuildRunning: boolean;
   frameFilter: FrameFilter;
   onFrameFilterChange: (filter: FrameFilter) => void;
   onStartScan: () => void;
@@ -46,7 +47,7 @@ const ScanControls: Component<{
       </div>
       <Show when={isAdmin()}>
         <div class="flex gap-2 flex-shrink-0 ml-auto">
-          <Show when={props.isActive}>
+          <Show when={props.isActive || props.rebuildRunning}>
             <button
               onClick={props.onStopScan}
               disabled={props.stopping}
