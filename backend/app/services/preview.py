@@ -25,7 +25,7 @@ def generate_preview(
         data = fits[0].read().astype(np.float32)
 
     effective_width: int | None = None
-    if max_width and max_width > 0:
+    if max_width > 0:
         effective_width = max_width
 
     if data.ndim == 2:

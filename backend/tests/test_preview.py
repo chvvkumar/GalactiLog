@@ -52,6 +52,7 @@ def test_generate_preview_native_when_zero(mono_data, tmp_path):
     assert out.exists()
     with PILImage.open(out) as img:
         assert img.width == 800  # native sensor width
+        assert img.height == 600
 
 
 def test_generate_preview_color_produces_rgb_jpeg(color_data, tmp_path):
