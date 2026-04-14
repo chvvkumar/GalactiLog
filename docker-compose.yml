@@ -55,7 +55,7 @@ services:
 
 volumes:
   # Named volumes used as fallbacks when host paths are not set in .env
-  # When GALACTILOG_POSTGRES_DATA_HOST_PATH / GALACTILOG_THUMBNAILS_HOST_PATH are set, bind mounts are used instead
+  # When GALACTILOG_POSTGRES_DATA_HOST_PATH / GALACTILOG_THUMBNAILS_HOST_PATH / GALACTILOG_PREVIEWS_HOST_PATH are set, bind mounts are used instead
   postgres_data:
   thumbnails_data:
   previews_data:
