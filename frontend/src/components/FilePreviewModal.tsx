@@ -25,6 +25,9 @@ export function FilePreviewModal(props: Props) {
   onCleanup(() => window.removeEventListener("keydown", handleEscape));
 
   const requestZoom = async () => {
+    const prev = zoomUrl();
+    if (prev) URL.revokeObjectURL(prev);
+    setZoomUrl(null);
     setLoading(true);
     setError(null);
     const url = `/api/preview/${props.imageId}?resolution=${previewResolution()}`;
@@ -94,7 +97,7 @@ export function FilePreviewModal(props: Props) {
         <Show when={error()}>
           <div class="mt-2 rounded bg-red-900/50 p-2 text-sm text-red-200">
             {error()}
-            <button class="ml-2 underline" onClick={requestZoom}>Retry</button>
+            <button class="ml-2 underline disabled:opacity-50" onClick={requestZoom} disabled={loading()}>Retry</button>
           </div>
         </Show>
 
