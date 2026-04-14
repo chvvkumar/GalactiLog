@@ -20,17 +20,24 @@ const NavBar: Component = () => {
     }
   });
 
+  const isSemver = (v: string) => /^\d+\.\d+\.\d+/.test(v);
   const versionLabel = () => {
     const v = version();
     if (!v) return "";
     const sha = v.git_sha && v.git_sha !== "unknown" ? ` (${v.git_sha.slice(0, 7)})` : "";
-    return `v${v.version}${sha}`;
+    const prefix = isSemver(v.version) ? "v" : "";
+    return `${prefix}${v.version}${sha}`;
   };
   const versionUrl = () => {
     const v = version();
-    return v && v.version !== "dev"
-      ? `https://github.com/chvvkumar/GalactiLog/releases/tag/${v.version}`
-      : null;
+    if (!v) return null;
+    if (isSemver(v.version)) {
+      return `https://github.com/chvvkumar/GalactiLog/releases/tag/${v.version}`;
+    }
+    if (v.git_sha && v.git_sha !== "unknown") {
+      return `https://github.com/chvvkumar/GalactiLog/commit/${v.git_sha}`;
+    }
+    return null;
   };
 
   const handleLogout = async () => {
@@ -115,7 +122,7 @@ const NavBar: Component = () => {
               target="_blank"
               rel="noopener noreferrer"
               class="text-xs text-theme-text-secondary hover:text-theme-text-primary transition-colors hidden sm:inline"
-              title="View this release on GitHub"
+              title={isSemver(version()!.version) ? "View this release on GitHub" : "View this build's commit on GitHub"}
             >
               {versionLabel()}
             </a>
