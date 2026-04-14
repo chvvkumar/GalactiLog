@@ -46,3 +46,10 @@ def test_resize_array_noop_when_smaller():
     data = np.zeros((50, 100), dtype=np.float32)
     out = resize_array(data, max_width=200)
     assert out.shape == (50, 100)
+
+
+def test_stretch_channel_uniform_returns_midgrey():
+    data = np.full((32, 32), 0.5, dtype=np.float32)
+    out = stretch_channel(data)
+    assert out.dtype == np.uint8
+    assert np.all(out == 128)
