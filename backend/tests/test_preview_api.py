@@ -43,23 +43,11 @@ async def test_preview_endpoint_404_for_missing_file(tmp_path):
     fake_image = MagicMock()
     fake_image.file_path = str(nonexistent)
 
-    call_count = 0
-
     async def _fake_session():
-        nonlocal call_count
         session = AsyncMock()
-
-        def _execute_side_effect(*args, **kwargs):
-            nonlocal call_count
-            result = MagicMock()
-            if call_count == 0:
-                result.scalar_one_or_none.return_value = fake_image
-            else:
-                result.scalar_one_or_none.return_value = None
-            call_count += 1
-            return result
-
-        session.execute = AsyncMock(side_effect=_execute_side_effect)
+        result = MagicMock()
+        result.scalar_one_or_none.return_value = fake_image
+        session.execute = AsyncMock(return_value=result)
         yield session
 
     app.dependency_overrides[get_session] = _fake_session
