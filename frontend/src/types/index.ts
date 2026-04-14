@@ -539,6 +539,8 @@ export interface GeneralSettings {
   observer_longitude?: number | null;
   observer_name?: string | null;
   use_imaging_night?: boolean;
+  preview_resolution?: number;
+  preview_cache_mb?: number;
 }
 
 export interface FilterConfig {

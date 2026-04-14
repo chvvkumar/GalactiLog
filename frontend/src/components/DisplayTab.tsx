@@ -153,6 +153,35 @@ export default function DisplayTab() {
     }
   };
 
+  const [previewResolution, setPreviewResolution] = createSignal<number>(2400);
+  const [previewCacheMb, setPreviewCacheMb] = createSignal<number>(2048);
+
+  createEffect(() => {
+    const r = ctx.settings()?.general.preview_resolution;
+    if (r !== undefined) setPreviewResolution(r);
+  });
+
+  createEffect(() => {
+    const c = ctx.settings()?.general.preview_cache_mb;
+    if (c !== undefined) setPreviewCacheMb(c);
+  });
+
+  const handlePreviewResolutionChange = async (value: number) => {
+    setPreviewResolution(value);
+    const current = ctx.settings()?.general;
+    if (current) {
+      await ctx.saveGeneral({ ...current, preview_resolution: value });
+    }
+  };
+
+  const handlePreviewCacheMbChange = async (value: number) => {
+    setPreviewCacheMb(value);
+    const current = ctx.settings()?.general;
+    if (current) {
+      await ctx.saveGeneral({ ...current, preview_cache_mb: value });
+    }
+  };
+
   const toggleCollapsed = (key: string) => setCollapsed((prev) => ({ ...prev, [key]: !prev[key] }));
 
   const toggleGroupEnabled = (key: keyof DisplaySettings) => {
@@ -388,6 +417,50 @@ export default function DisplayTab() {
               )}
             </For>
           </div>
+        </div>
+      </div>
+
+      <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
+        <h2 class="text-sm font-semibold text-theme-text-primary">File Preview</h2>
+        <p class="text-sm text-theme-text-secondary">Configure on-demand full-resolution preview rendering.</p>
+        <div class="flex items-center justify-between">
+          <div>
+            <span class="text-sm text-theme-text-secondary">Preview resolution</span>
+            <p class="text-xs text-theme-text-tertiary mt-0.5">Resolution for on-demand full previews. Native uses the sensor's full width.</p>
+          </div>
+          <select
+            value={previewResolution()}
+            onChange={(e) => handlePreviewResolutionChange(Number(e.currentTarget.value))}
+            class="px-3 py-1.5 bg-theme-input border border-theme-border rounded-[var(--radius-sm)] text-sm text-theme-text-primary focus:ring-1 focus:ring-theme-accent focus:border-theme-accent outline-none"
+          >
+            <option value={1600}>1600 px</option>
+            <option value={2400}>2400 px</option>
+            <option value={4000}>4000 px</option>
+            <option value={0}>Native</option>
+          </select>
+        </div>
+        <div class="flex items-center justify-between">
+          <div>
+            <span class="text-sm text-theme-text-secondary">Preview cache size (MB)</span>
+            <p class="text-xs text-theme-text-tertiary mt-0.5">Max disk space for cached previews. LRU eviction when full.</p>
+          </div>
+          <input
+            type="number"
+            value={previewCacheMb()}
+            min={100}
+            max={51200}
+            onBlur={(e) => {
+              const v = Math.min(51200, Math.max(100, Number(e.currentTarget.value) || 2048));
+              handlePreviewCacheMbChange(v);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                const v = Math.min(51200, Math.max(100, Number(e.currentTarget.value) || 2048));
+                handlePreviewCacheMbChange(v);
+              }
+            }}
+            class="w-28 px-3 py-1.5 bg-theme-input border border-theme-border rounded-[var(--radius-sm)] text-sm text-theme-text-primary focus:ring-1 focus:ring-theme-accent focus:border-theme-accent outline-none text-right"
+          />
         </div>
       </div>
 

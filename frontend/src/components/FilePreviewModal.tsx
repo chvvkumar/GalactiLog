@@ -15,8 +15,7 @@ export function FilePreviewModal(props: Props) {
   const [error, setError] = createSignal<string | null>(null);
   const [zoomUrl, setZoomUrl] = createSignal<string | null>(null);
 
-  const previewResolution = () =>
-    ((settings()?.general as Record<string, unknown>)?.["preview_resolution"] as number | undefined) ?? 2400;
+  const previewResolution = () => settings()?.general.preview_resolution ?? 2400;
 
   const handleEscape = (e: KeyboardEvent) => {
     if (e.key === "Escape") props.onClose();
