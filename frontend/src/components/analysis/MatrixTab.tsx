@@ -42,8 +42,9 @@ const MatrixTab: Component<Props> = (props) => {
 
   const cellMap = createMemo(() => {
     const d = data();
-    if (!d) return new Map<string, (typeof d.cells)[number]>();
-    const map = new Map<string, (typeof d.cells)[number]>();
+    type Cell = NonNullable<typeof d>["cells"][number];
+    if (!d) return new Map<string, Cell>();
+    const map = new Map<string, Cell>();
     for (const c of d.cells) {
       map.set(`${c.x_metric}:${c.y_metric}`, c);
     }

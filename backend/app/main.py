@@ -90,6 +90,21 @@ async def lifespan(app: FastAPI):
     start_queue_depth_probe(celery_app, settings.redis_url)
     register_celery_collector(settings.redis_url)
 
+    # Reconcile preview cache: drop orphaned metadata and on-disk strays
+    try:
+        from app.config import get_sync_redis
+        from app.services.preview_cache import PreviewCache
+        from pathlib import Path as _P
+        redis = get_sync_redis()
+        try:
+            cache = PreviewCache(redis, _P(settings.previews_path), cap_bytes=1)
+            summary = cache.reconcile()
+            logger.info("Preview cache reconciled: %s", summary)
+        finally:
+            redis.close()
+    except Exception as exc:
+        logger.warning("Preview cache reconcile skipped: %s", exc)
+
     yield
 
 
@@ -132,6 +147,15 @@ def create_app() -> FastAPI:
         "/thumbnails",
         StaticFiles(directory=str(thumbnails_dir)),
         name="thumbnails",
+    )
+
+    # Serve preview cache files (nginx intercepts via X-Accel-Redirect in prod)
+    previews_dir = Path(settings.previews_path)
+    previews_dir.mkdir(parents=True, exist_ok=True)
+    application.mount(
+        "/_previews_internal",
+        StaticFiles(directory=str(previews_dir)),
+        name="previews_internal",
     )
 
     return application

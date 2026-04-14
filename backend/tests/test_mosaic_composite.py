@@ -89,7 +89,7 @@ def test_generate_panel_thumbnail(tmp_path: Path):
     mock_fits.__exit__ = MagicMock(return_value=False)
     mock_fits.__getitem__ = MagicMock(return_value=mock_hdu)
 
-    with patch("app.services.mosaic_composite._read_decimated", return_value=data), \
+    with patch("app.services.mosaic_composite._read_binned", return_value=data), \
          patch("app.services.mosaic_composite.fitsio.FITS", return_value=mock_fits):
         img, native_width = generate_panel_thumbnail(fake_path, max_width=400)
     assert isinstance(img, PILImage.Image)

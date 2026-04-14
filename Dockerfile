@@ -19,6 +19,10 @@ RUN pip install --no-cache-dir .
 
 # Stage 3: Runtime
 FROM python:3.12-slim AS runtime
+ARG GALACTILOG_VERSION=dev
+ARG GALACTILOG_GIT_SHA=unknown
+ENV GALACTILOG_VERSION=${GALACTILOG_VERSION} \
+    GALACTILOG_GIT_SHA=${GALACTILOG_GIT_SHA}
 RUN apt-get update && apt-get install -y --no-install-recommends \
     nginx supervisor curl \
     && rm -rf /var/lib/apt/lists/* \
@@ -34,7 +38,8 @@ COPY backend/alembic/ /app/alembic/
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 COPY backend/entrypoint.sh /app/entrypoint.sh
-RUN chmod +x /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh \
+    && mkdir -p /app/data/fits /app/data/thumbnails /app/data/thumbnails/previews
 
 WORKDIR /app
 ENV GALACTILOG_CELERY_CONCURRENCY=4

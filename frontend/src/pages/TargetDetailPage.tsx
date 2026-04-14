@@ -358,21 +358,28 @@ const TargetDetailPage: Component = () => {
             {/* Sky View & Reference Thumbnail */}
             <Show when={detail().ra != null && detail().dec != null}>
               <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4">
-                <button
-                  class="flex items-center justify-between w-full py-2 cursor-pointer group"
-                  onClick={() => setSkyViewExpanded((v) => !v)}
-                >
-                  <h3 class="text-xs font-semibold uppercase tracking-wider text-theme-text-secondary border-l-2 border-theme-accent pl-2 group-hover:text-theme-text-primary transition-colors">
-                    Sky View
-                  </h3>
-                  <svg
-                    class={`w-3.5 h-3.5 transition-transform duration-200 text-theme-text-tertiary ${skyViewExpanded() ? "rotate-180" : ""}`}
-                    viewBox="0 0 20 20"
-                    fill="currentColor"
+                <div class="flex items-center gap-2">
+                  <button
+                    class="flex items-center gap-2 py-2 cursor-pointer group"
+                    onClick={() => setSkyViewExpanded((v) => !v)}
                   >
-                    <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
-                  </svg>
-                </button>
+                    <h3 class="text-xs font-semibold uppercase tracking-wider text-theme-text-secondary border-l-2 border-theme-accent pl-2 group-hover:text-theme-text-primary transition-colors">
+                      Sky View
+                    </h3>
+                    <svg
+                      class={`w-3.5 h-3.5 transition-transform duration-200 text-theme-text-tertiary ${skyViewExpanded() ? "rotate-180" : ""}`}
+                      viewBox="0 0 20 20"
+                      fill="currentColor"
+                    >
+                      <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
+                    </svg>
+                  </button>
+                  <HelpPopover>
+                    <p class="text-sm text-theme-text-secondary">
+                      Interactive sky viewer centered on the target. The Aladin panel supports zoom and pan across surveys (DSS2, PanSTARRS, and others), and the reference thumbnail shows the default DSS image for context. Example: switch surveys in Aladin to compare how the target looks in different wavelengths.
+                    </p>
+                  </HelpPopover>
+                </div>
                 <Show when={skyViewExpanded()}>
                   <div class="mt-2 flex gap-3 items-stretch">
                     <div class="w-[60%] min-w-0 flex flex-col">
@@ -400,29 +407,36 @@ const TargetDetailPage: Component = () => {
 
             {/* Target Notes */}
             <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4">
-              <button
-                class="flex items-center justify-between w-full py-2 cursor-pointer group"
-                onClick={() => setNotesExpanded((v) => !v)}
-              >
-                <h3 class="text-xs font-semibold uppercase tracking-wider text-theme-text-secondary border-l-2 border-theme-accent pl-2 group-hover:text-theme-text-primary transition-colors">
-                  Notes
-                  <Show when={targetNotes()}>
-                    <span class="text-theme-text-tertiary font-normal normal-case tracking-normal ml-2">has content</span>
-                  </Show>
-                </h3>
-                <div class="flex items-center gap-2">
-                  <Show when={notesSaving()}>
-                    <span class="text-xs text-theme-text-secondary">Saving...</span>
-                  </Show>
-                  <svg
-                    class={`w-3.5 h-3.5 transition-transform duration-200 text-theme-text-tertiary ${notesExpanded() ? "rotate-180" : ""}`}
-                    viewBox="0 0 20 20"
-                    fill="currentColor"
-                  >
-                    <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
-                  </svg>
-                </div>
-              </button>
+              <div class="flex items-center gap-2">
+                <button
+                  class="flex items-center gap-2 py-2 cursor-pointer group"
+                  onClick={() => setNotesExpanded((v) => !v)}
+                >
+                  <h3 class="text-xs font-semibold uppercase tracking-wider text-theme-text-secondary border-l-2 border-theme-accent pl-2 group-hover:text-theme-text-primary transition-colors">
+                    Notes
+                    <Show when={targetNotes()}>
+                      <span class="text-theme-text-tertiary font-normal normal-case tracking-normal ml-2">has content</span>
+                    </Show>
+                  </h3>
+                  <div class="flex items-center gap-2">
+                    <Show when={notesSaving()}>
+                      <span class="text-xs text-theme-text-secondary">Saving...</span>
+                    </Show>
+                    <svg
+                      class={`w-3.5 h-3.5 transition-transform duration-200 text-theme-text-tertiary ${notesExpanded() ? "rotate-180" : ""}`}
+                      viewBox="0 0 20 20"
+                      fill="currentColor"
+                    >
+                      <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
+                    </svg>
+                  </div>
+                </button>
+                <HelpPopover>
+                  <p class="text-sm text-theme-text-secondary">
+                    Free-form notes attached to this target. Notes persist across sessions and are included in exports. Example: record plate solving issues, framing plans, or processing decisions.
+                  </p>
+                </HelpPopover>
+              </div>
               <Show when={notesExpanded()}>
                 <textarea
                   class="w-full bg-theme-elevated border border-theme-border rounded px-3 py-2 text-sm text-theme-text-primary placeholder-theme-text-secondary resize-y min-h-[60px] mt-2"
@@ -440,21 +454,28 @@ const TargetDetailPage: Component = () => {
             {/* Target Metrics Chart */}
             <Show when={targetDetail()}>
               <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4">
-                <button
-                  class="flex items-center justify-between w-full py-2 cursor-pointer group"
-                  onClick={toggleTargetChart}
-                >
-                  <h3 class="text-xs font-semibold uppercase tracking-wider text-theme-text-secondary border-l-2 border-theme-accent pl-2 group-hover:text-theme-text-primary transition-colors">
-                    Graphs
-                  </h3>
-                  <svg
-                    class={`w-3.5 h-3.5 transition-transform duration-200 text-theme-text-tertiary ${targetChartExpanded() ? "rotate-180" : ""}`}
-                    viewBox="0 0 20 20"
-                    fill="currentColor"
+                <div class="flex items-center gap-2">
+                  <button
+                    class="flex items-center gap-2 py-2 cursor-pointer group"
+                    onClick={toggleTargetChart}
                   >
-                    <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
-                  </svg>
-                </button>
+                    <h3 class="text-xs font-semibold uppercase tracking-wider text-theme-text-secondary border-l-2 border-theme-accent pl-2 group-hover:text-theme-text-primary transition-colors">
+                      Graphs
+                    </h3>
+                    <svg
+                      class={`w-3.5 h-3.5 transition-transform duration-200 text-theme-text-tertiary ${targetChartExpanded() ? "rotate-180" : ""}`}
+                      viewBox="0 0 20 20"
+                      fill="currentColor"
+                    >
+                      <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
+                    </svg>
+                  </button>
+                  <HelpPopover>
+                    <p class="text-sm text-theme-text-secondary">
+                      Per-frame metric plots (HFR, FWHM, eccentricity, guide RMS, and others) over time. Use the date selector to narrow to a single imaging night or span multiple sessions. Example: spot a degrading HFR trend across a single night to identify focus drift.
+                    </p>
+                  </HelpPopover>
+                </div>
                 <Show when={targetChartExpanded()}>
                   <TargetMetricsChart
                     selectedDates={selectedChartDates()}
@@ -469,7 +490,14 @@ const TargetDetailPage: Component = () => {
 
             {/* Session Table */}
             <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
-              <h2 class="text-sm font-semibold text-theme-text-primary">Sessions</h2>
+              <div class="flex items-center gap-2">
+                <h2 class="text-sm font-semibold text-theme-text-primary">Sessions</h2>
+                <HelpPopover>
+                  <p class="text-sm text-theme-text-secondary">
+                    Each card is one imaging session on this target. Expand a card to see per-frame details (exposure, filter, camera temperature, HFR, guiding). Example: compare two sessions of the same target to pick the better one for stacking.
+                  </p>
+                </HelpPopover>
+              </div>
               <div class="overflow-x-auto">
               <table class="w-full border-collapse min-w-[600px]">
                 <thead>

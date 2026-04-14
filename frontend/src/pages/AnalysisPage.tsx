@@ -111,33 +111,35 @@ const AnalysisPage: Component = () => {
         <h1 class="text-xl font-semibold tracking-tight text-theme-text-primary">Analysis</h1>
         <HelpPopover>
           <p class="text-sm text-theme-text-secondary">
-            The Analysis page lets you explore relationships and trends in your imaging data across all targets and sessions.
+            Explore relationships and trends across your imaging data. Set scope once in Shared Filters, then switch between tabs to view the same data in different ways.
           </p>
           <ul class="list-disc list-inside space-y-1">
-            <li class="text-sm text-theme-text-secondary">
-              Use the <strong class="text-theme-text-primary">shared controls</strong> at the top to filter by equipment, filter, date range, and toggle between per-frame and per-session granularity. These filters apply to all tabs.
-            </li>
-            <li class="text-sm text-theme-text-secondary">
-              <strong class="text-theme-text-primary">Correlation</strong> plots two metrics against each other (e.g., HFR vs altitude) to find relationships.
-            </li>
-            <li class="text-sm text-theme-text-secondary">
-              <strong class="text-theme-text-primary">Distributions</strong> shows histograms of individual metrics to understand their spread and typical values.
-            </li>
-            <li class="text-sm text-theme-text-secondary">
-              <strong class="text-theme-text-primary">Time Series</strong> tracks how metrics change over time - useful for detecting equipment degradation or seasonal trends.
-            </li>
-            <li class="text-sm text-theme-text-secondary">
-              <strong class="text-theme-text-primary">Matrix</strong> shows a correlation grid across all metric pairs. Click a cell to jump to its detailed correlation plot.
-            </li>
-            <li class="text-sm text-theme-text-secondary">
-              <strong class="text-theme-text-primary">Compare</strong> lets you compare metric distributions across equipment setups or filters side by side.
-            </li>
+            <li class="text-sm text-theme-text-secondary"><strong class="text-theme-text-primary">Correlation</strong>: scatter plot of two metrics.</li>
+            <li class="text-sm text-theme-text-secondary"><strong class="text-theme-text-primary">Distributions</strong>: histogram of one metric, optionally grouped.</li>
+            <li class="text-sm text-theme-text-secondary"><strong class="text-theme-text-primary">Time Series</strong>: a metric plotted over time.</li>
+            <li class="text-sm text-theme-text-secondary"><strong class="text-theme-text-primary">Matrix</strong>: heatmap of one metric across two categorical axes.</li>
+            <li class="text-sm text-theme-text-secondary"><strong class="text-theme-text-primary">Compare</strong>: side-by-side distributions across groups.</li>
           </ul>
+          <p class="text-sm text-theme-text-secondary">Each section has its own info icon with details and examples.</p>
         </HelpPopover>
       </div>
       <div class="rounded-[var(--radius-md)] bg-theme-surface border border-theme-border p-4 space-y-6">
         <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
-          <h2 class="text-sm font-semibold text-theme-text-primary">Shared Filters</h2>
+          <div class="flex items-center gap-2">
+            <h2 class="text-sm font-semibold text-theme-text-primary">Shared Filters</h2>
+            <HelpPopover>
+              <p class="text-sm text-theme-text-secondary">
+                Scope controls that apply to every tab on this page at the same time. Switching tabs preserves your selection.
+              </p>
+              <ul class="list-disc list-inside space-y-1">
+                <li class="text-sm text-theme-text-secondary"><strong class="text-theme-text-primary">Equipment</strong>: telescope and camera combination.</li>
+                <li class="text-sm text-theme-text-secondary"><strong class="text-theme-text-primary">Filter</strong>: restrict to a single optical filter (e.g. Ha, OIII, L).</li>
+                <li class="text-sm text-theme-text-secondary"><strong class="text-theme-text-primary">Granularity</strong>: per frame uses each individual sub, per session aggregates by imaging session.</li>
+                <li class="text-sm text-theme-text-secondary"><strong class="text-theme-text-primary">Date range</strong>: restrict by capture date.</li>
+              </ul>
+              <p class="text-sm text-theme-text-secondary">Example: pick your main scope, Ha filter, per session, last 12 months, then flip through tabs to see that slice every way.</p>
+            </HelpPopover>
+          </div>
           <div class="flex flex-wrap items-center gap-3">
             <select
               ref={equipSelectRef}
@@ -214,31 +216,87 @@ const AnalysisPage: Component = () => {
 
         <Show when={activeTab() === "correlation"}>
           <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
-            <h2 class="text-sm font-semibold text-theme-text-primary">Correlation</h2>
+            <div class="flex items-center gap-2">
+              <h2 class="text-sm font-semibold text-theme-text-primary">Correlation</h2>
+              <HelpPopover>
+                <p class="text-sm text-theme-text-secondary">
+                  Scatter plot of any two numeric metrics across the filtered dataset. Use it to spot relationships between variables.
+                </p>
+                <ul class="list-disc list-inside space-y-1">
+                  <li class="text-sm text-theme-text-secondary">Plot HFR against guide RMS to check whether seeing tracks guiding.</li>
+                  <li class="text-sm text-theme-text-secondary">Plot star count against altitude to see how elevation affects detections.</li>
+                </ul>
+              </HelpPopover>
+            </div>
             <CorrelationTab filters={shared()} navX={navX()} navY={navY()} onNavConsumed={() => { setNavX(undefined); setNavY(undefined); }} />
           </div>
         </Show>
         <Show when={activeTab() === "distributions"}>
           <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
-            <h2 class="text-sm font-semibold text-theme-text-primary">Distributions</h2>
+            <div class="flex items-center gap-2">
+              <h2 class="text-sm font-semibold text-theme-text-primary">Distributions</h2>
+              <HelpPopover>
+                <p class="text-sm text-theme-text-secondary">
+                  Histogram of a single metric with optional grouping. Reveals the spread, central tendency, and outliers in your data.
+                </p>
+                <ul class="list-disc list-inside space-y-1">
+                  <li class="text-sm text-theme-text-secondary">HFR grouped by filter shows whether some filters consistently yield worse stars.</li>
+                  <li class="text-sm text-theme-text-secondary">Exposure time distribution confirms how often you use each sub length.</li>
+                </ul>
+              </HelpPopover>
+            </div>
             <DistributionsTab filters={shared()} />
           </div>
         </Show>
         <Show when={activeTab() === "timeseries"}>
           <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
-            <h2 class="text-sm font-semibold text-theme-text-primary">Time Series</h2>
+            <div class="flex items-center gap-2">
+              <h2 class="text-sm font-semibold text-theme-text-primary">Time Series</h2>
+              <HelpPopover>
+                <p class="text-sm text-theme-text-secondary">
+                  A metric plotted over time, either per frame or aggregated by session or night. Useful for spotting drift, degradation, and seasonal patterns.
+                </p>
+                <ul class="list-disc list-inside space-y-1">
+                  <li class="text-sm text-theme-text-secondary">Camera temperature across a single night to verify cooling stability.</li>
+                  <li class="text-sm text-theme-text-secondary">Median HFR per session across months to watch for focus or collimation drift.</li>
+                </ul>
+              </HelpPopover>
+            </div>
             <TimeSeriesTab filters={shared()} />
           </div>
         </Show>
         <Show when={activeTab() === "matrix"}>
           <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
-            <h2 class="text-sm font-semibold text-theme-text-primary">Matrix</h2>
+            <div class="flex items-center gap-2">
+              <h2 class="text-sm font-semibold text-theme-text-primary">Matrix</h2>
+              <HelpPopover>
+                <p class="text-sm text-theme-text-secondary">
+                  Heatmap grid of one metric across two categorical axes. Good for spotting gaps in coverage and comparing aggregate values at a glance.
+                </p>
+                <ul class="list-disc list-inside space-y-1">
+                  <li class="text-sm text-theme-text-secondary">Filter by target shows integration time per channel for each object.</li>
+                  <li class="text-sm text-theme-text-secondary">Telescope by filter highlights which rigs have imaged which bands.</li>
+                </ul>
+                <p class="text-sm text-theme-text-secondary">Click a cell to jump to the Correlation tab pre-filtered to that combination.</p>
+              </HelpPopover>
+            </div>
             <MatrixTab filters={shared()} />
           </div>
         </Show>
         <Show when={activeTab() === "compare"}>
           <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
-            <h2 class="text-sm font-semibold text-theme-text-primary">Compare</h2>
+            <div class="flex items-center gap-2">
+              <h2 class="text-sm font-semibold text-theme-text-primary">Compare</h2>
+              <HelpPopover>
+                <p class="text-sm text-theme-text-secondary">
+                  Side-by-side comparison of a metric's distribution across two or more groups. Quantifies how one setup differs from another.
+                </p>
+                <ul class="list-disc list-inside space-y-1">
+                  <li class="text-sm text-theme-text-secondary">Compare HFR between two telescopes on the same target to judge optical performance.</li>
+                  <li class="text-sm text-theme-text-secondary">Compare eccentricity across filters to spot chromatic focus issues.</li>
+                </ul>
+              </HelpPopover>
+            </div>
             <CompareTab filters={shared()} combos={combos()} availableFilters={filters() || []} />
           </div>
         </Show>

@@ -22,22 +22,8 @@ const StatisticsPage: Component = () => {
         <h1 class="text-xl font-semibold tracking-tight text-theme-text-primary">Statistics</h1>
         <HelpPopover>
           <p class="text-sm text-theme-text-secondary">
-            The Statistics page provides an overview of your entire imaging catalog with aggregate metrics and visualizations.
+            Aggregate metrics across the full catalog. Four sections: Overview, Equipment Performance, Breakdowns, and Imaging Activity. Open the popover next to each section for details.
           </p>
-          <ul class="list-disc list-inside space-y-1">
-            <li class="text-sm text-theme-text-secondary">
-              <strong class="text-theme-text-primary">Overview</strong> shows total integration time, frame count, how long the catalog has been active, average session length (with multi-rig nights counted per rig), and average integration per target.
-            </li>
-            <li class="text-sm text-theme-text-secondary">
-              <strong class="text-theme-text-primary">Equipment Performance</strong> compares imaging quality across telescope/camera combinations.
-            </li>
-            <li class="text-sm text-theme-text-secondary">
-              <strong class="text-theme-text-primary">Filter Usage</strong>, <strong class="text-theme-text-primary">Equipment Inventory</strong>, and <strong class="text-theme-text-primary">Top Targets</strong> give quick breakdowns of what you image most.
-            </li>
-            <li class="text-sm text-theme-text-secondary">
-              <strong class="text-theme-text-primary">Timeline</strong> and <strong class="text-theme-text-primary">Calendar</strong> views show imaging activity over time - useful for tracking seasonal patterns and productivity.
-            </li>
-          </ul>
         </HelpPopover>
       </div>
 
@@ -53,17 +39,38 @@ const StatisticsPage: Component = () => {
         {(data) => (
           <div class="rounded-[var(--radius-md)] bg-theme-surface border border-theme-border p-4 space-y-6">
             <section class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
-              <h2 class="text-sm font-semibold text-theme-text-primary">Overview</h2>
+              <div class="flex items-center gap-2">
+                <h2 class="text-sm font-semibold text-theme-text-primary">Overview</h2>
+                <HelpPopover>
+                  <p class="text-sm text-theme-text-secondary">
+                    Catalog-wide totals: integration time, frame count, catalog age (days since the earliest frame), session count, and average integration per target. Example: "42 targets, 187 sessions, 312 hours total" at a glance.
+                  </p>
+                </HelpPopover>
+              </div>
               <StatsOverview overview={data().overview} />
             </section>
 
             <section class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
-              <h2 class="text-sm font-semibold text-theme-text-primary">Equipment Performance</h2>
+              <div class="flex items-center gap-2">
+                <h2 class="text-sm font-semibold text-theme-text-primary">Equipment Performance</h2>
+                <HelpPopover>
+                  <p class="text-sm text-theme-text-secondary">
+                    Metric summaries grouped by telescope, camera, and filter combination. Use this to compare how gear performs. Example: median HFR per telescope, frames captured per camera.
+                  </p>
+                </HelpPopover>
+              </div>
               <EquipmentPerformance combos={data().equipment_performance} />
             </section>
 
             <section class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
-              <h2 class="text-sm font-semibold text-theme-text-primary">Breakdowns</h2>
+              <div class="flex items-center gap-2">
+                <h2 class="text-sm font-semibold text-theme-text-primary">Breakdowns</h2>
+                <HelpPopover>
+                  <p class="text-sm text-theme-text-secondary">
+                    Three breakdown cards. Filter Usage shows integration time per filter. Equipment Inventory lists telescopes, cameras, and filters seen across the catalog. Top Targets lists the targets with the most integration time. Example: confirm that Ha dominates your narrowband hours.
+                  </p>
+                </HelpPopover>
+              </div>
               <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 [&>*]:border [&>*]:border-theme-border [&>*]:rounded-[var(--radius-md)] [&>*]:shadow-[var(--shadow-sm)]">
                 <FilterUsageChart usage={data().filter_usage} />
                 <EquipmentInventory cameras={data().equipment.cameras} telescopes={data().equipment.telescopes} />
@@ -72,7 +79,14 @@ const StatisticsPage: Component = () => {
             </section>
 
             <section class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
-              <h2 class="text-sm font-semibold text-theme-text-primary">Imaging Activity</h2>
+              <div class="flex items-center gap-2">
+                <h2 class="text-sm font-semibold text-theme-text-primary">Imaging Activity</h2>
+                <HelpPopover>
+                  <p class="text-sm text-theme-text-secondary">
+                    Temporal view of when imaging happened. Timeline is a chronological strip across months, weeks, and days. Calendar is a month grid marking imaging nights. Example: spot long gaps between sessions, or identify productive weather windows.
+                  </p>
+                </HelpPopover>
+              </div>
               <div class="flex items-center gap-2">
                 <button
                   class={`px-3 py-1 text-xs rounded ${timelineView() === "timeline" ? "bg-theme-elevated text-theme-text-primary font-medium border border-theme-border-em" : "bg-theme-bg text-theme-text-secondary border border-theme-border hover:bg-theme-hover"}`}

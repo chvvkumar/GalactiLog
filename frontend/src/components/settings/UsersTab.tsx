@@ -5,6 +5,7 @@ import { useAuth } from "../AuthProvider";
 import type { UserAccount } from "../../types";
 import { formatDate } from "../../utils/dateTime";
 import { useSettingsContext } from "../SettingsProvider";
+import HelpPopover from "../HelpPopover";
 
 export const UsersTab: Component = () => {
   const { user: currentUser } = useAuth();
@@ -84,7 +85,15 @@ export const UsersTab: Component = () => {
   return (
     <div class="space-y-4">
       <div class="flex items-center justify-between">
-        <h2 class="text-base font-medium text-theme-text-primary">User Accounts</h2>
+        <div class="flex items-center gap-2">
+          <h2 class="text-base font-medium text-theme-text-primary">User Accounts</h2>
+          <HelpPopover title="User Accounts">
+            <p>Lists the user accounts on this GalactiLog instance. Admins can create accounts, promote or demote between viewer and admin, disable access, reset passwords, and delete users.</p>
+            <p>Viewers can browse the catalog, targets, sessions, and mosaics but cannot change settings, trigger scans, or edit data. Admins have full access.</p>
+            <p>You cannot delete your own account. The account marked "(you)" is the one making the request.</p>
+            <p>Example: create a viewer account for a collaborator who should see statistics without being able to modify configuration.</p>
+          </HelpPopover>
+        </div>
         <button
           onClick={() => setShowCreate(!showCreate())}
           class="px-3 py-1.5 text-xs bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded font-medium hover:bg-theme-accent/25 transition-colors"

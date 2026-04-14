@@ -1,3 +1,5 @@
+import os
+
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
@@ -16,6 +18,7 @@ from .tasks import router as tasks_router
 from .backup import router as backup_router
 from .planning import router as planning_router
 from .bootstrap import router as bootstrap_router
+from .preview import router as preview_router
 from app.database import async_session
 from app.config import async_redis
 
@@ -34,6 +37,15 @@ api_router.include_router(tasks_router)
 api_router.include_router(backup_router)
 api_router.include_router(planning_router)
 api_router.include_router(bootstrap_router)
+api_router.include_router(preview_router)
+
+
+@api_router.get("/version")
+async def version():
+    return {
+        "version": os.environ.get("GALACTILOG_VERSION", "dev"),
+        "git_sha": os.environ.get("GALACTILOG_GIT_SHA", "unknown"),
+    }
 
 
 @api_router.get("/health")

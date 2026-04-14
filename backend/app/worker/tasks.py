@@ -37,6 +37,7 @@ from app.services.scan_state import (
     increment_skipped_calibration_sync,
     start_scanning_sync, set_ingesting_sync, set_idle_sync,
     set_rebuild_running_sync, set_rebuild_progress_sync, set_rebuild_complete_sync,
+    set_rebuild_cancelled_sync,
     set_discovered_sync, is_cancel_requested_sync, clear_cancel_sync, set_cancelled_sync,
     append_activity_sync, check_complete_sync,
     add_skipped_path_sync, get_skipped_paths_sync, clear_skipped_paths_sync,
@@ -567,11 +568,123 @@ def reingest_changed_file(self, fits_path: str, include_calibration: bool = True
         raise self.retry(exc=exc)
 
 
+@celery_app.task(name="purge_and_regenerate_thumbnails")
+def purge_and_regenerate_thumbnails() -> dict:
+    """Delete every thumbnail file on disk, then queue regeneration for all images.
+
+    Logs start, per-batch progress, and completion of the delete phase to the
+    activity log. The final "scan complete" activity is emitted by the usual
+    check_complete_sync flow once all regenerate_thumbnail tasks finish.
+    """
+    with Session(_sync_engine) as session:
+        rows = session.execute(
+            select(Image.id, Image.file_path, Image.thumbnail_path)
+        ).all()
+
+    total = len(rows)
+    if not total:
+        set_idle_sync(_redis)
+        append_activity_sync(_redis, {
+            "type": "thumb_purge_complete",
+            "message": "Regen thumbnails: no images to process",
+            "details": {"deleted": 0, "queued": 0},
+            "timestamp": time.time(),
+        })
+        return {"status": "complete", "deleted": 0, "queued": 0}
+
+    if is_cancel_requested_sync(_redis):
+        set_cancelled_sync(_redis)
+        append_activity_sync(_redis, {
+            "type": "rebuild_cancelled",
+            "message": "Thumbnail purge cancelled before start",
+            "details": {"deleted": 0, "queued": 0, "total": total},
+            "timestamp": time.time(),
+        })
+        return {"status": "cancelled", "deleted": 0, "queued": 0}
+
+    append_activity_sync(_redis, {
+        "type": "thumb_purge_start",
+        "message": f"Deleting existing thumbnails for {total} image{'s' if total != 1 else ''}...",
+        "details": {"total": total},
+        "timestamp": time.time(),
+    })
+
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    def _unlink_one(thumb_path: str) -> str:
+        """Return 'deleted', 'missing', or 'error'. Network-IO bound."""
+        try:
+            Path(thumb_path).unlink()
+            return "deleted"
+        except FileNotFoundError:
+            return "missing"
+        except OSError as exc:
+            logger.warning("Failed to delete thumbnail %s: %s", thumb_path, exc)
+            return "error"
+
+    paths = [tp for (_id, _fp, tp) in rows if tp]
+    deleted = 0
+    missing = 0
+    progress_every = 1000
+    processed = 0
+    with ThreadPoolExecutor(max_workers=32) as pool:
+        futures = [pool.submit(_unlink_one, tp) for tp in paths]
+        for fut in as_completed(futures):
+            result = fut.result()
+            if result == "deleted":
+                deleted += 1
+            elif result == "missing":
+                missing += 1
+            processed += 1
+            if processed % progress_every == 0:
+                append_activity_sync(_redis, {
+                    "type": "thumb_purge_progress",
+                    "message": f"Deleted {deleted} thumbnails ({processed}/{len(paths)})...",
+                    "details": {"deleted": deleted, "processed": processed, "total": len(paths)},
+                    "timestamp": time.time(),
+                })
+
+    append_activity_sync(_redis, {
+        "type": "thumb_purge_complete",
+        "message": f"Deleted {deleted} thumbnail{'s' if deleted != 1 else ''}"
+                   + (f" ({missing} already missing)" if missing else "")
+                   + f", queueing {total} for regeneration...",
+        "details": {"deleted": deleted, "missing": missing, "queued": total},
+        "timestamp": time.time(),
+    })
+
+    if is_cancel_requested_sync(_redis):
+        set_cancelled_sync(_redis)
+        append_activity_sync(_redis, {
+            "type": "rebuild_cancelled",
+            "message": f"Thumbnail purge cancelled after deleting {deleted} files; regen skipped",
+            "details": {"deleted": deleted, "missing": missing, "queued": 0, "total": total},
+            "timestamp": time.time(),
+        })
+        return {"status": "cancelled", "deleted": deleted, "missing": missing, "queued": 0}
+
+    set_ingesting_sync(_redis, total=total)
+
+    queued = 0
+    for image_id, file_path, thumb_path in rows:
+        if file_path and thumb_path:
+            regenerate_thumbnail.delay(str(image_id), file_path, thumb_path)
+            queued += 1
+
+    return {"status": "ingesting", "deleted": deleted, "missing": missing, "queued": queued}
+
+
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=10)
 def regenerate_thumbnail(self, image_id: str, fits_path: str, thumb_path: str) -> dict:
     """Regenerate a single thumbnail using the current stretch algorithm."""
     path = Path(fits_path)
     output = Path(thumb_path)
+
+    # Drain queued tasks on cancel so scan state transitions to complete via check_complete_sync.
+    if is_cancel_requested_sync(_redis):
+        increment_completed_sync(_redis)
+        return {"file": str(path), "status": "cancelled"}
+
     logger.info("Regenerating thumbnail: %s", path.name)
 
     try:
@@ -746,6 +859,8 @@ def rebuild_targets(self) -> dict:
     6. Re-link images to new targets
     """
     logger.info("rebuild_targets: starting full rebuild")
+    # Clear a sticky cancel flag from a prior run so this run isn't killed immediately.
+    clear_cancel_sync(_redis)
     set_rebuild_running_sync(_redis, "full", "Clearing existing targets...")
 
     # Phase 1: Clear everything
@@ -780,6 +895,22 @@ def rebuild_targets(self) -> dict:
 
     # Phase 3: Resolve each and link images
     for i, (obj_name, img_count) in enumerate(object_names):
+        if is_cancel_requested_sync(_redis):
+            details = {"resolved": resolved, "failed": failed, "total": total, "processed": i}
+            set_rebuild_cancelled_sync(
+                _redis,
+                f"Cancelled after {i}/{total} names ({resolved} resolved, {failed} failed)",
+                details,
+            )
+            append_activity_sync(_redis, {
+                "type": "rebuild_cancelled",
+                "message": f"Full Rebuild cancelled after {i}/{total} names",
+                "details": details,
+                "timestamp": time.time(),
+            })
+            logger.info("rebuild_targets: cancelled after %d/%d", i, total)
+            return {"status": "cancelled", **details}
+
         with Session(_sync_engine) as session:
             target_id = resolve_target(obj_name, session, redis=_redis)
 
@@ -831,6 +962,7 @@ def retry_unresolved(self) -> dict:
     Useful after adding SESAME fallback or when upstream resolvers have new data.
     """
     logger.info("retry_unresolved: starting")
+    clear_cancel_sync(_redis)
     set_rebuild_running_sync(_redis, "retry", "Clearing caches...")
 
     # Phase 1: Clear negative caches so names get a fresh shot
@@ -864,6 +996,22 @@ def retry_unresolved(self) -> dict:
 
     # Phase 3: Resolve each and link images
     for i, (obj_name, img_count) in enumerate(object_names):
+        if is_cancel_requested_sync(_redis):
+            details = {"resolved": resolved, "failed": failed, "total": total, "processed": i}
+            set_rebuild_cancelled_sync(
+                _redis,
+                f"Cancelled after {i}/{total} names ({resolved} resolved, {failed} still unresolved)",
+                details,
+            )
+            append_activity_sync(_redis, {
+                "type": "rebuild_cancelled",
+                "message": f"Retry Unresolved cancelled after {i}/{total} names",
+                "details": details,
+                "timestamp": time.time(),
+            })
+            logger.info("retry_unresolved: cancelled after %d/%d", i, total)
+            return {"status": "cancelled", **details}
+
         with Session(_sync_engine) as session:
             target_id = resolve_target(obj_name, session, redis=_redis)
 
@@ -930,8 +1078,25 @@ def smart_rebuild_targets(self, manual: bool = False) -> dict:
 
 def _smart_rebuild_inner(manual: bool = False) -> dict:
     logger.info("smart_rebuild: starting")
+    clear_cancel_sync(_redis)
     set_rebuild_running_sync(_redis, "smart", "Running quick fix...")
     stats = {}
+
+    def _emit_cancelled(extra: dict | None = None) -> dict:
+        details = {**stats, **(extra or {})}
+        set_rebuild_cancelled_sync(_redis, "Quick Fix cancelled", details)
+        if manual:
+            append_activity_sync(_redis, {
+                "type": "rebuild_cancelled",
+                "message": "Quick Fix cancelled by user",
+                "details": details,
+                "timestamp": time.time(),
+            })
+        logger.info("smart_rebuild: cancelled")
+        return {"status": "cancelled", **details}
+
+    if is_cancel_requested_sync(_redis):
+        return _emit_cancelled()
 
     with Session(_sync_engine) as session:
         # Phase 1: Redirect images pointing to merged targets
@@ -988,6 +1153,9 @@ def _smart_rebuild_inner(manual: bool = False) -> dict:
         logger.info("smart_rebuild: updated aliases for %d targets", result.rowcount)
 
         # Phase 4: Re-derive catalog_id/common_name from SIMBAD cache
+        if is_cancel_requested_sync(_redis):
+            session.commit()
+            return _emit_cancelled()
         from app.models.simbad_cache import SimbadCache
         targets = session.execute(
             select(Target).where(Target.merged_into_id.is_(None))
@@ -995,6 +1163,10 @@ def _smart_rebuild_inner(manual: bool = False) -> dict:
 
         rederived = 0
         for target in targets:
+            if is_cancel_requested_sync(_redis):
+                stats["rederived"] = rederived
+                session.commit()
+                return _emit_cancelled()
             # Try to find cached SIMBAD data for this target
             cached = get_cached_simbad(normalize_object_name(target.catalog_id or target.primary_name), session)
             if cached and not cached.get("_negative"):
@@ -1469,6 +1641,7 @@ def generate_reference_thumbnails(self, force: bool = False) -> dict:
     """Fetch DSS reference thumbnails for all targets."""
     from app.services.skyview import fetch_reference_thumbnail
 
+    clear_cancel_sync(_redis)
     set_rebuild_running_sync(_redis, "ref_thumbnails", "Finding targets needing thumbnails...")
     output_dir = Path(settings.thumbnails_path) / "reference"
 
@@ -1487,7 +1660,11 @@ def generate_reference_thumbnails(self, force: bool = False) -> dict:
             _redis, f"Fetching reference thumbnails 0/{total}..."
         )
         fetched = 0
+        cancelled = False
         for i, target in enumerate(targets):
+            if is_cancel_requested_sync(_redis):
+                cancelled = True
+                break
             path = fetch_reference_thumbnail(target, output_dir)
             if path:
                 target.reference_thumbnail_path = path
@@ -1498,6 +1675,19 @@ def generate_reference_thumbnails(self, force: bool = False) -> dict:
                 )
             time.sleep(1.0)  # Rate limit
         session.commit()
+
+    if cancelled:
+        stats = {"fetched": fetched, "total": total}
+        set_rebuild_cancelled_sync(
+            _redis, f"Cancelled after fetching {fetched}/{total} reference thumbnails", stats
+        )
+        append_activity_sync(_redis, {
+            "type": "rebuild_cancelled",
+            "message": f"Reference Thumbnails cancelled after {fetched}/{total}",
+            "details": stats,
+            "timestamp": time.time(),
+        })
+        return {"status": "cancelled", **stats}
 
     _invalidate_stats_cache()
     stats = {"fetched": fetched, "total": total}
@@ -1518,6 +1708,7 @@ def run_xmatch_enrichment(self) -> dict:
     """Run CDS xMatch bulk cross-matching."""
     from app.services.xmatch import bulk_xmatch_targets
 
+    clear_cancel_sync(_redis)
     set_rebuild_running_sync(_redis, "xmatch", "Running xMatch enrichment...")
 
     with Session(_sync_engine) as session:
@@ -1533,6 +1724,17 @@ def run_xmatch_enrichment(self) -> dict:
             {"id": str(t.id), "ra": t.ra, "dec": t.dec}
             for t in targets
         ]
+
+        if is_cancel_requested_sync(_redis):
+            details = {"matched": 0, "total": len(target_dicts)}
+            set_rebuild_cancelled_sync(_redis, "xMatch cancelled before start", details)
+            append_activity_sync(_redis, {
+                "type": "rebuild_cancelled",
+                "message": "xMatch Enrichment cancelled before start",
+                "details": details,
+                "timestamp": time.time(),
+            })
+            return {"status": "cancelled", **details}
 
         set_rebuild_progress_sync(
             _redis, f"Cross-matching {len(target_dicts)} targets..."

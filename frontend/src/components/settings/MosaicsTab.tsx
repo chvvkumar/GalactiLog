@@ -3,6 +3,7 @@ import { api } from "../../api/client";
 import { showToast, dismissToast } from "../Toast";
 import { useAuth } from "../AuthProvider";
 import { useSettingsContext } from "../SettingsProvider";
+import HelpPopover from "../HelpPopover";
 import type {
   MosaicSummary,
   MosaicDetailResponse,
@@ -491,7 +492,14 @@ export const MosaicsTab: Component = () => {
       {/* Detection Keywords */}
       <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-4 space-y-3">
         <div class="flex justify-between items-center">
-          <h3 class="text-theme-text-primary font-medium">Detection Keywords</h3>
+          <div class="flex items-center gap-2">
+            <h3 class="text-theme-text-primary font-medium">Detection Keywords</h3>
+            <HelpPopover title="Detection Keywords">
+              <p>Token strings used to detect mosaic panels inside target names. When a target name contains a keyword followed by a number, the target is treated as a panel candidate.</p>
+              <p>Example: with keywords "Panel" and "P", the names "M31 Panel 1", "M31 Panel 2", and "NGC 7000 P2" are all recognized as panels of the same mosaic.</p>
+              <p>Run Detection re-scans targets after keyword changes to rebuild the suggestion list.</p>
+            </HelpPopover>
+          </div>
           <Show when={isAdmin()}>
             <button
               onClick={handleDetect}
@@ -502,9 +510,6 @@ export const MosaicsTab: Component = () => {
             </button>
           </Show>
         </div>
-        <p class="text-xs text-theme-text-secondary">
-          Keywords used to identify mosaic panels in target names (e.g., "M31 Panel 1", "NGC7000 P2").
-        </p>
         <div class="flex flex-wrap gap-2">
           <For each={keywords()}>
             {(kw) => (
@@ -546,9 +551,17 @@ export const MosaicsTab: Component = () => {
       {/* Auto-detected Suggestions */}
       <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-4 space-y-3">
         <div class="flex justify-between items-center">
-          <h3 class="text-theme-text-primary font-medium">
-            Suggestions ({suggestionFilter() ? `${filteredSuggestions().length}/` : ""}{suggestions().length})
-          </h3>
+          <div class="flex items-center gap-2">
+            <h3 class="text-theme-text-primary font-medium">
+              Suggestions ({suggestionFilter() ? `${filteredSuggestions().length}/` : ""}{suggestions().length})
+            </h3>
+            <HelpPopover title="Suggestions">
+              <p>Proposed mosaic groupings derived from detection. Each suggestion bundles targets that share a base name and differ only in panel index.</p>
+              <p>Accept a suggestion to create a mosaic from those panels; dismiss to hide it from future detection runs.</p>
+              <p>The campaign gap selector controls how sessions for the same panel are split: captures more than the selected gap apart become separate campaigns. Re-run detection after changing the gap.</p>
+              <p>Example: with a 30-day gap, an M31 panel shot in October and again in January produces two campaigns; with a 180-day gap, both nights merge into one.</p>
+            </HelpPopover>
+          </div>
           <Show when={isAdmin()}>
             <select
               value={campaignGap()}
@@ -575,9 +588,6 @@ export const MosaicsTab: Component = () => {
             </select>
           </Show>
         </div>
-        <p class="text-xs text-theme-text-secondary">
-          Sessions for the same panel shot more than the selected gap apart are treated as separate campaigns. Re-run detection after changing.
-        </p>
         <Show when={suggestions().length > 4}>
           <input
             type="text"
@@ -809,9 +819,16 @@ export const MosaicsTab: Component = () => {
       {/* Right column: Existing Mosaics */}
       <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-4 space-y-3">
         <div class="flex justify-between items-center">
-          <h3 class="text-theme-text-primary font-medium">
-            Mosaics ({mosaics().length})
-          </h3>
+          <div class="flex items-center gap-2">
+            <h3 class="text-theme-text-primary font-medium">
+              Mosaics ({mosaics().length})
+            </h3>
+            <HelpPopover title="Mosaics" align="right">
+              <p>Existing mosaic projects. Each mosaic collects one or more target panels and tracks their integration, per-filter breakdown, and layout.</p>
+              <p>Create a mosaic manually with the Create Mosaic button, or accept a detection suggestion from the left column. Select one or more rows to enable bulk delete.</p>
+              <p>Example: "M31 Mosaic 2x3" holds six target panels; opening the mosaic detail page shows the composite image and per-panel progress.</p>
+            </HelpPopover>
+          </div>
           <Show when={isAdmin()}>
             <div class="flex gap-2">
               <Show when={selectedMosaicIds().size > 0 && !bulkAction()}>

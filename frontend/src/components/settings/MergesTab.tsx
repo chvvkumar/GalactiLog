@@ -3,6 +3,7 @@ import { api } from "../../api/client";
 import { showToast, dismissToast } from "../Toast";
 import { useAuth } from "../AuthProvider";
 import { UnresolvedFilesTab } from "./UnresolvedFilesTab";
+import HelpPopover from "../HelpPopover";
 import { pollTask } from "../../store/taskPoller";
 import type { MergeCandidateResponse } from "../../types";
 
@@ -59,7 +60,6 @@ export const MergesTab: Component = () => {
   };
 
   const handleRevert = async (candidate: MergeCandidateResponse) => {
-    setConfirmRevertId(null);
     try {
       await api.revertMergeCandidate(candidate.id);
       showToast(`Reverted merge of "${candidate.source_name}"`);
@@ -102,7 +102,15 @@ export const MergesTab: Component = () => {
     <div class="space-y-4">
       <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-4 space-y-3">
         <div class="flex justify-between items-center">
-          <h3 class="text-theme-text-primary font-medium">Target Merges</h3>
+          <div class="flex items-center gap-2">
+            <h3 class="text-theme-text-primary font-medium">Target Merges</h3>
+            <HelpPopover title="Target Merges">
+              <p>Detects targets with near-duplicate names and proposes merging them into one canonical object. Useful when the same object ends up with multiple entries because of OBJECT header inconsistency.</p>
+              <p>Run Detection scans all targets and populates the Suggestions tab. Accept a suggestion to merge the targets; the surviving target keeps all frames and sessions from both.</p>
+              <p>Merged lists past accepted merges and lets an admin revert one if the match was wrong. Unresolved Files lists FITS files whose target name did not resolve against SIMBAD or any local target.</p>
+              <p>Example: "NGC 7000" and "NGC7000" flagged as duplicates can be merged so integration-time totals aggregate on a single target page.</p>
+            </HelpPopover>
+          </div>
           <Show when={isAdmin() && view() !== "unresolved"}>
             <button
               onClick={handleDetect}

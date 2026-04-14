@@ -195,6 +195,9 @@ export interface FrameRecord {
   sensor_temp: number | null;
   gain: number | null;
   file_name: string;
+  image_id: string;
+  file_path: string;
+  thumbnail_url?: string | null;
   hfr_stdev: number | null;
   fwhm: number | null;
   detected_stars: number | null;
@@ -539,6 +542,8 @@ export interface GeneralSettings {
   observer_longitude?: number | null;
   observer_name?: string | null;
   use_imaging_night?: boolean;
+  preview_resolution?: number;
+  preview_cache_mb?: number;
 }
 
 export interface FilterConfig {
@@ -793,6 +798,8 @@ export interface PanelStats {
   last_session_date: string | null;
   thumbnail_url: string | null;
   thumbnail_pier_side: string | null;
+  thumbnail_image_id?: string | null;
+  thumbnail_file_path?: string | null;
   object_pattern?: string | null;
   grid_row: number | null;
   grid_col: number | null;

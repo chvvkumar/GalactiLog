@@ -111,6 +111,9 @@ class FrameRecord(BaseModel):
     sensor_temp: float | None = None
     gain: int | None = None
     file_name: str
+    image_id: str
+    file_path: str
+    thumbnail_url: str | None = None
     hfr_stdev: float | None = None
     fwhm: float | None = None
     detected_stars: int | None = None

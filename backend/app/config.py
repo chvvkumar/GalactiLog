@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
     fits_data_path: str = "/app/data/fits"
     thumbnails_path: str = "/app/data/thumbnails"
+    previews_path: str = "/app/data/thumbnails/previews"
     thumbnail_max_width: int = 800
     jwt_secret: str = ""
     access_token_expiry: int = 1800
