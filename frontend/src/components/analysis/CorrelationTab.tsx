@@ -86,9 +86,10 @@ const CorrelationTab: Component<Props> = (props) => {
     const d = filteredData();
     if (!d) return;
     const header = "x,y,date,target_name,outlier";
-    const rows = d.points.map((p) =>
-      `${p.x},${p.y},${p.date},"${p.target_name || ""}",${p.outlier}`
-    );
+    const rows = d.points.map((p) => {
+      const name = p.target_id ? (d.target_names?.[p.target_id] ?? "") : "";
+      return `${p.x},${p.y},${p.date},"${name}",${p.outlier}`;
+    });
     const csv = [header, ...rows].join("\n");
     const blob = new Blob([csv], { type: "text/csv" });
     const url = URL.createObjectURL(blob);

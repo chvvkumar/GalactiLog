@@ -1,4 +1,4 @@
-import { Component, createResource, For } from "solid-js";
+import { Component, createMemo, createResource, For } from "solid-js";
 import { api } from "../../api/client";
 import type { SharedFilters } from "../../pages/AnalysisPage";
 
@@ -40,10 +40,18 @@ const MatrixTab: Component<Props> = (props) => {
     })
   );
 
-  const getCell = (xm: string, ym: string) => {
+  const cellMap = createMemo(() => {
     const d = data();
-    if (!d) return null;
-    return d.cells.find((c) => c.x_metric === xm && c.y_metric === ym) || null;
+    if (!d) return new Map<string, (typeof d.cells)[number]>();
+    const map = new Map<string, (typeof d.cells)[number]>();
+    for (const c of d.cells) {
+      map.set(`${c.x_metric}:${c.y_metric}`, c);
+    }
+    return map;
+  });
+
+  const getCell = (xm: string, ym: string) => {
+    return cellMap().get(`${xm}:${ym}`) ?? null;
   };
 
   return (

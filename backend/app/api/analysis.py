@@ -1,3 +1,5 @@
+import json
+import logging
 import math
 import statistics
 from collections import defaultdict
@@ -7,6 +9,7 @@ from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy import select, func, cast, Date, distinct
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import async_redis
 from app.database import get_session
 from app.models import Image, Target, User
 from app.schemas.analysis import (
@@ -31,6 +34,9 @@ from app.services.normalization import load_alias_maps, expand_canonical, normal
 from app.api.auth import get_current_user
 
 router = APIRouter(prefix="/analysis", tags=["analysis"])
+logger = logging.getLogger(__name__)
+
+_MATRIX_CACHE_TTL = 300  # 5 minutes
 
 # ── Metric map ──────────────────────────────────────────────────────────
 
@@ -316,7 +322,7 @@ async def get_correlation(
         target_ids = {r.resolved_target_id for r in rows if r.resolved_target_id}
         target_names = await _resolve_target_names(session, target_ids)
         raw_points = [
-            (float(r.x_val), float(r.y_val), str(r.night), target_names.get(r.resolved_target_id))
+            (float(r.x_val), float(r.y_val), str(r.night), r.resolved_target_id)
             for r in rows
         ]
     else:
@@ -334,7 +340,7 @@ async def get_correlation(
                 statistics.median(g["xs"]),
                 statistics.median(g["ys"]),
                 night,
-                target_names.get(g["target_id"]),
+                g["target_id"],
             )
             for (night, _), g in session_groups.items()
         ]
@@ -345,10 +351,11 @@ async def get_correlation(
 
     points = [
         CorrelationPoint(
-            x=x, y=y, date=d, target_name=tn,
+            x=x, y=y, date=d,
+            target_id=str(tid) if tid is not None else None,
             outlier=_is_outlier_iqr(x, y, all_xs, all_ys) if len(raw_points) >= 4 else False,
         )
-        for x, y, d, tn in raw_points
+        for x, y, d, tid in raw_points
     ]
 
     trend = _compute_trend(points)
@@ -363,6 +370,7 @@ async def get_correlation(
         granularity=granularity,
         x_stats=x_stats,
         y_stats=y_stats,
+        target_names={str(tid): name for tid, name in target_names.items()},
     )
 
 
@@ -612,37 +620,69 @@ async def get_matrix(
     session: AsyncSession = Depends(get_session),
     user: User = Depends(get_current_user),
 ):
-    """Compute Pearson r for all X-metric vs Y-metric pairs."""
-    all_metrics = list(set(X_METRICS + Y_METRICS))
-    cols = [METRIC_MAP[m].label(m) for m in all_metrics]
+    """Compute Pearson r for all X-metric vs Y-metric pairs using PostgreSQL corr()."""
+    # Build a deterministic cache key from all filter parameters.
+    cache_key = (
+        f"galactilog:analysis:matrix:"
+        f"{telescope or ''}:{camera or ''}:{filter_used or ''}:"
+        f"{date_from or ''}:{date_to or ''}"
+    )
+    try:
+        async with async_redis() as r:
+            cached = await r.get(cache_key)
+        if cached:
+            data = json.loads(cached)
+            return MatrixResponse(**data)
+    except Exception:
+        logger.debug("Redis cache read failed for matrix, computing fresh")
 
-    q = select(*cols).where(Image.image_type == "LIGHT").where(Image.capture_date.is_not(None))
-    q = await _apply_filters(q, session, telescope, camera, filter_used, date_from, date_to)
-    rows = (await session.execute(q)).all()
+    # Build one SELECT with a corr() and a pair-count expression for every
+    # (x_metric, y_metric) combination.  PostgreSQL's corr(Y, X) aggregate
+    # automatically excludes rows where either argument is NULL, which matches
+    # the original Python-side paired-filtering behaviour exactly.
+    corr_exprs = []
+    count_exprs = []
+    pairs: list[tuple[str, str]] = []
 
-    data: dict[str, list[float | None]] = {m: [] for m in all_metrics}
-    for r in rows:
-        for m in all_metrics:
-            data[m].append(getattr(r, m, None))
-
-    n_rows = len(rows)
-    cells = []
     for xm in X_METRICS:
         for ym in Y_METRICS:
-            paired_x, paired_y = [], []
-            for i in range(n_rows):
-                xv, yv = data[xm][i], data[ym][i]
-                if xv is not None and yv is not None:
-                    paired_x.append(float(xv))
-                    paired_y.append(float(yv))
-            n_points = len(paired_x)
-            if n_points >= 10:
-                r_val = _pearson_r(paired_x, paired_y)
-                cells.append(MatrixCell(x_metric=xm, y_metric=ym, pearson_r=round(r_val, 4), n_points=n_points))
-            else:
-                cells.append(MatrixCell(x_metric=xm, y_metric=ym, pearson_r=None, n_points=n_points))
+            xcol = METRIC_MAP[xm]
+            ycol = METRIC_MAP[ym]
+            label_r = f"r_{xm}__{ym}"
+            label_n = f"n_{xm}__{ym}"
+            corr_exprs.append(func.corr(ycol, xcol).label(label_r))
+            # count rows where both columns are non-NULL
+            count_exprs.append(
+                func.count(xcol).filter(ycol.is_not(None)).label(label_n)
+            )
+            pairs.append((xm, ym))
 
-    return MatrixResponse(cells=cells, x_metrics=X_METRICS, y_metrics=Y_METRICS)
+    q = (
+        select(*corr_exprs, *count_exprs)
+        .where(Image.image_type == "LIGHT")
+        .where(Image.capture_date.is_not(None))
+    )
+    q = await _apply_filters(q, session, telescope, camera, filter_used, date_from, date_to)
+    row = (await session.execute(q)).one()
+
+    cells = []
+    for xm, ym in pairs:
+        r_val = getattr(row, f"r_{xm}__{ym}", None)
+        n_points = getattr(row, f"n_{xm}__{ym}", 0) or 0
+        if n_points >= 10 and r_val is not None:
+            cells.append(MatrixCell(x_metric=xm, y_metric=ym, pearson_r=round(float(r_val), 4), n_points=n_points))
+        else:
+            cells.append(MatrixCell(x_metric=xm, y_metric=ym, pearson_r=None, n_points=n_points))
+
+    response = MatrixResponse(cells=cells, x_metrics=X_METRICS, y_metrics=Y_METRICS)
+
+    try:
+        async with async_redis() as r:
+            await r.setex(cache_key, _MATRIX_CACHE_TTL, response.model_dump_json())
+    except Exception:
+        logger.debug("Redis cache write failed for matrix")
+
+    return response
 
 
 @router.get("/compare", response_model=CompareResponse)

@@ -1,6 +1,6 @@
 import { Component, Show, createSignal } from "solid-js";
 import { A, useNavigate, useLocation } from "@solidjs/router";
-import { sidebarOpen, setSidebarOpen } from "../pages/DashboardPage";
+import { sidebarOpen, setSidebarOpen } from "../store/sidebar";
 import { useAuth } from "./AuthProvider";
 
 const NavBar: Component = () => {

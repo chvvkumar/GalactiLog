@@ -1252,7 +1252,10 @@ async def list_targets_aggregated(
         cv_q = (
             select(CustomColumnValue.target_id, CustomColumn.slug, CustomColumnValue.value)
             .join(CustomColumn)
-            .where(CustomColumn.applies_to == AppliesTo.target)
+            .where(
+                CustomColumn.applies_to == AppliesTo.target,
+                CustomColumnValue.target_id.in_(page_target_uuids),
+            )
         )
         cv_rows = (await session.execute(cv_q)).all()
         for tid, slug, val in cv_rows:

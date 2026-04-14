@@ -14,7 +14,7 @@ class CorrelationPoint(BaseModel):
     x: float
     y: float
     date: str
-    target_name: str | None = None
+    target_id: str | None = None
     outlier: bool = False
 
 
@@ -41,6 +41,7 @@ class CorrelationResponse(BaseModel):
     granularity: str
     x_stats: SummaryStats | None = None
     y_stats: SummaryStats | None = None
+    target_names: dict[str, str] = {}
 
 
 class HistogramBin(BaseModel):

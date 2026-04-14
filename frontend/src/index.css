@@ -1,5 +1,21 @@
 @import "tailwindcss";
 
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 300 700;
+  font-display: swap;
+  src: url('/fonts/inter-latin.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Fira Code';
+  font-style: normal;
+  font-weight: 400 600;
+  font-display: swap;
+  src: url('/fonts/fira-code-latin.woff2') format('woff2');
+}
+
 /*
   Theme tokens are set at runtime by applyTheme() in themes.ts.
   These fallbacks match the "Deep Neutral" theme so the page

@@ -1,4 +1,4 @@
-import { Component, onMount, onCleanup, createSignal } from "solid-js";
+import { Component, onMount, onCleanup } from "solid-js";
 import { useSearchParams } from "@solidjs/router";
 import Sidebar from "../components/Sidebar";
 import TargetFeed from "../components/TargetFeed";
@@ -9,10 +9,10 @@ import SidebarResizeHandle from "../components/SidebarResizeHandle";
 import { sidebarWidth, sidebarCollapsed, resizing, RAIL_WIDTH } from "../components/sidebarLayout";
 import { useSettingsContext } from "../components/SettingsProvider";
 import { contentWidthClass } from "../utils/format";
+import { sidebarOpen, setSidebarOpen } from "../store/sidebar";
+export { sidebarOpen, setSidebarOpen };
 
 const SESSION_KEY = "dashboard_params";
-
-export const [sidebarOpen, setSidebarOpen] = createSignal(false);
 
 const DashboardPage: Component = () => {
   const [searchParams, setSearchParams] = useSearchParams();

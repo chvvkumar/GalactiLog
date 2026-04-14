@@ -5,7 +5,7 @@ import { useAuth } from "./AuthProvider";
 import { useStats } from "../store/stats";
 import { api } from "../api/client";
 import { scanFilters as scanFiltersApi } from "../api/scanFilters";
-import type { RebuildStatus } from "../types";
+import type { RebuildStatus, ActivityEntry } from "../types";
 import type { ScanFiltersResponse } from "../api/scanFilters";
 import DatabaseOverview from "./DatabaseOverview";
 import CaptureActivity from "./CaptureActivity";
@@ -60,16 +60,33 @@ const ScanManager: Component = () => {
     try { setDbSummary(await api.getDbSummary()); } catch { /* ignore */ }
   };
 
-  // Track previous scan state to only refresh on transitions, not on every
-  // signal update.  The initial value of null ensures the first effect run
-  // triggers a fetch (transition from null → idle).
-  let prevScanState: string | null = null;
+  // --- Activity ---
+  const [activity, setActivity] = createSignal<ActivityEntry[]>([]);
+  const refreshActivity = async () => {
+    try { setActivity(await api.getActivity()); } catch { /* ignore */ }
+  };
+
+  const clearActivity = async () => {
+    try { await api.clearActivity(); setActivity([]); } catch { /* ignore */ }
+  };
+
+  // Track previous composite state (scan + rebuild) to only fetch on real
+  // transitions. Starting with null ensures the first effect run triggers
+  // the initial fetch for both db-summary and activity.
+  let prevCompositeState: string | null = null;
   createEffect(() => {
-    const s = scanStatus().state;
-    if (s !== prevScanState) {
-      const wasPrev = prevScanState;
-      prevScanState = s;
-      if (wasPrev === null || s === "complete" || s === "idle") refreshDbSummary();
+    const scanState = scanStatus().state;
+    const rebuildSt = rebuildState().state;
+    const current = `${scanState}:${rebuildSt}`;
+    if (current !== prevCompositeState) {
+      const wasPrev = prevCompositeState;
+      prevCompositeState = current;
+      if (wasPrev === null || scanState === "complete" || scanState === "idle") {
+        refreshDbSummary();
+      }
+      if (wasPrev === null || scanState === "complete" || scanState === "idle" || rebuildSt === "complete" || rebuildSt === "error") {
+        refreshActivity();
+      }
     }
   });
 
@@ -129,7 +146,6 @@ const ScanManager: Component = () => {
       setRebuildState(status);
       if (status.state !== "running") {
         if (rebuildPollTimer) { clearInterval(rebuildPollTimer); rebuildPollTimer = null; }
-        if (prev === "running" && status.state === "complete") refreshDbSummary();
       }
     } catch { /* ignore */ }
   };
@@ -319,6 +335,8 @@ const ScanManager: Component = () => {
               rebuildStatus={rebuildState()}
               stopping={stopping()}
               scanError={scanError()}
+              activity={activity()}
+              onClearActivity={clearActivity}
               onResetAndRescan={handleResetAndRescan}
               onDismissStalled={resetScan}
             />

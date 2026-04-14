@@ -18,6 +18,8 @@ const ReferenceThumbnail: Component<{ url: string | null; fill?: boolean }> = (p
             alt="Reference frame"
             class={`rounded bg-black cursor-pointer ${props.fill ? "max-h-full w-auto" : "w-full object-contain max-h-64"}`}
             loading="lazy"
+            width={800}
+            height={800}
             onClick={(e) => { e.stopPropagation(); setOpen(true); }}
           />
           <Show when={open()}>
