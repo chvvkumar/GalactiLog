@@ -134,6 +134,15 @@ def create_app() -> FastAPI:
         name="thumbnails",
     )
 
+    # Serve preview cache files (nginx intercepts via X-Accel-Redirect in prod)
+    previews_dir = Path(settings.previews_path)
+    previews_dir.mkdir(parents=True, exist_ok=True)
+    application.mount(
+        "/_previews_internal",
+        StaticFiles(directory=str(previews_dir)),
+        name="previews_internal",
+    )
+
     return application
 
 
