@@ -2,6 +2,7 @@ import { type Component, createEffect, createSignal, For, onCleanup, Show } from
 import { api } from "../../api/client";
 import type { ValidateResponse, RestoreResponse } from "../../api/client";
 import { showToast } from "../Toast";
+import HelpPopover from "../HelpPopover";
 
 const SECTION_LABELS: Record<string, string> = {
   settings: "Settings",
@@ -144,12 +145,14 @@ export const BackupRestoreTab: Component = () => {
   return (
     <div class="rounded-[var(--radius-md)] bg-theme-surface border border-theme-border p-4 space-y-6">
       <section class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
-        <h2 class="text-sm font-semibold text-theme-text-primary">Create Backup</h2>
-        <p class="text-sm text-theme-text-secondary">
-          Download a backup of all your customizations: settings, filter and equipment
-          configurations, session notes, custom columns, mosaics, user accounts, and
-          display preferences.
-        </p>
+        <div class="flex items-center gap-2">
+          <h2 class="text-sm font-semibold text-theme-text-primary">Create Backup</h2>
+          <HelpPopover title="Create Backup">
+            <p>Exports every user-facing customization as a versioned JSON file: settings, filter and equipment configurations, session notes, custom columns, mosaic definitions, user accounts, and display preferences.</p>
+            <p>The backup does not include scanned FITS file data or derived catalog tables. Those are rebuilt by running a scan against the same library.</p>
+            <p>Example: run Create Backup before upgrading the app, save the file somewhere safe, then restore on the upgraded instance if anything goes wrong.</p>
+          </HelpPopover>
+        </div>
         <button
           class="px-4 py-2 rounded-[var(--radius-md)] bg-theme-accent/15 text-theme-accent border border-theme-accent/30 hover:bg-theme-accent/25 transition-colors disabled:opacity-50"
           disabled={creating()}
@@ -160,12 +163,15 @@ export const BackupRestoreTab: Component = () => {
       </section>
 
       <section class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
-        <h2 class="text-sm font-semibold text-theme-text-primary">Restore from Backup</h2>
-        <p class="text-sm text-theme-text-secondary">
-          Upload a previously created backup file to restore your customizations.
-          You can choose which sections to restore and whether to merge with or replace
-          existing data.
-        </p>
+        <div class="flex items-center gap-2">
+          <h2 class="text-sm font-semibold text-theme-text-primary">Restore from Backup</h2>
+          <HelpPopover title="Restore from Backup">
+            <p>Imports a previously created backup file. After selecting the file, pick which sections to restore and choose a restore mode.</p>
+            <p>Merge mode adds or updates items from the backup and leaves everything else untouched. Replace mode first clears each selected section, then imports its contents from the file.</p>
+            <p>Backups carry a schema version; older files restore cleanly against newer app versions. When restoring user accounts, temporary passwords are generated and shown once, so copy them before closing the result dialog.</p>
+            <p>Example: restore only the Session Notes section in Merge mode to recover notes lost to an accidental deletion, without touching filter or equipment config.</p>
+          </HelpPopover>
+        </div>
 
         <label for="backup-file-input" class="sr-only">Backup file</label>
         <input

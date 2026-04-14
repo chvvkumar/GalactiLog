@@ -4,6 +4,7 @@ import { showToast } from "../Toast";
 import { useAuth } from "../AuthProvider";
 import { SuggestionsBanner } from "./SuggestionsBanner";
 import { GroupingEditor, type GroupEntry } from "./GroupingEditor";
+import HelpPopover from "../HelpPopover";
 import type { FilterConfig, SuggestionsResponse, DiscoveredItem, SuggestionGroup } from "../../types";
 import { api } from "../../api/client";
 import { getFilterColorMap } from "../../store/settings";
@@ -163,7 +164,14 @@ export const FiltersTab: Component = () => {
       />
 
       <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-4 space-y-3">
-        <h3 class="text-theme-text-primary font-medium">Filter Groups</h3>
+        <div class="flex items-center gap-2">
+          <h3 class="text-theme-text-primary font-medium">Filter Groups</h3>
+          <HelpPopover title="Filter Groups">
+            <p>Defines canonical filter names, their aliases from FITS FILTER headers, and the display color used in badges and charts.</p>
+            <p>Example: merge "Ha", "H-alpha", and "Halpha" under canonical "Ha" with a red color; every dashboard row and chart then renders those captures as the same filter.</p>
+            <p>Add a new filter with the input below. Suggestions appear when GalactiLog detects likely alias pairs; accept or dismiss from the banner above.</p>
+          </HelpPopover>
+        </div>
 
         <GroupingEditor
           discovered={discovered()}

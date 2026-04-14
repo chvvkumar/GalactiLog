@@ -250,8 +250,13 @@ export default function DisplayTab() {
     <div class="rounded-[var(--radius-md)] bg-theme-surface border border-theme-border p-4 space-y-6">
       <Show when={THEMES_SORTED.length > 1}>
         <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
-          <h2 class="text-sm font-semibold text-theme-text-primary">Theme</h2>
-          <p class="text-sm text-theme-text-secondary">Select the color palette used across the interface.</p>
+          <div class="flex items-center gap-2">
+            <h2 class="text-sm font-semibold text-theme-text-primary">Theme</h2>
+            <HelpPopover title="Theme">
+              <p>Color palette used across every page. Themes include light and dark variants, each with distinct accent and surface colors.</p>
+              <p>Example: pick a dark theme for night-time sessions at the scope and a light theme for planning during the day.</p>
+            </HelpPopover>
+          </div>
           <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <For each={THEMES_SORTED}>
               {(theme: ThemeMeta) => (
@@ -283,8 +288,13 @@ export default function DisplayTab() {
       </Show>
 
       <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
-        <h2 class="text-sm font-semibold text-theme-text-primary">Text Size</h2>
-        <p class="text-sm text-theme-text-secondary">Adjust the base font size used across the interface.</p>
+        <div class="flex items-center gap-2">
+          <h2 class="text-sm font-semibold text-theme-text-primary">Text Size</h2>
+          <HelpPopover title="Text Size">
+            <p>Scales the base font size used across the interface. All text, table cells, and chart labels scale together.</p>
+            <p>Example: choose Large on a 4K monitor viewed from a distance, or Small to fit more rows in dashboard tables.</p>
+          </HelpPopover>
+        </div>
         <div class="flex items-center justify-between">
           <span class="text-sm text-theme-text-secondary">Size</span>
           <div class="flex gap-2">
@@ -308,8 +318,13 @@ export default function DisplayTab() {
       </div>
 
       <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
-        <h2 class="text-sm font-semibold text-theme-text-primary">Filter Badge Style</h2>
-        <p class="text-sm text-theme-text-secondary">Choose how filter badges are rendered in tables and lists.</p>
+        <div class="flex items-center gap-2">
+          <h2 class="text-sm font-semibold text-theme-text-primary">Filter Badge Style</h2>
+          <HelpPopover title="Filter Badge Style">
+            <p>Controls how filter names render in session tables, dashboard rows, and charts.</p>
+            <p>Example: a solid pill fills the badge with the filter color, while the dot style keeps text neutral and uses a small colored dot next to the name.</p>
+          </HelpPopover>
+        </div>
         <div class="flex items-center justify-between">
           <span class="text-sm text-theme-text-secondary">Style</span>
           <div class="flex items-center gap-3">
@@ -345,8 +360,14 @@ export default function DisplayTab() {
       </div>
 
       <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
-        <h2 class="text-sm font-semibold text-theme-text-primary">Timezone</h2>
-        <p class="text-sm text-theme-text-secondary">Used to format session timestamps and date ranges.</p>
+        <div class="flex items-center gap-2">
+          <h2 class="text-sm font-semibold text-theme-text-primary">Timezone</h2>
+          <HelpPopover title="Timezone">
+            <p>Timezone used to format session dates, capture timestamps, and date-range labels in the UI. The underlying FITS timestamps remain in UTC; only the display changes.</p>
+            <p>Example: setting America/Denver shows a frame captured at 03:12 UTC as 21:12 the previous evening.</p>
+            <p>The 24-hour clock toggle switches between 14:30 and 2:30 PM formatting. Imaging night grouping keeps sessions that cross midnight as a single night, using FITS-header coordinates or the observer location as a fallback.</p>
+          </HelpPopover>
+        </div>
         <div class="flex items-center justify-between">
           <span class="text-sm text-theme-text-secondary">Zone</span>
           <div class="flex items-center gap-2">
@@ -396,8 +417,13 @@ export default function DisplayTab() {
       </div>
 
       <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
-        <h2 class="text-sm font-semibold text-theme-text-primary">Content Width</h2>
-        <p class="text-sm text-theme-text-secondary">Constrain the maximum width of page content.</p>
+        <div class="flex items-center gap-2">
+          <h2 class="text-sm font-semibold text-theme-text-primary">Content Width</h2>
+          <HelpPopover title="Content Width">
+            <p>Maximum width of the main content area. Narrower widths keep line lengths readable on large monitors; wider settings show more columns in dashboard tables.</p>
+            <p>Example: on an ultrawide 3440px monitor, Wide caps content at 1280px, leaving blank margins, while Full uses the whole viewport.</p>
+          </HelpPopover>
+        </div>
         <div class="flex items-center justify-between">
           <span class="text-sm text-theme-text-secondary">Width</span>
           <div class="flex gap-1">
@@ -483,8 +509,13 @@ export default function DisplayTab() {
       </div>
 
       <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
-        <h2 class="text-sm font-semibold text-theme-text-primary">Metric Visibility</h2>
-        <p class="text-sm text-theme-text-secondary">Choose which metric groups and individual fields appear on target detail pages.</p>
+        <div class="flex items-center gap-2">
+          <h2 class="text-sm font-semibold text-theme-text-primary">Metric Visibility</h2>
+          <HelpPopover title="Metric Visibility">
+            <p>Controls which metric groups and individual fields appear on target detail pages. Disable an entire group with the group toggle, or hide individual fields with the checkboxes.</p>
+            <p>Example: hide Eccentricity under Quality Metrics if you do not track star shape, or disable the Weather group if your capture software does not log it.</p>
+          </HelpPopover>
+        </div>
         <Show when={local()} fallback={<p class="text-theme-text-secondary text-sm">Loading...</p>}>
           {(settings) => (
             <div class="space-y-2">
