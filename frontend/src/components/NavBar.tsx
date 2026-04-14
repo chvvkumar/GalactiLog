@@ -24,9 +24,8 @@ const NavBar: Component = () => {
   const versionLabel = () => {
     const v = version();
     if (!v) return "";
-    const sha = v.git_sha && v.git_sha !== "unknown" ? ` (${v.git_sha.slice(0, 7)})` : "";
     const prefix = isSemver(v.version) ? "v" : "";
-    return `${prefix}${v.version}${sha}`;
+    return `${prefix}${v.version}`;
   };
   const versionUrl = () => {
     const v = version();
