@@ -56,9 +56,9 @@ const HelpPopover: Component<HelpPopoverProps> = (props) => {
         <div
           role="dialog"
           onClick={(e) => e.stopPropagation()}
-          class={`absolute top-full mt-2 z-50 w-[min(28rem,90vw)] ${
+          class={`glass-popover absolute top-full mt-2 z-50 w-[min(28rem,90vw)] ${
             props.align === "right" ? "right-0" : "left-0"
-          } bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-lg)] p-4`}
+          } border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-lg)] p-4`}
         >
           <div class="flex items-start justify-between gap-3 mb-2">
             <div class="text-sm font-medium text-theme-text-primary">

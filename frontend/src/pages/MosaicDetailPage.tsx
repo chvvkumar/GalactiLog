@@ -103,12 +103,21 @@ const MosaicDetailPage: Component = () => {
             </div>
 
             {/* Notes */}
-            <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4">
-              <Show when={notesSaving()}>
-                <div class="flex justify-end mb-2">
-                  <span class="text-xs text-theme-text-secondary">Saving...</span>
-                </div>
-              </Show>
+            <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
+              <div class="flex items-center gap-2">
+                <h3 class="text-sm font-semibold text-theme-text-primary">Notes</h3>
+                <HelpPopover>
+                  <p class="text-sm text-theme-text-secondary">
+                    Free-form notes for the mosaic project. Content persists across sessions.
+                  </p>
+                  <p class="text-sm text-theme-text-secondary">
+                    Example: record framing plans, capture progress, or processing decisions for the combined mosaic.
+                  </p>
+                </HelpPopover>
+                <Show when={notesSaving()}>
+                  <span class="ml-auto text-xs text-theme-text-secondary">Saving...</span>
+                </Show>
+              </div>
               <textarea
                 class="block w-full bg-theme-surface border border-theme-border rounded px-3 py-2 text-sm text-theme-text-primary placeholder-theme-text-secondary resize-y min-h-[50px]"
                 placeholder="Add notes about this mosaic project..."
@@ -124,7 +133,20 @@ const MosaicDetailPage: Component = () => {
             {/* Panel Thumbnails Grid */}
             <Show when={data().panels.some((p: PanelStats) => p.thumbnail_url)}>
               <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
-                <h2 class="text-sm font-semibold text-theme-text-primary">Panels</h2>
+                <div class="flex items-center gap-2">
+                  <h2 class="text-sm font-semibold text-theme-text-primary">Panels</h2>
+                  <HelpPopover>
+                    <p class="text-sm text-theme-text-secondary">
+                      Visual arrangement of the mosaic's constituent panels. Drag to reposition, use the rotate and flip controls to orient each panel, and drop panels onto a grid.
+                    </p>
+                    <p class="text-sm text-theme-text-secondary">
+                      Auto-arrangement based on WCS headers is often unreliable, so manual layout is expected.
+                    </p>
+                    <p class="text-sm text-theme-text-secondary">
+                      Example: arrange a four-panel M31 mosaic into a 2 by 2 grid with the bottom-left panel rotated 90 degrees.
+                    </p>
+                  </HelpPopover>
+                </div>
                 <MosaicPanelArranger
                   mosaicId={params.mosaicId}
                   panels={data().panels}
@@ -134,7 +156,17 @@ const MosaicDetailPage: Component = () => {
 
             {/* Panel Table */}
             <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
-              <h2 class="text-sm font-semibold text-theme-text-primary">Sessions</h2>
+              <div class="flex items-center gap-2">
+                <h2 class="text-sm font-semibold text-theme-text-primary">Sessions</h2>
+                <HelpPopover>
+                  <p class="text-sm text-theme-text-secondary">
+                    Table of every imaging session that contributed frames to any panel in the mosaic. Sort by session date, integration time, frames, or filter to review contributions.
+                  </p>
+                  <p class="text-sm text-theme-text-secondary">
+                    Example: identify a panel that still needs more integration time to match the others.
+                  </p>
+                </HelpPopover>
+              </div>
               <div class="overflow-hidden rounded border border-theme-border">
                 <table class="w-full text-xs">
                   <thead>

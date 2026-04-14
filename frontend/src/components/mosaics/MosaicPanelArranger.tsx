@@ -12,6 +12,7 @@ import {
 import { api } from "../../api/client";
 import type { PanelStats } from "../../types";
 import { formatIntegration } from "../../utils/format";
+import { FilePreviewModal } from "../FilePreviewModal";
 
 interface Props {
   mosaicId: string;
@@ -445,6 +446,16 @@ const PanelDraggable: Component<{
 };
 
 const PanelThumbnail: Component<{ panel: LocalPanel; maxIntegration: number }> = (props) => {
+  const [previewOpen, setPreviewOpen] = createSignal(false);
+  // Distinguish click from drag: drag activators on the parent div need
+  // pointerdown to bubble through, so we can't stopPropagation here.
+  // Track pointer movement and only open the preview on release if the
+  // pointer stayed near the press point (i.e. the user didn't drag).
+  let downX = 0;
+  let downY = 0;
+  let moved = false;
+  const DRAG_THRESHOLD_PX = 5;
+
   const transform = () => {
     const rot = props.panel.rotation ?? 0;
     const flip = props.panel.flip_h ? " scaleX(-1)" : "";
@@ -463,16 +474,38 @@ const PanelThumbnail: Component<{ panel: LocalPanel; maxIntegration: number }> =
           </div>
         }
       >
-        <img
-          src={api.thumbnailUrl(props.panel.thumbnail_url!)}
-          alt={props.panel.panel_label}
-          class="w-full h-full object-cover rounded border border-theme-border"
-          style={{ transform: transform(), "transition": "transform 160ms ease" }}
-          draggable={false}
-          loading="lazy"
-          width={360}
-          height={360}
-        />
+        <button
+          type="button"
+          class="w-full h-full p-0 border-0 bg-transparent cursor-pointer"
+          onPointerDown={(e) => {
+            downX = e.clientX;
+            downY = e.clientY;
+            moved = false;
+          }}
+          onPointerMove={(e) => {
+            if (!moved && Math.hypot(e.clientX - downX, e.clientY - downY) > DRAG_THRESHOLD_PX) {
+              moved = true;
+            }
+          }}
+          onClick={(e) => {
+            if (moved) {
+              e.preventDefault();
+              return;
+            }
+            if (props.panel.thumbnail_image_id) setPreviewOpen(true);
+          }}
+        >
+          <img
+            src={api.thumbnailUrl(props.panel.thumbnail_url!)}
+            alt={props.panel.panel_label}
+            class="w-full h-full object-cover rounded border border-theme-border"
+            style={{ transform: transform(), "transition": "transform 160ms ease" }}
+            draggable={false}
+            loading="lazy"
+            width={360}
+            height={360}
+          />
+        </button>
       </Show>
       <span class="absolute bottom-1 left-1 bg-black/60 text-white text-caption px-1.5 py-0.5 rounded pointer-events-none">
         {props.panel.panel_label}
@@ -487,6 +520,14 @@ const PanelThumbnail: Component<{ panel: LocalPanel; maxIntegration: number }> =
         <span class="absolute top-1 left-1 bg-theme-accent/80 text-white text-caption px-1.5 py-0.5 rounded pointer-events-none">
           {props.panel.rotation ?? 0}°{props.panel.flip_h ? " ⇋" : ""}
         </span>
+      </Show>
+      <Show when={previewOpen() && props.panel.thumbnail_image_id}>
+        <FilePreviewModal
+          imageId={props.panel.thumbnail_image_id!}
+          filePath={props.panel.thumbnail_file_path ?? ""}
+          thumbnailUrl={props.panel.thumbnail_url ? api.thumbnailUrl(props.panel.thumbnail_url) : null}
+          onClose={() => setPreviewOpen(false)}
+        />
       </Show>
     </div>
   );

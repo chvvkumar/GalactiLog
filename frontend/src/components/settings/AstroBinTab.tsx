@@ -1,6 +1,7 @@
 import { createSignal, createResource, createMemo, For } from "solid-js";
 import { useSettingsContext } from "../SettingsProvider";
 import { api } from "../../api/client";
+import HelpPopover from "../HelpPopover";
 
 export default function AstroBinTab() {
   const ctx = useSettingsContext();
@@ -35,11 +36,14 @@ export default function AstroBinTab() {
     <div class="space-y-4">
       {/* Filter ID Mapping */}
       <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-4 space-y-3">
-        <h3 class="text-theme-text-primary font-medium">Filter ID Mapping</h3>
-        <p class="text-xs text-theme-text-secondary">
-          Map your filters to AstroBin equipment database IDs for CSV import.
-          Find IDs in the URL when viewing a filter on AstroBin (e.g., app.astrobin.com/equipment/explorer/filter/<strong>4388</strong>/...).
-        </p>
+        <div class="flex items-center gap-2">
+          <h3 class="text-theme-text-primary font-medium">Filter ID Mapping</h3>
+          <HelpPopover title="Filter ID Mapping">
+            <p>Maps each local filter name to the AstroBin equipment database ID used in AstroBin CSV imports. Without a mapping, the filter column in the export stays blank for that filter.</p>
+            <p>The AstroBin filter ID is the numeric path segment in the URL when viewing the filter on AstroBin.</p>
+            <p>Example: Chroma LRGB L lives at app.astrobin.com/equipment/explorer/filter/4649/... so its AstroBin ID is 4649.</p>
+          </HelpPopover>
+        </div>
         <div class="space-y-2">
           <For each={allFilterNames()}>
             {(filterName) => (
@@ -68,10 +72,13 @@ export default function AstroBinTab() {
 
       {/* Bortle Class */}
       <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-4 space-y-3">
-        <h3 class="text-theme-text-primary font-medium">Bortle Class</h3>
-        <p class="text-xs text-theme-text-secondary">
-          Sky brightness classification used in AstroBin CSV exports.
-        </p>
+        <div class="flex items-center gap-2">
+          <h3 class="text-theme-text-primary font-medium">Bortle Class</h3>
+          <HelpPopover title="Bortle Class">
+            <p>Bortle dark-sky scale value from 1 (excellent dark site) to 9 (inner-city sky). Written into every row of the AstroBin CSV export so uploaded acquisitions carry the site-brightness context.</p>
+            <p>Example: set Bortle 4 for a rural-transition site, or Bortle 8 for typical city observing.</p>
+          </HelpPopover>
+        </div>
         <div class="flex items-center gap-3">
           <span class="text-xs text-theme-text-primary w-24">Bortle Class</span>
           <input

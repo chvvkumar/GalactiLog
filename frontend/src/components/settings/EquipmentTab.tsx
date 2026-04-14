@@ -4,6 +4,7 @@ import { showToast } from "../Toast";
 import { useAuth } from "../AuthProvider";
 import { SuggestionsBanner } from "./SuggestionsBanner";
 import { GroupingEditor, type GroupEntry } from "./GroupingEditor";
+import HelpPopover from "../HelpPopover";
 import type { EquipmentConfig, SuggestionsResponse, DiscoveredItem, SuggestionGroup } from "../../types";
 import { api } from "../../api/client";
 
@@ -113,7 +114,13 @@ export const EquipmentTab: Component = () => {
       />
 
       <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-4 space-y-3">
-        <h3 class="text-theme-text-primary font-medium">Cameras</h3>
+        <div class="flex items-center gap-2">
+          <h3 class="text-theme-text-primary font-medium">Cameras</h3>
+          <HelpPopover title="Cameras">
+            <p>Canonical camera names and their aliases. Aliases are raw strings as they appear in FITS INSTRUME headers; the canonical name is what GalactiLog displays and groups by.</p>
+            <p>Example: group "ZWO ASI2600MM Pro" and "ASI2600MM-Pro" under canonical "ASI2600MM Pro" so per-camera statistics aggregate correctly.</p>
+          </HelpPopover>
+        </div>
         <GroupingEditor
           discovered={discoveredCameras()}
           groups={cameraGroups()}
@@ -122,7 +129,13 @@ export const EquipmentTab: Component = () => {
       </div>
 
       <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-4 space-y-3">
-        <h3 class="text-theme-text-primary font-medium">Telescopes</h3>
+        <div class="flex items-center gap-2">
+          <h3 class="text-theme-text-primary font-medium">Telescopes</h3>
+          <HelpPopover title="Telescopes">
+            <p>Canonical telescope names and their aliases from FITS TELESCOP headers. Grouping consolidates variants of the same optical train into one entry.</p>
+            <p>Example: "FSQ-106EDX4" and "Takahashi FSQ106" merged under "FSQ-106" keeps rig-level stats coherent across nights where the capture profile wrote the name differently.</p>
+          </HelpPopover>
+        </div>
         <GroupingEditor
           discovered={discoveredTelescopes()}
           groups={telescopeGroups()}

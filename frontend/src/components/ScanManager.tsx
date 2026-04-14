@@ -15,6 +15,7 @@ import MaintenanceActions from "./MaintenanceActions";
 import ScanFiltersPanel from "./ScanFiltersPanel";
 import ScanFiltersOnboarding from "./ScanFiltersOnboarding";
 import { showToast } from "./Toast";
+import HelpPopover from "./HelpPopover";
 
 type FrameFilter = "all" | "light_only";
 
@@ -200,11 +201,34 @@ const ScanManager: Component = () => {
             }}
           />
           <div class="rounded-[var(--radius-md)] bg-theme-surface border border-theme-border p-4 space-y-6">
-            <h3 class="text-sm font-medium text-theme-text-primary">Library Scanning</h3>
+            <div class="flex items-center gap-2">
+              <h3 class="text-sm font-medium text-theme-text-primary">Library Scanning</h3>
+              <HelpPopover title="Library Scanning">
+                <p class="text-sm text-theme-text-secondary">
+                  A scan walks the configured library path, reads FITS headers, and imports target names, filters, timestamps, and equipment metadata into the catalog.
+                </p>
+                <p class="text-sm text-theme-text-secondary">
+                  The action bar at the bottom runs a one-time scan. Pick <strong class="text-theme-text-primary">Light frames only</strong> to skip calibration frames (darks, flats, bias), or <strong class="text-theme-text-primary">All frames</strong> to catalog every FITS file found.
+                </p>
+                <p class="text-sm text-theme-text-secondary">
+                  Example: after a night of capture, run a scan to pull the new files from your NAS directory into the catalog.
+                </p>
+              </HelpPopover>
+            </div>
 
             <Show when={isAdmin()}>
               <section class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
-                <h4 class="text-sm font-medium text-theme-text-primary">Auto-scan</h4>
+                <div class="flex items-center gap-2">
+                  <h4 class="text-sm font-medium text-theme-text-primary">Auto-scan</h4>
+                  <HelpPopover title="Auto-scan">
+                    <p class="text-sm text-theme-text-secondary">
+                      Runs a scan automatically on a fixed interval so new files dropped into the library are picked up without manual action.
+                    </p>
+                    <p class="text-sm text-theme-text-secondary">
+                      Example: set the interval to 1 hour to ingest frames that your capture software writes during an active session, or 12 hours if you only sync files once per day.
+                    </p>
+                  </HelpPopover>
+                </div>
                 <div class="flex items-center justify-between">
                   <label class="text-sm text-theme-text-secondary">Enable automatic scanning</label>
                   <button
@@ -238,7 +262,17 @@ const ScanManager: Component = () => {
             </Show>
 
             <section class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
-              <h4 class="text-sm font-medium text-theme-text-primary">Observer Location</h4>
+              <div class="flex items-center gap-2">
+                <h4 class="text-sm font-medium text-theme-text-primary">Observer Location</h4>
+                <HelpPopover title="Observer Location">
+                  <p class="text-sm text-theme-text-secondary">
+                    Latitude, longitude, and a site name for your imaging location. Used as a fallback when FITS headers lack site coordinates, and to compute the local noon boundary used by imaging-night session grouping.
+                  </p>
+                  <p class="text-sm text-theme-text-secondary">
+                    Example: with a longitude of -74, frames captured between local noon one day and local noon the next are grouped as one imaging night, so a session that crosses midnight stays together.
+                  </p>
+                </HelpPopover>
+              </div>
               <div class="grid grid-cols-3 gap-3">
                 <div class="space-y-1">
                   <label class="text-xs text-theme-text-secondary">Name</label>

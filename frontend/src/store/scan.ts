@@ -98,11 +98,11 @@ export function useScan() {
       startPolling(true);
     },
 
-    startRegeneration: async () => {
+    startRegeneration: async (opts: { purge?: boolean } = {}) => {
       setScanError(null);
       setScanStatus((prev) => ({ ...prev, state: "scanning", completed: 0, failed: 0, total: 0 }));
       try {
-        await api.regenerateThumbnails();
+        await api.regenerateThumbnails(opts);
       } catch {
         // POST may timeout but regeneration still starts server-side
       }

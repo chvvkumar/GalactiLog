@@ -5,15 +5,19 @@ const MaintenanceActions: Component<{
   disabled: boolean;
   rebuildRunning: boolean;
   rebuildMode: string;
-  onRegenThumbnails: () => void;
+  onRegenThumbnails: (opts?: { purge?: boolean }) => void;
   onStartedAction: () => void;
 }> = (props) => {
   const [showFullConfirm, setShowFullConfirm] = createSignal(false);
   const [showRefThumbChoice, setShowRefThumbChoice] = createSignal(false);
+  const [showRegenChoice, setShowRegenChoice] = createSignal(false);
+  const [confirmPurgeRegen, setConfirmPurgeRegen] = createSignal(false);
 
   const runAction = async (action: () => Promise<any>) => {
     setShowFullConfirm(false);
     setShowRefThumbChoice(false);
+    setShowRegenChoice(false);
+    setConfirmPurgeRegen(false);
     try {
       await action();
       props.onStartedAction();
@@ -60,9 +64,9 @@ const MaintenanceActions: Component<{
             {props.rebuildRunning && props.rebuildMode === "ref_thumbnails" ? "Running..." : "Fetch DSS"}
           </button>
           <button
-            onClick={() => props.onRegenThumbnails()}
+            onClick={() => setShowRegenChoice(true)}
             disabled={anyDisabled()}
-            title="Re-creates all thumbnails using current stretch settings. Does not affect database records."
+            title="Re-create all thumbnails using current stretch settings. Optionally delete existing thumbnails first."
             class="px-3 py-1.5 bg-theme-warning/15 text-theme-warning border border-theme-warning/30 rounded text-sm font-medium disabled:opacity-50 hover:bg-theme-warning/25 transition-colors"
           >
             Regen Thumbs
@@ -99,6 +103,60 @@ const MaintenanceActions: Component<{
             </button>
             <button
               onClick={() => setShowRefThumbChoice(false)}
+              class="px-3 py-1.5 border border-theme-border-em text-theme-text-secondary rounded text-xs hover:border-white hover:text-theme-text-primary transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      </Show>
+
+      <Show when={showRegenChoice() && !confirmPurgeRegen()}>
+        <div class="bg-theme-surface border border-theme-border-em rounded-[var(--radius-md)] p-3 space-y-2">
+          <p class="text-sm text-theme-text-primary font-medium">Regenerate Thumbnails</p>
+          <p class="text-xs text-theme-text-secondary">
+            Regenerate in place (overwrite existing files), or delete all thumbnails first then regenerate?
+          </p>
+          <div class="flex gap-2 pt-1">
+            <button
+              onClick={() => { setShowRegenChoice(false); props.onRegenThumbnails(); }}
+              class="px-3 py-1.5 border border-theme-accent text-theme-accent rounded text-xs font-medium hover:bg-theme-accent/20 transition-colors"
+            >
+              Regenerate in place
+            </button>
+            <button
+              onClick={() => setConfirmPurgeRegen(true)}
+              class="px-3 py-1.5 border border-theme-error/50 text-theme-error rounded text-xs hover:bg-theme-error/20 transition-colors"
+            >
+              Delete & regenerate
+            </button>
+            <button
+              onClick={() => setShowRegenChoice(false)}
+              class="px-3 py-1.5 border border-theme-border-em text-theme-text-secondary rounded text-xs hover:border-white hover:text-theme-text-primary transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      </Show>
+
+      <Show when={confirmPurgeRegen()}>
+        <div class="bg-theme-error/20 border border-theme-error/50 rounded-[var(--radius-md)] p-3 space-y-2">
+          <p class="text-sm text-theme-error font-medium">Delete all thumbnails?</p>
+          <p class="text-xs text-theme-error/70">
+            This will delete every thumbnail file on disk and then regenerate each one
+            from the original FITS/XISF data using current stretch settings. Database
+            records are not affected. Progress will be reported in the activity log.
+          </p>
+          <div class="flex gap-2 pt-1">
+            <button
+              onClick={() => { setConfirmPurgeRegen(false); setShowRegenChoice(false); props.onRegenThumbnails({ purge: true }); }}
+              class="px-3 py-1.5 bg-theme-error text-theme-text-primary rounded text-xs font-medium hover:opacity-90 transition-colors"
+            >
+              Yes, delete and regenerate
+            </button>
+            <button
+              onClick={() => { setConfirmPurgeRegen(false); setShowRegenChoice(false); }}
               class="px-3 py-1.5 border border-theme-border-em text-theme-text-secondary rounded text-xs hover:border-white hover:text-theme-text-primary transition-colors"
             >
               Cancel

@@ -21,6 +21,8 @@ class GeneralSettings(BaseModel):
     observer_longitude: float | None = None
     observer_name: str | None = None
     use_imaging_night: bool = True
+    preview_resolution: int = 2400  # 0 means native full resolution
+    preview_cache_mb: int = 2048
 
 
 class FilterConfig(BaseModel):

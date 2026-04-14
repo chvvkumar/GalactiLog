@@ -567,6 +567,92 @@ def reingest_changed_file(self, fits_path: str, include_calibration: bool = True
         raise self.retry(exc=exc)
 
 
+@celery_app.task(name="purge_and_regenerate_thumbnails")
+def purge_and_regenerate_thumbnails() -> dict:
+    """Delete every thumbnail file on disk, then queue regeneration for all images.
+
+    Logs start, per-batch progress, and completion of the delete phase to the
+    activity log. The final "scan complete" activity is emitted by the usual
+    check_complete_sync flow once all regenerate_thumbnail tasks finish.
+    """
+    with Session(_sync_engine) as session:
+        rows = session.execute(
+            select(Image.id, Image.file_path, Image.thumbnail_path)
+        ).all()
+
+    total = len(rows)
+    if not total:
+        set_idle_sync(_redis)
+        append_activity_sync(_redis, {
+            "type": "thumb_purge_complete",
+            "message": "Regen thumbnails: no images to process",
+            "details": {"deleted": 0, "queued": 0},
+            "timestamp": time.time(),
+        })
+        return {"status": "complete", "deleted": 0, "queued": 0}
+
+    append_activity_sync(_redis, {
+        "type": "thumb_purge_start",
+        "message": f"Deleting existing thumbnails for {total} image{'s' if total != 1 else ''}...",
+        "details": {"total": total},
+        "timestamp": time.time(),
+    })
+
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    def _unlink_one(thumb_path: str) -> str:
+        """Return 'deleted', 'missing', or 'error'. Network-IO bound."""
+        try:
+            Path(thumb_path).unlink()
+            return "deleted"
+        except FileNotFoundError:
+            return "missing"
+        except OSError as exc:
+            logger.warning("Failed to delete thumbnail %s: %s", thumb_path, exc)
+            return "error"
+
+    paths = [tp for (_id, _fp, tp) in rows if tp]
+    deleted = 0
+    missing = 0
+    progress_every = 1000
+    processed = 0
+    with ThreadPoolExecutor(max_workers=32) as pool:
+        futures = [pool.submit(_unlink_one, tp) for tp in paths]
+        for fut in as_completed(futures):
+            result = fut.result()
+            if result == "deleted":
+                deleted += 1
+            elif result == "missing":
+                missing += 1
+            processed += 1
+            if processed % progress_every == 0:
+                append_activity_sync(_redis, {
+                    "type": "thumb_purge_progress",
+                    "message": f"Deleted {deleted} thumbnails ({processed}/{len(paths)})...",
+                    "details": {"deleted": deleted, "processed": processed, "total": len(paths)},
+                    "timestamp": time.time(),
+                })
+
+    append_activity_sync(_redis, {
+        "type": "thumb_purge_complete",
+        "message": f"Deleted {deleted} thumbnail{'s' if deleted != 1 else ''}"
+                   + (f" ({missing} already missing)" if missing else "")
+                   + f", queueing {total} for regeneration...",
+        "details": {"deleted": deleted, "missing": missing, "queued": total},
+        "timestamp": time.time(),
+    })
+
+    set_ingesting_sync(_redis, total=total)
+
+    queued = 0
+    for image_id, file_path, thumb_path in rows:
+        if file_path and thumb_path:
+            regenerate_thumbnail.delay(str(image_id), file_path, thumb_path)
+            queued += 1
+
+    return {"status": "ingesting", "deleted": deleted, "missing": missing, "queued": queued}
+
+
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=10)
 def regenerate_thumbnail(self, image_id: str, fits_path: str, thumb_path: str) -> dict:
     """Regenerate a single thumbnail using the current stretch algorithm."""

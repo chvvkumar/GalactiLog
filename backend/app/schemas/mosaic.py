@@ -44,6 +44,8 @@ class PanelStats(BaseModel):
     last_session_date: str | None = None
     thumbnail_url: str | None = None
     thumbnail_pier_side: str | None = None
+    thumbnail_image_id: str | None = None
+    thumbnail_file_path: str | None = None
     object_pattern: str | None = None
     grid_row: int | None = None
     grid_col: int | None = None
