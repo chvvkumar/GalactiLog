@@ -36,8 +36,10 @@ services:
       GALACTILOG_REDIS_URL: redis://redis:6379/0
       GALACTILOG_FITS_DATA_PATH: /app/data/fits
       GALACTILOG_THUMBNAILS_PATH: /app/data/thumbnails
+      GALACTILOG_PREVIEWS_PATH: /app/data/previews
     volumes:
       - ${GALACTILOG_THUMBNAILS_HOST_PATH:-thumbnails_data}:/app/data/thumbnails
+      - ${GALACTILOG_PREVIEWS_HOST_PATH:-previews_data}:/app/data/previews
       - ${GALACTILOG_FITS_HOST_PATH:-./sample_fits}:/app/data/fits:ro
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8000/api/health || exit 1"]
@@ -56,3 +58,4 @@ volumes:
   # When GALACTILOG_POSTGRES_DATA_HOST_PATH / GALACTILOG_THUMBNAILS_HOST_PATH are set, bind mounts are used instead
   postgres_data:
   thumbnails_data:
+  previews_data:

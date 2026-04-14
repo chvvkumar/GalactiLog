@@ -34,7 +34,8 @@ COPY backend/alembic/ /app/alembic/
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 COPY backend/entrypoint.sh /app/entrypoint.sh
-RUN chmod +x /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh \
+    && mkdir -p /app/data/fits /app/data/thumbnails /app/data/previews
 
 WORKDIR /app
 ENV GALACTILOG_CELERY_CONCURRENCY=4
