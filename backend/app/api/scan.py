@@ -26,7 +26,7 @@ from app.services.scan_state import (
     get_activity, clear_activity, append_activity,
 )
 from app.services.simbad import resolve_target_name, normalize_object_name
-from app.worker.tasks import regenerate_thumbnail, run_scan, rebuild_targets, smart_rebuild_targets, retry_unresolved, backfill_csv_metrics, generate_reference_thumbnails, run_xmatch_enrichment
+from app.worker.tasks import regenerate_thumbnail, run_scan, rebuild_targets, smart_rebuild_targets, retry_unresolved, backfill_csv_metrics, generate_reference_thumbnails, run_xmatch_enrichment, purge_and_regenerate_thumbnails
 
 logger = logging.getLogger(__name__)
 
@@ -76,16 +76,30 @@ async def trigger_scan(
 
 @router.post("/regenerate-thumbnails")
 async def regenerate_thumbnails(
+    purge: bool = False,
     session: AsyncSession = Depends(get_session),
     user: User = Depends(require_admin),
 ):
-    """Queue all existing images for thumbnail regeneration."""
+    """Queue all existing images for thumbnail regeneration.
+
+    When purge=True, delete all existing thumbnail files first, logging
+    progress to the activity log, before queueing regeneration.
+    """
     async with async_redis() as r:
         state = await get_scan_state(r)
         if state.state in ("scanning", "ingesting"):
             return {"status": "already_running", **state.to_dict()}
 
         await start_scanning(r)
+
+        if purge:
+            # Defer DB work and file deletions to Celery so the HTTP call
+            # returns immediately and progress is reported via activity log.
+            purge_and_regenerate_thumbnails.delay()
+            return {
+                "status": "accepted",
+                "message": "Queued: delete and regenerate all thumbnails",
+            }
 
         result = await session.execute(
             select(Image.id, Image.file_path, Image.thumbnail_path)

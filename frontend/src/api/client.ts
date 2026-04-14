@@ -296,8 +296,10 @@ export const api = {
   getScanStatus: () =>
     fetchJson<ScanStatus>("/scan/status"),
 
-  regenerateThumbnails: () =>
-    fetchJson<ScanResult>("/scan/regenerate-thumbnails", { method: "POST" }),
+  regenerateThumbnails: (opts: { purge?: boolean } = {}) => {
+    const qs = opts.purge ? "?purge=true" : "";
+    return fetchJson<ScanResult>(`/scan/regenerate-thumbnails${qs}`, { method: "POST" });
+  },
 
   resetScan: () =>
     fetchJson<{ status: string }>("/scan/reset", { method: "POST" }),
