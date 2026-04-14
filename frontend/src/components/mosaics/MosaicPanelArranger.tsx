@@ -470,6 +470,7 @@ const PanelThumbnail: Component<{ panel: LocalPanel; maxIntegration: number }> =
           type="button"
           class="w-full h-full p-0 border-0 bg-transparent cursor-pointer"
           onClick={() => props.panel.thumbnail_image_id && setPreviewOpen(true)}
+          onPointerDown={(e) => e.stopPropagation()}
         >
           <img
             src={api.thumbnailUrl(props.panel.thumbnail_url!)}
