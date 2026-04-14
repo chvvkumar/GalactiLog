@@ -36,6 +36,9 @@ jobs:
           context: .
           push: true
           tags: chvvkumar/galactilog:snd
+          build-args: |
+            GALACTILOG_VERSION=snd
+            GALACTILOG_GIT_SHA=${{ github.sha }}
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=local,dest=/tmp/.buildx-cache,mode=max
 

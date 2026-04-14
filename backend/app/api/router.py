@@ -1,3 +1,5 @@
+import os
+
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
@@ -36,6 +38,14 @@ api_router.include_router(backup_router)
 api_router.include_router(planning_router)
 api_router.include_router(bootstrap_router)
 api_router.include_router(preview_router)
+
+
+@api_router.get("/version")
+async def version():
+    return {
+        "version": os.environ.get("GALACTILOG_VERSION", "dev"),
+        "git_sha": os.environ.get("GALACTILOG_GIT_SHA", "unknown"),
+    }
 
 
 @api_router.get("/health")

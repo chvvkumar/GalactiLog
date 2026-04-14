@@ -96,6 +96,9 @@ jobs:
           context: .
           push: true
           tags: ${{ steps.version.outputs.docker_tags }}
+          build-args: |
+            GALACTILOG_VERSION=${{ steps.version.outputs.version }}
+            GALACTILOG_GIT_SHA=${{ github.sha }}
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=local,dest=/tmp/.buildx-cache,mode=max
 
