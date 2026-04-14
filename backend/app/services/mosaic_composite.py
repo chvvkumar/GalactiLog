@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from astropy.wcs import WCS
 
 from app.models.image import Image
-from app.services.thumbnail import _read_decimated
+from app.services.thumbnail import _read_binned
 from app.services.stretch import (
     normalize_to_unit,
     resize_array,
@@ -139,7 +139,7 @@ def generate_panel_thumbnail(
         else:
             native_width = max(dims) if dims else max_width
 
-    data = _read_decimated(fits_path, max_width)
+    data = _read_binned(fits_path, max_width)
 
     if data.ndim == 2:
         data = normalize_to_unit(data)

@@ -11,14 +11,16 @@ from app.services.stretch import (
 )
 
 
-def _read_decimated(fits_path: Path, max_width: int) -> np.ndarray:
-    """Read FITS pixel data with decimation for thumbnail generation.
+def _read_binned(fits_path: Path, max_width: int) -> np.ndarray:
+    """Read FITS pixel data and block-average-bin for thumbnail generation.
 
-    For large sensors (e.g., 6000x4000), reading every Nth row/column
-    cuts I/O by N^2 while producing more data than the final thumbnail needs.
-    The subsequent LANCZOS resize handles the remaining downscale cleanly.
+    For large sensors (e.g. 6000x4000), the full frame is read and then
+    mean-pooled by an integer factor that leaves ~2x the target width for
+    the subsequent LANCZOS step. Block averaging (vs. strided sub-sampling)
+    integrates noise across bins, giving sqrt(N) noise reduction per axis
+    and eliminating the aliasing/moire that strided reads produce.
 
-    Falls back to full read for small images or color (3D) data.
+    Falls back to full read for small images or non-2D data.
     """
     with fitsio.FITS(str(fits_path), "r") as fits:
         hdu = fits[0]
@@ -29,17 +31,21 @@ def _read_decimated(fits_path: Path, max_width: int) -> np.ndarray:
         if len(dims) != 2:
             return hdu.read().astype(np.float32)
 
-        # Use the larger dimension for step calculation - fitsio dims order
-        # may vary (NAXIS1/NAXIS2), and we just need a proportional decimation.
-        max_dim = max(dims)
-        step = max(1, max_dim // (max_width * 2))
+        data = hdu.read().astype(np.float32)
 
-        if step <= 1:
-            return hdu.read().astype(np.float32)
-
-        # Read every step-th row and column via numpy slicing on FITS data
-        data = hdu[::step, ::step].astype(np.float32)
+    h, w = data.shape
+    max_dim = max(h, w)
+    step = max(1, max_dim // (max_width * 2))
+    if step <= 1:
         return data
+
+    h2 = (h // step) * step
+    w2 = (w // step) * step
+    cropped = data[:h2, :w2]
+    binned = cropped.reshape(
+        h2 // step, step, w2 // step, step
+    ).mean(axis=(1, 3)).astype(np.float32)
+    return binned
 
 
 def generate_thumbnail(
@@ -49,13 +55,13 @@ def generate_thumbnail(
 ) -> Path:
     """Read a FITS file, resize raw data, apply MTF stretch, save JPEG.
 
-    Pipeline: read (decimated) → flip → resize (raw linear) → MTF stretch → save.
+    Pipeline: read → block-bin → flip → resize (raw linear) → MTF stretch → save.
     Handles both mono (2D) and color (3D with shape [3, H, W]) data.
 
-    Uses decimated reads for large images to reduce I/O - for a 6000px wide
-    sensor targeting 800px thumbnails, this reads ~16x fewer pixels from disk.
+    Block-binning before resize integrates noise across bins (sqrt(N) reduction
+    per axis) and prevents the aliasing that strided reads cause.
     """
-    data = _read_decimated(fits_path, max_width)
+    data = _read_binned(fits_path, max_width)
 
     if data.ndim == 2:
         # Mono: normalize, flip, resize, stretch

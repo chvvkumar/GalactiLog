@@ -48,6 +48,27 @@ def test_resize_array_noop_when_smaller():
     assert out.shape == (50, 100)
 
 
+def test_resize_array_prefilter_reduces_noise():
+    # Large downscale (7.5x) with uniform random noise: the box-average
+    # prefilter should reduce output variance relative to the input.
+    rng = np.random.default_rng(42)
+    data = rng.standard_normal((4000, 6000)).astype(np.float32)
+    out = resize_array(data, max_width=800)
+    assert out.shape[1] == 800
+    # Block averaging by factor 7 cuts stddev by ~sqrt(49)=7. Allow slack
+    # for the fractional LANCZOS step, but it must be far below 1.0.
+    assert out.std() < 0.25
+
+
+def test_resize_array_integer_downscale_uses_prefilter_only():
+    # For exact integer downscales, the prefilter alone reaches target width
+    # and the function returns without invoking LANCZOS.
+    data = np.ones((400, 800), dtype=np.float32)
+    out = resize_array(data, max_width=200)
+    assert out.shape == (100, 200)
+    np.testing.assert_allclose(out, 1.0, atol=1e-6)
+
+
 def test_stretch_channel_uniform_returns_midgrey():
     data = np.full((32, 32), 0.5, dtype=np.float32)
     out = stretch_channel(data)

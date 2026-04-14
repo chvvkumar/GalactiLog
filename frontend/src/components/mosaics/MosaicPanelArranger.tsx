@@ -447,6 +447,14 @@ const PanelDraggable: Component<{
 
 const PanelThumbnail: Component<{ panel: LocalPanel; maxIntegration: number }> = (props) => {
   const [previewOpen, setPreviewOpen] = createSignal(false);
+  // Distinguish click from drag: drag activators on the parent div need
+  // pointerdown to bubble through, so we can't stopPropagation here.
+  // Track pointer movement and only open the preview on release if the
+  // pointer stayed near the press point (i.e. the user didn't drag).
+  let downX = 0;
+  let downY = 0;
+  let moved = false;
+  const DRAG_THRESHOLD_PX = 5;
 
   const transform = () => {
     const rot = props.panel.rotation ?? 0;
@@ -469,8 +477,23 @@ const PanelThumbnail: Component<{ panel: LocalPanel; maxIntegration: number }> =
         <button
           type="button"
           class="w-full h-full p-0 border-0 bg-transparent cursor-pointer"
-          onClick={() => props.panel.thumbnail_image_id && setPreviewOpen(true)}
-          onPointerDown={(e) => e.stopPropagation()}
+          onPointerDown={(e) => {
+            downX = e.clientX;
+            downY = e.clientY;
+            moved = false;
+          }}
+          onPointerMove={(e) => {
+            if (!moved && Math.hypot(e.clientX - downX, e.clientY - downY) > DRAG_THRESHOLD_PX) {
+              moved = true;
+            }
+          }}
+          onClick={(e) => {
+            if (moved) {
+              e.preventDefault();
+              return;
+            }
+            if (props.panel.thumbnail_image_id) setPreviewOpen(true);
+          }}
         >
           <img
             src={api.thumbnailUrl(props.panel.thumbnail_url!)}

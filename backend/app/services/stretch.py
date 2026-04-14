@@ -69,11 +69,29 @@ def stretch_channel(data: np.ndarray) -> np.ndarray:
 def resize_array(data: np.ndarray, max_width: int) -> np.ndarray:
     """Resize a 2D float array maintaining aspect ratio using LANCZOS.
 
+    For downscales of 2x or more, applies a box-average prefilter by the
+    integer factor of the ratio before LANCZOS handles the fractional
+    remainder. This band-limits the input below the output Nyquist,
+    eliminating aliasing/moire that LANCZOS alone produces on periodic
+    patterns and noise (which the subsequent MTF stretch would amplify).
+
     Uses PIL mode "F" for high-quality resampling on linear float data.
     """
     h, w = data.shape
     if w <= max_width:
         return data
+
+    prefilter = w // max_width
+    if prefilter >= 2:
+        h2 = (h // prefilter) * prefilter
+        w2 = (w // prefilter) * prefilter
+        cropped = data[:h2, :w2]
+        data = cropped.reshape(
+            h2 // prefilter, prefilter, w2 // prefilter, prefilter
+        ).mean(axis=(1, 3)).astype(np.float32)
+        h, w = data.shape
+        if w <= max_width:
+            return data
 
     ratio = max_width / w
     new_h = int(h * ratio)
