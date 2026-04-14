@@ -426,7 +426,7 @@ export default function DisplayTab() {
         <div class="flex items-center justify-between">
           <div>
             <span class="text-sm text-theme-text-secondary">Preview resolution</span>
-            <p class="text-xs text-theme-text-tertiary mt-0.5">Resolution for on-demand full previews. Native uses the sensor's full width.</p>
+            <p class="text-xs text-theme-text-tertiary mt-0.5">How large the zoomed-in preview image is. Native means it matches the camera's full resolution.</p>
           </div>
           <select
             value={previewResolution()}
@@ -442,7 +442,7 @@ export default function DisplayTab() {
         <div class="flex items-center justify-between">
           <div>
             <span class="text-sm text-theme-text-secondary">Preview cache size (MB)</span>
-            <p class="text-xs text-theme-text-tertiary mt-0.5">Max disk space for cached previews. LRU eviction when full.</p>
+            <p class="text-xs text-theme-text-tertiary mt-0.5">How much disk space to use for cached previews. When this limit is reached, the oldest previews are removed to make room for new ones.</p>
           </div>
           <input
             type="number"
