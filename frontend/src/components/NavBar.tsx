@@ -1,12 +1,37 @@
-import { Component, Show, createSignal } from "solid-js";
+import { Component, Show, createSignal, onMount } from "solid-js";
 import { A, useNavigate, useLocation } from "@solidjs/router";
 import { sidebarOpen, setSidebarOpen } from "../store/sidebar";
 import { useAuth } from "./AuthProvider";
+
+const API_BASE = import.meta.env.VITE_API_URL || "/api";
 
 const NavBar: Component = () => {
   const { user, logout, isAdmin } = useAuth();
   const navigate = useNavigate();
   const [menuOpen, setMenuOpen] = createSignal(false);
+  const [version, setVersion] = createSignal<{ version: string; git_sha: string } | null>(null);
+
+  onMount(async () => {
+    try {
+      const resp = await fetch(`${API_BASE}/version`, { credentials: "same-origin" });
+      if (resp.ok) setVersion(await resp.json());
+    } catch {
+      // ignore - version display is non-critical
+    }
+  });
+
+  const versionLabel = () => {
+    const v = version();
+    if (!v) return "";
+    const sha = v.git_sha && v.git_sha !== "unknown" ? ` (${v.git_sha.slice(0, 7)})` : "";
+    return `v${v.version}${sha}`;
+  };
+  const versionUrl = () => {
+    const v = version();
+    return v && v.version !== "dev"
+      ? `https://github.com/chvvkumar/GalactiLog/releases/tag/${v.version}`
+      : null;
+  };
 
   const handleLogout = async () => {
     await logout();
@@ -72,6 +97,29 @@ const NavBar: Component = () => {
           >
             Sign out
           </button>
+        </Show>
+        <Show when={version()}>
+          <Show
+            when={versionUrl()}
+            fallback={
+              <span
+                class="text-xs text-theme-text-secondary hidden sm:inline"
+                title="Local development build"
+              >
+                {versionLabel()}
+              </span>
+            }
+          >
+            <a
+              href={versionUrl()!}
+              target="_blank"
+              rel="noopener noreferrer"
+              class="text-xs text-theme-text-secondary hover:text-theme-text-primary transition-colors hidden sm:inline"
+              title="View this release on GitHub"
+            >
+              {versionLabel()}
+            </a>
+          </Show>
         </Show>
         <a
           href="https://github.com/chvvkumar/GalactiLog"

@@ -60,7 +60,6 @@ export const MergesTab: Component = () => {
   };
 
   const handleRevert = async (candidate: MergeCandidateResponse) => {
-    setConfirmRevertId(null);
     try {
       await api.revertMergeCandidate(candidate.id);
       showToast(`Reverted merge of "${candidate.source_name}"`);
