@@ -10,6 +10,7 @@ import { useSettingsContext } from "./SettingsProvider";
 import { isFieldVisible, isColumnVisible } from "../utils/displaySettings";
 import InlineEditCell from "./InlineEditCell";
 import { formatTime as formatTimeUtil, timezoneLabel } from "../utils/dateTime";
+import { ClickableFilePath } from "./ClickableFilePath";
 
 import { formatIntegration } from "../utils/format";
 import { showToast } from "./Toast";
@@ -403,7 +404,14 @@ const SessionAccordionCard: Component<{
               </Show>
               <td class="py-1 px-2 text-theme-text-primary text-right tabular-nums">{frame.sensor_temp?.toFixed(0) ?? "—"}°C</td>
               <td class="py-1 px-2 text-theme-text-primary text-right tabular-nums">{frame.gain ?? "—"}</td>
-              <td class="py-1 px-2 text-theme-text-secondary text-left">{frame.file_name}</td>
+              <td class="py-1 px-2 text-theme-text-secondary text-left">
+                <ClickableFilePath
+                  imageId={frame.image_id}
+                  filePath={frame.file_path}
+                  thumbnailUrl={frame.thumbnail_url}
+                  display={frame.file_name}
+                />
+              </td>
             </tr>
           )}
         </For>

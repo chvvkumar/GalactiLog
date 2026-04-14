@@ -90,6 +90,8 @@ async def _panel_stats(panel: MosaicPanel, session: AsyncSession) -> PanelStats:
         select(
             Image.thumbnail_path,
             Image.raw_headers["PIERSIDE"].astext.label("pier_side"),
+            Image.id,
+            Image.file_path,
         )
         .where(*base_filter)
         .where(Image.thumbnail_path.is_not(None))
@@ -99,10 +101,14 @@ async def _panel_stats(panel: MosaicPanel, session: AsyncSession) -> PanelStats:
     thumb_row = (await session.execute(thumb_q)).first()
     thumb_url = None
     thumb_pier_side = None
+    thumb_image_id = None
+    thumb_file_path = None
     if thumb_row and thumb_row.thumbnail_path:
         filename = thumb_row.thumbnail_path.split("/")[-1].split("\\")[-1]
         thumb_url = f"/thumbnails/{filename}"
         thumb_pier_side = thumb_row.pier_side
+        thumb_image_id = str(thumb_row.id)
+        thumb_file_path = thumb_row.file_path
 
     # Compute per-panel center from frame FITS headers (median of OBJCTRA/OBJCTDEC).
     # This gives the actual pointing position for each panel, even when multiple
@@ -143,6 +149,8 @@ async def _panel_stats(panel: MosaicPanel, session: AsyncSession) -> PanelStats:
         last_session_date=str(row.last_date) if row.last_date else None,
         thumbnail_url=thumb_url,
         thumbnail_pier_side=thumb_pier_side,
+        thumbnail_image_id=thumb_image_id,
+        thumbnail_file_path=thumb_file_path,
         object_pattern=panel.object_pattern,
         grid_row=panel.grid_row,
         grid_col=panel.grid_col,
@@ -197,7 +205,7 @@ async def _batch_panel_stats(
     # 3. Most recent thumbnail per target (with pier side for orientation)
     thumb_q = text(
         "SELECT DISTINCT ON (resolved_target_id) "
-        "resolved_target_id, thumbnail_path, raw_headers->>'PIERSIDE' AS pier_side "
+        "resolved_target_id, thumbnail_path, raw_headers->>'PIERSIDE' AS pier_side, id, file_path "
         "FROM images "
         "WHERE resolved_target_id = ANY(:target_ids) "
         "AND image_type = 'LIGHT' "
@@ -205,7 +213,7 @@ async def _batch_panel_stats(
         "ORDER BY resolved_target_id, capture_date DESC"
     )
     thumb_rows = (await session.execute(thumb_q, {"target_ids": target_ids})).all()
-    thumb_map: dict[str, tuple[str | None, str | None]] = {}
+    thumb_map: dict[str, tuple[str | None, str | None, str | None, str | None]] = {}
     for r in thumb_rows:
         tid = str(r[0])
         thumb_path = r[1]
@@ -213,7 +221,7 @@ async def _batch_panel_stats(
         if thumb_path:
             filename = thumb_path.split("/")[-1].split("\\")[-1]
             thumb_url = f"/thumbnails/{filename}"
-        thumb_map[tid] = (thumb_url, r[2])
+        thumb_map[tid] = (thumb_url, r[2], str(r[3]) if r[3] else None, r[4])
 
     # Build PanelStats for each panel
     result: dict[str, PanelStats] = {}
@@ -222,7 +230,7 @@ async def _batch_panel_stats(
         tid = str(p.target_id)
         agg = agg_map.get(tid, (0, 0, None))
         filters = filt_map.get(tid, {})
-        thumb_url, thumb_pier_side = thumb_map.get(tid, (None, None))
+        thumb_url, thumb_pier_side, thumb_image_id, thumb_file_path = thumb_map.get(tid, (None, None, None, None))
 
         result[str(p.id)] = PanelStats(
             panel_id=str(p.id),
@@ -238,6 +246,8 @@ async def _batch_panel_stats(
             last_session_date=str(agg[2]) if agg[2] else None,
             thumbnail_url=thumb_url,
             thumbnail_pier_side=thumb_pier_side,
+            thumbnail_image_id=thumb_image_id,
+            thumbnail_file_path=thumb_file_path,
             object_pattern=p.object_pattern,
             grid_row=p.grid_row,
             grid_col=p.grid_col,
