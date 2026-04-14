@@ -2,6 +2,7 @@ import { createSignal, createEffect, For, Show } from "solid-js";
 import { useSettingsContext } from "./SettingsProvider";
 import { useAuth } from "./AuthProvider";
 import { showToast } from "./Toast";
+import HelpPopover from "./HelpPopover";
 import type { DisplaySettings, MetricGroupSettings } from "../types";
 import { THEMES_SORTED, TEXT_SIZES, type ThemeMeta } from "../themes";
 import { FILTER_STYLE_OPTIONS, getFilterBadgeStyle, type FilterBadgeStyle } from "../utils/filterStyles";
@@ -421,8 +422,13 @@ export default function DisplayTab() {
       </div>
 
       <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
-        <h2 class="text-sm font-semibold text-theme-text-primary">File Preview</h2>
-        <p class="text-sm text-theme-text-secondary">Configure on-demand full-resolution preview rendering.</p>
+        <div class="flex items-center gap-2">
+          <h2 class="text-sm font-semibold text-theme-text-primary">File Preview</h2>
+          <HelpPopover title="File Preview">
+            <p>These settings configure on-demand high-resolution preview rendering.</p>
+            <p>To open a preview, click a file name in a session's image table on a target detail page, or click a thumbnail in the mosaic panel grid. Clicking opens a modal showing the existing thumbnail with a Zoom button that renders the higher-resolution preview on demand.</p>
+          </HelpPopover>
+        </div>
         <div class="flex items-center justify-between">
           <div>
             <span class="text-sm text-theme-text-secondary">Preview resolution</span>
