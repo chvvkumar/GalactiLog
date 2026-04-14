@@ -98,3 +98,28 @@ def test_ensure_capacity_stops_when_no_progress(redis_client, cache_dir):
     # Loop should have evicted at most one entry before bailing
     remaining = redis_client.zcard("preview:lru")
     assert remaining >= 1  # did not drain the entire set
+
+
+def test_reconcile_removes_orphans(redis_client, cache_dir):
+    cache = PreviewCache(redis_client, cache_dir, cap_bytes=10_000)
+
+    # Tracked but missing on disk
+    redis_client.zadd("preview:lru", {"ghost.jpg": 1.0})
+    redis_client.hset("preview:sizes", "ghost.jpg", 100)
+    redis_client.set("preview:total_bytes", 100)
+
+    # On disk but untracked
+    _make_file(cache_dir, "stray.jpg", 50)
+
+    # Legit tracked + present
+    _make_file(cache_dir, "keep.jpg", 200)
+    redis_client.zadd("preview:lru", {"keep.jpg": 2.0})
+    redis_client.hset("preview:sizes", "keep.jpg", 200)
+    redis_client.incrby("preview:total_bytes", 200)
+
+    summary = cache.reconcile()
+    assert summary["removed_orphan_metadata"] == 1
+    assert summary["removed_orphan_files"] == 1
+    assert summary["total_bytes"] == 200
+    assert not (cache_dir / "stray.jpg").exists()
+    assert (cache_dir / "keep.jpg").exists()

@@ -77,3 +77,38 @@ class PreviewCache:
         pipe.hdel(SIZES_KEY, key)
         pipe.decrby(TOTAL_KEY, size)
         pipe.execute()
+
+    def reconcile(self) -> dict:
+        """Reconcile Redis metadata against on-disk files.
+
+        Removes metadata for files missing on disk. Removes on-disk files
+        without metadata. Recomputes total_bytes from hash values.
+        Returns a dict summary.
+        """
+        if not self.cache_dir.exists():
+            return {"removed_orphan_metadata": 0, "removed_orphan_files": 0}
+
+        tracked_keys = set(self.redis.hkeys(SIZES_KEY))
+        on_disk = {p.name for p in self.cache_dir.iterdir() if p.is_file() and not p.name.startswith(".")}
+
+        orphan_meta = tracked_keys - on_disk
+        for key in orphan_meta:
+            self.redis.zrem(LRU_KEY, key)
+            self.redis.hdel(SIZES_KEY, key)
+
+        orphan_files = on_disk - tracked_keys
+        for name in orphan_files:
+            try:
+                (self.cache_dir / name).unlink(missing_ok=True)
+            except OSError:
+                pass
+
+        remaining = self.redis.hgetall(SIZES_KEY)
+        total = sum(int(v) for v in remaining.values())
+        self.redis.set(TOTAL_KEY, total)
+
+        return {
+            "removed_orphan_metadata": len(orphan_meta),
+            "removed_orphan_files": len(orphan_files),
+            "total_bytes": total,
+        }
