@@ -214,13 +214,27 @@ async def update_general(
 ):
     """Update general settings and return the full settings object."""
     row = await _get_or_create_settings(session)
+    old_general = row.general or {}
     row.general = {
-        **(row.general or {}),
+        **old_general,
         **payload.model_dump(),
         "_migrated": True,
     }
     await session.commit()
     await session.refresh(row)
+
+    # Trigger session_date recompute if imaging night setting changed
+    old_night = old_general.get("use_imaging_night", False)
+    new_night = payload.use_imaging_night
+    old_lon = old_general.get("observer_longitude")
+    new_lon = payload.observer_longitude
+    if old_night != new_night or (new_night and old_lon != new_lon):
+        try:
+            from app.worker.tasks import recompute_session_dates
+            recompute_session_dates.delay()
+        except Exception:
+            pass  # Worker may not be available in dev
+
     return _row_to_response(row)
 
 

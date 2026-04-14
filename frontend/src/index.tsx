@@ -4,7 +4,7 @@ import { lazy, Suspense } from "solid-js";
 import { Router, Route } from "@solidjs/router";
 import "./index.css";
 import App from "./App";
-import DashboardPage from "./pages/DashboardPage";
+const DashboardPage = lazy(() => import("./pages/DashboardPage"));
 import { SettingsProvider } from "./components/SettingsProvider";
 import { AuthProvider } from "./components/AuthProvider";
 import ProtectedRoute from "./components/ProtectedRoute";

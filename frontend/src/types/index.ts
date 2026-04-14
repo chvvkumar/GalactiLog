@@ -538,6 +538,7 @@ export interface GeneralSettings {
   observer_latitude?: number | null;
   observer_longitude?: number | null;
   observer_name?: string | null;
+  use_imaging_night?: boolean;
 }
 
 export interface FilterConfig {
@@ -631,7 +632,7 @@ export interface CorrelationPoint {
   x: number;
   y: number;
   date: string;
-  target_name: string | null;
+  target_id: string | null;
   outlier: boolean;
 }
 
@@ -658,6 +659,7 @@ export interface CorrelationResponse {
   granularity: string;
   x_stats: SummaryStats | null;
   y_stats: SummaryStats | null;
+  target_names: Record<string, string>;
 }
 
 export interface HistogramBin {

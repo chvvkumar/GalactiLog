@@ -65,6 +65,24 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("Failed to dispatch dark hours backfill: %s", e)
 
+    # Backfill session_date for any images that don't have one yet
+    try:
+        from sqlalchemy import select, func as sa_func
+        from app.models import Image
+        async with async_session() as db:
+            null_count = (await db.execute(
+                select(sa_func.count(Image.id)).where(
+                    Image.capture_date.isnot(None),
+                    Image.session_date.is_(None),
+                )
+            )).scalar_one()
+            if null_count > 0:
+                from app.worker.tasks import recompute_session_dates
+                recompute_session_dates.apply_async(countdown=10)
+                logger.info("Queued session_date backfill for %d images", null_count)
+    except Exception as e:
+        logger.warning("Failed to check/dispatch session_date backfill: %s", e)
+
     # Start queue depth probe in the uvicorn process so gauges are visible
     # at the /metrics endpoint (worker and uvicorn have separate registries)
     from app.metrics import start_queue_depth_probe, register_celery_collector

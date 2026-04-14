@@ -1,4 +1,4 @@
-import { Component, Show, For, createResource, createSignal, createEffect } from "solid-js";
+import { Component, Show, For, createResource, createSignal, createEffect, createMemo, on } from "solid-js";
 import { A, useParams, useSearchParams } from "@solidjs/router";
 import { api } from "../api/client";
 import type { TargetDetailResponse, SessionDetail } from "../types";
@@ -71,14 +71,13 @@ const TargetDetailPage: Component = () => {
     }, 1000);
   };
 
-  let chartDatesInitialized = false;
-  createEffect(() => {
-    const detail = targetDetail();
-    if (detail && !chartDatesInitialized) {
-      chartDatesInitialized = true;
-      setSelectedChartDates(detail.sessions.slice(0, 1).map((s) => s.session_date));
-    }
-  });
+  createEffect(
+    on(targetDetail, (detail, prev) => {
+      if (detail && !prev) {
+        setSelectedChartDates(detail.sessions.slice(0, 1).map((s) => s.session_date));
+      }
+    })
+  );
 
   const toggleTargetChart = () => {
     const next = !targetChartExpanded();
@@ -99,23 +98,49 @@ const TargetDetailPage: Component = () => {
 
   const selectNoDates = () => setSelectedChartDates([]);
 
-  const loadSessionDetail = async (date: string) => {
-    if (sessionCache()[date]) return;
-    try {
-      const detail = await api.getSessionDetail(params.targetId, date);
-      setSessionCache((prev) => ({ ...prev, [date]: detail }));
-    } catch (e: any) {
-      showToast(
-        e?.message ?? `Failed to load session ${date}`,
-        "error",
-      );
-      setExpandedSessions((prev) => {
-        const next = new Set(prev);
-        next.delete(date);
-        return next;
-      });
+  const pendingLoads = new Set<string>();
+  const MAX_CONCURRENT_LOADS = 2;
+  const loadQueue: string[] = [];
+
+  const processQueue = () => {
+    while (loadQueue.length > 0 && pendingLoads.size < MAX_CONCURRENT_LOADS) {
+      const date = loadQueue.shift()!;
+      if (sessionCache()[date] || pendingLoads.has(date)) continue;
+      pendingLoads.add(date);
+      api.getSessionDetail(params.targetId, date)
+        .then((detail) => {
+          setSessionCache((prev) => ({ ...prev, [date]: detail }));
+        })
+        .catch((e: any) => {
+          showToast(e?.message ?? `Failed to load session ${date}`, "error");
+          setExpandedSessions((prev) => {
+            const next = new Set(prev);
+            next.delete(date);
+            return next;
+          });
+        })
+        .finally(() => {
+          pendingLoads.delete(date);
+          processQueue();
+        });
     }
   };
+
+  const loadSessionDetail = (date: string) => {
+    if (sessionCache()[date] || pendingLoads.has(date)) return;
+    loadQueue.push(date);
+    processQueue();
+  };
+
+  const chartSessionDetails = createMemo(() => {
+    const cache = sessionCache();
+    const dates = selectedChartDates();
+    const result: Record<string, SessionDetail> = {};
+    for (const d of dates) {
+      if (cache[d]) result[d] = cache[d];
+    }
+    return result;
+  });
 
   // Auto-expand first session or session from query param, and load its data
   createEffect(() => {
@@ -433,7 +458,7 @@ const TargetDetailPage: Component = () => {
                 <Show when={targetChartExpanded()}>
                   <TargetMetricsChart
                     selectedDates={selectedChartDates()}
-                    sessionDetails={sessionCache()}
+                    sessionDetails={chartSessionDetails()}
                     expanded={targetChartExpanded()}
                     onLoadSession={loadSessionDetail}
                     availableFilters={detail().filters_used ?? []}

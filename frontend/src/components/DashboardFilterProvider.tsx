@@ -1,4 +1,4 @@
-import { Component, JSX, createContext, createMemo, createSignal, useContext } from "solid-js";
+import { Component, JSX, createContext, createEffect, createMemo, createSignal, untrack, useContext } from "solid-js";
 import { useSearchParams } from "@solidjs/router";
 import { createResource } from "solid-js";
 import { api } from "../api/client";
@@ -172,9 +172,18 @@ const DashboardFilterProvider: Component<{ children: JSX.Element }> = (props) =>
     return isNaN(p) || p < 1 ? 1 : p;
   });
 
-  const currentPageSize = createMemo(() => {
-    return settingsCtx.settings()?.general.default_page_size ?? 50;
+  const [initializedPageSize, setInitializedPageSize] = createSignal(false);
+  const [stablePageSize, setStablePageSize] = createSignal(25);
+
+  createEffect(() => {
+    const s = settingsCtx.settings();
+    if (s && !untrack(initializedPageSize)) {
+      setStablePageSize(s.general.default_page_size ?? 25);
+      setInitializedPageSize(true);
+    }
   });
+
+  const currentPageSize = () => stablePageSize();
 
   // Resource key combines filters + pagination + sort so changes to any trigger a refetch
   const fetchKey = createMemo(() => ({

@@ -169,7 +169,7 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
     # --- Define parallel query coroutines (each opens its own session) ---
 
     async def _query_overview():
-        capture_date_col = func.cast(Image.capture_date, Date)
+        capture_date_col = Image.session_date
         q = select(
             func.coalesce(func.sum(Image.exposure_time), 0),
             func.count(func.distinct(Image.resolved_target_id)),
@@ -238,12 +238,12 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
             return (await s.execute(q)).all()
 
     async def _query_timeline_monthly():
-        month_label = func.to_char(Image.capture_date, 'YYYY-MM').label('month')
+        month_label = func.to_char(Image.session_date, 'YYYY-MM').label('month')
         q = select(
             month_label,
             func.coalesce(func.sum(Image.exposure_time), 0),
         ).where(
-            Image.capture_date.isnot(None), Image.image_type == "LIGHT"
+            Image.session_date.isnot(None), Image.image_type == "LIGHT"
         ).group_by(month_label).order_by(month_label)
         async with async_session() as s:
             return (await s.execute(q)).all()
@@ -253,23 +253,23 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
             return await _extract_site_coords(s)
 
     async def _query_timeline_weekly():
-        week_label = func.to_char(Image.capture_date, 'IYYY-"W"IW').label('week')
+        week_label = func.to_char(Image.session_date, 'IYYY-"W"IW').label('week')
         q = select(
             week_label,
             func.coalesce(func.sum(Image.exposure_time), 0),
         ).where(
-            Image.capture_date.isnot(None), Image.image_type == "LIGHT"
+            Image.session_date.isnot(None), Image.image_type == "LIGHT"
         ).group_by(week_label).order_by(week_label)
         async with async_session() as s:
             return (await s.execute(q)).all()
 
     async def _query_timeline_daily():
-        day_label = func.to_char(Image.capture_date, 'YYYY-MM-DD').label('day')
+        day_label = func.to_char(Image.session_date, 'YYYY-MM-DD').label('day')
         q = select(
             day_label,
             func.coalesce(func.sum(Image.exposure_time), 0),
         ).where(
-            Image.capture_date.isnot(None), Image.image_type == "LIGHT"
+            Image.session_date.isnot(None), Image.image_type == "LIGHT"
         ).group_by(day_label).order_by(day_label)
         async with async_session() as s:
             return (await s.execute(q)).all()
@@ -315,11 +315,11 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
                 return 0
 
     async def _query_ingest_history():
-        capture_day = func.date(Image.capture_date).label('capture_day')
+        capture_day = Image.session_date.label('capture_day')
         q = select(
             capture_day, func.count(Image.id)
         ).where(
-            Image.capture_date.isnot(None)
+            Image.session_date.isnot(None)
         ).group_by(capture_day).order_by(capture_day.desc()).limit(30)
         async with async_session() as s:
             return (await s.execute(q)).all()
@@ -658,7 +658,7 @@ async def get_calendar(
     session: AsyncSession = Depends(get_session),
     user: User = Depends(get_current_user),
 ):
-    date_col = cast(Image.capture_date, Date)
+    date_col = Image.session_date
     q = (
         select(
             date_col.label("night"),
@@ -667,12 +667,12 @@ async def get_calendar(
             func.count(Image.id).label("frames"),
         )
         .where(Image.image_type == "LIGHT")
-        .where(Image.capture_date.is_not(None))
+        .where(Image.session_date.is_not(None))
         .group_by(date_col)
         .order_by(date_col)
     )
     if year:
-        q = q.where(func.extract("year", Image.capture_date) == year)
+        q = q.where(func.extract("year", Image.session_date) == year)
     else:
         from datetime import datetime, timedelta
         cutoff = datetime.utcnow() - timedelta(days=365)
