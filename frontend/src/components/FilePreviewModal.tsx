@@ -1,11 +1,20 @@
-import { createSignal, Show, onCleanup, onMount } from "solid-js";
+import { createSignal, Show, onCleanup, onMount, createEffect, createMemo } from "solid-js";
 import { Portal } from "solid-js/web";
 import { useSettingsContext } from "./SettingsProvider";
+import HelpPopover from "./HelpPopover";
+
+export type PreviewFile = {
+  imageId: string;
+  filePath: string;
+  thumbnailUrl?: string | null;
+};
 
 type Props = {
   imageId: string;
   filePath: string;
   thumbnailUrl?: string | null;
+  files?: PreviewFile[];
+  initialIndex?: number;
   onClose: () => void;
 };
 
@@ -15,6 +24,20 @@ export function FilePreviewModal(props: Props) {
   const [loading, setLoading] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
   const [zoomUrl, setZoomUrl] = createSignal<string | null>(null);
+  const [index, setIndex] = createSignal(props.initialIndex ?? 0);
+  const [autoZoom, setAutoZoom] = createSignal(false);
+
+  const files = createMemo<PreviewFile[]>(() =>
+    props.files && props.files.length > 0
+      ? props.files
+      : [{ imageId: props.imageId, filePath: props.filePath, thumbnailUrl: props.thumbnailUrl ?? null }],
+  );
+  const current = () => {
+    const list = files();
+    const i = Math.min(Math.max(index(), 0), list.length - 1);
+    return list[i];
+  };
+  const hasList = () => files().length > 1;
 
   const [scale, setScale] = createSignal(1);
   const [tx, setTx] = createSignal(0);
@@ -31,6 +54,33 @@ export function FilePreviewModal(props: Props) {
     setTx(0);
     setTy(0);
   };
+
+  const resetForNewFile = () => {
+    const prev = zoomUrl();
+    if (prev) URL.revokeObjectURL(prev);
+    setZoomUrl(null);
+    setZoomed(false);
+    setLoading(false);
+    setError(null);
+    resetTransform();
+  };
+
+  const goTo = (next: number) => {
+    const list = files();
+    if (list.length === 0) return;
+    const n = ((next % list.length) + list.length) % list.length;
+    if (n === index()) return;
+    resetForNewFile();
+    setIndex(n);
+    if (autoZoom()) requestZoom();
+  };
+  const goPrev = () => goTo(index() - 1);
+  const goNext = () => goTo(index() + 1);
+
+  createEffect(() => {
+    const max = files().length - 1;
+    if (index() > max) setIndex(Math.max(0, max));
+  });
 
   const onWheel = (e: WheelEvent) => {
     e.preventDefault();
@@ -76,11 +126,19 @@ export function FilePreviewModal(props: Props) {
 
   const previewResolution = () => settings()?.general.preview_resolution ?? 2400;
 
-  const handleEscape = (e: KeyboardEvent) => {
-    if (e.key === "Escape") props.onClose();
+  const handleKey = (e: KeyboardEvent) => {
+    if (e.key === "Escape") {
+      props.onClose();
+    } else if (hasList() && e.key === "ArrowLeft") {
+      e.preventDefault();
+      goPrev();
+    } else if (hasList() && e.key === "ArrowRight") {
+      e.preventDefault();
+      goNext();
+    }
   };
-  onMount(() => window.addEventListener("keydown", handleEscape));
-  onCleanup(() => window.removeEventListener("keydown", handleEscape));
+  onMount(() => window.addEventListener("keydown", handleKey));
+  onCleanup(() => window.removeEventListener("keydown", handleKey));
 
   const requestZoom = async () => {
     const prev = zoomUrl();
@@ -89,14 +147,14 @@ export function FilePreviewModal(props: Props) {
     setLoading(true);
     setError(null);
     resetTransform();
-    const url = `/api/preview/${props.imageId}?resolution=${previewResolution()}`;
+    const target = current();
+    const url = `/api/preview/${target.imageId}?resolution=${previewResolution()}`;
     try {
       const resp = await fetch(url);
       if (!resp.ok) {
         const body = await resp.json().catch(() => ({ detail: resp.statusText }));
         throw new Error(body.detail || `HTTP ${resp.status}`);
       }
-      // Browser followed the X-Accel-Redirect internally; resp body is the JPEG bytes
       const blob = await resp.blob();
       setZoomUrl(URL.createObjectURL(blob));
       setZoomed(true);
@@ -132,7 +190,69 @@ export function FilePreviewModal(props: Props) {
           >
             &times;
           </button>
-          <div class="mb-2 text-xs text-neutral-400 truncate max-w-[80ch]">{props.filePath}</div>
+          <Show when={hasList()}>
+            <div class="mb-2 flex items-center gap-2 pr-8">
+              <button
+                class="rounded px-2 py-0.5 text-neutral-300 hover:bg-neutral-800 disabled:opacity-40"
+                onClick={goPrev}
+                title="Previous (←)"
+                disabled={loading()}
+              >
+                &#8592;
+              </button>
+              <span class="text-xs text-neutral-400 tabular-nums shrink-0">
+                {index() + 1} / {files().length}
+              </span>
+              <button
+                class="rounded px-2 py-0.5 text-neutral-300 hover:bg-neutral-800 disabled:opacity-40"
+                onClick={goNext}
+                title="Next (→)"
+                disabled={loading()}
+              >
+                &#8594;
+              </button>
+              <div class="ml-2 flex items-center gap-1 shrink-0">
+                <label class="flex items-center gap-1 text-xs text-neutral-400 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    class="cursor-pointer"
+                    checked={autoZoom()}
+                    onChange={(e) => {
+                      const on = e.currentTarget.checked;
+                      setAutoZoom(on);
+                      if (on) {
+                        if (!zoomed() && !loading()) requestZoom();
+                      } else {
+                        const u = zoomUrl();
+                        if (u) URL.revokeObjectURL(u);
+                        setZoomUrl(null);
+                        setZoomed(false);
+                        resetTransform();
+                      }
+                    }}
+                  />
+                  Render full preview on navigation
+                </label>
+                <HelpPopover title="Render full preview on navigation" align="left">
+                  <p>
+                    Controls what is shown when stepping through files with the ← / → keys or buttons.
+                  </p>
+                  <p>
+                    <span class="font-medium text-theme-text-primary">Off (default):</span> shows only
+                    the cached thumbnail for each file. Fast scrolling through many frames.
+                  </p>
+                  <p>
+                    <span class="font-medium text-theme-text-primary">On:</span> automatically renders
+                    a fresh full-resolution preview for every file at the configured Preview resolution.
+                    Slower per step; useful for inspecting detail across frames.
+                  </p>
+                </HelpPopover>
+              </div>
+            </div>
+          </Show>
+          <div class="mb-2 pr-8 text-xs text-neutral-400 truncate" title={current().filePath}>
+            {current().filePath}
+          </div>
 
           <div
             ref={viewportEl}
@@ -149,13 +269,13 @@ export function FilePreviewModal(props: Props) {
               when={zoomed() && zoomUrl()}
               fallback={
                 <Show
-                  when={props.thumbnailUrl}
+                  when={current().thumbnailUrl}
                   fallback={
                     <div class="text-neutral-500 italic">No thumbnail available. Click Zoom to render.</div>
                   }
                 >
                   <img
-                    src={props.thumbnailUrl!}
+                    src={current().thumbnailUrl!}
                     alt="Thumbnail"
                     draggable={false}
                     class="max-h-[70vh] max-w-full"

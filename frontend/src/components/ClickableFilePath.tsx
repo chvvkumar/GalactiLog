@@ -1,5 +1,5 @@
 import { createSignal, Show } from "solid-js";
-import { FilePreviewModal } from "./FilePreviewModal";
+import { FilePreviewModal, type PreviewFile } from "./FilePreviewModal";
 
 type Props = {
   imageId: string;
@@ -7,6 +7,8 @@ type Props = {
   thumbnailUrl?: string | null;
   display?: string;
   class?: string;
+  files?: PreviewFile[];
+  index?: number;
 };
 
 export function ClickableFilePath(props: Props) {
@@ -27,6 +29,8 @@ export function ClickableFilePath(props: Props) {
           imageId={props.imageId}
           filePath={props.filePath}
           thumbnailUrl={props.thumbnailUrl}
+          files={props.files}
+          initialIndex={props.index}
           onClose={() => setOpen(false)}
         />
       </Show>
