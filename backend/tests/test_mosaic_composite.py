@@ -245,3 +245,26 @@ def test_parse_coord_negative_dec():
     assert result is not None
     assert result < 0
     assert abs(result - (-30.25)) < 0.01
+
+
+@pytest.mark.asyncio
+async def test_mosaic_composite_failed_emit_called_on_exception(mock_session):
+    from app.services import mosaic_composite as mc
+
+    emit_calls = []
+
+    async def fake_emit(db, *, category, severity, event_type, message, **kw):
+        emit_calls.append({
+            "category": category,
+            "severity": severity,
+            "event_type": event_type,
+            "message": message,
+        })
+
+    with patch.object(mc, "_emit_activity", fake_emit):
+        with pytest.raises(ValueError):
+            # Empty panels list -> raises ValueError "No panels have accessible FITS frames"
+            await mc.build_mosaic_composite("mosaic-x", [], mock_session)
+
+    assert any(c["event_type"] == "mosaic_composite_failed" for c in emit_calls)
+    assert any(c["severity"] == "error" for c in emit_calls)
