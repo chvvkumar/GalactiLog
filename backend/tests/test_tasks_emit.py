@@ -40,6 +40,17 @@ def test_run_scan_uses_emit_sync_not_append_activity_sync():
     )
 
 
+def test_append_activity_sync_not_imported_in_tasks():
+    src = TASKS_PATH.read_text()
+    tree = ast.parse(src)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            if node.module and "scan_state" in node.module:
+                names = [a.name for a in node.names]
+                assert "append_activity_sync" not in names, \
+                    "append_activity_sync still imported in tasks.py"
+
+
 def test_emit_sync_imported_in_tasks():
     src = TASKS_PATH.read_text()
     tree = ast.parse(src)

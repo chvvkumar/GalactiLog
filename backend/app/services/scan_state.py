@@ -356,13 +356,6 @@ def set_cancelled_sync(r: sync_redis.Redis) -> None:
     r.delete(SCAN_CANCEL_KEY)
 
 
-def append_activity_sync(r: sync_redis.Redis, entry: dict) -> None:
-    """Append an activity entry and cap the list at SCAN_ACTIVITY_MAX."""
-    import json
-    r.lpush(SCAN_ACTIVITY_KEY, json.dumps(entry))
-    r.ltrim(SCAN_ACTIVITY_KEY, 0, SCAN_ACTIVITY_MAX - 1)
-
-
 # ── Rebuild status (Quick Fix / Full Rebuild) ────────────────────────────
 
 REBUILD_KEY = "rebuild:status"

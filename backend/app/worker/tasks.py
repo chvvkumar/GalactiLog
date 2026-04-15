@@ -39,7 +39,7 @@ from app.services.scan_state import (
     set_rebuild_running_sync, set_rebuild_progress_sync, set_rebuild_complete_sync,
     set_rebuild_cancelled_sync,
     set_discovered_sync, is_cancel_requested_sync, clear_cancel_sync, set_cancelled_sync,
-    append_activity_sync, check_complete_sync,
+    check_complete_sync,
     add_skipped_path_sync, get_skipped_paths_sync, clear_skipped_paths_sync,
 )
 from app.services.activity import emit_sync as _emit_activity_sync
@@ -597,30 +597,33 @@ def purge_and_regenerate_thumbnails() -> dict:
     total = len(rows)
     if not total:
         set_idle_sync(_redis)
-        append_activity_sync(_redis, {
-            "type": "thumb_purge_complete",
-            "message": "Regen thumbnails: no images to process",
-            "details": {"deleted": 0, "queued": 0},
-            "timestamp": time.time(),
-        })
+        with _activity_session() as _db:
+            _emit_activity_sync(
+                _db, redis=_redis, category="thumbnail", severity="info",
+                event_type="thumb_purge_complete",
+                message="Regen thumbnails: no images to process",
+                details={"deleted": 0, "queued": 0}, actor="system",
+            )
         return {"status": "complete", "deleted": 0, "queued": 0}
 
     if is_cancel_requested_sync(_redis):
         set_cancelled_sync(_redis)
-        append_activity_sync(_redis, {
-            "type": "rebuild_cancelled",
-            "message": "Thumbnail purge cancelled before start",
-            "details": {"deleted": 0, "queued": 0, "total": total},
-            "timestamp": time.time(),
-        })
+        with _activity_session() as _db:
+            _emit_activity_sync(
+                _db, redis=_redis, category="thumbnail", severity="info",
+                event_type="rebuild_cancelled",
+                message="Thumbnail purge cancelled before start",
+                details={"deleted": 0, "queued": 0, "total": total}, actor="system",
+            )
         return {"status": "cancelled", "deleted": 0, "queued": 0}
 
-    append_activity_sync(_redis, {
-        "type": "thumb_purge_start",
-        "message": f"Deleting existing thumbnails for {total} image{'s' if total != 1 else ''}...",
-        "details": {"total": total},
-        "timestamp": time.time(),
-    })
+    with _activity_session() as _db:
+        _emit_activity_sync(
+            _db, redis=_redis, category="thumbnail", severity="info",
+            event_type="thumb_purge_start",
+            message=f"Deleting existing thumbnails for {total} image{'s' if total != 1 else ''}...",
+            details={"total": total}, actor="system",
+        )
 
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -638,8 +641,6 @@ def purge_and_regenerate_thumbnails() -> dict:
     paths = [tp for (_id, _fp, tp) in rows if tp]
     deleted = 0
     missing = 0
-    progress_every = 1000
-    processed = 0
     with ThreadPoolExecutor(max_workers=32) as pool:
         futures = [pool.submit(_unlink_one, tp) for tp in paths]
         for fut in as_completed(futures):
@@ -648,32 +649,28 @@ def purge_and_regenerate_thumbnails() -> dict:
                 deleted += 1
             elif result == "missing":
                 missing += 1
-            processed += 1
-            if processed % progress_every == 0:
-                append_activity_sync(_redis, {
-                    "type": "thumb_purge_progress",
-                    "message": f"Deleted {deleted} thumbnails ({processed}/{len(paths)})...",
-                    "details": {"deleted": deleted, "processed": processed, "total": len(paths)},
-                    "timestamp": time.time(),
-                })
 
-    append_activity_sync(_redis, {
-        "type": "thumb_purge_complete",
-        "message": f"Deleted {deleted} thumbnail{'s' if deleted != 1 else ''}"
-                   + (f" ({missing} already missing)" if missing else "")
-                   + f", queueing {total} for regeneration...",
-        "details": {"deleted": deleted, "missing": missing, "queued": total},
-        "timestamp": time.time(),
-    })
+    with _activity_session() as _db:
+        _emit_activity_sync(
+            _db, redis=_redis, category="thumbnail", severity="info",
+            event_type="thumb_purge_complete",
+            message=f"Deleted {deleted} thumbnail{'s' if deleted != 1 else ''}"
+                    + (f" ({missing} already missing)" if missing else "")
+                    + f", queueing {total} for regeneration...",
+            details={"deleted": deleted, "missing": missing, "queued": total},
+            actor="system",
+        )
 
     if is_cancel_requested_sync(_redis):
         set_cancelled_sync(_redis)
-        append_activity_sync(_redis, {
-            "type": "rebuild_cancelled",
-            "message": f"Thumbnail purge cancelled after deleting {deleted} files; regen skipped",
-            "details": {"deleted": deleted, "missing": missing, "queued": 0, "total": total},
-            "timestamp": time.time(),
-        })
+        with _activity_session() as _db:
+            _emit_activity_sync(
+                _db, redis=_redis, category="thumbnail", severity="info",
+                event_type="rebuild_cancelled",
+                message=f"Thumbnail purge cancelled after deleting {deleted} files; regen skipped",
+                details={"deleted": deleted, "missing": missing, "queued": 0, "total": total},
+                actor="system",
+            )
         return {"status": "cancelled", "deleted": deleted, "missing": missing, "queued": 0}
 
     set_ingesting_sync(_redis, total=total)
@@ -915,12 +912,13 @@ def rebuild_targets(self) -> dict:
                 f"Cancelled after {i}/{total} names ({resolved} resolved, {failed} failed)",
                 details,
             )
-            append_activity_sync(_redis, {
-                "type": "rebuild_cancelled",
-                "message": f"Full Rebuild cancelled after {i}/{total} names",
-                "details": details,
-                "timestamp": time.time(),
-            })
+            with _activity_session() as _db:
+                _emit_activity_sync(
+                    _db, redis=_redis, category="rebuild", severity="info",
+                    event_type="rebuild_cancelled",
+                    message=f"Full Rebuild cancelled after {i}/{total} names",
+                    details=details, actor="system",
+                )
             logger.info("rebuild_targets: cancelled after %d/%d", i, total)
             return {"status": "cancelled", **details}
 
@@ -957,12 +955,14 @@ def rebuild_targets(self) -> dict:
         f"Resolved {resolved} targets, {failed} failed out of {total} object names",
         details,
     )
-    append_activity_sync(_redis, {
-        "type": "rebuild_complete",
-        "message": f"Full Rebuild: {resolved} resolved, {failed} failed out of {total} names",
-        "details": {"resolved": resolved, "failed": failed, "total": total},
-        "timestamp": time.time(),
-    })
+    with _activity_session() as _db:
+        _emit_activity_sync(
+            _db, redis=_redis, category="rebuild", severity="info",
+            event_type="rebuild_complete",
+            message=f"Full Rebuild: {resolved} resolved, {failed} failed out of {total} names",
+            details={"resolved": resolved, "failed": failed, "total": total},
+            actor="system",
+        )
     logger.info("rebuild_targets: done - resolved=%d, failed=%d", resolved, failed)
     return {"status": "complete", **details}
 
@@ -1016,12 +1016,13 @@ def retry_unresolved(self) -> dict:
                 f"Cancelled after {i}/{total} names ({resolved} resolved, {failed} still unresolved)",
                 details,
             )
-            append_activity_sync(_redis, {
-                "type": "rebuild_cancelled",
-                "message": f"Retry Unresolved cancelled after {i}/{total} names",
-                "details": details,
-                "timestamp": time.time(),
-            })
+            with _activity_session() as _db:
+                _emit_activity_sync(
+                    _db, redis=_redis, category="rebuild", severity="info",
+                    event_type="rebuild_cancelled",
+                    message=f"Retry Unresolved cancelled after {i}/{total} names",
+                    details=details, actor="system",
+                )
             logger.info("retry_unresolved: cancelled after %d/%d", i, total)
             return {"status": "cancelled", **details}
 
@@ -1053,12 +1054,13 @@ def retry_unresolved(self) -> dict:
         f"Retry: {resolved} resolved, {failed} still unresolved out of {total} names",
         details,
     )
-    append_activity_sync(_redis, {
-        "type": "rebuild_complete",
-        "message": f"Retry Unresolved: {resolved} resolved, {failed} still unresolved out of {total} names",
-        "details": details,
-        "timestamp": time.time(),
-    })
+    with _activity_session() as _db:
+        _emit_activity_sync(
+            _db, redis=_redis, category="rebuild", severity="info",
+            event_type="rebuild_complete",
+            message=f"Retry Unresolved: {resolved} resolved, {failed} still unresolved out of {total} names",
+            details=details, actor="system",
+        )
     logger.info("retry_unresolved: done - resolved=%d, failed=%d", resolved, failed)
     return {"status": "complete", **details}
 
@@ -1099,12 +1101,13 @@ def _smart_rebuild_inner(manual: bool = False) -> dict:
         details = {**stats, **(extra or {})}
         set_rebuild_cancelled_sync(_redis, "Quick Fix cancelled", details)
         if manual:
-            append_activity_sync(_redis, {
-                "type": "rebuild_cancelled",
-                "message": "Quick Fix cancelled by user",
-                "details": details,
-                "timestamp": time.time(),
-            })
+            with _activity_session() as _db:
+                _emit_activity_sync(
+                    _db, redis=_redis, category="rebuild", severity="info",
+                    event_type="rebuild_cancelled",
+                    message="Quick Fix cancelled by user",
+                    details=details, actor="system",
+                )
         logger.info("smart_rebuild: cancelled")
         return {"status": "cancelled", **details}
 
@@ -1259,12 +1262,13 @@ def _smart_rebuild_inner(manual: bool = False) -> dict:
     set_rebuild_complete_sync(_redis, message, stats)
     _invalidate_stats_cache()
     if manual:
-        append_activity_sync(_redis, {
-            "type": "rebuild_complete",
-            "message": f"Quick Fix: {message}",
-            "details": stats,
-            "timestamp": time.time(),
-        })
+        with _activity_session() as _db:
+            _emit_activity_sync(
+                _db, redis=_redis, category="rebuild", severity="info",
+                event_type="rebuild_complete",
+                message=f"Quick Fix: {message}",
+                details=stats, actor="system",
+            )
     logger.info("smart_rebuild: done - %s", stats)
     return {"status": "complete", **stats}
 
@@ -1412,21 +1416,25 @@ def run_data_migrations(self, from_version: int) -> dict:
                     session.rollback()
                     error_msg = f"Data upgrade failed at v{ver} ({desc}): {e}"
                     logger.exception("data_migrations: %s", error_msg)
-                    append_activity_sync(_redis, {
-                        "type": "data_upgrade_failed",
-                        "message": f"{error_msg}. Press Quick Fix to retry.",
-                        "details": {"version": ver, "error": str(e)},
-                        "timestamp": time.time(),
-                    })
+                    with _activity_session() as _db:
+                        _emit_activity_sync(
+                            _db, redis=_redis, category="migration", severity="error",
+                            event_type="data_upgrade_failed",
+                            message=f"{error_msg}. Press Quick Fix to retry.",
+                            details={"version": ver, "error": str(e)},
+                            actor="system",
+                        )
                     return {"status": "error", "version": ver, "error": str(e)}
 
         summary_msg = "Data upgrade complete: " + "; ".join(results)
-        append_activity_sync(_redis, {
-            "type": "data_upgrade_complete",
-            "message": summary_msg,
-            "details": {"from_version": from_version, "to_version": DATA_VERSION},
-            "timestamp": time.time(),
-        })
+        with _activity_session() as _db:
+            _emit_activity_sync(
+                _db, redis=_redis, category="migration", severity="info",
+                event_type="data_upgrade_complete",
+                message=summary_msg,
+                details={"from_version": from_version, "to_version": DATA_VERSION},
+                actor="system",
+            )
         logger.info("data_migrations: %s", summary_msg)
 
         # Queue quick fix + mosaic detection after data migrations
@@ -1694,12 +1702,13 @@ def generate_reference_thumbnails(self, force: bool = False) -> dict:
         set_rebuild_cancelled_sync(
             _redis, f"Cancelled after fetching {fetched}/{total} reference thumbnails", stats
         )
-        append_activity_sync(_redis, {
-            "type": "rebuild_cancelled",
-            "message": f"Reference Thumbnails cancelled after {fetched}/{total}",
-            "details": stats,
-            "timestamp": time.time(),
-        })
+        with _activity_session() as _db:
+            _emit_activity_sync(
+                _db, redis=_redis, category="thumbnail", severity="info",
+                event_type="rebuild_cancelled",
+                message=f"Reference Thumbnails cancelled after {fetched}/{total}",
+                details=stats, actor="system",
+            )
         return {"status": "cancelled", **stats}
 
     _invalidate_stats_cache()
@@ -1707,12 +1716,13 @@ def generate_reference_thumbnails(self, force: bool = False) -> dict:
     set_rebuild_complete_sync(
         _redis, f"Fetched {fetched}/{total} reference thumbnails", stats
     )
-    append_activity_sync(_redis, {
-        "type": "ref_thumbnails_complete",
-        "message": f"Reference Thumbnails: fetched {fetched}/{total}",
-        "details": stats,
-        "timestamp": time.time(),
-    })
+    with _activity_session() as _db:
+        _emit_activity_sync(
+            _db, redis=_redis, category="thumbnail", severity="info",
+            event_type="ref_thumbnails_complete",
+            message=f"Reference Thumbnails: fetched {fetched}/{total}",
+            details=stats, actor="system",
+        )
     return stats
 
 
@@ -1741,12 +1751,13 @@ def run_xmatch_enrichment(self) -> dict:
         if is_cancel_requested_sync(_redis):
             details = {"matched": 0, "total": len(target_dicts)}
             set_rebuild_cancelled_sync(_redis, "xMatch cancelled before start", details)
-            append_activity_sync(_redis, {
-                "type": "rebuild_cancelled",
-                "message": "xMatch Enrichment cancelled before start",
-                "details": details,
-                "timestamp": time.time(),
-            })
+            with _activity_session() as _db:
+                _emit_activity_sync(
+                    _db, redis=_redis, category="rebuild", severity="info",
+                    event_type="rebuild_cancelled",
+                    message="xMatch Enrichment cancelled before start",
+                    details=details, actor="system",
+                )
             return {"status": "cancelled", **details}
 
         set_rebuild_progress_sync(
@@ -1758,12 +1769,13 @@ def run_xmatch_enrichment(self) -> dict:
     set_rebuild_complete_sync(
         _redis, f"xMatch: {len(results)}/{len(target_dicts)} matched", stats
     )
-    append_activity_sync(_redis, {
-        "type": "xmatch_complete",
-        "message": f"xMatch Enrichment: {len(results)}/{len(target_dicts)} matched",
-        "details": stats,
-        "timestamp": time.time(),
-    })
+    with _activity_session() as _db:
+        _emit_activity_sync(
+            _db, redis=_redis, category="enrichment", severity="info",
+            event_type="xmatch_complete",
+            message=f"xMatch Enrichment: {len(results)}/{len(target_dicts)} matched",
+            details=stats, actor="system",
+        )
     return stats
 
 
