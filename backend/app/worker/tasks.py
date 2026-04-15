@@ -1301,6 +1301,16 @@ def detect_mosaic_panels_task():
 
         count = asyncio.run(_run())
         logger.info("detect_mosaic_panels_task: found %d new suggestions", count)
+        try:
+            with _activity_session() as _db:
+                _emit_activity_sync(
+                    _db, redis=_redis, category="mosaic", severity="info",
+                    event_type="mosaic_detection_complete",
+                    message=f"Mosaic detection complete: {count} new suggestion{'s' if count != 1 else ''} found",
+                    details={"candidates": count}, actor="system",
+                )
+        except Exception:
+            logger.warning("detect_mosaic_panels_task: failed to emit mosaic_detection_complete")
         return {"status": "complete", "new_suggestions": count}
     finally:
         _redis.delete(MOSAIC_DETECT_LOCK)
