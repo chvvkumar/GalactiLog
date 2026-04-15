@@ -257,13 +257,27 @@ def check_complete_sync(r: sync_redis.Redis) -> None:
                             })
                         except Exception:
                             pass
-                    emit_sync(
-                        _db, redis=r, category="scan", severity="warning",
-                        event_type="scan_files_failed",
-                        message=f"Scan completed with {snap.failed} file failure{'s' if snap.failed != 1 else ''}",
-                        details={"failed_files": failed_files, "truncated": len(raw) > 500},
-                        actor="system",
-                    )
+                    from app.config import settings as _cfg2
+                    thumb_root = _cfg2.thumbnails_path
+                    thumb_failures = [f for f in failed_files if f["path"].startswith(thumb_root)]
+                    fits_failures = [f for f in failed_files if not f["path"].startswith(thumb_root)]
+
+                    if thumb_failures:
+                        emit_sync(
+                            _db, redis=r, category="thumbnail", severity="warning",
+                            event_type="thumbnail_regen_failed",
+                            message=f"Thumbnail regen: {len(thumb_failures)} failure{'s' if len(thumb_failures) != 1 else ''}",
+                            details={"failed_files": thumb_failures, "truncated": len(raw) > 500},
+                            actor="system",
+                        )
+                    if fits_failures:
+                        emit_sync(
+                            _db, redis=r, category="scan", severity="warning",
+                            event_type="scan_files_failed",
+                            message=f"Scan completed with {len(fits_failures)} file failure{'s' if len(fits_failures) != 1 else ''}",
+                            details={"failed_files": fits_failures, "truncated": len(raw) > 500},
+                            actor="system",
+                        )
         except Exception:
             logger.exception("scan_state: failed to emit scan_complete activity")
         # Invalidate stats cache immediately so the next request gets fresh data

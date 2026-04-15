@@ -88,3 +88,27 @@ def test_scan_files_failed_emitted_when_failures_occur():
     assert len(failure_evs) == 1
     assert failure_evs[0]["details"]["failed_files"][0]["path"] == "/fits/bad.fits"
     assert "truncated" in failure_evs[0]["details"]
+
+
+def test_thumbnail_regen_failed_emitted_for_thumbnail_failures():
+    import json
+    from app.services.scan_state import check_complete_sync
+    r = _redis(total=3, completed=2, failed=1, new_files=0)
+    r.lrange.return_value = [
+        json.dumps({"file": "/tmp/test_thumbnails/bad_abc123.jpg", "error": "stretch error"})
+    ]
+    emit_calls = []
+
+    def fake_emit(session, *, redis, category, severity, event_type, message, **kw):
+        emit_calls.append({"event_type": event_type, "category": category})
+
+    mock_session = MagicMock()
+    with patch("app.services.scan_state.emit_sync", fake_emit), \
+         patch("app.services.scan_state.create_engine"), \
+         patch("app.services.scan_state._SyncSession") as ms:
+        ms.return_value.__enter__ = lambda s, *a: mock_session
+        ms.return_value.__exit__ = lambda s, *a: None
+        check_complete_sync(r)
+
+    ev_types = [e["event_type"] for e in emit_calls]
+    assert "thumbnail_regen_failed" in ev_types
