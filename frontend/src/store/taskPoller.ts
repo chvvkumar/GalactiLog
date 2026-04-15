@@ -1,4 +1,6 @@
 import { api } from "../api/client";
+import { registerCeleryJob, unregisterCeleryJob } from "./activeJobs";
+import type { ActiveJob } from "../types";
 
 interface PollOptions {
   onSuccess?: (result: any) => void;
@@ -45,4 +47,47 @@ export function pollTask(taskId: string, options: PollOptions = {}): () => void 
   }, timeout);
 
   return stop;
+}
+
+interface TrackOptions {
+  id: string;
+  category: ActiveJob["category"];
+  label: string;
+  subLabel?: string;
+  cancelable?: boolean;
+  timeout?: number;
+  onSuccess?: (result: any) => void;
+  onFailure?: (error: string) => void;
+}
+
+export function track(opts: TrackOptions): () => void {
+  const jobId = `celery:${opts.id}`;
+
+  registerCeleryJob({
+    id: jobId,
+    category: opts.category,
+    label: opts.label,
+    subLabel: opts.subLabel,
+    progress: undefined,
+    startedAt: Date.now(),
+    cancelable: opts.cancelable ?? false,
+  });
+
+  const stop = pollTask(opts.id, {
+    interval: 2000,
+    timeout: opts.timeout ?? 300_000,
+    onSuccess: (result) => {
+      unregisterCeleryJob(jobId);
+      opts.onSuccess?.(result);
+    },
+    onFailure: (error) => {
+      unregisterCeleryJob(jobId);
+      opts.onFailure?.(error);
+    },
+  });
+
+  return () => {
+    unregisterCeleryJob(jobId);
+    stop();
+  };
 }
