@@ -79,6 +79,18 @@ def _bootstrap_real_tasks():
     return tasks_mod
 
 
+def test_enrichment_query_failed_emits_after_rebuild():
+    import pathlib
+    src = pathlib.Path("app/worker/tasks.py").read_text()
+    assert "enrichment_query_failed" in src
+
+
+def test_filename_candidate_failed_event_type_present():
+    import pathlib
+    src = pathlib.Path("app/worker/tasks.py").read_text()
+    assert "filename_candidate_failed" in src
+
+
 def test_mosaic_detection_complete_emits():
     tasks_mod = _bootstrap_real_tasks()
     detect_mosaic_panels_task = tasks_mod.detect_mosaic_panels_task

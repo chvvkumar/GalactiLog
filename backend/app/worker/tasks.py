@@ -495,6 +495,16 @@ def _do_ingest(fits_path: str, include_calibration: bool = True) -> dict:
                 session.commit()
         except Exception:
             logger.warning("Failed to create filename candidate for %s", path.name, exc_info=True)
+            try:
+                with _activity_session() as _db:
+                    _emit_activity_sync(
+                        _db, redis=_redis, category="scan", severity="warning",
+                        event_type="filename_candidate_failed",
+                        message=f"Filename candidate resolution failed for {path.name}",
+                        details={"path": str(path)}, actor="system",
+                    )
+            except Exception:
+                pass
 
     logger.info("Ingested: %s (target=%s)", path.name, target_id)
     increment_completed_sync(_redis)
@@ -963,6 +973,14 @@ def rebuild_targets(self) -> dict:
             details={"resolved": resolved, "failed": failed, "total": total},
             actor="system",
         )
+    if failed > 0:
+        with _activity_session() as _db:
+            _emit_activity_sync(
+                _db, redis=_redis, category="enrichment", severity="warning",
+                event_type="enrichment_query_failed",
+                message=f"Full Rebuild: enrichment failed for {failed} of {total} object names",
+                details={"failed_targets": failed, "total": total}, actor="system",
+            )
     logger.info("rebuild_targets: done - resolved=%d, failed=%d", resolved, failed)
     return {"status": "complete", **details}
 
@@ -1061,6 +1079,14 @@ def retry_unresolved(self) -> dict:
             message=f"Retry Unresolved: {resolved} resolved, {failed} still unresolved out of {total} names",
             details=details, actor="system",
         )
+    if failed > 0:
+        with _activity_session() as _db:
+            _emit_activity_sync(
+                _db, redis=_redis, category="enrichment", severity="warning",
+                event_type="enrichment_query_failed",
+                message=f"Retry Unresolved: enrichment failed for {failed} of {total} object names",
+                details={"failed_targets": failed, "total": total}, actor="system",
+            )
     logger.info("retry_unresolved: done - resolved=%d, failed=%d", resolved, failed)
     return {"status": "complete", **details}
 
