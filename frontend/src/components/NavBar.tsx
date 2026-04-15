@@ -1,7 +1,10 @@
-import { Component, Show, createSignal, onMount } from "solid-js";
+import { Component, Show, createSignal, onMount, lazy } from "solid-js";
 import { A, useNavigate, useLocation } from "@solidjs/router";
 import { sidebarOpen, setSidebarOpen } from "../store/sidebar";
 import { useAuth } from "./AuthProvider";
+import type { LatestRelease } from "./ReleaseNotesModal";
+
+const ReleaseNotesModal = lazy(() => import("./ReleaseNotesModal"));
 
 const API_BASE = import.meta.env.VITE_API_URL || "/api";
 
@@ -10,6 +13,8 @@ const NavBar: Component = () => {
   const navigate = useNavigate();
   const [menuOpen, setMenuOpen] = createSignal(false);
   const [version, setVersion] = createSignal<{ version: string; git_sha: string } | null>(null);
+  const [latest, setLatest] = createSignal<LatestRelease | null>(null);
+  const [showNotes, setShowNotes] = createSignal(false);
 
   onMount(async () => {
     try {
@@ -17,6 +22,12 @@ const NavBar: Component = () => {
       if (resp.ok) setVersion(await resp.json());
     } catch {
       // ignore - version display is non-critical
+    }
+    try {
+      const resp = await fetch(`${API_BASE}/version/latest`, { credentials: "same-origin" });
+      if (resp.ok) setLatest(await resp.json());
+    } catch {
+      // ignore - upgrade check is non-critical
     }
   });
 
@@ -105,27 +116,42 @@ const NavBar: Component = () => {
           </button>
         </Show>
         <Show when={version()}>
-          <Show
-            when={versionUrl()}
-            fallback={
-              <span
-                class="text-xs text-theme-text-secondary hidden sm:inline"
-                title="Local development build"
+          <div class="hidden sm:flex items-center gap-1.5">
+            <Show
+              when={versionUrl()}
+              fallback={
+                <span
+                  class="text-xs text-theme-text-secondary"
+                  title="Local development build"
+                >
+                  {versionLabel()}
+                </span>
+              }
+            >
+              <a
+                href={versionUrl()!}
+                target="_blank"
+                rel="noopener noreferrer"
+                class="text-xs text-theme-text-secondary hover:text-theme-text-primary transition-colors"
+                title={isSemver(version()!.version) ? "View this release on GitHub" : "View this build's commit on GitHub"}
               >
                 {versionLabel()}
-              </span>
-            }
-          >
-            <a
-              href={versionUrl()!}
-              target="_blank"
-              rel="noopener noreferrer"
-              class="text-xs text-theme-text-secondary hover:text-theme-text-primary transition-colors hidden sm:inline"
-              title={isSemver(version()!.version) ? "View this release on GitHub" : "View this build's commit on GitHub"}
-            >
-              {versionLabel()}
-            </a>
-          </Show>
+              </a>
+            </Show>
+            <Show when={latest()?.is_newer}>
+              <button
+                onClick={() => setShowNotes(true)}
+                class="flex items-center gap-1 rounded-full bg-theme-warning/15 text-theme-warning hover:bg-theme-warning/25 transition-colors px-1.5 py-0.5 text-[10px] font-medium"
+                title={`Update available: ${latest()!.tag}. Click to view release notes.`}
+              >
+                <span class="inline-block h-1.5 w-1.5 rounded-full bg-theme-warning" />
+                update
+              </button>
+            </Show>
+          </div>
+        </Show>
+        <Show when={showNotes() && latest()?.available}>
+          <ReleaseNotesModal release={latest()!} onClose={() => setShowNotes(false)} />
         </Show>
         <a
           href="https://github.com/chvvkumar/GalactiLog"
