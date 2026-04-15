@@ -95,10 +95,11 @@ async def regenerate_thumbnails(
         if purge:
             # Defer DB work and file deletions to Celery so the HTTP call
             # returns immediately and progress is reported via activity log.
-            purge_and_regenerate_thumbnails.delay()
+            task = purge_and_regenerate_thumbnails.delay()
             return {
                 "status": "accepted",
                 "message": "Queued: delete and regenerate all thumbnails",
+                "task_id": task.id,
             }
 
         result = await session.execute(
@@ -294,8 +295,8 @@ async def trigger_rebuild_targets(user: User = Depends(require_admin)):
                 detail="A scan is already running. Wait for it to complete first.",
             )
 
-        rebuild_targets.delay()
-        return {"status": "accepted", "message": "Target rebuild queued as background task"}
+        task = rebuild_targets.delay()
+        return {"status": "accepted", "message": "Target rebuild queued as background task", "task_id": task.id}
 
 
 @router.post("/smart-rebuild-targets")
@@ -313,8 +314,8 @@ async def trigger_smart_rebuild(user: User = Depends(require_admin)):
                 detail="A scan is already running. Wait for it to complete first.",
             )
 
-        smart_rebuild_targets.delay(manual=True)
-        return {"status": "accepted", "message": "Smart rebuild queued as background task"}
+        task = smart_rebuild_targets.delay(manual=True)
+        return {"status": "accepted", "message": "Smart rebuild queued as background task", "task_id": task.id}
 
 
 @router.post("/retry-unresolved")
@@ -328,8 +329,8 @@ async def trigger_retry_unresolved(user: User = Depends(require_admin)):
                 detail="A scan is already running. Wait for it to complete first.",
             )
 
-        retry_unresolved.delay()
-        return {"status": "accepted", "message": "Retry unresolved queued as background task"}
+        task = retry_unresolved.delay()
+        return {"status": "accepted", "message": "Retry unresolved queued as background task", "task_id": task.id}
 
 
 @router.post("/generate-reference-thumbnails")
@@ -343,8 +344,8 @@ async def trigger_reference_thumbnails(force: bool = False, user: User = Depends
                 detail="A scan is already running. Wait for it to complete first.",
             )
 
-        generate_reference_thumbnails.delay(force=force)
-        return {"status": "accepted", "message": "Reference thumbnail generation queued as background task"}
+        task = generate_reference_thumbnails.delay(force=force)
+        return {"status": "accepted", "message": "Reference thumbnail generation queued as background task", "task_id": task.id}
 
 
 @router.post("/xmatch-enrichment")
@@ -358,8 +359,8 @@ async def trigger_xmatch_enrichment(user: User = Depends(require_admin)):
                 detail="A scan is already running. Wait for it to complete first.",
             )
 
-        run_xmatch_enrichment.delay()
-        return {"status": "accepted", "message": "xMatch enrichment queued as background task"}
+        task = run_xmatch_enrichment.delay()
+        return {"status": "accepted", "message": "xMatch enrichment queued as background task", "task_id": task.id}
 
 
 @router.post("/backfill-csv")

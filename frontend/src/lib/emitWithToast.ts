@@ -26,6 +26,16 @@ export async function emitWithToast(opts: EmitWithToastOptions): Promise<void> {
     return;
   }
 
+  // Backend may not return a task_id (older endpoints). In that case we
+  // cannot poll for completion, so skip the activeJobs registration and
+  // just show a fire-and-forget toast rather than stranding an entry in
+  // "Now Running" that never clears.
+  if (!taskId) {
+    dismissToast();
+    showToast(opts.successLabel, "info", 3000);
+    return;
+  }
+
   track({
     id: taskId,
     category: opts.category,
