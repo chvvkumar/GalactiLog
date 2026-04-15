@@ -330,6 +330,9 @@ const DashboardFilterProvider: Component<{ children: JSX.Element }> = (props) =>
       clear[key] = undefined;
     }
     set(clear);
+    try {
+      sessionStorage.removeItem("dashboard_params");
+    } catch { /* ignore */ }
   };
 
   const value: DashboardFilterAPI = {

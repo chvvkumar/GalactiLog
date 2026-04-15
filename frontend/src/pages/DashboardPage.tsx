@@ -41,6 +41,8 @@ const DashboardPage: Component = () => {
     try {
       if (Object.keys(toSave).length > 0) {
         sessionStorage.setItem(SESSION_KEY, JSON.stringify(toSave));
+      } else {
+        sessionStorage.removeItem(SESSION_KEY);
       }
     } catch { /* ignore */ }
   });
