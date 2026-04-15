@@ -9,10 +9,11 @@ from fastapi.staticfiles import StaticFiles
 from slowapi.errors import RateLimitExceeded
 from starlette.responses import JSONResponse
 
-from app.config import settings, limiter
+from app.config import settings, limiter, async_redis
+from app.database import async_session
 from app.api.router import api_router
 from app.api.metrics_endpoint import router as metrics_router
-from app.metrics import PrometheusMiddleware
+from app.metrics import PrometheusMiddleware, start_queue_depth_probe, register_celery_collector
 
 logger = logging.getLogger(__name__)
 
@@ -24,11 +25,18 @@ async def lifespan(app: FastAPI):
         logger.warning("GALACTILOG_JWT_SECRET is not set - using auto-generated secret. Sessions will not survive restarts. Set GALACTILOG_JWT_SECRET in .env for persistence.")
 
     # Ensure required PostgreSQL extensions exist (idempotent)
-    from app.database import async_session
     from sqlalchemy import text
     async with async_session() as session:
         await session.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
         await session.commit()
+
+    # Delete legacy scan:activity Redis list replaced by activity_events table.
+    try:
+        async with async_redis() as r:
+            await r.delete("scan:activity")
+        logger.info("Deleted legacy scan:activity Redis key")
+    except Exception as e:
+        logger.warning("Failed to delete scan:activity key: %s", e)
 
     # Auto-create accounts from env vars if they don't already exist
     if settings.admin_password or settings.viewer_password:
@@ -85,7 +93,6 @@ async def lifespan(app: FastAPI):
 
     # Start queue depth probe in the uvicorn process so gauges are visible
     # at the /metrics endpoint (worker and uvicorn have separate registries)
-    from app.metrics import start_queue_depth_probe, register_celery_collector
     from app.worker.celery_app import celery_app
     start_queue_depth_probe(celery_app, settings.redis_url)
     register_celery_collector(settings.redis_url)
