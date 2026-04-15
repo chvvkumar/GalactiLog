@@ -1,248 +1,481 @@
-import { Component, Show, For, createSignal } from "solid-js";
-import type { ScanStatus, ActivityEntry, RebuildStatus } from "../types";
+import {
+  Component,
+  For,
+  Show,
+  createSignal,
+  createEffect,
+  onMount,
+  onCleanup,
+  batch,
+} from "solid-js";
+import { A } from "@solidjs/router";
+import { activeJobs, hasActiveJobs } from "../store/activeJobs";
+import { api } from "../api/client";
 import { useSettingsContext } from "./SettingsProvider";
-import { formatDateTime, timezoneLabel } from "../utils/dateTime";
+import type {
+  ActivityEvent,
+  ActivityCategory,
+  ActivitySeverity,
+  ActiveJob,
+} from "../types";
+import FailedFilesList from "./activity/FailedFilesList";
+import EnrichmentFailureList from "./activity/EnrichmentFailureList";
+import DetailsJsonFallback from "./activity/DetailsJsonFallback";
 
-const ActivityFeed: Component<{
-  scanStatus: ScanStatus;
-  rebuildStatus: RebuildStatus;
-  stopping: boolean;
-  scanError: string | null;
-  activity: ActivityEntry[];
-  onClearActivity: () => void;
-  onResetAndRescan: () => void;
-  onDismissStalled: () => void;
-}> = (props) => {
-  const settingsCtx = useSettingsContext();
+const SEVERITY_ICON: Record<ActivitySeverity, string> = {
+  info: "\u25CF", // filled circle
+  warning: "\u25B2", // filled triangle
+  error: "\u2715", // cross
+};
 
-  const clearLog = () => props.onClearActivity();
+const SEVERITY_CLASS: Record<ActivitySeverity, string> = {
+  info: "text-theme-text-secondary",
+  warning: "text-theme-warning",
+  error: "text-theme-error",
+};
 
-  const isActive = () => {
-    const s = props.scanStatus.state;
-    return s === "scanning" || s === "ingesting";
-  };
+const CATEGORY_LABELS: Record<ActivityCategory, string> = {
+  scan: "scan",
+  rebuild: "reb",
+  thumbnail: "thumb",
+  enrichment: "enrich",
+  mosaic: "mosaic",
+  migration: "migr",
+  user_action: "user",
+  system: "sys",
+};
 
-  const progressPct = () => {
-    const s = props.scanStatus;
-    if (s.total === 0) return 0;
-    return Math.min(100, Math.round(((s.completed + s.failed) / s.total) * 100));
-  };
+const ALL_CATEGORIES: ActivityCategory[] = [
+  "scan", "rebuild", "thumbnail", "enrichment",
+  "mosaic", "migration", "user_action", "system",
+];
 
-  const elapsed = () => {
-    const s = props.scanStatus;
-    if (!s.started_at) return null;
-    const end = s.completed_at || Date.now() / 1000;
-    return Math.round(end - s.started_at);
-  };
+const IndeterminateBar: Component = () => (
+  <div class="w-full h-1.5 rounded-full overflow-hidden bg-[var(--color-bg-subtle)]">
+    <div
+      class="h-full rounded-full"
+      style={{
+        background: "var(--color-accent)",
+        animation: "activityIndeterminate 1.6s ease-in-out infinite",
+        width: "40%",
+      }}
+    />
+    <style>{`
+      @keyframes activityIndeterminate {
+        0%   { transform: translateX(-150%); }
+        100% { transform: translateX(350%); }
+      }
+    `}</style>
+  </div>
+);
 
-  const formatDuration = (secs: number) => {
-    if (secs < 60) return `${secs}s`;
-    const m = Math.floor(secs / 60);
-    const s = secs % 60;
-    return `${m}m ${s}s`;
-  };
+function startedAgo(startedAt: number): string {
+  const secs = Math.floor((Date.now() - startedAt) / 1000);
+  if (secs < 60) return `${secs}s ago`;
+  const m = Math.floor(secs / 60);
+  const s = secs % 60;
+  return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")} ago`;
+}
 
-  const throughput = () => {
-    const el = elapsed();
-    if (!el || el === 0 || props.scanStatus.completed === 0) return null;
-    return (props.scanStatus.completed / el).toFixed(1);
-  };
+const ActiveJobRow: Component<{ job: ActiveJob }> = (props) => {
+  const [agoLabel, setAgoLabel] = createSignal(startedAgo(props.job.startedAt));
 
-  const stateLabel = () => {
-    if (props.stopping) return "Stopping...";
-    switch (props.scanStatus.state) {
-      case "scanning": return "Discovering files...";
-      case "ingesting": return "Ingesting";
-      default: return "";
-    }
-  };
-
-  const lostCount = () => {
-    const s = props.scanStatus;
-    return s.total - s.completed - s.failed;
-  };
-
-  const formatTime = (ts: number) =>
-    formatDateTime(new Date(ts * 1000), settingsCtx.timezone(), settingsCtx.use24hTime()) + " " + timezoneLabel(settingsCtx.timezone());
+  const timer = setInterval(() => {
+    setAgoLabel(startedAgo(props.job.startedAt));
+  }, 5000);
+  onCleanup(() => clearInterval(timer));
 
   return (
-    <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-4 flex flex-col h-full min-h-0">
-      <div class="flex justify-between items-center flex-wrap gap-2 mb-3">
-        <h3 class="text-theme-text-primary font-medium">Activity</h3>
-        <Show when={props.activity.length > 0 && !isActive()}>
-          <button
-            onClick={clearLog}
-            class="text-xs text-theme-text-secondary hover:text-theme-text-primary transition-colors"
-          >
-            Clear
-          </button>
-        </Show>
-      </div>
-
-      <div class="flex-1 min-h-0 overflow-y-auto space-y-3">
-      <Show when={props.scanError}>
-        <p class="text-xs text-theme-error">{props.scanError}</p>
-      </Show>
-
-      {/* Live scan progress */}
-      <Show when={isActive()}>
-        <div class="space-y-2 border border-theme-border-em rounded-[var(--radius-md)] p-3">
-          <div class="flex justify-between text-xs text-theme-text-secondary">
-            <span class="flex items-center gap-2">
-              <span class="w-2 h-2 bg-theme-accent rounded-full animate-pulse flex-shrink-0" />
-              {stateLabel()}
+    <div class="space-y-1.5 py-2">
+      <div class="flex items-center justify-between gap-2">
+        <div class="flex flex-col min-w-0">
+          <span class="text-xs font-medium text-theme-text-primary truncate">
+            {props.job.label}
+          </span>
+          <Show when={props.job.subLabel}>
+            <span class="text-xs text-theme-text-secondary truncate">
+              {props.job.subLabel}
             </span>
-            <Show when={props.scanStatus.state === "scanning"}>
-              <span>{props.scanStatus.discovered > 0 ? `${props.scanStatus.discovered.toLocaleString()} files found` : ""}</span>
-            </Show>
-            <Show when={props.scanStatus.state === "ingesting"}>
-              <span>{props.scanStatus.completed + props.scanStatus.failed} / {props.scanStatus.total}</span>
-            </Show>
-          </div>
-          <Show when={props.scanStatus.state === "scanning"}>
-            <div class="w-full bg-theme-base rounded-full h-2 overflow-hidden">
-              <div class="bg-theme-accent h-2 rounded-full animate-pulse w-full opacity-30" />
-            </div>
-          </Show>
-          <Show when={props.scanStatus.state === "ingesting"}>
-            <div class="w-full bg-theme-base rounded-full h-2">
-              <div class="bg-theme-accent h-2 rounded-full transition-all" style={{ width: `${progressPct()}%` }} />
-            </div>
-            <div class="flex justify-between text-xs text-theme-text-secondary">
-              <div class="flex gap-4">
-                <Show when={elapsed() != null}>
-                  <span>Elapsed: {formatDuration(elapsed()!)}</span>
-                </Show>
-                <Show when={throughput() != null}>
-                  <span>{throughput()} files/s</span>
-                </Show>
-              </div>
-              <div class="flex gap-3">
-                <Show when={props.scanStatus.new_files > 0}>
-                  <span>{props.scanStatus.new_files} new</span>
-                </Show>
-                <Show when={props.scanStatus.changed_files > 0}>
-                  <span>{props.scanStatus.changed_files} changed</span>
-                </Show>
-                <Show when={props.scanStatus.removed > 0}>
-                  <span>{props.scanStatus.removed} removed</span>
-                </Show>
-                <Show when={props.scanStatus.failed > 0}>
-                  <span class="text-theme-error">{props.scanStatus.failed} failed</span>
-                </Show>
-                <Show when={props.scanStatus.skipped_calibration > 0}>
-                  <span>{props.scanStatus.skipped_calibration} skipped</span>
-                </Show>
-              </div>
-            </div>
           </Show>
         </div>
-      </Show>
-
-      {/* Live rebuild progress */}
-      <Show when={props.rebuildStatus.state === "running"}>
-        <div class="flex items-center gap-2 border border-theme-border-em rounded-[var(--radius-md)] p-3">
-          <span class="w-2 h-2 bg-theme-accent rounded-full animate-pulse flex-shrink-0" />
-          <span class="text-xs text-theme-text-primary">{props.rebuildStatus.message || "Running..."}</span>
-        </div>
-      </Show>
-
-      {/* Rebuild completion summary */}
-      <Show when={props.rebuildStatus.state === "complete" && props.rebuildStatus.message}>
-        <div class="flex items-center gap-2 border border-theme-success/30 rounded-[var(--radius-md)] p-3">
-          <span class="w-2 h-2 bg-theme-success rounded-full flex-shrink-0" />
-          <span class="text-xs text-theme-text-primary">{props.rebuildStatus.message}</span>
-        </div>
-      </Show>
-
-      {/* Stalled warning */}
-      <Show when={props.scanStatus.state === "stalled"}>
-        <div class="bg-theme-warning/20 border border-theme-warning/50 rounded-[var(--radius-md)] p-3 space-y-2">
-          <span class="text-theme-warning text-sm font-medium">Scan stalled</span>
-          <p class="text-xs text-theme-warning/80">
-            {props.scanStatus.completed + props.scanStatus.failed} of {props.scanStatus.total} files were processed
-            ({props.scanStatus.completed} ingested, {props.scanStatus.failed} failed)
-            but {lostCount()} tasks stopped responding.
-          </p>
-          <p class="text-xs text-theme-warning/60">
-            Already-ingested files are safe. A rescan will pick up the {lostCount()} remaining files.
-          </p>
-          <div class="flex gap-2 pt-1">
+        <div class="flex items-center gap-2 flex-shrink-0">
+          <span class="text-xs text-theme-text-secondary">{agoLabel()}</span>
+          <Show when={props.job.cancelable && props.job.onCancel}>
             <button
-              onClick={props.onResetAndRescan}
-              class="px-3 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded text-xs font-medium hover:bg-theme-accent/25 transition-colors"
+              onClick={() => props.job.onCancel?.()}
+              class="px-2 py-1 text-xs border border-theme-border-em text-theme-text-secondary rounded hover:border-theme-error hover:text-theme-error transition-colors"
             >
-              Reset & Rescan
+              Stop
             </button>
-            <button
-              onClick={props.onDismissStalled}
-              class="px-3 py-1.5 border border-theme-border-em text-theme-text-secondary rounded text-xs hover:border-theme-accent hover:text-theme-text-primary transition-colors"
-            >
-              Dismiss
-            </button>
-          </div>
+          </Show>
         </div>
-      </Show>
-
-      {/* Failed files (expandable) */}
-      <Show when={(props.scanStatus.failed_files?.length ?? 0) > 0}>
-        <FailedFilesSection files={props.scanStatus.failed_files!} />
-      </Show>
-
-      {/* Historical activity log */}
-      <Show when={props.activity.length > 0}>
-        <div class="space-y-1">
-          <For each={props.activity}>
-            {(entry) => (
-              <div class="flex gap-3 text-xs py-1.5 border-t border-theme-border first:border-0">
-                <span class="text-theme-text-secondary flex-shrink-0 min-w-[4.5rem]">
-                  {formatTime(entry.timestamp)}
-                </span>
-                <span class={
-                  entry.type.includes("failed") ? "text-theme-error" :
-                  entry.type.includes("stopped") || entry.type.includes("stalled") || entry.type.includes("warning") ? "text-theme-warning" :
-                  entry.type.startsWith("migration_") ? "text-theme-text-secondary" :
-                  "text-theme-text-primary"
-                }>
-                  {entry.message}
-                </span>
-              </div>
-            )}
-          </For>
-        </div>
-      </Show>
-
-      {/* Empty state */}
-      <Show when={!isActive() && props.rebuildStatus.state !== "running" && props.scanStatus.state !== "stalled" && props.activity.length === 0 && !props.scanError}>
-        <p class="text-xs text-theme-text-secondary">No recent activity</p>
-      </Show>
       </div>
+      <Show
+        when={props.job.progress !== undefined}
+        fallback={<IndeterminateBar />}
+      >
+        {(_) => {
+          const pct = () => Math.round((props.job.progress ?? 0) * 100);
+          return (
+            <div class="w-full h-1.5 rounded-full overflow-hidden bg-[var(--color-bg-subtle)]">
+              <div
+                class="h-full rounded-full transition-all"
+                style={{
+                  background: "var(--color-accent)",
+                  width: `${pct()}%`,
+                }}
+              />
+            </div>
+          );
+        }}
+      </Show>
     </div>
   );
 };
 
-const FailedFilesSection: Component<{ files: { file: string; error: string }[] }> = (props) => {
+const RowDetails: Component<{ event: ActivityEvent }> = (props) => {
+  const d = props.event.details;
+  if (!d) return null;
+
+  if (
+    props.event.category === "scan" &&
+    Array.isArray((d as any).failed_files)
+  ) {
+    return (
+      <FailedFilesList
+        files={(d as any).failed_files}
+        truncated={(d as any).truncated ?? false}
+      />
+    );
+  }
+
+  if (
+    props.event.category === "enrichment" &&
+    Array.isArray((d as any).failed_targets)
+  ) {
+    return <EnrichmentFailureList targets={(d as any).failed_targets} />;
+  }
+
+  return <DetailsJsonFallback details={d} />;
+};
+
+const TargetLinkedMessage: Component<{ event: ActivityEvent }> = (props) => (
+  <span>
+    {props.event.message}
+    {" "}
+    <A
+      href={`/targets/${props.event.target_id}`}
+      class="text-theme-accent hover:underline"
+      onClick={(e) => e.stopPropagation()}
+    >
+      {"\u2197"}
+    </A>
+  </span>
+);
+
+const HistoryRow: Component<{ event: ActivityEvent }> = (props) => {
+  const settingsCtx = useSettingsContext();
   const [expanded, setExpanded] = createSignal(false);
+  const hasDetails = () => props.event.details !== null;
+
+  const hhmm = () => {
+    const d = new Date(props.event.timestamp);
+    const fmt = new Intl.DateTimeFormat("en-GB", {
+      hour: "2-digit",
+      minute: "2-digit",
+      timeZone: settingsCtx.timezone() || "UTC",
+      hour12: !settingsCtx.use24hTime(),
+    });
+    return fmt.format(d);
+  };
+
   return (
-    <div class="space-y-1">
-      <button
-        onClick={() => setExpanded((v) => !v)}
-        class="text-xs text-theme-error hover:underline"
+    <div
+      id={`activity-event-${props.event.id}`}
+      class="border-t border-theme-border first:border-0"
+    >
+      <div
+        class="flex items-start gap-2 py-1.5 text-xs cursor-default"
+        tabIndex={hasDetails() ? 0 : undefined}
+        role={hasDetails() ? "button" : undefined}
+        aria-expanded={hasDetails() ? expanded() : undefined}
+        onKeyDown={(e) => {
+          if (hasDetails() && (e.key === "Enter" || e.key === " ")) {
+            e.preventDefault();
+            setExpanded((v) => !v);
+          }
+        }}
+        onClick={() => {
+          if (hasDetails()) setExpanded((v) => !v);
+        }}
       >
-        {expanded() ? "Hide" : "Show"} {props.files.length} failed file{props.files.length > 1 ? "s" : ""}
-      </button>
-      <Show when={expanded()}>
-        <div class="max-h-40 overflow-y-auto space-y-1">
-          <For each={props.files}>
-            {(f) => (
-              <div class="border border-theme-border rounded px-2 py-1">
-                <div class="text-xs text-theme-text-secondary break-all">{f.file}</div>
-                <div class="text-xs text-theme-error/70 truncate" title={f.error}>{f.error}</div>
-              </div>
-            )}
+        <span class="text-theme-text-secondary flex-shrink-0 w-[3rem] tabular-nums">
+          {hhmm()}
+        </span>
+        <span
+          class={`flex-shrink-0 w-4 text-center ${SEVERITY_CLASS[props.event.severity]}`}
+          title={props.event.severity}
+        >
+          {SEVERITY_ICON[props.event.severity]}
+        </span>
+        <span class="flex-shrink-0 w-[3.5rem] text-theme-text-secondary truncate">
+          {CATEGORY_LABELS[props.event.category]}
+        </span>
+        <span class="flex-1 text-theme-text-primary min-w-0">
+          <Show
+            when={props.event.target_id !== null}
+            fallback={<span>{props.event.message}</span>}
+          >
+            <TargetLinkedMessage event={props.event} />
+          </Show>
+        </span>
+        <Show when={hasDetails()}>
+          <span
+            class={`flex-shrink-0 text-theme-text-secondary transition-transform ${
+              expanded() ? "rotate-90" : ""
+            }`}
+          >
+            {"\u203A"}
+          </span>
+        </Show>
+      </div>
+      <Show when={expanded() && hasDetails()}>
+        <div class="pb-2 pl-[7rem]">
+          <RowDetails event={props.event} />
+        </div>
+      </Show>
+    </div>
+  );
+};
+
+const FilterPill: Component<{
+  label: string;
+  active: boolean;
+  onClick: () => void;
+}> = (props) => (
+  <button
+    onClick={props.onClick}
+    class={`px-2 py-0.5 text-xs rounded-full border transition-colors ${
+      props.active
+        ? "bg-[var(--color-accent)]/20 text-[var(--color-accent)] border-[var(--color-accent)]/40"
+        : "border-theme-border text-theme-text-secondary hover:text-theme-text-primary hover:border-theme-border-em"
+    }`}
+  >
+    {props.label}
+  </button>
+);
+
+const ActivityFeed: Component = () => {
+  const [severityFilter, setSeverityFilter] =
+    createSignal<ActivitySeverity | "all">("all");
+  const [categoryFilter, setCategoryFilter] =
+    createSignal<ActivityCategory | "all">("all");
+  const [items, setItems] = createSignal<ActivityEvent[]>([]);
+  const [nextCursor, setNextCursor] = createSignal<string | null>(null);
+  const [total, setTotal] = createSignal(0);
+  const [loading, setLoading] = createSignal(false);
+  const [loadingMore, setLoadingMore] = createSignal(false);
+  const [newCount, setNewCount] = createSignal(0);
+  const [latestId, setLatestId] = createSignal<number | null>(null);
+  const [isScrolledDown, setIsScrolledDown] = createSignal(false);
+  let listRef: HTMLDivElement | undefined;
+  let pollTimer: ReturnType<typeof setInterval> | null = null;
+
+  const buildParams = (extra: Record<string, unknown> = {}) => {
+    const p: Record<string, unknown> = { limit: 50, ...extra };
+    const sv = severityFilter();
+    if (sv !== "all") p.severity = sv;
+    const cat = categoryFilter();
+    if (cat !== "all") p.category = cat;
+    return p;
+  };
+
+  const loadInitial = async () => {
+    setLoading(true);
+    try {
+      const res = await api.fetchActivity(buildParams());
+      batch(() => {
+        setItems(res.items);
+        setNextCursor(res.next_cursor);
+        setTotal(res.total);
+        setNewCount(0);
+        if (res.items.length > 0) setLatestId(res.items[0].id);
+      });
+    } catch { /* non-blocking */ } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadMore = async () => {
+    const cursor = nextCursor();
+    if (!cursor || loadingMore()) return;
+    setLoadingMore(true);
+    try {
+      const res = await api.fetchActivity(buildParams({ cursor }));
+      batch(() => {
+        setItems((prev) => [...prev, ...res.items]);
+        setNextCursor(res.next_cursor);
+      });
+    } catch { /* ignore */ } finally {
+      setLoadingMore(false);
+    }
+  };
+
+  const pollNew = async () => {
+    const top = latestId();
+    if (top === null) { await loadInitial(); return; }
+    try {
+      const res = await api.fetchActivity(buildParams({ limit: 50 }));
+      if (res.items.length === 0) return;
+      const newItems = res.items.filter((e) => e.id > top);
+      if (newItems.length === 0) return;
+      if (isScrolledDown()) {
+        setNewCount((n) => n + newItems.length);
+      } else {
+        batch(() => {
+          setItems((prev) => [...newItems, ...prev]);
+          setLatestId(newItems[0].id);
+          setTotal(res.total);
+        });
+      }
+    } catch { /* ignore */ }
+  };
+
+  onMount(() => {
+    loadInitial();
+    pollTimer = setInterval(pollNew, 10_000);
+  });
+
+  onCleanup(() => {
+    if (pollTimer) clearInterval(pollTimer);
+  });
+
+  createEffect(() => {
+    severityFilter();
+    categoryFilter();
+    loadInitial();
+  });
+
+  const onScroll = () => {
+    if (!listRef) return;
+    setIsScrolledDown(listRef.scrollTop > 120);
+  };
+
+  const jumpToNew = () => {
+    listRef?.scrollTo({ top: 0, behavior: "smooth" });
+    setNewCount(0);
+    loadInitial();
+  };
+
+  const jobs = () => activeJobs();
+  const jobCount = () => jobs().length;
+
+  return (
+    <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] flex flex-col h-full min-h-0">
+      <div class="flex items-center justify-between px-4 py-3 flex-shrink-0">
+        <div class="flex items-center gap-2">
+          <h3 class="text-theme-text-primary font-medium text-sm">Activity</h3>
+          <Show when={jobCount() > 0}>
+            <span class="px-1.5 py-0.5 text-xs rounded-full bg-[var(--color-accent)]/20 text-[var(--color-accent)] border border-[var(--color-accent)]/30 tabular-nums">
+              {jobCount()} live
+            </span>
+          </Show>
+        </div>
+      </div>
+
+      <Show when={hasActiveJobs()}>
+        <div
+          role="status"
+          aria-live="polite"
+          class="px-4 pb-3 border-b border-theme-border space-y-0 divide-y divide-theme-border"
+          style={{ background: "var(--color-bg-subtle)" }}
+        >
+          <p class="text-[10px] font-semibold uppercase tracking-wider text-theme-text-secondary pb-1 pt-0.5">
+            Now Running
+          </p>
+          <For each={jobs()}>
+            {(job) => <ActiveJobRow job={job} />}
           </For>
         </div>
       </Show>
+
+      <div class="flex flex-col flex-1 min-h-0">
+        <div class="px-4 pt-3 pb-2 space-y-1.5 flex-shrink-0">
+          <p class="text-[10px] font-semibold uppercase tracking-wider text-theme-text-secondary">
+            History
+          </p>
+          <div class="flex flex-wrap gap-1">
+            {(["all", "info", "warning", "error"] as const).map((sv) => (
+              <FilterPill
+                label={sv === "all" ? "all" : sv === "warning" ? "warn" : sv}
+                active={severityFilter() === sv}
+                onClick={() => setSeverityFilter(sv)}
+              />
+            ))}
+          </div>
+          <div class="flex flex-wrap gap-1">
+            <FilterPill
+              label="all"
+              active={categoryFilter() === "all"}
+              onClick={() => setCategoryFilter("all")}
+            />
+            <For each={ALL_CATEGORIES}>
+              {(cat) => (
+                <FilterPill
+                  label={CATEGORY_LABELS[cat]}
+                  active={categoryFilter() === cat}
+                  onClick={() => setCategoryFilter(cat)}
+                />
+              )}
+            </For>
+          </div>
+        </div>
+
+        <div
+          ref={listRef}
+          class="flex-1 min-h-0 overflow-y-auto px-4 relative"
+          onScroll={onScroll}
+        >
+          <Show when={newCount() > 0}>
+            <div class="sticky top-2 flex justify-center z-10">
+              <button
+                onClick={jumpToNew}
+                class="px-3 py-1 text-xs rounded-full bg-[var(--color-accent)] text-white shadow-md"
+              >
+                {newCount()} new, click to view
+              </button>
+            </div>
+          </Show>
+
+          <Show when={loading()}>
+            <p class="text-xs text-theme-text-secondary py-4 text-center">Loading...</p>
+          </Show>
+
+          <Show when={!loading() && items().length === 0}>
+            <p class="text-xs text-theme-text-secondary py-4">No activity recorded yet.</p>
+          </Show>
+
+          <Show when={!loading()}>
+            <div class="space-y-0">
+              <For each={items()}>
+                {(event) => <HistoryRow event={event} />}
+              </For>
+            </div>
+
+            <Show when={nextCursor() !== null}>
+              <div class="py-3 text-center">
+                <button
+                  onClick={loadMore}
+                  disabled={loadingMore()}
+                  class="px-4 py-1.5 text-xs border border-theme-border text-theme-text-secondary rounded hover:text-theme-text-primary hover:border-theme-border-em transition-colors disabled:opacity-50"
+                >
+                  {loadingMore() ? "Loading..." : "Load older"}
+                </button>
+              </div>
+            </Show>
+          </Show>
+        </div>
+      </div>
     </div>
   );
 };

@@ -5,7 +5,7 @@ import { useAuth } from "./AuthProvider";
 import { useStats } from "../store/stats";
 import { api } from "../api/client";
 import { scanFilters as scanFiltersApi } from "../api/scanFilters";
-import type { RebuildStatus, ActivityEntry } from "../types";
+import type { RebuildStatus } from "../types";
 import type { ScanFiltersResponse } from "../api/scanFilters";
 import DatabaseOverview from "./DatabaseOverview";
 import CaptureActivity from "./CaptureActivity";
@@ -30,7 +30,7 @@ const INTERVALS = [
 ];
 
 const ScanManager: Component = () => {
-  const { scanStatus, scanError, isActive, stopping, startScan, startRegeneration, resetScan, stopScan, stopPolling } = useScan();
+  const { scanStatus, isActive, stopping, startScan, startRegeneration, stopScan, stopPolling } = useScan();
   const { settings, saveGeneral } = useSettingsContext();
   const { isAdmin } = useAuth();
   const { stats } = useStats();
@@ -64,19 +64,9 @@ const ScanManager: Component = () => {
     try { setDbSummary(await api.getDbSummary()); } catch { /* ignore */ }
   };
 
-  // --- Activity ---
-  const [activity, setActivity] = createSignal<ActivityEntry[]>([]);
-  const refreshActivity = async () => {
-    try { setActivity(await api.getActivity()); } catch { /* ignore */ }
-  };
-
-  const clearActivity = async () => {
-    try { await api.clearActivity(); setActivity([]); } catch { /* ignore */ }
-  };
-
-  // Track previous composite state (scan + rebuild) to only fetch on real
-  // transitions. Starting with null ensures the first effect run triggers
-  // the initial fetch for both db-summary and activity.
+  // Track previous composite state (scan + rebuild) to only fetch db summary
+  // on real transitions. Starting with null ensures the first effect run
+  // triggers the initial fetch.
   let prevCompositeState: string | null = null;
   createEffect(() => {
     const scanState = scanStatus().state;
@@ -87,9 +77,6 @@ const ScanManager: Component = () => {
       prevCompositeState = current;
       if (wasPrev === null || scanState === "complete" || scanState === "idle") {
         refreshDbSummary();
-      }
-      if (wasPrev === null || scanState === "complete" || scanState === "idle" || rebuildSt === "complete" || rebuildSt === "error") {
-        refreshActivity();
       }
     }
   });
@@ -177,12 +164,6 @@ const ScanManager: Component = () => {
     stopPolling();
     if (rebuildPollTimer) clearInterval(rebuildPollTimer);
   });
-
-  // --- Stalled scan handling ---
-  const handleResetAndRescan = async () => {
-    await resetScan();
-    startScan({ includeCalibration: frameFilter() === "all" });
-  };
 
   return (
     <div class="space-y-4">
@@ -368,16 +349,7 @@ const ScanManager: Component = () => {
         {/* Right column: sticky activity feed */}
         <div class="lg:sticky lg:top-4 lg:self-start min-w-0">
           <div class="lg:max-h-[calc(100vh-2rem)] lg:overflow-hidden lg:flex lg:flex-col">
-            <ActivityFeed
-              scanStatus={scanStatus()}
-              rebuildStatus={rebuildState()}
-              stopping={stopping()}
-              scanError={scanError()}
-              activity={activity()}
-              onClearActivity={clearActivity}
-              onResetAndRescan={handleResetAndRescan}
-              onDismissStalled={resetScan}
-            />
+            <ActivityFeed />
           </div>
         </div>
       </div>
