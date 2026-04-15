@@ -683,7 +683,7 @@ export const api = {
     fetchJson<import("../types").MosaicSuggestionResponse[]>("/mosaics/suggestions"),
 
   triggerMosaicDetection: () =>
-    fetchJson<{ status: string; new_suggestions: number }>("/mosaics/detect", { method: "POST" }),
+    fetchJson<{ status: string; new_suggestions?: number; task_id?: string }>("/mosaics/detect", { method: "POST" }),
 
   acceptMosaicSuggestion: (id: string, selectedPanels?: string[]) =>
     fetchJson<import("../types").MosaicSummary>(`/mosaics/suggestions/${id}/accept`, {

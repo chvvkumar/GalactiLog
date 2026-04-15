@@ -4,6 +4,7 @@ import { showToast, dismissToast } from "../Toast";
 import { useAuth } from "../AuthProvider";
 import { useSettingsContext } from "../SettingsProvider";
 import HelpPopover from "../HelpPopover";
+import { emitWithToast } from "../../lib/emitWithToast";
 import type {
   MosaicSummary,
   MosaicDetailResponse,
@@ -133,16 +134,19 @@ export const MosaicsTab: Component = () => {
   };
 
   const handleDetect = async () => {
+    if (detecting()) return;
     setDetecting(true);
-    try {
-      const result = await api.triggerMosaicDetection();
-      showToast(`Detection complete - ${result.new_suggestions} new suggestion(s) found`);
-      await refresh();
-    } catch {
-      showToast("Failed to run detection", "error");
-    } finally {
-      setDetecting(false);
-    }
+    await emitWithToast({
+      action: () => api.triggerMosaicDetection() as Promise<{ task_id: string }>,
+      pendingLabel: "Running mosaic detection...",
+      successLabel: "Mosaic detection complete",
+      errorLabel: "Mosaic detection failed",
+      category: "mosaic",
+      taskLabel: "Mosaic detection",
+      timeout: 120_000,
+    });
+    setDetecting(false);
+    refresh(true);
   };
 
   // Initialize panel selection when expanding a suggestion (all selected by default)
