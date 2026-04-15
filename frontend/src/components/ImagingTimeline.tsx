@@ -160,9 +160,9 @@ function fillGaps(data: TimelineDetailEntry[], allPeriods: string[]): TimelineDe
 
 const ImagingTimeline: Component<Props> = (props) => {
   const navigate = useNavigate();
-  const [zoom, setZoom] = createSignal(1);
-  const [activePreset, setActivePreset] = createSignal<Preset | null>("all");
-  const [gapMode, setGapMode] = createSignal<GapMode>("imaged");
+  const [zoom, setZoom] = createSignal(presetToZoom("1y"));
+  const [activePreset, setActivePreset] = createSignal<Preset | null>("1y");
+  const [gapMode, setGapMode] = createSignal<GapMode>("all");
 
   // Drag-to-pan state
   const [isDragging, setIsDragging] = createSignal(false);
