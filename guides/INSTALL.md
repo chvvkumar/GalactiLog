@@ -108,6 +108,72 @@ Docker Compose
         └── celery beat (periodic task scheduler)
 ```
 
+## Running as non-root
+
+The container runs as a non-root `galactilog` user (UID 1000, GID 1000 by default) for security. Any bind-mounted directory the container writes to must be accessible to that user. The FITS mount is read-only and only needs read access.
+
+### Discover the host user and group ID
+
+Run these on the host, as the user who owns the target directory:
+
+```bash
+id -u
+id -g
+```
+
+To inspect the current owner of a bind-mount source:
+
+```bash
+stat -c '%u %g' /path/to/thumbnails
+```
+
+### Set PUID and PGID
+
+Pass `PUID` and `PGID` to remap the in-container `galactilog` user to the host UID/GID at entrypoint time. Set them in the `environment:` block of the app service:
+
+```yaml
+services:
+  app:
+    environment:
+      - PUID=1000
+      - PGID=1000
+```
+
+Or via `.env` in the project root:
+
+```
+PUID=1000
+PGID=1000
+```
+
+and reference them in `docker-compose.yml`:
+
+```yaml
+environment:
+  - PUID=${PUID}
+  - PGID=${PGID}
+```
+
+### Platform notes
+
+- TrueNAS SCALE: the `apps` user is typically UID/GID 568. Set `PUID=568` and `PGID=568`, and ensure the dataset ACL grants that user write access to the thumbnails path.
+- Unraid: the `nobody` user is UID 99, GID 100. Set `PUID=99` and `PGID=100`.
+- Synology DSM: UIDs vary per user account. Check `id <username>` via SSH. For shared folders, use the UID/GID of the owning user.
+- Generic Linux host: `PUID=1000` and `PGID=1000` match the first regular user on most distributions and are the default if `PUID`/`PGID` are omitted.
+
+### First-boot chown
+
+On the first start after upgrading to a non-root image, the entrypoint runs `chown -R` on `/app/data/thumbnails` to match the effective `PUID:PGID` if the existing ownership differs. This runs once and may take time on large thumbnail directories.
+
+To skip the automatic chown (for example, if you have pre-set ownership yourself or run on a filesystem where recursive chown is expensive), set:
+
+```yaml
+environment:
+  - GALACTILOG_SKIP_CHOWN=1
+```
+
+With this flag set, you are responsible for ensuring the thumbnail directories are writable by the `PUID:PGID` user.
+
 ## Updating
 
 ```bash

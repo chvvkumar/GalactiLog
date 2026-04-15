@@ -31,6 +31,9 @@ Thumbs.db
 thumbnails/
 celerybeat-schedule
 
+# PUID/PGID test harness mounts (backend/tests/container_perms.sh)
+.test_mounts/
+
 CLAUDE.md
 
 # Claude Code / Superpowers tooling
@@ -52,3 +55,6 @@ guides/specs/
 .worktrees/
 repomix-output.*
 .repomixignore
+
+# Dev override writes /app/run to ./backend/run on the host
+backend/run/

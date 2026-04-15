@@ -177,11 +177,12 @@ docker compose up -d
 
 Migrations run automatically on first start. Log in with the admin credentials from the compose file and trigger your first scan from Settings.
 
-See the [Install Guide](guides/INSTALL.md) for platform-specific paths, version pinning, building from source, and troubleshooting.
+See the [Install Guide](guides/INSTALL.md) for platform-specific paths, version pinning, building from source, non-root and `PUID`/`PGID` setup, and troubleshooting.
 
 ## Guides
 
 - [Install Guide](guides/INSTALL.md) -- Installation, updating, uninstalling, and troubleshooting
+- [Upgrade Guide](guides/UPGRADE.md) -- Release-specific upgrade notes and migration steps
 - [N.I.N.A. Setup Guide](guides/NINA-SETUP.md) -- Configuring N.I.N.A. for use with GalactiLog
 - [Configuration Guide](guides/CONFIGURATION.md) -- Environment variables, themes, filter/equipment aliases, and display settings
 - [Security Guide](guides/security.md) -- Authentication, HTTPS, cookie security, and user management
