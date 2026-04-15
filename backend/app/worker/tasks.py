@@ -42,6 +42,13 @@ from app.services.scan_state import (
     append_activity_sync, check_complete_sync,
     add_skipped_path_sync, get_skipped_paths_sync, clear_skipped_paths_sync,
 )
+from app.services.activity import emit_sync as _emit_activity_sync
+
+
+def _activity_session():
+    """Return a context-managed sync Session for activity writes in Celery tasks."""
+    return Session(_sync_engine)
+
 
 _redis = get_sync_redis()
 
@@ -130,22 +137,24 @@ def run_scan(self, include_calibration: bool = True) -> dict:
 
     if is_cancel_requested_sync(_redis):
         set_cancelled_sync(_redis)
-        append_activity_sync(_redis, {
-            "type": "scan_stopped",
-            "message": f"Scan stopped by user ({len(new_files)} files discovered before stop)",
-            "details": {"discovered": len(new_files)},
-            "timestamp": time.time(),
-        })
+        with _activity_session() as _db:
+            _emit_activity_sync(
+                _db, redis=_redis, category="scan", severity="info",
+                event_type="scan_stopped",
+                message=f"Scan stopped by user ({len(new_files)} files discovered before stop)",
+                details={"discovered": len(new_files)}, actor="system",
+            )
         return {"status": "cancelled"}
 
     if changed_files:
         logger.info("Delta scan: %d changed files queued for re-ingest", len(changed_files))
-        append_activity_sync(_redis, {
-            "type": "delta_scan",
-            "message": f"Delta scan: {len(changed_files)} changed file{'s' if len(changed_files) != 1 else ''} detected and re-queued",
-            "details": {"changed_files": len(changed_files)},
-            "timestamp": time.time(),
-        })
+        with _activity_session() as _db:
+            _emit_activity_sync(
+                _db, redis=_redis, category="scan", severity="info",
+                event_type="delta_scan",
+                message=f"Delta scan: {len(changed_files)} changed file{'s' if len(changed_files) != 1 else ''} detected and re-queued",
+                details={"changed_files": len(changed_files)}, actor="system",
+            )
 
     # Detect and remove orphaned DB records (files deleted from disk).
     # CRITICAL: only consider rows the walker would have actually visited
@@ -183,24 +192,27 @@ def run_scan(self, include_calibration: bool = True) -> dict:
                 session.commit()
         if removed:
             logger.info("Removed %d orphaned image records (files deleted from disk)", removed)
-            append_activity_sync(_redis, {
-                "type": "orphan_cleanup",
-                "message": f"Removed {removed} deleted file{'s' if removed != 1 else ''} from catalog",
-                "details": {"removed": removed},
-                "timestamp": time.time(),
-            })
+            with _activity_session() as _db:
+                _emit_activity_sync(
+                    _db, redis=_redis, category="scan", severity="info",
+                    event_type="orphan_cleanup",
+                    message=f"Removed {removed} deleted file{'s' if removed != 1 else ''} from catalog",
+                    details={"removed": removed}, actor="system",
+                )
     elif orphaned_paths:
         logger.warning(
             "Skipped orphan cleanup: %d of %d in-scope files missing (>50%%) - "
             "possible unmounted share or unreachable storage",
             len(orphaned_paths), len(in_scope_known_paths),
         )
-        append_activity_sync(_redis, {
-            "type": "orphan_warning",
-            "message": f"Orphan cleanup skipped: {len(orphaned_paths)} of {len(in_scope_known_paths)} in-scope files missing (>50%) - possible unmounted share",
-            "details": {"missing": len(orphaned_paths), "total_known": len(in_scope_known_paths)},
-            "timestamp": time.time(),
-        })
+        with _activity_session() as _db:
+            _emit_activity_sync(
+                _db, redis=_redis, category="scan", severity="warning",
+                event_type="orphan_warning",
+                message=f"Orphan cleanup skipped: {len(orphaned_paths)} of {len(in_scope_known_paths)} in-scope files missing (>50%) - possible unmounted share",
+                details={"missing": len(orphaned_paths), "total_known": len(in_scope_known_paths)},
+                actor="system",
+            )
 
     total_queued = len(new_files) + len(changed_files)
     if not total_queued:
@@ -209,12 +221,13 @@ def run_scan(self, include_calibration: bool = True) -> dict:
         msg = f"Scan complete: no new files found ({cataloged} already cataloged)"
         if removed:
             msg += f", {removed} deleted files purged from catalog"
-        append_activity_sync(_redis, {
-            "type": "scan_complete",
-            "message": msg,
-            "details": {"completed": 0, "failed": 0, "already_known": cataloged, "removed": removed},
-            "timestamp": time.time(),
-        })
+        with _activity_session() as _db:
+            _emit_activity_sync(
+                _db, redis=_redis, category="scan", severity="info",
+                event_type="scan_complete", message=msg,
+                details={"completed": 0, "failed": 0, "already_known": cataloged, "removed": removed},
+                actor="system",
+            )
         return {"status": "complete", "new_files_queued": 0, "already_known": cataloged, "removed": removed}
 
     # Transition to ingesting with final total - ingest tasks are already running
