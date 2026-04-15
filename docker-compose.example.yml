@@ -44,6 +44,14 @@ services:
     ports:
       - "8080:80"                                                # <-- CHANGE host port if needed
     environment:
+      # PUID/PGID: set these to match the host user that owns the bind-mounted
+      # directories. Find your UID/GID with `id -u` / `id -g`. Defaults to 1000:1000.
+      # On TrueNAS/Unraid/Synology, use the UID/GID of the user that owns the
+      # host directories you bind-mount below.
+      # PUID: "1000"
+      # PGID: "1000"
+      # GALACTILOG_SKIP_CHOWN: "1"   # Opt out of the automatic one-time chown on boot
+
       # Database - must match the postgres service credentials above
       GALACTILOG_DATABASE_URL: postgresql+asyncpg://galactilog:galactilog@postgres:5432/galactilog_catalog
       GALACTILOG_REDIS_URL: redis://redis:6379/0
