@@ -301,7 +301,7 @@ export const api = {
 
   regenerateThumbnails: (opts: { purge?: boolean } = {}) => {
     const qs = opts.purge ? "?purge=true" : "";
-    return fetchJson<ScanResult>(`/scan/regenerate-thumbnails${qs}`, { method: "POST" });
+    return fetchJson<ScanResult & { task_id?: string }>(`/scan/regenerate-thumbnails${qs}`, { method: "POST" });
   },
 
   resetScan: () =>
@@ -349,13 +349,13 @@ export const api = {
     }),
 
   rebuildTargets: () =>
-    fetchJson<{ status: string; message: string }>("/scan/rebuild-targets", { method: "POST" }),
+    fetchJson<{ status: string; message: string; task_id?: string }>("/scan/rebuild-targets", { method: "POST" }),
 
   smartRebuildTargets: () =>
-    fetchJson<{ status: string; message: string }>("/scan/smart-rebuild-targets", { method: "POST" }),
+    fetchJson<{ status: string; message: string; task_id?: string }>("/scan/smart-rebuild-targets", { method: "POST" }),
 
   retryUnresolved: () =>
-    fetchJson<{ status: string; message: string }>("/scan/retry-unresolved", { method: "POST" }),
+    fetchJson<{ status: string; message: string; task_id?: string }>("/scan/retry-unresolved", { method: "POST" }),
 
   getRebuildStatus: () =>
     fetchJson<import("../types").RebuildStatus>("/scan/rebuild-status"),
@@ -756,10 +756,10 @@ export const api = {
 
   // Catalog enrichment tasks
   triggerXmatchEnrichment: () =>
-    fetchJson<{ status: string; message: string }>("/scan/xmatch-enrichment", { method: "POST" }),
+    fetchJson<{ status: string; message: string; task_id?: string }>("/scan/xmatch-enrichment", { method: "POST" }),
 
   triggerReferenceThumbnails: (force = false) =>
-    fetchJson<{ status: string; message: string }>(`/scan/generate-reference-thumbnails${force ? "?force=true" : ""}`, { method: "POST" }),
+    fetchJson<{ status: string; message: string; task_id?: string }>(`/scan/generate-reference-thumbnails${force ? "?force=true" : ""}`, { method: "POST" }),
 
   // Backup / Restore
   createBackup: async (): Promise<Blob> => {

@@ -336,13 +336,7 @@ const ScanManager: Component = () => {
           </div>
 
           <Show when={isAdmin()}>
-            <MaintenanceActions
-              disabled={isActive()}
-              rebuildRunning={rebuildState().state === "running"}
-              rebuildMode={rebuildState().mode}
-              onRegenThumbnails={startRegeneration}
-              onStartedAction={startRebuildPolling}
-            />
+            <MaintenanceActions />
           </Show>
         </div>
 
