@@ -15,18 +15,27 @@ interface EmitWithToastOptions {
 
 // Monotonic counter identifying the most recently invoked emitWithToast call.
 // Each invocation captures its own id; only callbacks belonging to the most
-// recent invocation are allowed to mutate the global toast slot. This prevents
+// recent invocation are allowed to mutate the toast surface. This prevents
 // terminal callbacks from a previous (still-polling or just-completed) action
-// from stomping on the toast that a freshly clicked action just created. The
-// underlying Celery job tracking in `track()` is unaffected; only the toast
-// surface is gated.
+// from affecting the toast surface for a freshly clicked action.
 let latestEmitId = 0;
+
+// Cancel handle for the most recent in-flight `track()` call. When a newer
+// emitWithToast supersedes it, we cancel the older poller to stop wasted
+// network polling and remove the stale "Now Running" entry.
+let activeCancel: (() => void) | null = null;
 
 export async function emitWithToast(opts: EmitWithToastOptions): Promise<void> {
   const myId = ++latestEmitId;
   const isCurrent = () => myId === latestEmitId;
 
-  showToast(opts.pendingLabel, "info", 120_000);
+  // Supersede any previous in-flight tracker.
+  if (activeCancel) {
+    try { activeCancel(); } catch { /* ignore */ }
+    activeCancel = null;
+  }
+
+  const pendingToastId = showToast(opts.pendingLabel, "info", 120_000);
 
   let taskId: string;
   try {
@@ -34,7 +43,7 @@ export async function emitWithToast(opts: EmitWithToastOptions): Promise<void> {
     taskId = result.task_id;
   } catch {
     if (!isCurrent()) return;
-    dismissToast();
+    dismissToast(pendingToastId);
     showToast(opts.errorLabel, "error", 0);
     return;
   }
@@ -45,26 +54,36 @@ export async function emitWithToast(opts: EmitWithToastOptions): Promise<void> {
   // "Now Running" that never clears.
   if (!taskId) {
     if (!isCurrent()) return;
-    dismissToast();
+    dismissToast(pendingToastId);
     showToast(opts.successLabel, "info", 3000);
     return;
   }
 
-  track({
+  const cancel = track({
     id: taskId,
     category: opts.category,
     label: opts.taskLabel,
     subLabel: opts.taskSubLabel,
     timeout: opts.timeout ?? 300_000,
     onSuccess: () => {
+      if (activeCancel === cancel) activeCancel = null;
       if (!isCurrent()) return;
-      dismissToast();
+      dismissToast(pendingToastId);
       showToast(opts.successLabel, "success", 3000);
     },
     onFailure: (error) => {
+      if (activeCancel === cancel) activeCancel = null;
       if (!isCurrent()) return;
-      dismissToast();
+      dismissToast(pendingToastId);
       showToast(`${opts.errorLabel}: ${error}`, "error", 0);
     },
+    onTimeout: () => {
+      // Client poller gave up; the backend task may still finish. Silently
+      // dismiss the pending toast without surfacing a misleading failure.
+      if (activeCancel === cancel) activeCancel = null;
+      if (!isCurrent()) return;
+      dismissToast(pendingToastId);
+    },
   });
+  activeCancel = cancel;
 }
