@@ -16,6 +16,7 @@ import ScanFiltersPanel from "./ScanFiltersPanel";
 import ScanFiltersOnboarding from "./ScanFiltersOnboarding";
 import { showToast } from "./Toast";
 import HelpPopover from "./HelpPopover";
+import { wireActiveJobSources } from "../store/activeJobs";
 
 type FrameFilter = "all" | "light_only";
 
@@ -45,6 +46,8 @@ const ScanManager: Component = () => {
   const [observerLongitude, setObserverLongitude] = createSignal<number | null>(null);
   const [scanFiltersData, setScanFiltersData] = createSignal<ScanFiltersResponse | null>(null);
   let rebuildPollTimer: ReturnType<typeof setInterval> | null = null;
+
+  wireActiveJobSources(scanStatus, rebuildState, stopScan);
 
   // --- Scan filters (shared between ScanFiltersPanel & ScanFiltersOnboarding) ---
   const loadScanFilters = async () => {
