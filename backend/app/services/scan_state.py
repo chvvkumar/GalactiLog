@@ -5,11 +5,18 @@ Keys used:
   scan:state is set to expire after 24h on completion so old results don't linger forever.
 """
 
+import logging
 import time
 from dataclasses import dataclass
 
 import redis.asyncio as aioredis
 import redis as sync_redis
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session as _SyncSession
+
+from app.services.activity import emit_sync
+
+logger = logging.getLogger(__name__)
 
 SCAN_KEY = "scan:state"
 SCAN_PROGRESS_KEY = "scan:last_progress"
@@ -218,12 +225,47 @@ def check_complete_sync(r: sync_redis.Redis) -> None:
         if snap.removed:
             parts.append(f"{snap.removed} deleted file{'s' if snap.removed != 1 else ''} purged")
         msg = "Scan complete: " + (", ".join(parts) if parts else "no changes")
-        append_activity_sync(r, {
-            "type": "scan_complete",
-            "message": msg,
-            "details": {"completed": snap.completed, "failed": snap.failed, "skipped_calibration": snap.skipped_calibration, "csv_enriched": snap.csv_enriched, "total": snap.total, "removed": snap.removed, "new_files": snap.new_files, "changed_files": snap.changed_files},
-            "timestamp": time.time(),
-        })
+        try:
+            from app.config import settings as _cfg
+            _engine = create_engine(
+                _cfg.database_url.replace("+asyncpg", "+psycopg2"),
+                pool_pre_ping=True,
+            )
+            with _SyncSession(_engine) as _db:
+                emit_sync(
+                    _db, redis=r, category="scan", severity="info",
+                    event_type="scan_complete", message=msg,
+                    details={
+                        "completed": snap.completed, "failed": snap.failed,
+                        "skipped_calibration": snap.skipped_calibration,
+                        "csv_enriched": snap.csv_enriched, "total": snap.total,
+                        "removed": snap.removed, "new_files": snap.new_files,
+                        "changed_files": snap.changed_files,
+                    },
+                    actor="system",
+                )
+                if snap.failed > 0:
+                    import json as _json
+                    raw = r.lrange(SCAN_FAILED_KEY, 0, -1)
+                    failed_files = []
+                    for item in raw[:500]:
+                        try:
+                            entry = _json.loads(item)
+                            failed_files.append({
+                                "path": entry.get("file", ""),
+                                "reason": entry.get("error", ""),
+                            })
+                        except Exception:
+                            pass
+                    emit_sync(
+                        _db, redis=r, category="scan", severity="warning",
+                        event_type="scan_files_failed",
+                        message=f"Scan completed with {snap.failed} file failure{'s' if snap.failed != 1 else ''}",
+                        details={"failed_files": failed_files, "truncated": len(raw) > 500},
+                        actor="system",
+                    )
+        except Exception:
+            logger.exception("scan_state: failed to emit scan_complete activity")
         # Invalidate stats cache immediately so the next request gets fresh data
         try:
             r.delete("galactilog:stats:cache", "galactilog:fits_keys")
