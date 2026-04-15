@@ -231,13 +231,13 @@ The store exposes `activeJobs: Accessor<ActiveJob[]>` and `hasActiveJobs: Access
 │  [all] [scan] [rebuild] [thumb] [enrich] [mosaic] [migr]│
 │                                                         │
 │  16:42  warn   scan    Scan stalled after 5 min idle  > │
-│  15:20  ok     reb     Rebuild complete, 42 targets     │
+│  15:20  info   reb     Rebuild complete, 42 targets     │
 │  15:20  warn   scan    Scan complete, 12 failures     > │
 │                        expanded:                        │
 │                          file1.fits, header parse error │
 │                          file2.fits, SIP ctype mismatch │
 │                          (10 more)                      │
-│  14:55  ok     user    Merge accepted: NGC 7000 ← NAm   │
+│  14:55  info   user    Merge accepted: NGC 7000 ← NAm   │
 │  14:12  info   migr    Data upgrade v7 → v8 complete    │
 │                                                         │
 │          [ Load older ]                                 │
@@ -274,7 +274,7 @@ New Celery beat task `prune_activity_events`:
 
 - Runs daily at 03:00 local time.
 - Executes `DELETE FROM activity_events WHERE timestamp < now() - interval 'N days'` where N is `activity_retention_days`.
-- Emits one `system` `info` event with `event_type=activity_pruned` and `details.deleted_count=N` only if N > 0.
+- Emits one `system` `info` event with `event_type=activity_pruned` and a `deleted_count` field in `details`, only when `deleted_count > 0`.
 
 ## Rollout
 
