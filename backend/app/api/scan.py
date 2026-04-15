@@ -23,7 +23,7 @@ from app.services.scan_filters import ScanFilterConfig
 from app.services.scan_state import (
     get_scan_state, get_failed_files, start_scanning, set_ingesting, set_idle, reset_scan,
     get_rebuild_state, request_cancel,
-    get_activity, clear_activity, append_activity,
+    append_activity,
 )
 from app.services.simbad import resolve_target_name, normalize_object_name
 from app.worker.tasks import regenerate_thumbnail, run_scan, rebuild_targets, smart_rebuild_targets, retry_unresolved, backfill_csv_metrics, generate_reference_thumbnails, run_xmatch_enrichment, purge_and_regenerate_thumbnails
@@ -146,21 +146,6 @@ async def stop_scan(user: User = Depends(require_admin)):
             return {"status": "not_running", "state": state.state}
         await request_cancel(r)
         return {"status": "stopping", "message": "Cancel requested - task will stop shortly"}
-
-
-@router.get("/activity")
-async def get_activity_log(user: User = Depends(get_current_user)):
-    """Return persistent activity log (newest first)."""
-    async with async_redis() as r:
-        return await get_activity(r)
-
-
-@router.delete("/activity")
-async def clear_activity_log(user: User = Depends(require_admin)):
-    """Clear the activity log."""
-    async with async_redis() as r:
-        await clear_activity(r)
-        return {"status": "cleared"}
 
 
 @router.post("/reset")
