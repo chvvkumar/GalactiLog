@@ -288,15 +288,55 @@ export interface ScanStatus {
   failed_files?: FailedFile[];
 }
 
-export interface ActivityEntry {
-  type: "scan_complete" | "scan_stopped" | "scan_stalled"
-    | "rebuild_complete" | "rebuild_failed" | "regen_complete"
-    | "delta_scan" | "orphan_cleanup" | "orphan_warning"
-    | "migration_applied" | "migration_initialized" | "migration_ok" | "migration_failed"
-    | "data_upgrade_started" | "data_upgrade_complete" | "data_upgrade_failed";
+export type ActivitySeverity = "info" | "warning" | "error";
+
+export type ActivityCategory =
+  | "scan"
+  | "rebuild"
+  | "thumbnail"
+  | "enrichment"
+  | "mosaic"
+  | "migration"
+  | "user_action"
+  | "system";
+
+export interface ActivityEvent {
+  id: number;
+  timestamp: string;
+  severity: ActivitySeverity;
+  category: ActivityCategory;
+  event_type: string;
   message: string;
-  details: Record<string, any>;
-  timestamp: number;
+  details: Record<string, unknown> | null;
+  target_id: number | null;
+  actor: string | null;
+  duration_ms: number | null;
+}
+
+export interface ActiveJob {
+  id: string;
+  category: "scan" | "rebuild" | "thumbnail" | "enrichment" | "mosaic";
+  label: string;
+  subLabel?: string;
+  progress?: number;
+  startedAt: number;
+  detail?: string;
+  cancelable: boolean;
+  onCancel?: () => Promise<void>;
+}
+
+export interface ActivityQueryParams {
+  severity?: ActivitySeverity | ActivitySeverity[];
+  category?: ActivityCategory | ActivityCategory[];
+  limit?: number;
+  cursor?: string;
+  since?: string;
+}
+
+export interface ActivityPageResponse {
+  items: ActivityEvent[];
+  next_cursor: string | null;
+  total: number;
 }
 
 export interface RebuildStatus {

@@ -1,10 +1,10 @@
-import { Component, For, Show, createSignal, onMount, onCleanup } from "solid-js";
+import { Component, For, Show, createSignal, onMount } from "solid-js";
 import { api } from "../../api/client";
-import { showToast, dismissToast } from "../Toast";
+import { showToast } from "../Toast";
 import { useAuth } from "../AuthProvider";
 import { UnresolvedFilesTab } from "./UnresolvedFilesTab";
 import HelpPopover from "../HelpPopover";
-import { pollTask } from "../../store/taskPoller";
+import { emitWithToast } from "../../lib/emitWithToast";
 import type { MergeCandidateResponse } from "../../types";
 
 export const MergesTab: Component = () => {
@@ -70,32 +70,20 @@ export const MergesTab: Component = () => {
     }
   };
 
-  let stopPolling: (() => void) | null = null;
-  onCleanup(() => stopPolling?.());
-
   const handleDetect = async () => {
+    if (detecting()) return;
     setDetecting(true);
-    try {
-      const { task_id } = await api.triggerDuplicateDetection();
-      showToast("Detecting duplicates...", "info", 60000);
-      stopPolling = pollTask(task_id, {
-        onSuccess: (result) => {
-          dismissToast();
-          const count = result?.candidates_found ?? 0;
-          showToast(`Detection complete - ${count} candidate(s) found`);
-          setDetecting(false);
-          refresh();
-        },
-        onFailure: (error) => {
-          dismissToast();
-          showToast(error, "error");
-          setDetecting(false);
-        },
-      });
-    } catch {
-      showToast("Failed to start detection", "error");
-      setDetecting(false);
-    }
+    await emitWithToast({
+      action: () => api.triggerDuplicateDetection(),
+      pendingLabel: "Detecting duplicates...",
+      successLabel: "Duplicate detection complete",
+      errorLabel: "Duplicate detection failed",
+      category: "scan",
+      taskLabel: "Duplicate detection",
+      timeout: 120_000,
+    });
+    setDetecting(false);
+    refresh();
   };
 
   return (

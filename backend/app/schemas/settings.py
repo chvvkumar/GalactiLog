@@ -23,6 +23,7 @@ class GeneralSettings(BaseModel):
     use_imaging_night: bool = True
     preview_resolution: int = 2400  # 0 means native full resolution
     preview_cache_mb: int = 2048
+    activity_retention_days: int = Field(default=90, ge=1, le=3650)
 
 
 class FilterConfig(BaseModel):

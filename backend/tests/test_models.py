@@ -63,3 +63,28 @@ def test_user_settings_has_dismissed_suggestions_default():
     from app.models.user_settings import UserSettings, SETTINGS_ROW_ID
     row = UserSettings(id=SETTINGS_ROW_ID)
     assert row.dismissed_suggestions == []
+
+
+def test_activity_event_columns():
+    from app.models.activity_event import ActivityEvent
+    cols = {c.name for c in ActivityEvent.__table__.columns}
+    assert cols == {
+        "id", "timestamp", "severity", "category", "event_type",
+        "message", "details", "target_id", "actor", "duration_ms",
+    }
+
+
+def test_activity_event_instantiation():
+    from app.models.activity_event import ActivityEvent
+    ev = ActivityEvent(
+        severity="warning",
+        category="scan",
+        event_type="scan_complete",
+        message="Scan complete: 5 new files added",
+        details={"completed": 5, "failed": 0},
+        actor="system",
+    )
+    assert ev.severity == "warning"
+    assert ev.details["completed"] == 5
+    assert ev.target_id is None
+    assert ev.duration_ms is None

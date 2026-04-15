@@ -26,6 +26,9 @@ import type {
   CustomColumn,
   CustomColumnValue,
   ColumnVisibility,
+  ActivityEvent,
+  ActivityQueryParams,
+  ActivityPageResponse,
 } from "../types";
 
 const API_BASE = import.meta.env.VITE_API_URL || "/api";
@@ -298,7 +301,7 @@ export const api = {
 
   regenerateThumbnails: (opts: { purge?: boolean } = {}) => {
     const qs = opts.purge ? "?purge=true" : "";
-    return fetchJson<ScanResult>(`/scan/regenerate-thumbnails${qs}`, { method: "POST" });
+    return fetchJson<ScanResult & { task_id?: string }>(`/scan/regenerate-thumbnails${qs}`, { method: "POST" });
   },
 
   resetScan: () =>
@@ -307,20 +310,52 @@ export const api = {
   stopScan: () =>
     fetchJson<{ status: string; message?: string }>("/scan/stop", { method: "POST" }),
 
-  getActivity: () =>
-    fetchJson<import("../types").ActivityEntry[]>("/scan/activity"),
+  fetchActivity: (params: ActivityQueryParams = {}) => {
+    const qs = new URLSearchParams();
+    const severities = Array.isArray(params.severity)
+      ? params.severity
+      : params.severity
+      ? [params.severity]
+      : [];
+    severities.forEach((s) => qs.append("severity", s));
+    const categories = Array.isArray(params.category)
+      ? params.category
+      : params.category
+      ? [params.category]
+      : [];
+    categories.forEach((c) => qs.append("category", c));
+    if (params.limit !== undefined) qs.set("limit", String(params.limit));
+    if (params.cursor) qs.set("cursor", params.cursor);
+    if (params.since) qs.set("since", params.since);
+    const q = qs.toString();
+    return fetchJson<ActivityPageResponse>(`/activity${q ? `?${q}` : ""}`);
+  },
 
-  clearActivity: () =>
-    fetchJson<{ status: string }>("/scan/activity", { method: "DELETE" }),
+  fetchActivityErrorsSince: (since: string) => {
+    const qs = new URLSearchParams({ severity: "error", since });
+    return fetchJson<ActivityPageResponse>(`/activity?${qs}`);
+  },
+
+  clearActivityLog: () =>
+    fetchJson<{ status: string }>("/activity", { method: "DELETE" }),
+
+  getActivitySettings: () =>
+    fetchJson<{ activity_retention_days: number }>("/settings/activity"),
+
+  setActivitySettings: (body: { retention_days: number }) =>
+    fetchJson<{ activity_retention_days: number }>("/settings/activity", {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
 
   rebuildTargets: () =>
-    fetchJson<{ status: string; message: string }>("/scan/rebuild-targets", { method: "POST" }),
+    fetchJson<{ status: string; message: string; task_id?: string }>("/scan/rebuild-targets", { method: "POST" }),
 
   smartRebuildTargets: () =>
-    fetchJson<{ status: string; message: string }>("/scan/smart-rebuild-targets", { method: "POST" }),
+    fetchJson<{ status: string; message: string; task_id?: string }>("/scan/smart-rebuild-targets", { method: "POST" }),
 
   retryUnresolved: () =>
-    fetchJson<{ status: string; message: string }>("/scan/retry-unresolved", { method: "POST" }),
+    fetchJson<{ status: string; message: string; task_id?: string }>("/scan/retry-unresolved", { method: "POST" }),
 
   getRebuildStatus: () =>
     fetchJson<import("../types").RebuildStatus>("/scan/rebuild-status"),
@@ -648,7 +683,7 @@ export const api = {
     fetchJson<import("../types").MosaicSuggestionResponse[]>("/mosaics/suggestions"),
 
   triggerMosaicDetection: () =>
-    fetchJson<{ status: string; new_suggestions: number }>("/mosaics/detect", { method: "POST" }),
+    fetchJson<{ status: string; new_suggestions?: number; task_id?: string }>("/mosaics/detect", { method: "POST" }),
 
   acceptMosaicSuggestion: (id: string, selectedPanels?: string[]) =>
     fetchJson<import("../types").MosaicSummary>(`/mosaics/suggestions/${id}/accept`, {
@@ -721,10 +756,10 @@ export const api = {
 
   // Catalog enrichment tasks
   triggerXmatchEnrichment: () =>
-    fetchJson<{ status: string; message: string }>("/scan/xmatch-enrichment", { method: "POST" }),
+    fetchJson<{ status: string; message: string; task_id?: string }>("/scan/xmatch-enrichment", { method: "POST" }),
 
   triggerReferenceThumbnails: (force = false) =>
-    fetchJson<{ status: string; message: string }>(`/scan/generate-reference-thumbnails${force ? "?force=true" : ""}`, { method: "POST" }),
+    fetchJson<{ status: string; message: string; task_id?: string }>(`/scan/generate-reference-thumbnails${force ? "?force=true" : ""}`, { method: "POST" }),
 
   // Backup / Restore
   createBackup: async (): Promise<Blob> => {

@@ -20,10 +20,10 @@ from app.schemas.scan_filters import (
     ValidateRegexIn, ValidateRegexOut,
 )
 from app.services.scan_filters import ScanFilterConfig
+from app.services.activity import emit as _emit_activity
 from app.services.scan_state import (
     get_scan_state, get_failed_files, start_scanning, set_ingesting, set_idle, reset_scan,
     get_rebuild_state, request_cancel,
-    get_activity, clear_activity, append_activity,
 )
 from app.services.simbad import resolve_target_name, normalize_object_name
 from app.worker.tasks import regenerate_thumbnail, run_scan, rebuild_targets, smart_rebuild_targets, retry_unresolved, backfill_csv_metrics, generate_reference_thumbnails, run_xmatch_enrichment, purge_and_regenerate_thumbnails
@@ -95,10 +95,11 @@ async def regenerate_thumbnails(
         if purge:
             # Defer DB work and file deletions to Celery so the HTTP call
             # returns immediately and progress is reported via activity log.
-            purge_and_regenerate_thumbnails.delay()
+            task = purge_and_regenerate_thumbnails.delay()
             return {
                 "status": "accepted",
                 "message": "Queued: delete and regenerate all thumbnails",
+                "task_id": task.id,
             }
 
         result = await session.execute(
@@ -146,21 +147,6 @@ async def stop_scan(user: User = Depends(require_admin)):
             return {"status": "not_running", "state": state.state}
         await request_cancel(r)
         return {"status": "stopping", "message": "Cancel requested - task will stop shortly"}
-
-
-@router.get("/activity")
-async def get_activity_log(user: User = Depends(get_current_user)):
-    """Return persistent activity log (newest first)."""
-    async with async_redis() as r:
-        return await get_activity(r)
-
-
-@router.delete("/activity")
-async def clear_activity_log(user: User = Depends(require_admin)):
-    """Clear the activity log."""
-    async with async_redis() as r:
-        await clear_activity(r)
-        return {"status": "cleared"}
 
 
 @router.post("/reset")
@@ -309,8 +295,8 @@ async def trigger_rebuild_targets(user: User = Depends(require_admin)):
                 detail="A scan is already running. Wait for it to complete first.",
             )
 
-        rebuild_targets.delay()
-        return {"status": "accepted", "message": "Target rebuild queued as background task"}
+        task = rebuild_targets.delay()
+        return {"status": "accepted", "message": "Target rebuild queued as background task", "task_id": task.id}
 
 
 @router.post("/smart-rebuild-targets")
@@ -328,8 +314,8 @@ async def trigger_smart_rebuild(user: User = Depends(require_admin)):
                 detail="A scan is already running. Wait for it to complete first.",
             )
 
-        smart_rebuild_targets.delay(manual=True)
-        return {"status": "accepted", "message": "Smart rebuild queued as background task"}
+        task = smart_rebuild_targets.delay(manual=True)
+        return {"status": "accepted", "message": "Smart rebuild queued as background task", "task_id": task.id}
 
 
 @router.post("/retry-unresolved")
@@ -343,8 +329,8 @@ async def trigger_retry_unresolved(user: User = Depends(require_admin)):
                 detail="A scan is already running. Wait for it to complete first.",
             )
 
-        retry_unresolved.delay()
-        return {"status": "accepted", "message": "Retry unresolved queued as background task"}
+        task = retry_unresolved.delay()
+        return {"status": "accepted", "message": "Retry unresolved queued as background task", "task_id": task.id}
 
 
 @router.post("/generate-reference-thumbnails")
@@ -358,8 +344,8 @@ async def trigger_reference_thumbnails(force: bool = False, user: User = Depends
                 detail="A scan is already running. Wait for it to complete first.",
             )
 
-        generate_reference_thumbnails.delay(force=force)
-        return {"status": "accepted", "message": "Reference thumbnail generation queued as background task"}
+        task = generate_reference_thumbnails.delay(force=force)
+        return {"status": "accepted", "message": "Reference thumbnail generation queued as background task", "task_id": task.id}
 
 
 @router.post("/xmatch-enrichment")
@@ -373,8 +359,8 @@ async def trigger_xmatch_enrichment(user: User = Depends(require_admin)):
                 detail="A scan is already running. Wait for it to complete first.",
             )
 
-        run_xmatch_enrichment.delay()
-        return {"status": "accepted", "message": "xMatch enrichment queued as background task"}
+        task = run_xmatch_enrichment.delay()
+        return {"status": "accepted", "message": "xMatch enrichment queued as background task", "task_id": task.id}
 
 
 @router.post("/backfill-csv")
@@ -620,21 +606,19 @@ async def apply_filters_now(
         )
         await session.commit()
 
-        import time as _time
-        async with async_redis() as r:
-            await append_activity(r, {
-                "type": "scan_filters_applied",
-                "message": (
-                    f"Scan filters applied: {len(matched_ids)} image row"
-                    f"{'s' if len(matched_ids) != 1 else ''} removed "
-                    f"(by {user.username})"
-                ),
-                "details": {
-                    "removed": len(matched_ids),
-                    "by_user": user.username,
-                },
-                "timestamp": _time.time(),
-            })
+        await _emit_activity(
+            session,
+            category="scan",
+            severity="info",
+            event_type="scan_filters_applied",
+            message=(
+                f"Scan filters applied: {len(matched_ids)} image row"
+                f"{'s' if len(matched_ids) != 1 else ''} removed "
+                f"(by {user.username})"
+            ),
+            details={"removed": len(matched_ids), "by_user": user.username},
+            actor=user.username,
+        )
         logger.info(
             "scan_filters_applied: removed %d image rows by user %s",
             len(matched_ids), user.username,

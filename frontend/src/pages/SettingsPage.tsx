@@ -37,6 +37,7 @@ const ScanManager = lazy(() => import("../components/ScanManager"));
 const DisplayTab = lazy(() => import("../components/DisplayTab"));
 const AstroBinTab = lazy(() => import("../components/settings/AstroBinTab"));
 const CustomColumnsTab = lazy(() => import("../components/CustomColumnsTab"));
+const ActivityLogTab = lazy(() => import("../components/settings/ActivityLogTab"));
 
 const ALL_TABS = [
   { id: "scan", label: "Library" },
@@ -47,6 +48,7 @@ const ALL_TABS = [
   { id: "custom-columns", label: "Custom Columns" },
   { id: "backup", label: "Backup & Restore", adminOnly: true },
   { id: "users", label: "Users", adminOnly: true },
+  { id: "activity-log", label: "Activity Log", adminOnly: true },
 ] as const;
 
 type TabId = (typeof ALL_TABS)[number]["id"];
@@ -144,6 +146,9 @@ export const SettingsPage: Component = () => {
         </Show>
         <Show when={activeTab() === "users" && isAdmin()}>
           <UsersTab />
+        </Show>
+        <Show when={activeTab() === "activity-log" && isAdmin()}>
+          <ActivityLogTab />
         </Show>
       </Suspense>
     </div>
