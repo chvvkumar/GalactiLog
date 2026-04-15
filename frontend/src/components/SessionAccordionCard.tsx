@@ -1,4 +1,4 @@
-import { Component, Show, For, createSignal, createEffect } from "solid-js";
+import { Component, Show, For, createSignal, createEffect, createMemo } from "solid-js";
 import type { SessionOverview, SessionDetail, FrameRecord } from "../types";
 import { api } from "../api/client";
 import ReferenceThumbnail from "./ReferenceThumbnail";
@@ -209,7 +209,16 @@ const SessionAccordionCard: Component<{
     return isHfrOutlier(frame, medianHfr) || isEccOutlier(frame, medianEcc);
   };
 
-  const renderFrameTable = (frames: FrameRecord[], medianHfr?: number | null, medianEcc?: number | null) => (
+  const renderFrameTable = (frames: FrameRecord[], medianHfr?: number | null, medianEcc?: number | null) => {
+    const sorted = createMemo(() => sortedFrames(frames));
+    const previewFiles = createMemo(() =>
+      sorted().map((f) => ({
+        imageId: f.image_id,
+        filePath: f.file_path,
+        thumbnailUrl: f.thumbnail_url,
+      })),
+    );
+    return (
     <table class="w-full text-label">
       <thead class="sticky top-0 bg-theme-base">
         <tr class="text-theme-text-secondary border-b border-theme-border">
@@ -300,8 +309,8 @@ const SessionAccordionCard: Component<{
         </tr>
       </thead>
       <tbody>
-        <For each={sortedFrames(frames)}>
-          {(frame) => (
+        <For each={sorted()}>
+          {(frame, i) => (
             <tr class={`border-b border-theme-border/30 hover:bg-theme-hover transition-colors duration-100 ${isOutlier(frame, medianHfr, medianEcc) ? "bg-theme-error/20" : ""}`}>
               <td class="py-1 px-2 text-theme-text-primary">{formatTimeUtil(frame.timestamp, settingsCtx.timezone(), settingsCtx.use24hTime())}</td>
               <td class="py-1 px-2 text-theme-text-primary text-center">{frame.filter_used ?? "—"}</td>
@@ -410,6 +419,8 @@ const SessionAccordionCard: Component<{
                   filePath={frame.file_path}
                   thumbnailUrl={frame.thumbnail_url}
                   display={frame.file_name}
+                  files={previewFiles()}
+                  index={i()}
                 />
               </td>
             </tr>
@@ -417,7 +428,8 @@ const SessionAccordionCard: Component<{
         </For>
       </tbody>
     </table>
-  );
+    );
+  };
 
   return (
     <>
