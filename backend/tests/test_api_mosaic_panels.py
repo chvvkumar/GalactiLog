@@ -105,7 +105,9 @@ async def test_batch_update_panels_happy_path():
 
     mock_session = _mock_session_for_batch(mosaic)
 
-    app.dependency_overrides[get_session] = lambda: mock_session
+    async def override_session():
+        yield mock_session
+    app.dependency_overrides[get_session] = override_session
     app.dependency_overrides[get_current_user] = lambda: admin
 
     body = [
@@ -156,7 +158,9 @@ async def test_batch_update_partial_fields():
 
     mock_session = _mock_session_for_batch(mosaic)
 
-    app.dependency_overrides[get_session] = lambda: mock_session
+    async def override_session():
+        yield mock_session
+    app.dependency_overrides[get_session] = override_session
     app.dependency_overrides[get_current_user] = lambda: admin
 
     # Only update grid_row, leave everything else as-is
@@ -197,7 +201,9 @@ async def test_batch_update_invalid_panel_id():
 
     mock_session = _mock_session_for_batch(mosaic)
 
-    app.dependency_overrides[get_session] = lambda: mock_session
+    async def override_session():
+        yield mock_session
+    app.dependency_overrides[get_session] = override_session
     app.dependency_overrides[get_current_user] = lambda: admin
 
     bogus_id = str(uuid.uuid4())
@@ -238,7 +244,9 @@ async def test_batch_update_cross_mosaic_panel():
     # Session returns mosaic_a when queried
     mock_session = _mock_session_for_batch(mosaic_a)
 
-    app.dependency_overrides[get_session] = lambda: mock_session
+    async def override_session():
+        yield mock_session
+    app.dependency_overrides[get_session] = override_session
     app.dependency_overrides[get_current_user] = lambda: admin
 
     # Try to update panel_b (belongs to mosaic_b) via mosaic_a's batch endpoint
@@ -281,7 +289,9 @@ async def test_rotation_angle_persistence():
     get_result.scalar_one_or_none.return_value = mosaic
     mock_session.execute = AsyncMock(return_value=get_result)
 
-    app.dependency_overrides[get_session] = lambda: mock_session
+    async def override_session():
+        yield mock_session
+    app.dependency_overrides[get_session] = override_session
     app.dependency_overrides[get_current_user] = lambda: admin
 
     try:
@@ -331,7 +341,9 @@ async def test_pixel_coords_persistence():
     get_result.scalar_one_or_none.return_value = mosaic
     mock_session.execute = AsyncMock(return_value=get_result)
 
-    app.dependency_overrides[get_session] = lambda: mock_session
+    async def override_session():
+        yield mock_session
+    app.dependency_overrides[get_session] = override_session
     app.dependency_overrides[get_current_user] = lambda: admin
 
     try:
