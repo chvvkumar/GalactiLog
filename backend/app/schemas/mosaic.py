@@ -55,6 +55,14 @@ class PanelStats(BaseModel):
     flip_h: bool = False
 
 
+class PanelThumbnail(BaseModel):
+    panel_id: str
+    thumbnail_url: str | None = None
+    frame_id: str | None = None
+    score: float | None = None
+    filter_used: str
+
+
 class MosaicSummary(BaseModel):
     id: str
     name: str
@@ -87,6 +95,8 @@ class MosaicDetailResponse(BaseModel):
     total_integration_seconds: float
     total_frames: int
     panels: list[PanelStats]
+    available_filters: list[str] = []
+    default_filter: str | None = None
 
 
 class SuggestionPanelSession(BaseModel):
