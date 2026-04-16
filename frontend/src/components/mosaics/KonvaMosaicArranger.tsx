@@ -70,6 +70,7 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
   let mosaicGroup: Konva.Group | null = null;
 
   const tiles = new Map<string, TileState>();
+  const noDataNodes = new Map<string, Konva.Text>();
 
   const [selectedId, setSelectedId] = createSignal<string | null>(null);
   const [globalRotation, setGlobalRotation] = createSignal(props.rotationAngle ?? 0);
@@ -748,11 +749,20 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
       const tile = tiles.get(panelId);
       if (!tile) continue;
 
+      // Clean up any existing "No data" text node for this panel
+      const existingNoData = noDataNodes.get(panelId);
+      if (existingNoData) {
+        existingNoData.destroy();
+        noDataNodes.delete(panelId);
+      }
+
+      // Destroy old image node
+      if (tile.imageNode) {
+        tile.imageNode.destroy();
+      }
+
       if (url === null) {
         // No data for this filter — show dimmed placeholder
-        if (tile.imageNode instanceof Konva.Image) {
-          tile.imageNode.destroy();
-        }
         const placeholder = new Konva.Rect({
           width: tile.width,
           height: tile.height,
@@ -765,7 +775,7 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
         tile.group.add(placeholder);
         tile.imageNode = placeholder;
 
-        // Add "No data" text
+        // Add "No data" text and track it
         const noDataText = new Konva.Text({
           x: 0,
           y: tile.height / 2 - 8,
@@ -778,6 +788,7 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
           listening: false,
         });
         tile.group.add(noDataText);
+        noDataNodes.set(panelId, noDataText);
 
         // Keep label/badge on top
         tile.badgeNode.moveToTop();
@@ -802,16 +813,10 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
           tile.borderRect.height(scaledH + 6);
           tile.labelNode.y(scaledH - 22);
 
-          // Remove old image node
+          // Remove current image node (could be placeholder set above while loading)
           if (tile.imageNode) {
             tile.imageNode.destroy();
           }
-          // Remove any "No data" text nodes
-          tile.group.find("Text").forEach((n: any) => {
-            if (n !== tile.labelNode && n !== tile.badgeNode && typeof n.text === "function" && n.text().includes("data")) {
-              n.destroy();
-            }
-          });
 
           const konvaImg = new Konva.Image({
             image: img,
