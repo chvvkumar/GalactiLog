@@ -422,6 +422,28 @@ const MosaicDetailPage: Component = () => {
                           <Show when={!panelSessions.loading && included().length === 0 && available().length === 0}>
                             <div class="p-3 text-xs text-theme-text-secondary">No sessions found for this panel.</div>
                           </Show>
+
+                          <Show when={included().length === 0 && !panelSessions.loading}>
+                            <div class="p-3 border-t border-theme-border/50 flex justify-end">
+                              <button
+                                onClick={async () => {
+                                  if (!window.confirm(`Delete panel "${panel.panel_label}"?`)) return;
+                                  const data = mosaic();
+                                  if (!data) return;
+                                  try {
+                                    await api.removeMosaicPanel(data.id, panel.panel_id);
+                                    showToast(`Deleted panel "${panel.panel_label}"`);
+                                    refetch();
+                                  } catch {
+                                    showToast("Failed to delete panel", "error");
+                                  }
+                                }}
+                                class="text-xs text-theme-text-secondary hover:text-theme-danger transition-colors"
+                              >
+                                Delete panel
+                              </button>
+                            </div>
+                          </Show>
                         </div>
                       </Show>
                     </div>
