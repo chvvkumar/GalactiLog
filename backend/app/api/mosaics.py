@@ -28,9 +28,17 @@ router = APIRouter(prefix="/mosaics", tags=["mosaics"])
 
 def _ilike_to_regex(pattern: str):
     """Convert a SQL ILIKE pattern (%, _) to a compiled Python regex."""
-    escaped = re.escape(pattern)
-    escaped = escaped.replace(r"\%", ".*").replace(r"\_", ".")
-    return re.compile(f"^{escaped}$", re.IGNORECASE)
+    # Process char-by-char: % and _ are ILIKE wildcards, everything else is literal.
+    # Can't rely on re.escape treating % specially (Python 3.7+ doesn't).
+    parts = []
+    for ch in pattern:
+        if ch == "%":
+            parts.append(".*")
+        elif ch == "_":
+            parts.append(".")
+        else:
+            parts.append(re.escape(ch))
+    return re.compile(f"^{''.join(parts)}$", re.IGNORECASE)
 
 
 def _parse_sexa_ra(s: str) -> float | None:
