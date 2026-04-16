@@ -691,7 +691,6 @@ async def get_panel_thumbnails(
     from pathlib import Path
     from app.services.mosaic_composite import (
         select_best_frame_for_filter,
-        score_frames,
         generate_panel_thumbnail,
         _get_cached_thumbnail,
         _set_cached_thumbnail,
@@ -707,10 +706,10 @@ async def get_panel_thumbnails(
 
     results = []
     for panel in sorted(mosaic.panels, key=lambda p: p.sort_order):
-        frame = await select_best_frame_for_filter(
+        result = await select_best_frame_for_filter(
             panel.target_id, panel.object_pattern, filter, session,
         )
-        if not frame or not frame.file_path:
+        if not result:
             results.append({
                 "panel_id": str(panel.id),
                 "thumbnail_url": None,
@@ -720,28 +719,23 @@ async def get_panel_thumbnails(
             })
             continue
 
-        # Score this frame in context of its panel's pool
-        pid = str(panel.id)
-        base_filter_conds = [
-            Image.resolved_target_id == panel.target_id,
-            Image.image_type == "LIGHT",
-            Image.file_path.isnot(None),
-            Image.filter_used == filter,
-        ]
-        if panel.object_pattern:
-            base_filter_conds.append(
-                Image.raw_headers["OBJECT"].astext.ilike(panel.object_pattern)
-            )
-        pool_q = select(Image).where(*base_filter_conds)
-        pool = list((await session.execute(pool_q)).scalars().all())
-        scored = score_frames(pool)
-        frame_score = next((s for f, s in scored if f.id == frame.id), None)
+        frame, frame_score = result
+        if not frame.file_path:
+            results.append({
+                "panel_id": str(panel.id),
+                "thumbnail_url": None,
+                "frame_id": None,
+                "score": None,
+                "filter_used": filter,
+            })
+            continue
 
+        pid = str(panel.id)
         results.append({
             "panel_id": pid,
             "thumbnail_url": f"/api/mosaics/{mosaic_id}/panels/{pid}/thumbnail?filter={filter}",
             "frame_id": str(frame.id),
-            "score": round(frame_score, 4) if frame_score is not None else None,
+            "score": round(frame_score, 4),
             "filter_used": filter,
         })
 
@@ -780,11 +774,12 @@ async def get_panel_thumbnail_image(
     if cached:
         return Response(content=cached, media_type="image/jpeg")
 
-    frame = await select_best_frame_for_filter(
+    result = await select_best_frame_for_filter(
         panel.target_id, panel.object_pattern, filter, session,
     )
-    if not frame or not frame.file_path:
+    if not result or not result[0].file_path:
         raise HTTPException(404, f"No frames for filter '{filter}' in this panel")
+    frame = result[0]
 
     fits_path = Path(frame.file_path)
     if not fits_path.exists():

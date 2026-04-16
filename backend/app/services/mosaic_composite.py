@@ -189,8 +189,10 @@ async def select_best_frame_for_filter(
     object_pattern: str | None,
     filter_name: str,
     session: AsyncSession,
-):
-    """Select the best LIGHT frame for a specific filter using quality scoring."""
+) -> tuple[Any, float] | None:
+    """Select the best LIGHT frame for a specific filter using quality scoring.
+    Returns (frame, score) or None.
+    """
     base_filter = [
         Image.resolved_target_id == target_id,
         Image.image_type == "LIGHT",
@@ -205,7 +207,7 @@ async def select_best_frame_for_filter(
     if not frames:
         return None
     scored = score_frames(frames)
-    return scored[0][0]  # best frame
+    return scored[0]  # (frame, score)
 
 
 async def find_default_filter(
@@ -254,20 +256,20 @@ async def find_default_filter(
             Image.resolved_target_id == panel.target_id,
             Image.image_type == "LIGHT",
             Image.file_path.isnot(None),
+            Image.filter_used.in_(available),
         ]
         if panel.object_pattern:
             base_filter.append(Image.raw_headers["OBJECT"].astext.ilike(panel.object_pattern))
 
-        for fname in available:
-            q = select(Image).where(*base_filter, Image.filter_used == fname)
-            frames = list((await session.execute(q)).scalars().all())
-            if not frames:
-                continue
-            scored = score_frames(frames)
-            top_score = scored[0][1]
-            if top_score > best_score:
-                best_score = top_score
-                best_filter = fname
+        q = select(Image).where(*base_filter)
+        frames = list((await session.execute(q)).scalars().all())
+        if not frames:
+            continue
+        scored = score_frames(frames)
+        top_frame, top_score = scored[0]
+        if top_score > best_score:
+            best_score = top_score
+            best_filter = top_frame.filter_used
 
     return best_filter, available
 
@@ -474,6 +476,7 @@ def composite_panels(
 # Module-level cache
 _composite_cache: dict[str, tuple[float, bytes]] = {}
 _CACHE_TTL = 3600
+_CACHE_MAX_SIZE = 100
 
 
 def _compute_cache_key(mosaic_id: str, frame_ids: list, filter_name: str | None = None) -> str:
@@ -495,6 +498,10 @@ def _get_cached(cache_key: str) -> bytes | None:
 
 
 def _set_cached(cache_key: str, data: bytes) -> None:
+    if len(_composite_cache) >= _CACHE_MAX_SIZE:
+        # Evict oldest entry
+        oldest_key = min(_composite_cache, key=lambda k: _composite_cache[k][0])
+        del _composite_cache[oldest_key]
     _composite_cache[cache_key] = (time.time(), data)
 
 
@@ -515,6 +522,9 @@ def _get_cached_thumbnail(panel_id: str, filter_name: str) -> bytes | None:
 
 
 def _set_cached_thumbnail(panel_id: str, filter_name: str, data: bytes) -> None:
+    if len(_thumbnail_cache) >= _CACHE_MAX_SIZE:
+        oldest_key = min(_thumbnail_cache, key=lambda k: _thumbnail_cache[k][0])
+        del _thumbnail_cache[oldest_key]
     _thumbnail_cache[f"{panel_id}:{filter_name}"] = (time.time(), data)
 
 
@@ -530,9 +540,10 @@ async def build_mosaic_composite(
         panel_frames = []
         for panel in panels:
             if filter_name:
-                frame = await select_best_frame_for_filter(
+                result = await select_best_frame_for_filter(
                     panel.target_id, panel.object_pattern, filter_name, session,
                 )
+                frame = result[0] if result else None
             else:
                 frame = await select_best_frame(panel.target_id, panel.object_pattern, session)
             if frame and frame.file_path:
