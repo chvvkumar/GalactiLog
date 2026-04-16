@@ -19,6 +19,8 @@ permissions:
 jobs:
   build-and-push:
     runs-on: [self-hosted, Linux, X64]
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
     steps:
       - name: Checkout code
@@ -99,8 +101,8 @@ jobs:
           build-args: |
             GALACTILOG_VERSION=${{ steps.version.outputs.version }}
             GALACTILOG_GIT_SHA=${{ github.sha }}
-          cache-from: type=local,src=/tmp/.buildx-cache
-          cache-to: type=local,dest=/tmp/.buildx-cache,mode=max
+          cache-from: type=registry,ref=chvvkumar/galactilog:buildcache
+          cache-to: type=registry,ref=chvvkumar/galactilog:buildcache,mode=max
 
       - name: Report image size
         shell: bash
