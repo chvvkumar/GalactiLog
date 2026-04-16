@@ -110,10 +110,12 @@ async def test_batch_update_panels_happy_path():
     app.dependency_overrides[get_session] = override_session
     app.dependency_overrides[get_current_user] = lambda: admin
 
-    body = [
-        {"panel_id": str(p1.id), "grid_row": 0, "grid_col": 0, "rotation": 90, "flip_h": True},
-        {"panel_id": str(p2.id), "grid_row": 0, "grid_col": 1, "rotation": 180, "flip_h": False},
-    ]
+    body = {
+        "panels": [
+            {"panel_id": str(p1.id), "grid_row": 0, "grid_col": 0, "rotation": 90, "flip_h": True},
+            {"panel_id": str(p2.id), "grid_row": 0, "grid_col": 1, "rotation": 180, "flip_h": False},
+        ],
+    }
 
     try:
         async with AsyncClient(
@@ -164,7 +166,7 @@ async def test_batch_update_partial_fields():
     app.dependency_overrides[get_current_user] = lambda: admin
 
     # Only update grid_row, leave everything else as-is
-    body = [{"panel_id": str(p1.id), "grid_row": 2}]
+    body = {"panels": [{"panel_id": str(p1.id), "grid_row": 2}]}
 
     try:
         async with AsyncClient(
@@ -207,7 +209,7 @@ async def test_batch_update_invalid_panel_id():
     app.dependency_overrides[get_current_user] = lambda: admin
 
     bogus_id = str(uuid.uuid4())
-    body = [{"panel_id": bogus_id, "grid_row": 0}]
+    body = {"panels": [{"panel_id": bogus_id, "grid_row": 0}]}
 
     try:
         async with AsyncClient(
@@ -250,7 +252,7 @@ async def test_batch_update_cross_mosaic_panel():
     app.dependency_overrides[get_current_user] = lambda: admin
 
     # Try to update panel_b (belongs to mosaic_b) via mosaic_a's batch endpoint
-    body = [{"panel_id": str(panel_b.id), "grid_row": 1}]
+    body = {"panels": [{"panel_id": str(panel_b.id), "grid_row": 1}]}
 
     try:
         async with AsyncClient(
@@ -267,7 +269,52 @@ async def test_batch_update_cross_mosaic_panel():
 
 
 # ---------------------------------------------------------------------------
-# 5. rotation_angle persistence via PUT /mosaics/{id} then GET
+# 5. Batch endpoint persists rotation_angle alongside panel updates
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_batch_update_with_rotation_angle():
+    """Including rotation_angle in the batch request persists it on the mosaic."""
+    admin = _make_admin_user()
+    target = _make_target()
+    mosaic = _make_mosaic(rotation_angle=0.0)
+    p1 = _make_panel(mosaic.id, target, "Panel 1", sort_order=0)
+    mosaic.panels = [p1]
+
+    mock_session = _mock_session_for_batch(mosaic)
+
+    async def override_session():
+        yield mock_session
+    app.dependency_overrides[get_session] = override_session
+    app.dependency_overrides[get_current_user] = lambda: admin
+
+    body = {
+        "panels": [
+            {"panel_id": str(p1.id), "grid_row": 1, "grid_col": 2},
+        ],
+        "rotation_angle": 37.5,
+    }
+
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            resp = await client.put(
+                f"/api/mosaics/{mosaic.id}/panels/batch", json=body
+            )
+
+        assert resp.status_code == 200
+        # rotation_angle persisted on the mosaic object
+        assert mosaic.rotation_angle == 37.5
+        # panel grid also updated
+        assert p1.grid_row == 1
+        assert p1.grid_col == 2
+    finally:
+        app.dependency_overrides.clear()
+
+
+# ---------------------------------------------------------------------------
+# 6. rotation_angle persistence via PUT /mosaics/{id} then GET
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
@@ -322,7 +369,7 @@ async def test_rotation_angle_persistence():
 
 
 # ---------------------------------------------------------------------------
-# 6. pixel_coords persistence via PUT /mosaics/{id} then GET
+# 7. pixel_coords persistence via PUT /mosaics/{id} then GET
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio

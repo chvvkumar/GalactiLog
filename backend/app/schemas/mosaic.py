@@ -73,6 +73,11 @@ class MosaicPanelBatchItem(BaseModel):
     flip_h: bool | None = None
 
 
+class MosaicPanelBatchRequest(BaseModel):
+    panels: list[MosaicPanelBatchItem]
+    rotation_angle: float | None = None
+
+
 class MosaicDetailResponse(BaseModel):
     id: str
     name: str

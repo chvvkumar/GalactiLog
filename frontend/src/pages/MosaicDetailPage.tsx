@@ -152,8 +152,7 @@ const MosaicDetailPage: Component = () => {
                   rotationAngle={data().rotation_angle ?? 0}
                   pixelCoords={data().pixel_coords ?? false}
                   onSave={async (panels, rotationAngle) => {
-                    await api.batchUpdateMosaicPanels(params.mosaicId, panels);
-                    await api.updateMosaic(params.mosaicId, { rotation_angle: rotationAngle });
+                    await api.batchUpdateMosaicPanels(params.mosaicId, panels, rotationAngle);
                   }}
                   onPixelCoordsConverted={() => {
                     api.updateMosaic(params.mosaicId, { pixel_coords: true }).catch(console.error);

@@ -16,7 +16,7 @@ from app.models.mosaic_suggestion import MosaicSuggestion
 from app.schemas.mosaic import (
     AcceptSuggestionRequest,
     MosaicCreate, MosaicUpdate, MosaicPanelCreate, MosaicPanelUpdate,
-    MosaicPanelBatchItem,
+    MosaicPanelBatchItem, MosaicPanelBatchRequest,
     MosaicSummary, MosaicDetailResponse, PanelStats, MosaicSuggestionResponse,
 )
 from app.api.auth import get_current_user
@@ -878,7 +878,7 @@ async def add_panel(
 @router.put("/{mosaic_id}/panels/batch", response_model=list[PanelStats])
 async def batch_update_panels(
     mosaic_id: uuid.UUID,
-    body: list[MosaicPanelBatchItem],
+    body: MosaicPanelBatchRequest,
     session: AsyncSession = Depends(get_session),
     user: User = Depends(get_current_user),
 ):
@@ -892,15 +892,19 @@ async def batch_update_panels(
     if not mosaic:
         raise HTTPException(404, "Mosaic not found")
 
+    # Persist mosaic-level rotation_angle if provided
+    if body.rotation_angle is not None:
+        mosaic.rotation_angle = body.rotation_angle
+
     panel_map = {p.id: p for p in mosaic.panels}
 
     # Validate all panel_ids belong to this mosaic
-    for item in body:
+    for item in body.panels:
         if item.panel_id not in panel_map:
             raise HTTPException(404, f"Panel {item.panel_id} not found in mosaic")
 
     # Apply partial updates
-    for item in body:
+    for item in body.panels:
         panel = panel_map[item.panel_id]
         if item.grid_row is not None:
             panel.grid_row = item.grid_row

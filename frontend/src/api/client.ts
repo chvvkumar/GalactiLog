@@ -679,10 +679,11 @@ export const api = {
   batchUpdateMosaicPanels: (
     mosaicId: string,
     panels: Array<{ panel_id: string; grid_row?: number; grid_col?: number; rotation?: number; flip_h?: boolean }>,
+    rotationAngle?: number,
   ) =>
     fetchJson<import("../types").PanelStats[]>(`/mosaics/${mosaicId}/panels/batch`, {
       method: "PUT",
-      body: JSON.stringify(panels),
+      body: JSON.stringify({ panels, rotation_angle: rotationAngle }),
     }),
 
   removeMosaicPanel: (mosaicId: string, panelId: string) =>
