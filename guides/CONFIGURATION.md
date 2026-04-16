@@ -24,6 +24,36 @@ Default uses Docker named volumes; host path alternatives are commented out in t
 | Thumbnails | `/app/data/thumbnails` | Generated JPEG thumbnails. Grows over time. |
 | PostgreSQL data | `/var/lib/postgresql/data` | Database storage. |
 
+### Permissions and ownership
+
+The container runs as a non-root `galactilog` user. Bind-mounted directories the container writes to must be owned by, or otherwise writable by, that user on the host.
+
+| Container path | Access | Notes |
+|---------------|--------|-------|
+| `/app/data/fits` | read-only | FITS source tree. Read permission for the container user is sufficient. |
+| `/app/data/thumbnails` | read-write | Generated JPEG thumbnails. Must be writable. |
+| `/app/data/thumbnails/previews` | read-write | Larger preview renders. Must be writable. |
+
+The `galactilog` user is remapped at entrypoint time to match the host ownership of these bind mounts. Use the following environment variables to control that behavior:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PUID` | `1000` | Host user ID the in-container `galactilog` user is remapped to. Set to match the host owner of the thumbnails directory. |
+| `PGID` | `1000` | Host group ID the in-container `galactilog` user is remapped to. |
+| `GALACTILOG_SKIP_CHOWN` | *(unset)* | Set to `1` to skip the first-boot recursive chown of `/app/data/thumbnails`. Use when ownership is already correct or when recursive chown is too slow. |
+
+See the [Install Guide](INSTALL.md#running-as-non-root) for discovery commands and platform-specific values.
+
+#### Troubleshooting 403 responses
+
+A 403 on `/preview/...` or `/thumbnails/...` paths indicates the container user cannot read the files. On the host, confirm ownership of the thumbnails directory matches `PUID:PGID`:
+
+```bash
+stat -c '%u %g' /path/to/thumbnails
+```
+
+If the values do not match, either adjust `PUID` and `PGID` to the existing owner, or `chown -R` the directory to the configured UID/GID.
+
 ### PostgreSQL Settings
 
 Set in the postgres service's `environment:` block. Must match `GALACTILOG_DATABASE_URL`.

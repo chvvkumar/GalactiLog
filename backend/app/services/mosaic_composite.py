@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from astropy.wcs import WCS
 
 from app.models.image import Image
+from app.services.activity import emit as _emit_activity
 from app.services.thumbnail import _read_binned
 from app.services.stretch import (
     normalize_to_unit,
@@ -350,72 +351,88 @@ async def build_mosaic_composite(
     tile_max_width: int = 400,
 ) -> bytes:
     """Full orchestrator: select frames, check cache, generate composite."""
-    panel_frames = []
-    for panel in panels:
-        frame = await select_best_frame(panel.target_id, panel.object_pattern, session)
-        if frame and frame.file_path:
-            panel_frames.append((panel, frame))
+    try:
+        panel_frames = []
+        for panel in panels:
+            frame = await select_best_frame(panel.target_id, panel.object_pattern, session)
+            if frame and frame.file_path:
+                panel_frames.append((panel, frame))
 
-    if not panel_frames:
-        raise ValueError("No panels have accessible FITS frames")
+        if not panel_frames:
+            raise ValueError("No panels have accessible FITS frames")
 
-    frame_ids = [f.id for _, f in panel_frames]
-    cache_key = _compute_cache_key(mosaic_id, frame_ids)
-    cached = _get_cached(cache_key)
-    if cached:
-        return cached
+        frame_ids = [f.id for _, f in panel_frames]
+        cache_key = _compute_cache_key(mosaic_id, frame_ids)
+        cached = _get_cached(cache_key)
+        if cached:
+            return cached
 
-    panel_infos = []
-    tiles = {}
-    for panel, frame in panel_frames:
-        headers = frame.raw_headers or {}
-        ra_raw = headers.get("RA") or headers.get("OBJCTRA")
-        dec_raw = headers.get("DEC") or headers.get("OBJCTDEC")
-        ra = _parse_ra(ra_raw)
-        dec = _parse_coord(dec_raw)
-        if ra is None or dec is None:
-            continue
+        panel_infos = []
+        tiles = {}
+        for panel, frame in panel_frames:
+            headers = frame.raw_headers or {}
+            ra_raw = headers.get("RA") or headers.get("OBJCTRA")
+            dec_raw = headers.get("DEC") or headers.get("OBJCTDEC")
+            ra = _parse_ra(ra_raw)
+            dec = _parse_coord(dec_raw)
+            if ra is None or dec is None:
+                continue
 
-        pid = str(panel.id)
-        fits_path = Path(frame.file_path)
-        if not fits_path.exists():
-            continue
+            pid = str(panel.id)
+            fits_path = Path(frame.file_path)
+            if not fits_path.exists():
+                continue
+            try:
+                tile_img, native_width = generate_panel_thumbnail(fits_path, max_width=tile_max_width)
+                tiles[pid] = tile_img
+            except Exception:
+                logger.warning("Failed to generate thumbnail for panel %s", panel.id)
+                continue
+
+            panel_infos.append(PanelInfo(
+                panel_id=pid,
+                ra=ra,
+                dec=dec,
+                objctrot=float(headers.get("OBJCTROT", 0)),
+                pierside=str(headers.get("PIERSIDE", "West")),
+                fits_path=frame.file_path,
+                focallen=float(headers.get("FOCALLEN", 448)),
+                xpixsz=float(headers.get("XPIXSZ", 3.76)),
+            ))
+
+        if not tiles:
+            raise ValueError("No panels could be rendered from FITS files")
+
+        sample_tile = next(iter(tiles.values()))
+        # Scale factor: thumbnail pixels / native sensor pixels
+        thumb_scale = sample_tile.width / native_width if native_width > 0 else 1.0
+        layout = compute_panel_layout(
+            panel_infos,
+            tile_width=sample_tile.width,
+            tile_height=sample_tile.height,
+            scale=thumb_scale,
+        )
+
+        composite = composite_panels(tiles, layout)
+
+        buf = io.BytesIO()
+        composite.save(buf, "JPEG", quality=90)
+        jpeg_bytes = buf.getvalue()
+
+        _set_cached(cache_key, jpeg_bytes)
+        return jpeg_bytes
+    except Exception as exc:
+        logger.error("mosaic_composite: failed - %s", exc, exc_info=True)
         try:
-            tile_img, native_width = generate_panel_thumbnail(fits_path, max_width=tile_max_width)
-            tiles[pid] = tile_img
+            await _emit_activity(
+                session,
+                category="mosaic",
+                severity="error",
+                event_type="mosaic_composite_failed",
+                message=f"Mosaic composite generation failed: {exc}",
+                details={"error": str(exc), "mosaic_id": str(mosaic_id)},
+                actor="system",
+            )
         except Exception:
-            logger.warning("Failed to generate thumbnail for panel %s", panel.id)
-            continue
-
-        panel_infos.append(PanelInfo(
-            panel_id=pid,
-            ra=ra,
-            dec=dec,
-            objctrot=float(headers.get("OBJCTROT", 0)),
-            pierside=str(headers.get("PIERSIDE", "West")),
-            fits_path=frame.file_path,
-            focallen=float(headers.get("FOCALLEN", 448)),
-            xpixsz=float(headers.get("XPIXSZ", 3.76)),
-        ))
-
-    if not tiles:
-        raise ValueError("No panels could be rendered from FITS files")
-
-    sample_tile = next(iter(tiles.values()))
-    # Scale factor: thumbnail pixels / native sensor pixels
-    thumb_scale = sample_tile.width / native_width if native_width > 0 else 1.0
-    layout = compute_panel_layout(
-        panel_infos,
-        tile_width=sample_tile.width,
-        tile_height=sample_tile.height,
-        scale=thumb_scale,
-    )
-
-    composite = composite_panels(tiles, layout)
-
-    buf = io.BytesIO()
-    composite.save(buf, "JPEG", quality=90)
-    jpeg_bytes = buf.getvalue()
-
-    _set_cached(cache_key, jpeg_bytes)
-    return jpeg_bytes
+            pass
+        raise

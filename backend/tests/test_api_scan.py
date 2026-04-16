@@ -143,53 +143,12 @@ async def test_scan_rejects_when_already_running():
 
 
 @pytest.mark.asyncio
-async def test_get_activity_empty():
-    with patch("app.api.scan.async_redis") as mock_redis_cm:
-        mock_redis = AsyncMock()
-        mock_redis.lrange = AsyncMock(return_value=[])
-        mock_redis_cm.side_effect = _mock_async_redis(mock_redis)
-
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            resp = await client.get("/api/scan/activity")
-
-    assert resp.status_code == 200
-    assert resp.json() == []
-
-
-@pytest.mark.asyncio
-async def test_get_activity_with_entries():
-    import json
-    entries = [
-        json.dumps({"type": "scan_complete", "message": "Scan complete: 10 ingested, 0 failed", "details": {}, "timestamp": 1711000000.0}),
-        json.dumps({"type": "rebuild_complete", "message": "Quick Fix: 3 linked", "details": {}, "timestamp": 1710999000.0}),
-    ]
-    with patch("app.api.scan.async_redis") as mock_redis_cm:
-        mock_redis = AsyncMock()
-        mock_redis.lrange = AsyncMock(return_value=entries)
-        mock_redis_cm.side_effect = _mock_async_redis(mock_redis)
-
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            resp = await client.get("/api/scan/activity")
-
-    assert resp.status_code == 200
-    data = resp.json()
-    assert len(data) == 2
-    assert data[0]["type"] == "scan_complete"
-
-
-@pytest.mark.asyncio
-async def test_clear_activity():
-    with patch("app.api.scan.async_redis") as mock_redis_cm:
-        mock_redis = AsyncMock()
-        mock_redis.delete = AsyncMock()
-        mock_redis_cm.side_effect = _mock_async_redis(mock_redis)
-
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            resp = await client.delete("/api/scan/activity")
-
-    assert resp.status_code == 200
-    assert resp.json()["status"] == "cleared"
-    mock_redis.delete.assert_called_once()
+async def test_old_scan_activity_routes_removed():
+    from app.main import app as _app
+    from httpx import AsyncClient, ASGITransport
+    transport = ASGITransport(app=_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as c:
+        r1 = await c.get("/api/scan/activity")
+        r2 = await c.delete("/api/scan/activity")
+    assert r1.status_code == 404
+    assert r2.status_code == 404

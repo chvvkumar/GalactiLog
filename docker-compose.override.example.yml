@@ -3,5 +3,13 @@
 # To skip in prod: docker compose -f docker-compose.yml up
 services:
   app:
+    # PUID/PGID: set to the UID/GID that owns the dev bind mount below.
+    # Find yours with `id -u` / `id -g`. Defaults to 1000:1000.
+    # Create bind-mounted dev directories with correct ownership up front to
+    # avoid the one-time chown on container boot.
+    # environment:
+    #   PUID: "1000"
+    #   PGID: "1000"
+    #   GALACTILOG_SKIP_CHOWN: "1"
     volumes:
       - ./backend:/app

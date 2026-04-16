@@ -1,6 +1,67 @@
 #!/bin/bash
 set -e
 
+# ---- PUID/PGID handling ----
+PUID=${PUID:-1000}
+PGID=${PGID:-1000}
+
+# Belt-and-suspenders: ensure runtime dirs exist even if a bind mount shadowed
+# them (e.g. dev override mounts ./backend to /app) or the image predates the
+# /app/run layout.
+mkdir -p /app/run \
+         /app/run/nginx/client_body \
+         /app/run/nginx/proxy \
+         /app/run/nginx/fastcgi \
+         /app/run/nginx/uwsgi \
+         /app/run/nginx/scgi
+
+CURRENT_UID=$(id -u galactilog)
+CURRENT_GID=$(id -g galactilog)
+
+if [ "$PGID" != "$CURRENT_GID" ]; then
+    groupmod -o -g "$PGID" galactilog
+fi
+if [ "$PUID" != "$CURRENT_UID" ]; then
+    usermod -o -u "$PUID" galactilog
+fi
+
+# Internal runtime dir is container-local; chown is cheap.
+chown -R galactilog:galactilog /app/run 2>/dev/null || true
+
+DID_CHOWN=0
+# /app/data/fits is typically a read-only bind mount, so we must NOT recurse
+# into /app/data. Shallow chown /app/data itself, recursive chown for
+# /app/data/thumbnails (the only dir we actually write into).
+# Honor GALACTILOG_SKIP_CHOWN=1 for users who manage ownership themselves.
+if [ "${GALACTILOG_SKIP_CHOWN:-0}" != "1" ]; then
+    desired="$PUID:$PGID"
+
+    if [ -d /app/data ]; then
+        current_owner=$(stat -c '%u:%g' /app/data 2>/dev/null || echo "")
+        if [ -n "$current_owner" ] && [ "$current_owner" != "$desired" ]; then
+            echo "Adjusting ownership of /app/data from $current_owner to $desired (shallow)..."
+            if chown "$PUID:$PGID" /app/data 2>/dev/null; then
+                DID_CHOWN=1
+            else
+                echo "Warning: chown of /app/data failed (likely read-only mount, continuing)"
+            fi
+        fi
+    fi
+
+    if [ -d /app/data/thumbnails ]; then
+        current_owner=$(stat -c '%u:%g' /app/data/thumbnails 2>/dev/null || echo "")
+        if [ -n "$current_owner" ] && [ "$current_owner" != "$desired" ]; then
+            echo "Adjusting ownership of /app/data/thumbnails from $current_owner to $desired (one-time, may take a moment on large directories)..."
+            if chown -R "$PUID:$PGID" /app/data/thumbnails 2>/dev/null; then
+                DID_CHOWN=1
+            else
+                echo "Warning: chown of /app/data/thumbnails failed (continuing)"
+            fi
+        fi
+    fi
+fi
+# ---- end PUID/PGID handling ----
+
 echo "Running database migrations..."
 
 # Check if alembic_version table exists. If the DB has tables but no
@@ -188,6 +249,26 @@ from app.worker.tasks import smart_rebuild_targets, detect_mosaic_panels_task
 smart_rebuild_targets.apply_async(countdown=10)
 detect_mosaic_panels_task.apply_async(countdown=30)
 " 2>&1 || echo "Warning: could not dispatch startup maintenance tasks"
+fi
+
+if [ "$DID_CHOWN" = "1" ]; then
+    python -c "
+import json, time, os, sys
+try:
+    import redis
+    r = redis.from_url(os.environ.get('GALACTILOG_REDIS_URL', 'redis://redis:6379/0'))
+    entry = {
+        'type': 'ownership_adjusted',
+        'message': 'Data directory ownership aligned to PUID=${PUID} PGID=${PGID}',
+        'details': {'puid': ${PUID}, 'pgid': ${PGID}},
+        'timestamp': time.time(),
+    }
+    r.lpush('scan:activity', json.dumps(entry))
+    r.ltrim('scan:activity', 0, 19)
+    r.close()
+except Exception as e:
+    print(f'Warning: could not post ownership activity: {e}', file=sys.stderr)
+" 2>&1 || true
 fi
 
 echo "Starting services..."

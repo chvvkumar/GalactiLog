@@ -309,3 +309,16 @@ async def test_browse_rejects_escape(admin_user):
         assert r.status_code == 400
     finally:
         app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_apply_filters_now_calls_emit_not_append_activity():
+    import ast, pathlib
+    src = pathlib.Path("app/api/scan.py").read_text()
+    tree = ast.parse(src)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            if isinstance(node.func, ast.Name) and node.func.id == "append_activity":
+                raise AssertionError("append_activity() still called in scan.py")
+            if isinstance(node.func, ast.Attribute) and node.func.attr == "append_activity":
+                raise AssertionError("append_activity() still called in scan.py")

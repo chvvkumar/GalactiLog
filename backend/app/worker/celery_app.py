@@ -1,4 +1,5 @@
 from celery import Celery
+from celery.schedules import crontab
 
 from app.config import settings
 
@@ -29,6 +30,10 @@ celery_app.conf.update(
         "auto-scan-tick": {
             "task": "app.worker.tasks.auto_scan_tick",
             "schedule": 60.0,
+        },
+        "prune-activity-events": {
+            "task": "app.worker.prune_activity.prune_activity_events",
+            "schedule": crontab(hour=3, minute=0),
         },
     },
 )

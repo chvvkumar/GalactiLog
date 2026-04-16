@@ -24,5 +24,6 @@ from .herschel400_catalog import Herschel400Entry
 from .arp_catalog import ArpEntry
 from .abell_catalog import AbellEntry
 from .catalog_membership import TargetCatalogMembership
+from .activity_event import ActivityEvent
 
-__all__ = ["Base", "Target", "Image", "UserSettings", "SETTINGS_ROW_ID", "MergeCandidate", "SimbadCache", "SesameCache", "User", "UserRole", "RefreshToken", "AppMetadata", "OpenNGCEntry", "VizierCache", "SiteDarkHours", "SessionNote", "Mosaic", "MosaicPanel", "MosaicSuggestion", "CustomColumn", "CustomColumnValue", "ColumnType", "AppliesTo", "FilenameCandidate", "GaiaCache", "SACEntry", "CaldwellEntry", "Herschel400Entry", "ArpEntry", "AbellEntry", "TargetCatalogMembership"]
+__all__ = ["Base", "Target", "Image", "UserSettings", "SETTINGS_ROW_ID", "MergeCandidate", "SimbadCache", "SesameCache", "User", "UserRole", "RefreshToken", "AppMetadata", "OpenNGCEntry", "VizierCache", "SiteDarkHours", "SessionNote", "Mosaic", "MosaicPanel", "MosaicSuggestion", "CustomColumn", "CustomColumnValue", "ColumnType", "AppliesTo", "FilenameCandidate", "GaiaCache", "SACEntry", "CaldwellEntry", "Herschel400Entry", "ArpEntry", "AbellEntry", "TargetCatalogMembership", "ActivityEvent"]

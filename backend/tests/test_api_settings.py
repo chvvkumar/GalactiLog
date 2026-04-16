@@ -720,3 +720,19 @@ async def test_discovered_invalid_section_returns_422():
         assert resp.status_code == 422
     finally:
         app.dependency_overrides.clear()
+
+
+def test_activity_retention_days_default():
+    from app.schemas.settings import GeneralSettings
+    assert GeneralSettings().activity_retention_days == 90
+
+
+def test_activity_retention_days_validation():
+    from pydantic import ValidationError
+    from app.schemas.settings import GeneralSettings
+    with pytest.raises(ValidationError):
+        GeneralSettings(activity_retention_days=0)
+    with pytest.raises(ValidationError):
+        GeneralSettings(activity_retention_days=3651)
+    assert GeneralSettings(activity_retention_days=1).activity_retention_days == 1
+    assert GeneralSettings(activity_retention_days=3650).activity_retention_days == 3650
