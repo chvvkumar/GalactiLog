@@ -552,6 +552,8 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
       }
       setSelectedId(tile.panelId);
       updateSelectionVisual(tile, true);
+      group.moveToTop();
+      mosaicGroup?.getLayer()?.batchDraw();
     });
 
     return tile;
