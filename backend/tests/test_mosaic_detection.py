@@ -77,6 +77,9 @@ async def test_detect_creates_separate_suggestions_per_campaign():
     targets_result = MagicMock()
     targets_result.scalars.return_value.all.return_value = [t1, t2]
 
+    stale_result = MagicMock()
+    stale_result.all.return_value = []
+
     existing_result = MagicMock()
     existing_result.all.return_value = []
 
@@ -95,6 +98,7 @@ async def test_detect_creates_separate_suggestions_per_campaign():
     mock_session.execute = AsyncMock(side_effect=[
         in_mosaic_result,
         targets_result,
+        stale_result,
         existing_result,
         p1_dates,
         p2_dates,
@@ -107,4 +111,7 @@ async def test_detect_creates_separate_suggestions_per_campaign():
              if isinstance(call.args[0], MosaicSuggestion)]
     assert len(added) == 2
     names = sorted(s.suggested_name for s in added)
-    assert names == ["Heart Nebula (2023)", "Heart Nebula (2025)"]
+    assert names == [
+        "Heart Nebula (Jun 2023 - Aug 2023)",
+        "Heart Nebula (Oct 2025)",
+    ]

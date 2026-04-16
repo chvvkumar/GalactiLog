@@ -1,4 +1,4 @@
-import { Component, Show, For, createResource, createSignal, createMemo } from "solid-js";
+import { Component, Show, For, createResource, createSignal, createMemo, createEffect } from "solid-js";
 import { A, useParams } from "@solidjs/router";
 import { api } from "../api/client";
 import type { PanelStats } from "../types";
@@ -17,6 +17,17 @@ const MosaicDetailPage: Component = () => {
   type SortDir = "asc" | "desc";
   const [sortKey, setSortKey] = createSignal<SortKey>("panel");
   const [sortDir, setSortDir] = createSignal<SortDir>("asc");
+  const [selectedFilter, setSelectedFilter] = createSignal<string | null>(null);
+  const [filterLoading, setFilterLoading] = createSignal(false);
+  const [thumbnailOverrides, setThumbnailOverrides] = createSignal<Record<string, string | null> | null>(null);
+
+  // Initialize selected filter from API response
+  createEffect(() => {
+    const data = mosaic();
+    if (data && data.default_filter && selectedFilter() === null) {
+      setSelectedFilter(data.default_filter);
+    }
+  });
 
   const toggleSort = (key: SortKey) => {
     if (sortKey() === key) {
@@ -65,6 +76,23 @@ const MosaicDetailPage: Component = () => {
         setNotesSaving(false);
       }
     }, 1000);
+  };
+
+  const handleFilterChange = async (filter: string) => {
+    setSelectedFilter(filter);
+    setFilterLoading(true);
+    try {
+      const thumbnails = await api.getMosaicPanelThumbnails(params.mosaicId, filter);
+      const overrides: Record<string, string | null> = {};
+      for (const t of thumbnails) {
+        overrides[t.panel_id] = t.thumbnail_url;
+      }
+      setThumbnailOverrides(overrides);
+    } catch (e) {
+      showToast("Failed to load filter previews", "error", 5000);
+    } finally {
+      setFilterLoading(false);
+    }
   };
 
   return (
@@ -131,6 +159,38 @@ const MosaicDetailPage: Component = () => {
               />
             </div>
 
+            {/* Needs Review Banner */}
+            <Show when={mosaic()?.needs_review}>
+              <div class="rounded-[var(--radius-sm)] bg-amber-500/10 border border-amber-500/30 p-4 flex items-center justify-between">
+                <div>
+                  <p class="text-sm font-medium text-amber-400">Session review required</p>
+                  <p class="text-xs text-theme-text-secondary mt-1">
+                    This mosaic was created before session management. Select which sessions to include for each panel.
+                  </p>
+                </div>
+                <button
+                  onClick={async () => {
+                    const data = mosaic();
+                    if (!data) return;
+                    for (const panel of data.panels) {
+                      const sessions = await api.getPanelSessions(data.id, panel.panel_id);
+                      const available = sessions.sessions
+                        .filter((s) => s.status === "available")
+                        .map((s) => s.session_date);
+                      if (available.length > 0) {
+                        await api.updatePanelSessions(data.id, panel.panel_id, available, []);
+                      }
+                    }
+                    refetch();
+                    showToast("All sessions included");
+                  }}
+                  class="px-4 py-2 text-sm bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded-[var(--radius-sm)] hover:bg-amber-500/30 transition-colors whitespace-nowrap"
+                >
+                  Include All
+                </button>
+              </div>
+            </Show>
+
             {/* Panel Thumbnails Grid */}
             <Show when={data().panels.some((p: PanelStats) => p.thumbnail_url)}>
               <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
@@ -152,6 +212,11 @@ const MosaicDetailPage: Component = () => {
                   panels={data().panels}
                   rotationAngle={data().rotation_angle ?? 0}
                   pixelCoords={data().pixel_coords ?? false}
+                  availableFilters={data().available_filters ?? []}
+                  selectedFilter={selectedFilter()}
+                  onFilterChange={handleFilterChange}
+                  filterLoading={filterLoading()}
+                  thumbnailOverrides={thumbnailOverrides()}
                   onSave={async (panels, rotationAngle) => {
                     try {
                       await api.batchUpdateMosaicPanels(params.mosaicId, panels, rotationAngle);
@@ -168,60 +233,162 @@ const MosaicDetailPage: Component = () => {
               </div>
             </Show>
 
-            {/* Panel Table */}
+            {/* Per-Panel Session Management */}
             <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
               <div class="flex items-center gap-2">
                 <h2 class="text-sm font-semibold text-theme-text-primary">Sessions</h2>
                 <HelpPopover>
                   <p class="text-sm text-theme-text-secondary">
-                    Table of every imaging session that contributed frames to any panel in the mosaic. Sort by session date, integration time, frames, or filter to review contributions.
-                  </p>
-                  <p class="text-sm text-theme-text-secondary">
-                    Example: identify a panel that still needs more integration time to match the others.
+                    Manage which imaging sessions are included in each panel. Included sessions contribute to mosaic statistics and composites. Available sessions can be added at any time.
                   </p>
                 </HelpPopover>
               </div>
-              <div class="overflow-hidden rounded border border-theme-border">
-                <table class="w-full text-xs">
-                  <thead>
-                    <tr class="bg-theme-surface text-theme-text-secondary">
-                      <th class="px-3 py-2 text-left cursor-pointer select-none hover:text-theme-text-primary" onClick={() => toggleSort("panel")}>Panel{sortIndicator("panel")}</th>
-                      <th class="px-3 py-2 text-left cursor-pointer select-none hover:text-theme-text-primary" onClick={() => toggleSort("target")}>Target{sortIndicator("target")}</th>
-                      <th class="px-3 py-2 text-right cursor-pointer select-none hover:text-theme-text-primary" onClick={() => toggleSort("integration")}>Integration{sortIndicator("integration")}</th>
-                      <th class="px-3 py-2 text-right cursor-pointer select-none hover:text-theme-text-primary" onClick={() => toggleSort("frames")}>Frames{sortIndicator("frames")}</th>
-                      <th class="px-3 py-2 text-left">Filters</th>
-                      <th class="px-3 py-2 text-left cursor-pointer select-none hover:text-theme-text-primary" onClick={() => toggleSort("session")}>Session Date{sortIndicator("session")}</th>
-                      <th class="px-3 py-2"></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <For each={sortedPanels()}>
-                      {(panel) => (
-                        <tr class="border-t border-theme-border hover:bg-theme-surface/50">
-                          <td class="px-3 py-2 text-theme-text-primary">{panel.panel_label}</td>
-                          <td class="px-3 py-2 text-theme-text-primary">{panel.target_name}</td>
-                          <td class="px-3 py-2 text-right text-theme-text-primary">{formatIntegration(panel.total_integration_seconds)}</td>
-                          <td class="px-3 py-2 text-right text-theme-text-secondary">{panel.total_frames}</td>
-                          <td class="px-3 py-2 text-theme-text-secondary">
-                            {Object.entries(panel.filter_distribution)
-                              .map(([f, s]) => `${f}: ${formatIntegration(s)}`)
-                              .join(", ")}
-                          </td>
-                          <td class="px-3 py-2 text-theme-text-secondary">{panel.last_session_date || "\u2014"}</td>
-                          <td class="px-3 py-2">
-                            <A
-                              href={`/targets/${encodeURIComponent(panel.target_id)}`}
-                              class="text-theme-accent hover:underline"
-                            >
-                              Detail
-                            </A>
-                          </td>
-                        </tr>
-                      )}
-                    </For>
-                  </tbody>
-                </table>
-              </div>
+              <For each={mosaic()?.panels ?? []}>
+                {(panel) => {
+                  const [panelSessions, { refetch: refetchSessions }] = createResource(
+                    () => mosaic() ? { mId: mosaic()!.id, pId: panel.panel_id } : null,
+                    (params) => params ? api.getPanelSessions(params.mId, params.pId) : null,
+                  );
+                  const [expanded, setExpanded] = createSignal(false);
+                  const included = () => panelSessions()?.sessions.filter((s) => s.status === "included") ?? [];
+                  const available = () => panelSessions()?.sessions.filter((s) => s.status === "available") ?? [];
+
+                  const handleInclude = async (dates: string[]) => {
+                    const data = mosaic();
+                    if (!data) return;
+                    await api.updatePanelSessions(data.id, panel.panel_id, dates, []);
+                    refetchSessions();
+                    refetch();
+                  };
+
+                  const handleExclude = async (dates: string[]) => {
+                    const data = mosaic();
+                    if (!data) return;
+                    await api.updatePanelSessions(data.id, panel.panel_id, [], dates);
+                    refetchSessions();
+                    refetch();
+                  };
+
+                  return (
+                    <div class="border border-theme-border rounded-[var(--radius-sm)] overflow-hidden">
+                      <button
+                        onClick={() => setExpanded(!expanded())}
+                        class="w-full flex items-center justify-between p-3 hover:bg-theme-surface/50 transition-colors"
+                      >
+                        <div class="flex items-center gap-3">
+                          <span class="text-sm font-medium text-theme-text-primary">{panel.panel_label}</span>
+                          <span class="text-xs text-theme-text-secondary">{panel.target_name}</span>
+                          <span class="text-xs text-theme-text-secondary">
+                            {formatIntegration(panel.total_integration_seconds)} · {panel.total_frames} frames
+                          </span>
+                          <Show when={(panel.available_session_count ?? 0) > 0}>
+                            <span class="text-xs text-amber-400">
+                              {panel.available_session_count} available
+                            </span>
+                          </Show>
+                        </div>
+                        <span class="text-theme-text-secondary text-xs">{expanded() ? "\u25B2" : "\u25BC"}</span>
+                      </button>
+
+                      <Show when={expanded()}>
+                        <div class="border-t border-theme-border">
+                          {/* Included sessions */}
+                          <Show when={included().length > 0}>
+                            <div class="p-3 space-y-2">
+                              <div class="text-xs font-medium text-theme-text-secondary">Included ({included().length})</div>
+                              <table class="w-full text-xs">
+                                <thead>
+                                  <tr class="text-theme-text-secondary">
+                                    <th class="px-2 py-1 text-left">Date</th>
+                                    <th class="px-2 py-1 text-left">Filters</th>
+                                    <th class="px-2 py-1 text-right">Frames</th>
+                                    <th class="px-2 py-1 text-right">Integration</th>
+                                    <th class="px-2 py-1"></th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  <For each={included()}>
+                                    {(sess) => (
+                                      <tr class="border-t border-theme-border/30 hover:bg-theme-base/30">
+                                        <td class="px-2 py-1 text-theme-text-primary">{sess.session_date}</td>
+                                        <td class="px-2 py-1 text-theme-text-secondary">
+                                          {Object.entries(sess.filters).map(([f, d]) => `${f}: ${d.frames}`).join(", ")}
+                                        </td>
+                                        <td class="px-2 py-1 text-right text-theme-text-secondary">{sess.total_frames}</td>
+                                        <td class="px-2 py-1 text-right text-theme-text-secondary">{formatIntegration(sess.total_integration_seconds)}</td>
+                                        <td class="px-2 py-1 text-right">
+                                          <button
+                                            onClick={() => handleExclude([sess.session_date])}
+                                            class="text-xs text-theme-text-secondary hover:text-theme-danger transition-colors"
+                                          >
+                                            Remove
+                                          </button>
+                                        </td>
+                                      </tr>
+                                    )}
+                                  </For>
+                                </tbody>
+                              </table>
+                            </div>
+                          </Show>
+
+                          {/* Available sessions */}
+                          <Show when={available().length > 0}>
+                            <div class="p-3 space-y-2 border-t border-theme-border/50">
+                              <div class="flex items-center justify-between">
+                                <div class="text-xs font-medium text-amber-400">Available ({available().length})</div>
+                                <button
+                                  onClick={() => handleInclude(available().map((s) => s.session_date))}
+                                  class="text-xs text-theme-accent hover:underline"
+                                >
+                                  Include all
+                                </button>
+                              </div>
+                              <table class="w-full text-xs">
+                                <thead>
+                                  <tr class="text-theme-text-secondary">
+                                    <th class="px-2 py-1 text-left">Date</th>
+                                    <th class="px-2 py-1 text-left">Filters</th>
+                                    <th class="px-2 py-1 text-right">Frames</th>
+                                    <th class="px-2 py-1 text-right">Integration</th>
+                                    <th class="px-2 py-1"></th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  <For each={available()}>
+                                    {(sess) => (
+                                      <tr class="border-t border-theme-border/30 hover:bg-theme-base/30 opacity-60">
+                                        <td class="px-2 py-1 text-theme-text-primary">{sess.session_date}</td>
+                                        <td class="px-2 py-1 text-theme-text-secondary">
+                                          {Object.entries(sess.filters).map(([f, d]) => `${f}: ${d.frames}`).join(", ")}
+                                        </td>
+                                        <td class="px-2 py-1 text-right text-theme-text-secondary">{sess.total_frames}</td>
+                                        <td class="px-2 py-1 text-right text-theme-text-secondary">{formatIntegration(sess.total_integration_seconds)}</td>
+                                        <td class="px-2 py-1 text-right">
+                                          <button
+                                            onClick={() => handleInclude([sess.session_date])}
+                                            class="text-xs text-theme-accent hover:underline"
+                                          >
+                                            Include
+                                          </button>
+                                        </td>
+                                      </tr>
+                                    )}
+                                  </For>
+                                </tbody>
+                              </table>
+                            </div>
+                          </Show>
+
+                          <Show when={!panelSessions.loading && included().length === 0 && available().length === 0}>
+                            <div class="p-3 text-xs text-theme-text-secondary">No sessions found for this panel.</div>
+                          </Show>
+                        </div>
+                      </Show>
+                    </div>
+                  );
+                }}
+              </For>
             </div>
           </div>
         )}

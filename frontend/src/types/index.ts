@@ -845,6 +845,7 @@ export interface PanelStats {
   grid_col: number | null;
   rotation: number;
   flip_h: boolean;
+  available_session_count?: number;
 }
 
 export interface MosaicSummary {
@@ -855,6 +856,9 @@ export interface MosaicSummary {
   total_integration_seconds: number;
   total_frames: number;
   completion_pct: number;
+  first_session: string | null;
+  last_session: string | null;
+  needs_review?: boolean;
 }
 
 export interface MosaicDetailResponse {
@@ -866,6 +870,17 @@ export interface MosaicDetailResponse {
   total_integration_seconds: number;
   total_frames: number;
   panels: PanelStats[];
+  available_filters: string[];
+  default_filter: string | null;
+  needs_review?: boolean;
+}
+
+export interface PanelThumbnailResponse {
+  panel_id: string;
+  thumbnail_url: string | null;
+  frame_id: string | null;
+  score: number | null;
+  filter_used: string;
 }
 
 export interface SuggestionPanelSession {
@@ -884,7 +899,28 @@ export interface MosaicSuggestionResponse {
   panel_labels: string[];
   target_names: Record<string, string>;
   sessions: SuggestionPanelSession[];
+  session_dates?: Record<string, string[]> | null;
+  other_session_count?: number;
   status: string;
+}
+
+export interface PanelSessionFilter {
+  frames: number;
+  integration: number;
+}
+
+export interface PanelSessionInfo {
+  session_date: string;
+  status: "included" | "available";
+  total_frames: number;
+  total_integration_seconds: number;
+  filters: Record<string, PanelSessionFilter>;
+}
+
+export interface PanelSessionsResponse {
+  panel_id: string;
+  panel_label: string;
+  sessions: PanelSessionInfo[];
 }
 
 // Custom Columns

@@ -644,6 +644,11 @@ export const api = {
   getMosaicDetail: (id: string) =>
     fetchJson<import("../types").MosaicDetailResponse>(`/mosaics/${id}`),
 
+  getMosaicPanelThumbnails: (mosaicId: string, filter: string) =>
+    fetchJson<import("../types").PanelThumbnailResponse[]>(
+      `/mosaics/${mosaicId}/panels/thumbnails?filter=${encodeURIComponent(filter)}`
+    ),
+
   updateMosaic: (id: string, data: { name?: string; notes?: string; rotation_angle?: number | null; pixel_coords?: boolean }) =>
     fetchJson<{ status: string }>(`/mosaics/${id}`, {
       method: "PUT",
@@ -703,6 +708,17 @@ export const api = {
 
   dismissMosaicSuggestion: (id: string) =>
     fetchJson<{ status: string }>(`/mosaics/suggestions/${id}/dismiss`, { method: "POST" }),
+
+  getPanelSessions: (mosaicId: string, panelId: string) =>
+    fetchJson<import("../types").PanelSessionsResponse>(
+      `/mosaics/${mosaicId}/panels/${panelId}/sessions`
+    ),
+
+  updatePanelSessions: (mosaicId: string, panelId: string, include: string[], exclude: string[]) =>
+    fetchJson<{ status: string }>(`/mosaics/${mosaicId}/panels/${panelId}/sessions`, {
+      method: "PUT",
+      body: JSON.stringify({ include, exclude }),
+    }),
 
   // Custom Columns
   getCustomColumns: () =>

@@ -80,6 +80,70 @@ def _parse_ra(value) -> float | None:
         return None
 
 
+def score_frames(frames: list) -> list[tuple[Any, float]]:
+    """Score frames by quality metrics, returning (frame, score) pairs sorted best-first.
+
+    Metrics and weights:
+      detected_stars  0.35  (higher is better)
+      median_hfr      0.30  (lower is better)
+      eccentricity    0.15  (lower is better)
+      guiding_rms     0.12  (lower is better)
+      fwhm            0.08  (lower is better)
+
+    Each metric is min-max normalised within the provided frame pool.
+    Missing values receive a neutral 0.5.
+    """
+    if not frames:
+        return []
+    if len(frames) == 1:
+        return [(frames[0], 1.0)]
+
+    METRICS = [
+        # (attr, weight, higher_is_better)
+        ("detected_stars",      0.35, True),
+        ("median_hfr",          0.30, False),
+        ("eccentricity",        0.15, False),
+        ("guiding_rms_arcsec",  0.12, False),
+        ("fwhm",                0.08, False),
+    ]
+
+    # Collect raw values per metric
+    raw: dict[str, list[float | None]] = {}
+    for attr, _, _ in METRICS:
+        raw[attr] = [getattr(f, attr, None) for f in frames]
+
+    # Normalise each metric to 0-1
+    normalised: dict[str, list[float]] = {}
+    for attr, _, higher_is_better in METRICS:
+        vals = raw[attr]
+        nums = [v for v in vals if v is not None and v > 0]
+        if len(nums) < 2:
+            normalised[attr] = [0.5] * len(frames)
+            continue
+        lo, hi = min(nums), max(nums)
+        span = hi - lo if hi != lo else 1.0
+        result = []
+        for v in vals:
+            if v is None or v <= 0:
+                result.append(0.5)
+            else:
+                n = (v - lo) / span
+                result.append(n if higher_is_better else 1.0 - n)
+        normalised[attr] = result
+
+    # Weighted sum
+    scored = []
+    for i, frame in enumerate(frames):
+        total = sum(
+            normalised[attr][i] * weight
+            for attr, weight, _ in METRICS
+        )
+        scored.append((frame, total))
+
+    scored.sort(key=lambda x: x[1], reverse=True)
+    return scored
+
+
 async def select_best_frame(
     target_id,
     object_pattern: str | None,
@@ -118,6 +182,96 @@ async def select_best_frame(
     )
     row = (await session.execute(alt_q)).scalars().first()
     return row
+
+
+async def select_best_frame_for_filter(
+    target_id,
+    object_pattern: str | None,
+    filter_name: str,
+    session: AsyncSession,
+) -> tuple[Any, float] | None:
+    """Select the best LIGHT frame for a specific filter using quality scoring.
+    Returns (frame, score) or None.
+    """
+    base_filter = [
+        Image.resolved_target_id == target_id,
+        Image.image_type == "LIGHT",
+        Image.file_path.isnot(None),
+        Image.filter_used == filter_name,
+    ]
+    if object_pattern:
+        base_filter.append(Image.raw_headers["OBJECT"].astext.ilike(object_pattern))
+
+    q = select(Image).where(*base_filter)
+    frames = list((await session.execute(q)).scalars().all())
+    if not frames:
+        return None
+    scored = score_frames(frames)
+    return scored[0]  # (frame, score)
+
+
+async def find_default_filter(
+    panels: list,
+    session: AsyncSession,
+) -> tuple[str | None, list[str]]:
+    """Find the best default filter across all panels, plus the list of available filters.
+
+    Returns (default_filter, available_filters) where available_filters is sorted
+    by total integration time descending.
+    """
+    from sqlalchemy import func as sa_func
+
+    # Collect all available filters with total integration across panels
+    all_filters: dict[str, float] = {}
+
+    for panel in panels:
+        base_filter = [
+            Image.resolved_target_id == panel.target_id,
+            Image.image_type == "LIGHT",
+            Image.file_path.isnot(None),
+        ]
+        if panel.object_pattern:
+            base_filter.append(Image.raw_headers["OBJECT"].astext.ilike(panel.object_pattern))
+
+        # Get filter integration totals
+        fq = (
+            select(Image.filter_used, sa_func.sum(Image.exposure_time))
+            .where(*base_filter)
+            .where(Image.filter_used.is_not(None))
+            .group_by(Image.filter_used)
+        )
+        for fname, total in (await session.execute(fq)).all():
+            all_filters[fname] = all_filters.get(fname, 0) + (total or 0)
+
+    available = sorted(all_filters.keys(), key=lambda f: all_filters[f], reverse=True)
+    if not available:
+        return None, []
+
+    # Find the single best-scoring frame across all panels and filters
+    best_score = -1.0
+    best_filter = available[0]  # fallback to most-integrated filter
+
+    for panel in panels:
+        base_filter = [
+            Image.resolved_target_id == panel.target_id,
+            Image.image_type == "LIGHT",
+            Image.file_path.isnot(None),
+            Image.filter_used.in_(available),
+        ]
+        if panel.object_pattern:
+            base_filter.append(Image.raw_headers["OBJECT"].astext.ilike(panel.object_pattern))
+
+        q = select(Image).where(*base_filter)
+        frames = list((await session.execute(q)).scalars().all())
+        if not frames:
+            continue
+        scored = score_frames(frames)
+        top_frame, top_score = scored[0]
+        if top_score > best_score:
+            best_score = top_score
+            best_filter = top_frame.filter_used
+
+    return best_filter, available
 
 
 def generate_panel_thumbnail(
@@ -322,10 +476,13 @@ def composite_panels(
 # Module-level cache
 _composite_cache: dict[str, tuple[float, bytes]] = {}
 _CACHE_TTL = 3600
+_CACHE_MAX_SIZE = 100
 
 
-def _compute_cache_key(mosaic_id: str, frame_ids: list) -> str:
-    raw = f"{mosaic_id}:" + ",".join(str(fid) for fid in sorted(str(f) for f in frame_ids))
+def _compute_cache_key(mosaic_id: str, frame_ids: list, filter_name: str | None = None) -> str:
+    raw = f"{mosaic_id}:{filter_name or 'all'}:" + ",".join(
+        str(fid) for fid in sorted(str(f) for f in frame_ids)
+    )
     return hashlib.sha256(raw.encode()).hexdigest()
 
 
@@ -341,7 +498,34 @@ def _get_cached(cache_key: str) -> bytes | None:
 
 
 def _set_cached(cache_key: str, data: bytes) -> None:
+    if len(_composite_cache) >= _CACHE_MAX_SIZE:
+        # Evict oldest entry
+        oldest_key = min(_composite_cache, key=lambda k: _composite_cache[k][0])
+        del _composite_cache[oldest_key]
     _composite_cache[cache_key] = (time.time(), data)
+
+
+# Per-panel thumbnail cache: key = "{panel_id}:{filter}" -> (timestamp, jpeg_bytes)
+_thumbnail_cache: dict[str, tuple[float, bytes]] = {}
+
+
+def _get_cached_thumbnail(panel_id: str, filter_name: str) -> bytes | None:
+    key = f"{panel_id}:{filter_name}"
+    entry = _thumbnail_cache.get(key)
+    if entry is None:
+        return None
+    ts, data = entry
+    if time.time() - ts > _CACHE_TTL:
+        del _thumbnail_cache[key]
+        return None
+    return data
+
+
+def _set_cached_thumbnail(panel_id: str, filter_name: str, data: bytes) -> None:
+    if len(_thumbnail_cache) >= _CACHE_MAX_SIZE:
+        oldest_key = min(_thumbnail_cache, key=lambda k: _thumbnail_cache[k][0])
+        del _thumbnail_cache[oldest_key]
+    _thumbnail_cache[f"{panel_id}:{filter_name}"] = (time.time(), data)
 
 
 async def build_mosaic_composite(
@@ -349,12 +533,19 @@ async def build_mosaic_composite(
     panels: list,
     session: AsyncSession,
     tile_max_width: int = 400,
+    filter_name: str | None = None,
 ) -> bytes:
     """Full orchestrator: select frames, check cache, generate composite."""
     try:
         panel_frames = []
         for panel in panels:
-            frame = await select_best_frame(panel.target_id, panel.object_pattern, session)
+            if filter_name:
+                result = await select_best_frame_for_filter(
+                    panel.target_id, panel.object_pattern, filter_name, session,
+                )
+                frame = result[0] if result else None
+            else:
+                frame = await select_best_frame(panel.target_id, panel.object_pattern, session)
             if frame and frame.file_path:
                 panel_frames.append((panel, frame))
 
@@ -362,7 +553,7 @@ async def build_mosaic_composite(
             raise ValueError("No panels have accessible FITS frames")
 
         frame_ids = [f.id for _, f in panel_frames]
-        cache_key = _compute_cache_key(mosaic_id, frame_ids)
+        cache_key = _compute_cache_key(mosaic_id, frame_ids, filter_name)
         cached = _get_cached(cache_key)
         if cached:
             return cached

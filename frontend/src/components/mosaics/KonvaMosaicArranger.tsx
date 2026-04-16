@@ -1,4 +1,4 @@
-import { Component, createSignal, createEffect, onMount, onCleanup, Show } from "solid-js";
+import { Component, createSignal, createEffect, onMount, onCleanup, Show, For } from "solid-js";
 import Konva from "konva";
 import { api } from "../../api/client";
 import type { PanelStats } from "../../types";
@@ -26,6 +26,11 @@ export interface KonvaMosaicArrangerProps {
   panels: PanelStats[];
   rotationAngle: number;
   pixelCoords: boolean;
+  availableFilters: string[];
+  selectedFilter: string | null;
+  onFilterChange: (filter: string) => void;
+  filterLoading: boolean;
+  thumbnailOverrides: Record<string, string | null> | null;
   onSave: (
     panels: Array<{
       panel_id: string;
@@ -65,6 +70,7 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
   let mosaicGroup: Konva.Group | null = null;
 
   const tiles = new Map<string, TileState>();
+  const noDataNodes = new Map<string, Konva.Text>();
 
   const [selectedId, setSelectedId] = createSignal<string | null>(null);
   const [globalRotation, setGlobalRotation] = createSignal(props.rotationAngle ?? 0);
@@ -734,9 +740,119 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
     rotationInitialized = true;
   });
 
+  // ── Update tile images when thumbnail overrides change ───────────
+  createEffect(() => {
+    const overrides = props.thumbnailOverrides;
+    if (!overrides || !stage) return;
+
+    for (const [panelId, url] of Object.entries(overrides)) {
+      const tile = tiles.get(panelId);
+      if (!tile) continue;
+
+      // Clean up any existing "No data" text node for this panel
+      const existingNoData = noDataNodes.get(panelId);
+      if (existingNoData) {
+        existingNoData.destroy();
+        noDataNodes.delete(panelId);
+      }
+
+      // Destroy old image node
+      if (tile.imageNode) {
+        tile.imageNode.destroy();
+      }
+
+      if (url === null) {
+        // No data for this filter — show dimmed placeholder
+        const placeholder = new Konva.Rect({
+          width: tile.width,
+          height: tile.height,
+          fill: PLACEHOLDER_COLOR,
+          stroke: PLACEHOLDER_BORDER,
+          strokeWidth: 1,
+          cornerRadius: 4,
+          opacity: 0.5,
+        });
+        tile.group.add(placeholder);
+        tile.imageNode = placeholder;
+
+        // Add "No data" text and track it
+        const noDataText = new Konva.Text({
+          x: 0,
+          y: tile.height / 2 - 8,
+          width: tile.width,
+          text: `No ${props.selectedFilter ?? "filter"} data`,
+          fontSize: 11,
+          fontFamily: "sans-serif",
+          fill: "#999",
+          align: "center",
+          listening: false,
+        });
+        tile.group.add(noDataText);
+        noDataNodes.set(panelId, noDataText);
+
+        // Keep label/badge on top
+        tile.badgeNode.moveToTop();
+        tile.labelNode.moveToTop();
+        tile.borderRect.moveToTop();
+        updateTileTransform(tile);
+      } else {
+        // Load new thumbnail
+        const img = new Image();
+        img.crossOrigin = "anonymous";
+        img.onload = () => {
+          if (!stage) return;
+          const nw = img.naturalWidth;
+          const nh = img.naturalHeight;
+          const scale = Math.min(TILE_SIZE / nw, TILE_SIZE / nh);
+          const scaledW = Math.round(nw * scale);
+          const scaledH = Math.round(nh * scale);
+
+          tile.width = scaledW;
+          tile.height = scaledH;
+          tile.borderRect.width(scaledW + 6);
+          tile.borderRect.height(scaledH + 6);
+          tile.labelNode.y(scaledH - 22);
+
+          // Remove current image node (could be placeholder set above while loading)
+          if (tile.imageNode) {
+            tile.imageNode.destroy();
+          }
+
+          const konvaImg = new Konva.Image({
+            image: img,
+            width: scaledW,
+            height: scaledH,
+            cornerRadius: 4,
+          });
+          tile.group.add(konvaImg);
+          tile.imageNode = konvaImg;
+
+          tile.badgeNode.moveToTop();
+          tile.labelNode.moveToTop();
+          tile.borderRect.moveToTop();
+          updateTileTransform(tile);
+          tileLayer?.batchDraw();
+        };
+        img.src = url;
+      }
+    }
+    tileLayer?.batchDraw();
+  });
+
   // ── Reset global rotation ──────────────────────────────────────────
   const resetRotation = () => {
     setGlobalRotation(0);
+  };
+
+  // ── Reset all tile transforms to defaults ─────────────────────────
+  const resetAllTransforms = () => {
+    for (const tile of tiles.values()) {
+      tile.rotation = 0;
+      tile.flipH = false;
+      updateTileTransform(tile);
+    }
+    setGlobalRotation(0);
+    scheduleSave();
   };
 
   return (
@@ -808,13 +924,46 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
         <button
           class="px-2 py-1 rounded bg-theme-surface hover:bg-theme-hover transition-colors text-xs"
           onClick={resetRotation}
-          title="Reset rotation to 0"
+          title="Reset rotation to 0°"
         >
-          Reset
+          0&deg;
         </button>
 
+        <div class="w-px h-5 bg-theme-border" />
+
+        <button
+          class="px-2 py-1 rounded bg-theme-surface hover:bg-theme-hover transition-colors text-xs"
+          onClick={resetAllTransforms}
+          title="Reset all tile rotations, flips, and global rotation to defaults"
+        >
+          Reset All
+        </button>
+
+        {/* Spacer to push filter to right */}
+        <div class="flex-1" />
+
+        {/* Filter selector */}
+        <Show when={props.availableFilters.length > 0}>
+          <div class="flex items-center gap-2">
+            <label class="text-xs text-theme-text-secondary">Filter</label>
+            <select
+              class="px-2 py-1 rounded bg-theme-surface text-xs text-theme-text border border-theme-border"
+              value={props.selectedFilter ?? ""}
+              onChange={(e) => props.onFilterChange(e.currentTarget.value)}
+              disabled={props.filterLoading}
+            >
+              <For each={props.availableFilters}>
+                {(f) => <option value={f}>{f}</option>}
+              </For>
+            </select>
+            <Show when={props.filterLoading}>
+              <span class="text-xs text-theme-text-secondary">Loading...</span>
+            </Show>
+          </div>
+        </Show>
+
         <Show when={saving()}>
-          <span class="ml-auto text-xs text-theme-text-secondary">Saving...</span>
+          <span class="text-xs text-theme-text-secondary">Saving...</span>
         </Show>
       </div>
 
