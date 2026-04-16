@@ -855,6 +855,8 @@ export interface MosaicSummary {
   total_integration_seconds: number;
   total_frames: number;
   completion_pct: number;
+  first_session: string | null;
+  last_session: string | null;
 }
 
 export interface MosaicDetailResponse {

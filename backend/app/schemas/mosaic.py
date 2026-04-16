@@ -71,6 +71,8 @@ class MosaicSummary(BaseModel):
     total_integration_seconds: float
     total_frames: int
     completion_pct: float
+    first_session: str | None = None
+    last_session: str | None = None
 
 
 class MosaicPanelBatchItem(BaseModel):

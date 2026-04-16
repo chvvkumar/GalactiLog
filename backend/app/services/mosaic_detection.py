@@ -14,25 +14,40 @@ from app.models.mosaic_suggestion import MosaicSuggestion
 
 
 def cluster_sessions_by_gap(dates: list[str], gap_days: int) -> list[list[str]]:
-    """Split sorted date strings into clusters where consecutive dates are <= gap_days apart."""
+    """Split sorted date strings into clusters.
+
+    A new cluster starts when either:
+      - the gap between consecutive dates exceeds gap_days, OR
+      - adding the next date would make the cluster span exceed gap_days.
+    This prevents chaining where small consecutive gaps accumulate into
+    a cluster spanning many months.
+    """
     if not dates:
         return []
     sorted_dates = sorted(dates)
     parsed = [datetime.strptime(d, "%Y-%m-%d").date() for d in sorted_dates]
     clusters: list[list[str]] = [[sorted_dates[0]]]
+    cluster_start = parsed[0]
     for i in range(1, len(parsed)):
-        if (parsed[i] - parsed[i - 1]).days > gap_days:
+        consecutive_gap = (parsed[i] - parsed[i - 1]).days > gap_days
+        span_exceeded = (parsed[i] - cluster_start).days > gap_days
+        if consecutive_gap or span_exceeded:
             clusters.append([])
+            cluster_start = parsed[i]
         clusters[-1].append(sorted_dates[i])
     return clusters
 
 
-def _year_range_suffix(dates: list[str]) -> str:
-    """Return '(YYYY)' or '(YYYY-YYYY)' from a list of date strings."""
-    years = sorted({d[:4] for d in dates})
-    if len(years) == 1:
-        return f"({years[0]})"
-    return f"({years[0]}-{years[-1]})"
+def _date_range_suffix(dates: list[str]) -> str:
+    """Return '(Mon YYYY)' or '(Mon YYYY - Mon YYYY)' from a list of date strings."""
+    parsed = sorted(datetime.strptime(d, "%Y-%m-%d").date() for d in dates)
+    first = parsed[0]
+    last = parsed[-1]
+    fmt_first = first.strftime("%b %Y")
+    fmt_last = last.strftime("%b %Y")
+    if fmt_first == fmt_last:
+        return f"({fmt_first})"
+    return f"({fmt_first} - {fmt_last})"
 
 
 async def detect_mosaic_panels(session: AsyncSession, gap_days: int = 0) -> int:
@@ -179,7 +194,7 @@ async def detect_mosaic_panels(session: AsyncSession, gap_days: int = 0) -> int:
                 # Multiple campaigns - one suggestion per cluster with year suffix
                 for cluster_dates in clusters:
                     cluster_set = set(cluster_dates)
-                    suffix = _year_range_suffix(cluster_dates)
+                    suffix = _date_range_suffix(cluster_dates)
                     campaign_name = f"{base_name} {suffix}"
 
                     if base_name in accepted_bases:

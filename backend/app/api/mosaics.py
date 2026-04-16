@@ -466,6 +466,7 @@ async def list_mosaics(
     # to avoid N+1 per-panel queries.
     simple_panels = [p for m in mosaics for p in m.panels if not p.object_pattern]
     bulk_rows: dict[str, tuple[float, int]] = {}
+    bulk_dates: dict[str, tuple[str | None, str | None]] = {}
     if simple_panels:
         target_ids = list({p.target_id for p in simple_panels})
         bulk_q = (
@@ -473,20 +474,26 @@ async def list_mosaics(
                 Image.resolved_target_id,
                 func.sum(Image.exposure_time).label("integration"),
                 func.count(Image.id).label("frames"),
+                func.min(Image.session_date).label("first_session"),
+                func.max(Image.session_date).label("last_session"),
             )
             .where(Image.resolved_target_id.in_(target_ids), Image.image_type == "LIGHT")
             .group_by(Image.resolved_target_id)
         )
-        bulk_rows = {
-            str(r[0]): (r[1] or 0, r[2] or 0)
-            for r in (await session.execute(bulk_q)).all()
-        }
+        for r in (await session.execute(bulk_q)).all():
+            tid = str(r[0])
+            bulk_rows[tid] = (r[1] or 0, r[2] or 0)
+            bulk_dates[tid] = (
+                str(r.first_session) if r.first_session else None,
+                str(r.last_session) if r.last_session else None,
+            )
 
     # Batch-fetch integration stats for all pattern panels using a single query
     # with per-(target_id, object_pattern) case expressions to avoid N+1.
     pattern_panels = [p for m in mosaics for p in m.panels if p.object_pattern]
     # Key: (str(target_id), object_pattern) -> (integration, frames)
     pattern_rows: dict[tuple[str, str], tuple[float, int]] = {}
+    pattern_dates: dict[tuple[str, str], tuple[str | None, str | None]] = {}
     if pattern_panels:
         # Build one OR condition per unique (target_id, pattern) pair
         unique_pairs = list({(p.target_id, p.object_pattern) for p in pattern_panels})
@@ -502,6 +509,7 @@ async def list_mosaics(
                 Image.resolved_target_id,
                 Image.raw_headers["OBJECT"].astext.label("object_name"),
                 Image.exposure_time,
+                Image.session_date,
             )
             .where(Image.image_type == "LIGHT", conditions)
         )
@@ -518,6 +526,9 @@ async def list_mosaics(
         accum: dict[tuple[str, str], list[float]] = {
             (str(tid), pat): [] for tid, pat in unique_pairs
         }
+        accum_dates: dict[tuple[str, str], list[str]] = {
+            (str(tid), pat): [] for tid, pat in unique_pairs
+        }
         for row in raw_rows:
             tid_str = str(row.resolved_target_id)
             obj_name = row.object_name or ""
@@ -525,25 +536,40 @@ async def list_mosaics(
             for pat, rx in patterns_by_target.get(tid_str, []):
                 if rx.match(obj_name):
                     accum[(tid_str, pat)].append(exp)
+                    if row.session_date:
+                        accum_dates[(tid_str, pat)].append(str(row.session_date))
 
         for key, exposures in accum.items():
             pattern_rows[key] = (sum(exposures), len(exposures))
+        pattern_dates: dict[tuple[str, str], tuple[str | None, str | None]] = {}
+        for key, dates in accum_dates.items():
+            if dates:
+                sorted_d = sorted(dates)
+                pattern_dates[key] = (sorted_d[0], sorted_d[-1])
+            else:
+                pattern_dates[key] = (None, None)
 
     results = []
     for m in mosaics:
         total_int = 0
         total_frames = 0
         panel_integrations = []
+        mosaic_first: str | None = None
+        mosaic_last: str | None = None
         for p in m.panels:
             if not p.object_pattern:
-                # Use bulk-fetched result
                 pi, pf = bulk_rows.get(str(p.target_id), (0, 0))
+                pf_date, pl_date = bulk_dates.get(str(p.target_id), (None, None))
             else:
-                # Use batch-fetched result for pattern panels
                 pi, pf = pattern_rows.get((str(p.target_id), p.object_pattern), (0, 0))
+                pf_date, pl_date = pattern_dates.get((str(p.target_id), p.object_pattern), (None, None))
             total_int += pi
             total_frames += pf
             panel_integrations.append(pi)
+            if pf_date and (mosaic_first is None or pf_date < mosaic_first):
+                mosaic_first = pf_date
+            if pl_date and (mosaic_last is None or pl_date > mosaic_last):
+                mosaic_last = pl_date
 
         max_panel = max(panel_integrations) if panel_integrations else 0
         if max_panel > 0 and len(panel_integrations) > 0:
@@ -559,6 +585,8 @@ async def list_mosaics(
             total_integration_seconds=total_int,
             total_frames=total_frames,
             completion_pct=round(completion, 1),
+            first_session=mosaic_first,
+            last_session=mosaic_last,
         ))
     return results
 

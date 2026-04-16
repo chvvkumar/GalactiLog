@@ -936,6 +936,12 @@ export const MosaicsTab: Component = () => {
                           {formatIntegration(m.total_integration_seconds)} integration
                           {" \u00b7 "}
                           {m.total_frames} frames
+                          <Show when={m.first_session}>
+                            {" \u00b7 "}
+                            {m.first_session === m.last_session
+                              ? m.first_session
+                              : `${m.first_session} \u2013 ${m.last_session}`}
+                          </Show>
                         </div>
                       </div>
                       <span class="text-theme-text-secondary text-xs">
