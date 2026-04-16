@@ -476,8 +476,10 @@ _composite_cache: dict[str, tuple[float, bytes]] = {}
 _CACHE_TTL = 3600
 
 
-def _compute_cache_key(mosaic_id: str, frame_ids: list) -> str:
-    raw = f"{mosaic_id}:" + ",".join(str(fid) for fid in sorted(str(f) for f in frame_ids))
+def _compute_cache_key(mosaic_id: str, frame_ids: list, filter_name: str | None = None) -> str:
+    raw = f"{mosaic_id}:{filter_name or 'all'}:" + ",".join(
+        str(fid) for fid in sorted(str(f) for f in frame_ids)
+    )
     return hashlib.sha256(raw.encode()).hexdigest()
 
 
@@ -496,17 +498,43 @@ def _set_cached(cache_key: str, data: bytes) -> None:
     _composite_cache[cache_key] = (time.time(), data)
 
 
+# Per-panel thumbnail cache: key = "{panel_id}:{filter}" -> (timestamp, jpeg_bytes)
+_thumbnail_cache: dict[str, tuple[float, bytes]] = {}
+
+
+def _get_cached_thumbnail(panel_id: str, filter_name: str) -> bytes | None:
+    key = f"{panel_id}:{filter_name}"
+    entry = _thumbnail_cache.get(key)
+    if entry is None:
+        return None
+    ts, data = entry
+    if time.time() - ts > _CACHE_TTL:
+        del _thumbnail_cache[key]
+        return None
+    return data
+
+
+def _set_cached_thumbnail(panel_id: str, filter_name: str, data: bytes) -> None:
+    _thumbnail_cache[f"{panel_id}:{filter_name}"] = (time.time(), data)
+
+
 async def build_mosaic_composite(
     mosaic_id: str,
     panels: list,
     session: AsyncSession,
     tile_max_width: int = 400,
+    filter_name: str | None = None,
 ) -> bytes:
     """Full orchestrator: select frames, check cache, generate composite."""
     try:
         panel_frames = []
         for panel in panels:
-            frame = await select_best_frame(panel.target_id, panel.object_pattern, session)
+            if filter_name:
+                frame = await select_best_frame_for_filter(
+                    panel.target_id, panel.object_pattern, filter_name, session,
+                )
+            else:
+                frame = await select_best_frame(panel.target_id, panel.object_pattern, session)
             if frame and frame.file_path:
                 panel_frames.append((panel, frame))
 
@@ -514,7 +542,7 @@ async def build_mosaic_composite(
             raise ValueError("No panels have accessible FITS frames")
 
         frame_ids = [f.id for _, f in panel_frames]
-        cache_key = _compute_cache_key(mosaic_id, frame_ids)
+        cache_key = _compute_cache_key(mosaic_id, frame_ids, filter_name)
         cached = _get_cached(cache_key)
         if cached:
             return cached

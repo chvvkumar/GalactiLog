@@ -18,9 +18,10 @@ from app.schemas.mosaic import (
     MosaicCreate, MosaicUpdate, MosaicPanelCreate, MosaicPanelUpdate,
     MosaicPanelBatchItem, MosaicPanelBatchRequest,
     MosaicSummary, MosaicDetailResponse, PanelStats, MosaicSuggestionResponse,
+    PanelThumbnail,
 )
 from app.api.auth import get_current_user
-from app.services.mosaic_composite import build_mosaic_composite
+from app.services.mosaic_composite import build_mosaic_composite, find_default_filter
 
 router = APIRouter(prefix="/mosaics", tags=["mosaics"])
 
@@ -629,6 +630,8 @@ async def get_mosaic_detail(
         total_frames += ps.total_frames
         panels.append(ps)
 
+    default_filter, available_filters = await find_default_filter(sorted_panels, session)
+
     return MosaicDetailResponse(
         id=str(mosaic.id),
         name=mosaic.name,
@@ -638,12 +641,15 @@ async def get_mosaic_detail(
         total_integration_seconds=total_int,
         total_frames=total_frames,
         panels=panels,
+        available_filters=available_filters,
+        default_filter=default_filter,
     )
 
 
 @router.get("/{mosaic_id}/composite")
 async def get_mosaic_composite(
     mosaic_id: str,
+    filter: str | None = None,
     session: AsyncSession = Depends(get_session),
     _user: User = Depends(get_current_user),
 ):
@@ -666,10 +672,134 @@ async def get_mosaic_composite(
             mosaic_id=str(mosaic.id),
             panels=panels,
             session=session,
+            filter_name=filter,
         )
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
+    return Response(content=jpeg_bytes, media_type="image/jpeg")
+
+
+@router.get("/{mosaic_id}/panels/thumbnails")
+async def get_panel_thumbnails(
+    mosaic_id: uuid.UUID,
+    filter: str,
+    session: AsyncSession = Depends(get_session),
+    _user: User = Depends(get_current_user),
+):
+    """Generate per-panel thumbnails for a specific filter using quality scoring."""
+    from pathlib import Path
+    from app.services.mosaic_composite import (
+        select_best_frame_for_filter,
+        score_frames,
+        generate_panel_thumbnail,
+        _get_cached_thumbnail,
+        _set_cached_thumbnail,
+    )
+    import io
+
+    q = select(Mosaic).options(
+        selectinload(Mosaic.panels).selectinload(MosaicPanel.target)
+    ).where(Mosaic.id == mosaic_id)
+    mosaic = (await session.execute(q)).scalar_one_or_none()
+    if not mosaic:
+        raise HTTPException(404, "Mosaic not found")
+
+    results = []
+    for panel in sorted(mosaic.panels, key=lambda p: p.sort_order):
+        frame = await select_best_frame_for_filter(
+            panel.target_id, panel.object_pattern, filter, session,
+        )
+        if not frame or not frame.file_path:
+            results.append({
+                "panel_id": str(panel.id),
+                "thumbnail_url": None,
+                "frame_id": None,
+                "score": None,
+                "filter_used": filter,
+            })
+            continue
+
+        # Score this frame in context of its panel's pool
+        pid = str(panel.id)
+        base_filter_conds = [
+            Image.resolved_target_id == panel.target_id,
+            Image.image_type == "LIGHT",
+            Image.file_path.isnot(None),
+            Image.filter_used == filter,
+        ]
+        if panel.object_pattern:
+            base_filter_conds.append(
+                Image.raw_headers["OBJECT"].astext.ilike(panel.object_pattern)
+            )
+        pool_q = select(Image).where(*base_filter_conds)
+        pool = list((await session.execute(pool_q)).scalars().all())
+        scored = score_frames(pool)
+        frame_score = next((s for f, s in scored if f.id == frame.id), None)
+
+        results.append({
+            "panel_id": pid,
+            "thumbnail_url": f"/api/mosaics/{mosaic_id}/panels/{pid}/thumbnail?filter={filter}",
+            "frame_id": str(frame.id),
+            "score": round(frame_score, 4) if frame_score is not None else None,
+            "filter_used": filter,
+        })
+
+    return results
+
+
+@router.get("/{mosaic_id}/panels/{panel_id}/thumbnail")
+async def get_panel_thumbnail_image(
+    mosaic_id: uuid.UUID,
+    panel_id: uuid.UUID,
+    filter: str,
+    session: AsyncSession = Depends(get_session),
+    _user: User = Depends(get_current_user),
+):
+    """Serve a single panel thumbnail JPEG for a specific filter."""
+    from pathlib import Path
+    from app.services.mosaic_composite import (
+        select_best_frame_for_filter,
+        generate_panel_thumbnail,
+        _get_cached_thumbnail,
+        _set_cached_thumbnail,
+    )
+    import io
+
+    panel = (await session.execute(
+        select(MosaicPanel).where(
+            MosaicPanel.id == panel_id,
+            MosaicPanel.mosaic_id == mosaic_id,
+        )
+    )).scalar_one_or_none()
+    if not panel:
+        raise HTTPException(404, "Panel not found")
+
+    pid = str(panel.id)
+    cached = _get_cached_thumbnail(pid, filter)
+    if cached:
+        return Response(content=cached, media_type="image/jpeg")
+
+    frame = await select_best_frame_for_filter(
+        panel.target_id, panel.object_pattern, filter, session,
+    )
+    if not frame or not frame.file_path:
+        raise HTTPException(404, f"No frames for filter '{filter}' in this panel")
+
+    fits_path = Path(frame.file_path)
+    if not fits_path.exists():
+        raise HTTPException(404, "FITS file not found")
+
+    try:
+        img, _ = generate_panel_thumbnail(fits_path, max_width=800)
+    except Exception as e:
+        raise HTTPException(422, f"Thumbnail generation failed: {e}")
+
+    buf = io.BytesIO()
+    img.save(buf, "JPEG", quality=90)
+    jpeg_bytes = buf.getvalue()
+
+    _set_cached_thumbnail(pid, filter, jpeg_bytes)
     return Response(content=jpeg_bytes, media_type="image/jpeg")
 
 
