@@ -23,7 +23,6 @@ const SAVE_DEBOUNCE_MS = 500;
 // ── Props ──────────────────────────────────────────────────────────────
 export interface KonvaMosaicArrangerProps {
   panels: PanelStats[];
-  mosaicId: string;
   rotationAngle: number;
   pixelCoords: boolean;
   onSave: (
@@ -76,7 +75,7 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
   // ── Debounced save ─────────────────────────────────────────────────
   const scheduleSave = () => {
     clearTimeout(saveTimer);
-    saveTimer = setTimeout(() => {
+    saveTimer = setTimeout(async () => {
       setSaving(true);
       const panelData = Array.from(tiles.values()).map((t) => ({
         panel_id: t.panelId,
@@ -85,8 +84,11 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
         rotation: t.rotation,
         flip_h: t.flipH,
       }));
-      props.onSave(panelData, globalRotation());
-      setSaving(false);
+      try {
+        await props.onSave(panelData, globalRotation());
+      } finally {
+        setSaving(false);
+      }
     }, SAVE_DEBOUNCE_MS);
   };
 
@@ -291,6 +293,7 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
       y: by,
       duration: SWAP_DURATION,
       easing: Konva.Easings.EaseInOut,
+      onFinish: function () { this.destroy(); },
     }).play();
 
     new Konva.Tween({
@@ -299,6 +302,7 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
       y: ay,
       duration: SWAP_DURATION,
       easing: Konva.Easings.EaseInOut,
+      onFinish: function () { this.destroy(); },
     }).play();
 
     scheduleSave();
@@ -450,6 +454,7 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
       const img = new Image();
       img.crossOrigin = "anonymous";
       img.onload = () => {
+        if (!stage) return; // component unmounted
         // Scale to actual aspect ratio, capping the larger dimension at TILE_SIZE
         const nw = img.naturalWidth;
         const nh = img.naturalHeight;
@@ -488,6 +493,7 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
         tileLayer?.batchDraw();
       };
       img.onerror = () => {
+        if (!stage) return; // component unmounted
         // Keep placeholder
         updateTileTransform(tile);
       };
@@ -714,10 +720,10 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
   return (
     <div class="space-y-3">
       {/* Toolbar */}
-      <div class="flex flex-wrap items-center gap-2 bg-gray-800 rounded px-3 py-2 text-sm text-gray-200">
+      <div class="flex flex-wrap items-center gap-2 bg-theme-elevated rounded px-3 py-2 text-sm text-theme-text">
         {/* Tile operations */}
         <button
-          class="px-2 py-1 rounded bg-gray-700 hover:bg-gray-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          class="px-2 py-1 rounded bg-theme-surface hover:bg-theme-hover disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           disabled={!selectedId()}
           onClick={rotateSelectedCW}
           title="Rotate selected tile 90 CW"
@@ -725,7 +731,7 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
           Rotate CW
         </button>
         <button
-          class="px-2 py-1 rounded bg-gray-700 hover:bg-gray-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          class="px-2 py-1 rounded bg-theme-surface hover:bg-theme-hover disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           disabled={!selectedId()}
           onClick={flipSelectedH}
           title="Flip selected tile horizontally"
@@ -733,18 +739,18 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
           Flip H
         </button>
 
-        <div class="w-px h-5 bg-gray-600" />
+        <div class="w-px h-5 bg-theme-border" />
 
         {/* View controls */}
         <button
-          class="px-2 py-1 rounded bg-gray-700 hover:bg-gray-600 transition-colors"
+          class="px-2 py-1 rounded bg-theme-surface hover:bg-theme-hover transition-colors"
           onClick={fitToView}
           title="Fit all tiles to viewport"
         >
           Fit
         </button>
         <button
-          class="px-2 py-1 rounded bg-gray-700 hover:bg-gray-600 transition-colors"
+          class="px-2 py-1 rounded bg-theme-surface hover:bg-theme-hover transition-colors"
           onClick={zoomOut}
           title="Zoom out"
         >
@@ -754,18 +760,18 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
           {Math.round(zoom() * 100)}%
         </span>
         <button
-          class="px-2 py-1 rounded bg-gray-700 hover:bg-gray-600 transition-colors"
+          class="px-2 py-1 rounded bg-theme-surface hover:bg-theme-hover transition-colors"
           onClick={zoomIn}
           title="Zoom in"
         >
           +
         </button>
 
-        <div class="w-px h-5 bg-gray-600" />
+        <div class="w-px h-5 bg-theme-border" />
 
         {/* Global rotation */}
         <label class="flex items-center gap-2 text-xs">
-          <span class="text-gray-400">Rotation</span>
+          <span class="text-theme-text-secondary">Rotation</span>
           <input
             type="range"
             min={-180}
@@ -778,7 +784,7 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
           <span class="tabular-nums w-10 text-center">{globalRotation()}&deg;</span>
         </label>
         <button
-          class="px-2 py-1 rounded bg-gray-700 hover:bg-gray-600 transition-colors text-xs"
+          class="px-2 py-1 rounded bg-theme-surface hover:bg-theme-hover transition-colors text-xs"
           onClick={resetRotation}
           title="Reset rotation to 0"
         >
@@ -786,14 +792,14 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
         </button>
 
         <Show when={saving()}>
-          <span class="ml-auto text-xs text-gray-400">Saving...</span>
+          <span class="ml-auto text-xs text-theme-text-secondary">Saving...</span>
         </Show>
       </div>
 
       {/* Canvas container */}
       <div
         ref={containerRef!}
-        class="w-full rounded border border-gray-700 bg-gray-900"
+        class="w-full rounded border border-theme-border bg-theme-surface"
         style={{ height: "600px", cursor: "grab" }}
       />
     </div>
