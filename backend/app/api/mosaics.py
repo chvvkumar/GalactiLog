@@ -16,6 +16,7 @@ from app.models.mosaic_suggestion import MosaicSuggestion
 from app.schemas.mosaic import (
     AcceptSuggestionRequest,
     MosaicCreate, MosaicUpdate, MosaicPanelCreate, MosaicPanelUpdate,
+    MosaicPanelBatchItem, MosaicPanelBatchRequest,
     MosaicSummary, MosaicDetailResponse, PanelStats, MosaicSuggestionResponse,
 )
 from app.api.auth import get_current_user
@@ -632,6 +633,8 @@ async def get_mosaic_detail(
         id=str(mosaic.id),
         name=mosaic.name,
         notes=mosaic.notes,
+        rotation_angle=mosaic.rotation_angle,
+        pixel_coords=mosaic.pixel_coords,
         total_integration_seconds=total_int,
         total_frames=total_frames,
         panels=panels,
@@ -793,6 +796,10 @@ async def update_mosaic(
         mosaic.name = body.name
     if body.notes is not None:
         mosaic.notes = body.notes
+    if body.rotation_angle is not None:
+        mosaic.rotation_angle = body.rotation_angle
+    if body.pixel_coords is not None:
+        mosaic.pixel_coords = body.pixel_coords
     await session.commit()
     return {"status": "ok"}
 
@@ -866,6 +873,67 @@ async def add_panel(
     session.add(panel)
     await session.commit()
     return {"status": "ok", "panel_id": str(panel.id)}
+
+
+@router.put("/{mosaic_id}/panels/batch", response_model=list[PanelStats])
+async def batch_update_panels(
+    mosaic_id: uuid.UUID,
+    body: MosaicPanelBatchRequest,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    """Update multiple panels in a single transaction (positions, rotation, flip)."""
+    q = (
+        select(Mosaic)
+        .options(selectinload(Mosaic.panels).selectinload(MosaicPanel.target))
+        .where(Mosaic.id == mosaic_id)
+    )
+    mosaic = (await session.execute(q)).scalar_one_or_none()
+    if not mosaic:
+        raise HTTPException(404, "Mosaic not found")
+
+    # Persist mosaic-level rotation_angle if provided
+    if body.rotation_angle is not None:
+        mosaic.rotation_angle = body.rotation_angle
+
+    panel_map = {p.id: p for p in mosaic.panels}
+
+    # Validate all panel_ids belong to this mosaic
+    for item in body.panels:
+        if item.panel_id not in panel_map:
+            raise HTTPException(404, f"Panel {item.panel_id} not found in mosaic")
+
+    # Apply partial updates
+    for item in body.panels:
+        panel = panel_map[item.panel_id]
+        if item.grid_row is not None:
+            panel.grid_row = item.grid_row
+        if item.grid_col is not None:
+            panel.grid_col = item.grid_col
+        if item.rotation is not None:
+            if item.rotation not in (0, 90, 180, 270):
+                raise HTTPException(400, "rotation must be 0, 90, 180, or 270")
+            panel.rotation = item.rotation
+        if item.flip_h is not None:
+            panel.flip_h = item.flip_h
+
+    await session.flush()
+
+    # Build response with panel stats
+    sorted_panels = sorted(mosaic.panels, key=lambda x: x.sort_order)
+    simple = [p for p in sorted_panels if not p.object_pattern]
+    batch_stats = await _batch_panel_stats(simple, session) if simple else {}
+
+    result = []
+    for p in sorted_panels:
+        if str(p.id) in batch_stats:
+            ps = batch_stats[str(p.id)]
+        else:
+            ps = await _panel_stats(p, session)
+        result.append(ps)
+
+    await session.commit()
+    return result
 
 
 @router.put("/{mosaic_id}/panels/{panel_id}")

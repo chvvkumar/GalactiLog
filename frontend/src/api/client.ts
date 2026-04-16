@@ -644,7 +644,7 @@ export const api = {
   getMosaicDetail: (id: string) =>
     fetchJson<import("../types").MosaicDetailResponse>(`/mosaics/${id}`),
 
-  updateMosaic: (id: string, data: { name?: string; notes?: string }) =>
+  updateMosaic: (id: string, data: { name?: string; notes?: string; rotation_angle?: number | null; pixel_coords?: boolean }) =>
     fetchJson<{ status: string }>(`/mosaics/${id}`, {
       method: "PUT",
       body: JSON.stringify(data),
@@ -674,6 +674,16 @@ export const api = {
     fetchJson<{ status: string }>(`/mosaics/${mosaicId}/panels/${panelId}`, {
       method: "PUT",
       body: JSON.stringify(data),
+    }),
+
+  batchUpdateMosaicPanels: (
+    mosaicId: string,
+    panels: Array<{ panel_id: string; grid_row?: number; grid_col?: number; rotation?: number; flip_h?: boolean }>,
+    rotationAngle?: number,
+  ) =>
+    fetchJson<import("../types").PanelStats[]>(`/mosaics/${mosaicId}/panels/batch`, {
+      method: "PUT",
+      body: JSON.stringify({ panels, rotation_angle: rotationAngle }),
     }),
 
   removeMosaicPanel: (mosaicId: string, panelId: string) =>

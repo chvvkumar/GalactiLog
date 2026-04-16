@@ -21,6 +21,7 @@ import type {
 import FailedFilesList from "./activity/FailedFilesList";
 import EnrichmentFailureList from "./activity/EnrichmentFailureList";
 import DetailsJsonFallback from "./activity/DetailsJsonFallback";
+import KeyValueDetails from "./activity/KeyValueDetails";
 
 const SEVERITY_ICON: Record<ActivitySeverity, string> = {
   info: "\u25CF", // filled circle
@@ -133,6 +134,37 @@ const ActiveJobRow: Component<{ job: ActiveJob }> = (props) => {
   );
 };
 
+function isPrimitive(value: unknown): boolean {
+  return (
+    value === null ||
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  );
+}
+
+function isShallowPrimitiveObject(
+  details: Record<string, unknown>,
+): boolean {
+  const values = Object.values(details);
+  if (values.length === 0) return false;
+  return values.every(isPrimitive);
+}
+
+function detailsRedundantWithMessage(
+  details: Record<string, unknown> | null,
+  message: string,
+): boolean {
+  if (!details) return true;
+  const entries = Object.entries(details);
+  if (entries.length === 0) return true;
+  if (entries.length !== 1) return false;
+  const [, value] = entries[0];
+  if (typeof value !== "number") return false;
+  const needle = String(value);
+  return message.includes(needle);
+}
+
 const RowDetails: Component<{ event: ActivityEvent }> = (props) => {
   const d = props.event.details;
   if (!d) return null;
@@ -156,6 +188,10 @@ const RowDetails: Component<{ event: ActivityEvent }> = (props) => {
     return <EnrichmentFailureList targets={(d as any).failed_targets} />;
   }
 
+  if (isShallowPrimitiveObject(d as Record<string, unknown>)) {
+    return <KeyValueDetails details={d as Record<string, unknown>} />;
+  }
+
   return <DetailsJsonFallback details={d} />;
 };
 
@@ -176,7 +212,15 @@ const TargetLinkedMessage: Component<{ event: ActivityEvent }> = (props) => (
 const HistoryRow: Component<{ event: ActivityEvent }> = (props) => {
   const settingsCtx = useSettingsContext();
   const [expanded, setExpanded] = createSignal(false);
-  const hasDetails = () => props.event.details !== null;
+  const hasDetails = () => {
+    const d = props.event.details;
+    if (d === null || d === undefined) return false;
+    if (typeof d !== "object") return false;
+    const record = d as Record<string, unknown>;
+    if (Object.keys(record).length === 0) return false;
+    if (detailsRedundantWithMessage(record, props.event.message)) return false;
+    return true;
+  };
 
   const hhmm = () => {
     const d = new Date(props.event.timestamp);
