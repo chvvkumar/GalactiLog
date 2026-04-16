@@ -4,7 +4,8 @@ import { api } from "../../api/client";
 import type { PanelStats } from "../../types";
 
 // ── Constants ──────────────────────────────────────────────────────────
-const SNAP = 20;
+const SNAP = 5;
+const GRID_VISUAL_SPACING = 40;
 const TILE_SIZE = 300; // default tile size when thumbnail dimensions unknown
 const LEGACY_CELL_PX = 320;
 const GRID_LINE_COLOR = "#374151"; // gray-700
@@ -123,12 +124,12 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
     const right = left + w / s;
     const bottom = top + h / s;
 
-    const startX = Math.floor(left / SNAP) * SNAP;
-    const endX = Math.ceil(right / SNAP) * SNAP;
-    const startY = Math.floor(top / SNAP) * SNAP;
-    const endY = Math.ceil(bottom / SNAP) * SNAP;
+    const startX = Math.floor(left / GRID_VISUAL_SPACING) * GRID_VISUAL_SPACING;
+    const endX = Math.ceil(right / GRID_VISUAL_SPACING) * GRID_VISUAL_SPACING;
+    const startY = Math.floor(top / GRID_VISUAL_SPACING) * GRID_VISUAL_SPACING;
+    const endY = Math.ceil(bottom / GRID_VISUAL_SPACING) * GRID_VISUAL_SPACING;
 
-    for (let x = startX; x <= endX; x += SNAP) {
+    for (let x = startX; x <= endX; x += GRID_VISUAL_SPACING) {
       bgLayer.add(
         new Konva.Line({
           points: [x, startY, x, endY],
@@ -138,7 +139,7 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
         }),
       );
     }
-    for (let y = startY; y <= endY; y += SNAP) {
+    for (let y = startY; y <= endY; y += GRID_VISUAL_SPACING) {
       bgLayer.add(
         new Konva.Line({
           points: [startX, y, endX, y],
@@ -509,6 +510,8 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
     // ── Drag events ────────────────────────────────────────────────
     group.on("dragstart", () => {
       stage?.draggable(false);
+      group.moveToTop();
+      mosaicGroup?.getLayer()?.batchDraw();
     });
 
     group.on("dragmove", () => {
@@ -520,13 +523,7 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
       stage?.draggable(true);
       tile.x = group.x();
       tile.y = group.y();
-
-      const overlap = findOverlapping(tile);
-      if (overlap) {
-        swapTiles(tile, overlap);
-      } else {
-        scheduleSave();
-      }
+      scheduleSave();
     });
 
     // ── Right-click to select + rotate CW ────────────────────────
