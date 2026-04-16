@@ -80,6 +80,70 @@ def _parse_ra(value) -> float | None:
         return None
 
 
+def score_frames(frames: list) -> list[tuple[Any, float]]:
+    """Score frames by quality metrics, returning (frame, score) pairs sorted best-first.
+
+    Metrics and weights:
+      detected_stars  0.35  (higher is better)
+      median_hfr      0.30  (lower is better)
+      eccentricity    0.15  (lower is better)
+      guiding_rms     0.12  (lower is better)
+      fwhm            0.08  (lower is better)
+
+    Each metric is min-max normalised within the provided frame pool.
+    Missing values receive a neutral 0.5.
+    """
+    if not frames:
+        return []
+    if len(frames) == 1:
+        return [(frames[0], 1.0)]
+
+    METRICS = [
+        # (attr, weight, higher_is_better)
+        ("detected_stars",      0.35, True),
+        ("median_hfr",          0.30, False),
+        ("eccentricity",        0.15, False),
+        ("guiding_rms_arcsec",  0.12, False),
+        ("fwhm",                0.08, False),
+    ]
+
+    # Collect raw values per metric
+    raw: dict[str, list[float | None]] = {}
+    for attr, _, _ in METRICS:
+        raw[attr] = [getattr(f, attr, None) for f in frames]
+
+    # Normalise each metric to 0-1
+    normalised: dict[str, list[float]] = {}
+    for attr, _, higher_is_better in METRICS:
+        vals = raw[attr]
+        nums = [v for v in vals if v is not None and v > 0]
+        if len(nums) < 2:
+            normalised[attr] = [0.5] * len(frames)
+            continue
+        lo, hi = min(nums), max(nums)
+        span = hi - lo if hi != lo else 1.0
+        result = []
+        for v in vals:
+            if v is None or v <= 0:
+                result.append(0.5)
+            else:
+                n = (v - lo) / span
+                result.append(n if higher_is_better else 1.0 - n)
+        normalised[attr] = result
+
+    # Weighted sum
+    scored = []
+    for i, frame in enumerate(frames):
+        total = sum(
+            normalised[attr][i] * weight
+            for attr, weight, _ in METRICS
+        )
+        scored.append((frame, total))
+
+    scored.sort(key=lambda x: x[1], reverse=True)
+    return scored
+
+
 async def select_best_frame(
     target_id,
     object_pattern: str | None,
