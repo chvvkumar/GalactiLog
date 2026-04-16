@@ -184,6 +184,94 @@ async def select_best_frame(
     return row
 
 
+async def select_best_frame_for_filter(
+    target_id,
+    object_pattern: str | None,
+    filter_name: str,
+    session: AsyncSession,
+):
+    """Select the best LIGHT frame for a specific filter using quality scoring."""
+    base_filter = [
+        Image.resolved_target_id == target_id,
+        Image.image_type == "LIGHT",
+        Image.file_path.isnot(None),
+        Image.filter_used == filter_name,
+    ]
+    if object_pattern:
+        base_filter.append(Image.raw_headers["OBJECT"].astext.ilike(object_pattern))
+
+    q = select(Image).where(*base_filter)
+    frames = list((await session.execute(q)).scalars().all())
+    if not frames:
+        return None
+    scored = score_frames(frames)
+    return scored[0][0]  # best frame
+
+
+async def find_default_filter(
+    panels: list,
+    session: AsyncSession,
+) -> tuple[str | None, list[str]]:
+    """Find the best default filter across all panels, plus the list of available filters.
+
+    Returns (default_filter, available_filters) where available_filters is sorted
+    by total integration time descending.
+    """
+    from sqlalchemy import func as sa_func
+
+    # Collect all available filters with total integration across panels
+    all_filters: dict[str, float] = {}
+
+    for panel in panels:
+        base_filter = [
+            Image.resolved_target_id == panel.target_id,
+            Image.image_type == "LIGHT",
+            Image.file_path.isnot(None),
+        ]
+        if panel.object_pattern:
+            base_filter.append(Image.raw_headers["OBJECT"].astext.ilike(panel.object_pattern))
+
+        # Get filter integration totals
+        fq = (
+            select(Image.filter_used, sa_func.sum(Image.exposure_time))
+            .where(*base_filter)
+            .where(Image.filter_used.is_not(None))
+            .group_by(Image.filter_used)
+        )
+        for fname, total in (await session.execute(fq)).all():
+            all_filters[fname] = all_filters.get(fname, 0) + (total or 0)
+
+    available = sorted(all_filters.keys(), key=lambda f: all_filters[f], reverse=True)
+    if not available:
+        return None, []
+
+    # Find the single best-scoring frame across all panels and filters
+    best_score = -1.0
+    best_filter = available[0]  # fallback to most-integrated filter
+
+    for panel in panels:
+        base_filter = [
+            Image.resolved_target_id == panel.target_id,
+            Image.image_type == "LIGHT",
+            Image.file_path.isnot(None),
+        ]
+        if panel.object_pattern:
+            base_filter.append(Image.raw_headers["OBJECT"].astext.ilike(panel.object_pattern))
+
+        for fname in available:
+            q = select(Image).where(*base_filter, Image.filter_used == fname)
+            frames = list((await session.execute(q)).scalars().all())
+            if not frames:
+                continue
+            scored = score_frames(frames)
+            top_score = scored[0][1]
+            if top_score > best_score:
+                best_score = top_score
+                best_filter = fname
+
+    return best_filter, available
+
+
 def generate_panel_thumbnail(
     fits_path: Path, max_width: int = 800,
 ) -> tuple[PILImage.Image, int]:
