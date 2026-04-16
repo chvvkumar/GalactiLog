@@ -67,15 +67,28 @@ Konva has no maintained SolidJS wrapper. Integration is imperative:
 
 ### Migration of existing positions
 
-Existing mosaics store grid_row/grid_col as small integers (0, 1, 2, etc.) representing cell indices. With Konva, these become pixel coordinates. On first load, if all panel positions have values less than 10, apply a one-time conversion: multiply each by 300 (a default cell spacing). Save the converted positions back immediately.
+Existing mosaics store grid_row/grid_col as small integers (0, 1, 2, etc.) representing cell indices. With Konva, these become pixel coordinates. A new boolean column `pixel_coords` on the `mosaics` table (default false) distinguishes legacy from converted mosaics.
+
+Migration strategy:
+- When `pixel_coords` is false, grid_row/grid_col are legacy cell indices.
+- When `pixel_coords` is true, grid_row/grid_col are pixel coordinates.
+- On first load of a mosaic where `pixel_coords` is false, the frontend multiplies each panel's grid_row/grid_col by a default cell spacing of 320px (chosen as a middle ground for typical panel sizes). It then saves the converted pixel positions and sets `pixel_coords=true` via the mosaic update endpoint.
+- This is a one-way migration. Once converted, the mosaic stays in pixel coordinate mode.
+- The `pixel_coords` column is added in the same Alembic migration as `rotation_angle`.
 
 ## Backend Changes
 
-### New column: mosaics.rotation_angle
+### New columns
 
+**mosaics.rotation_angle**
 - Type: Float, default 0.0, nullable
 - Purpose: stores the global mosaic rotation angle in degrees (-180 to +180)
-- Alembic migration with defensive _add_column_if_not_exists helper (per project convention, see migration 0013 pattern)
+
+**mosaics.pixel_coords**
+- Type: Boolean, default false, non-nullable
+- Purpose: distinguishes legacy cell-index positions (false) from pixel coordinate positions (true). See "Migration of existing positions" above.
+
+Both columns are added in a single Alembic migration with defensive _add_column_if_not_exists helper (per project convention, see migration 0013 pattern).
 
 ### New endpoint: PUT /{mosaic_id}/panels/batch
 
@@ -108,7 +121,7 @@ Behavior:
 
 ### Reinterpretation of grid_row/grid_col
 
-These columns (Integer, nullable) now store pixel coordinates instead of cell indices. No database migration needed. The column names become slightly misleading but changing them would require a migration and break backward compatibility for no functional gain.
+These columns (Integer, nullable) now store pixel coordinates instead of cell indices. The column type does not change, but the `pixel_coords` flag migration is required to distinguish old mosaics (cell indices) from new/converted mosaics (pixel coordinates). The column names become slightly misleading but changing them would require a rename migration and break backward compatibility for no functional gain.
 
 ## Frontend Changes
 
@@ -180,14 +193,20 @@ The rotation angle is stored on the Mosaic model (rotation_angle column) and app
 
 ### Tile overlap detection and swap
 
-On dragend, check if the dropped tile's snapped position overlaps any other tile (bounding box intersection). If overlap detected:
-1. Store the other tile's position
-2. Move the other tile to the dragged tile's original position (animated, 200ms)
+On dragend, check if the dropped tile's snapped position overlaps any other tile (bounding box intersection).
+
+If the tile is dragged to empty space (no overlap), it simply moves there with no swap.
+
+If overlap is detected, only two-tile swaps are supported. When the dropped position overlaps multiple tiles, swap with the tile whose center is closest to the drop point. The swap procedure:
+1. Store the closest overlapping tile's position
+2. Move that tile to the dragged tile's original position (animated, 200ms)
 3. Place the dragged tile at the target position
 
 ### Tile aspect ratios
 
 Each tile's Konva.Image dimensions match the source thumbnail's actual width/height. No forced aspect ratio. The panel's thumbnail dimensions come from the backend (or are measured from the loaded image).
+
+If a thumbnail fails to load, use a placeholder rectangle of 300x300 with the panel label centered. This prevents layout breakage from missing images.
 
 ## Testing
 
@@ -198,9 +217,21 @@ Each tile's Konva.Image dimensions match the source thumbnail's actual width/hei
 
 ## Rollout
 
-1. Alembic migration for rotation_angle column
-2. Backend: batch endpoint + schema updates
-3. Frontend: install konva, build KonvaMosaicArranger, wire into MosaicDetailPage
-4. Frontend: remove MosaicPanelArranger and @thisbeyond/solid-dnd
-5. Test with existing mosaics (verify position migration works)
-6. Deploy
+### Phase 1: Backend
+- Alembic migration adding rotation_angle and pixel_coords columns (single migration, defensive helpers)
+- Batch endpoint: PUT /{mosaic_id}/panels/batch
+- Schema updates: MosaicUpdate gains rotation_angle and pixel_coords; new MosaicPanelBatchUpdate schema
+
+### Phase 2: Frontend
+- Install konva npm package
+- Build KonvaMosaicArranger component
+- Wire into MosaicDetailPage (replace MosaicPanelArranger import, pass rotation_angle/pixel_coords, connect batch save callback)
+
+### Phase 3: Cleanup
+- Remove MosaicPanelArranger.tsx
+- Remove @thisbeyond/solid-dnd dependency from package.json (confirmed: it is only used in MosaicPanelArranger.tsx, not elsewhere in the codebase)
+
+### Phase 4: Testing
+- Test with existing mosaics to verify legacy position migration (pixel_coords false to true conversion)
+- Test batch save round-trip (drag, rotate, flip, reload)
+- Test global rotation persistence across page loads
