@@ -644,6 +644,11 @@ export const api = {
   getMosaicDetail: (id: string) =>
     fetchJson<import("../types").MosaicDetailResponse>(`/mosaics/${id}`),
 
+  getMosaicPanelThumbnails: (mosaicId: string, filter: string) =>
+    fetchJson<import("../types").PanelThumbnailResponse[]>(
+      `/mosaics/${mosaicId}/panels/thumbnails?filter=${encodeURIComponent(filter)}`
+    ),
+
   updateMosaic: (id: string, data: { name?: string; notes?: string; rotation_angle?: number | null; pixel_coords?: boolean }) =>
     fetchJson<{ status: string }>(`/mosaics/${id}`, {
       method: "PUT",

@@ -866,6 +866,16 @@ export interface MosaicDetailResponse {
   total_integration_seconds: number;
   total_frames: number;
   panels: PanelStats[];
+  available_filters: string[];
+  default_filter: string | null;
+}
+
+export interface PanelThumbnailResponse {
+  panel_id: string;
+  thumbnail_url: string | null;
+  frame_id: string | null;
+  score: number | null;
+  filter_used: string;
 }
 
 export interface SuggestionPanelSession {
