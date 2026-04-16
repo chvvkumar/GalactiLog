@@ -658,10 +658,10 @@ export const api = {
   deleteMosaic: (id: string) =>
     fetchJson<{ status: string }>(`/mosaics/${id}`, { method: "DELETE" }),
 
-  addMosaicPanel: (mosaicId: string, targetId: string, label: string) =>
+  addMosaicPanel: (mosaicId: string, targetId: string, label: string, objectPattern?: string | null) =>
     fetchJson<{ status: string; panel_id: string }>(`/mosaics/${mosaicId}/panels`, {
       method: "POST",
-      body: JSON.stringify({ target_id: targetId, panel_label: label }),
+      body: JSON.stringify({ target_id: targetId, panel_label: label, object_pattern: objectPattern }),
     }),
 
   updateMosaicPanel: (

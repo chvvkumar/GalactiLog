@@ -269,6 +269,37 @@ const MosaicDetailPage: Component = () => {
                     refetch();
                   };
 
+                  const suggestNextLabel = (label: string): string => {
+                    const m = label.match(/^(.*) \(([a-z])\)$/i);
+                    if (m) {
+                      const nextChar = String.fromCharCode(m[2].charCodeAt(0) + 1);
+                      return `${m[1]} (${nextChar})`;
+                    }
+                    return `${label} (b)`;
+                  };
+
+                  const handleIncludeAsNewPanel = async (sessionDate: string) => {
+                    const data = mosaic();
+                    if (!data) return;
+                    const suggested = suggestNextLabel(panel.panel_label);
+                    const newLabel = window.prompt("New panel label:", suggested);
+                    if (!newLabel || !newLabel.trim()) return;
+                    const label = newLabel.trim();
+                    try {
+                      const res = await api.addMosaicPanel(
+                        data.id,
+                        panel.target_id,
+                        label,
+                        panel.object_pattern ?? null,
+                      );
+                      await api.updatePanelSessions(data.id, res.panel_id, [sessionDate], []);
+                      showToast(`Created panel '${label}' with session`);
+                      refetch();
+                    } catch (err) {
+                      showToast(`Failed to create panel: ${err instanceof Error ? err.message : String(err)}`, "error", 5000);
+                    }
+                  };
+
                   return (
                     <div class="border border-theme-border rounded-[var(--radius-sm)] overflow-hidden">
                       <button
@@ -365,12 +396,20 @@ const MosaicDetailPage: Component = () => {
                                         <td class="px-2 py-1 text-right text-theme-text-secondary">{sess.total_frames}</td>
                                         <td class="px-2 py-1 text-right text-theme-text-secondary">{formatIntegration(sess.total_integration_seconds)}</td>
                                         <td class="px-2 py-1 text-right">
-                                          <button
-                                            onClick={() => handleInclude([sess.session_date])}
-                                            class="text-xs text-theme-accent hover:underline"
-                                          >
-                                            Include
-                                          </button>
+                                          <div class="flex gap-2 justify-end">
+                                            <button
+                                              onClick={() => handleInclude([sess.session_date])}
+                                              class="text-xs text-theme-accent hover:underline"
+                                            >
+                                              Include
+                                            </button>
+                                            <button
+                                              onClick={() => handleIncludeAsNewPanel(sess.session_date)}
+                                              class="text-xs text-theme-accent hover:underline"
+                                            >
+                                              As new panel
+                                            </button>
+                                          </div>
                                         </td>
                                       </tr>
                                     )}
@@ -382,6 +421,28 @@ const MosaicDetailPage: Component = () => {
 
                           <Show when={!panelSessions.loading && included().length === 0 && available().length === 0}>
                             <div class="p-3 text-xs text-theme-text-secondary">No sessions found for this panel.</div>
+                          </Show>
+
+                          <Show when={included().length === 0 && !panelSessions.loading}>
+                            <div class="p-3 border-t border-theme-border/50 flex justify-end">
+                              <button
+                                onClick={async () => {
+                                  if (!window.confirm(`Delete panel "${panel.panel_label}"?`)) return;
+                                  const data = mosaic();
+                                  if (!data) return;
+                                  try {
+                                    await api.removeMosaicPanel(data.id, panel.panel_id);
+                                    showToast(`Deleted panel "${panel.panel_label}"`);
+                                    refetch();
+                                  } catch {
+                                    showToast("Failed to delete panel", "error");
+                                  }
+                                }}
+                                class="text-xs text-theme-text-secondary hover:text-theme-danger transition-colors"
+                              >
+                                Delete panel
+                              </button>
+                            </div>
                           </Show>
                         </div>
                       </Show>
