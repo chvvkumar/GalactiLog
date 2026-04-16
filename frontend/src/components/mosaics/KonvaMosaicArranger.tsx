@@ -739,6 +739,101 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
     rotationInitialized = true;
   });
 
+  // ── Update tile images when thumbnail overrides change ───────────
+  createEffect(() => {
+    const overrides = props.thumbnailOverrides;
+    if (!overrides || !stage) return;
+
+    for (const [panelId, url] of Object.entries(overrides)) {
+      const tile = tiles.get(panelId);
+      if (!tile) continue;
+
+      if (url === null) {
+        // No data for this filter — show dimmed placeholder
+        if (tile.imageNode instanceof Konva.Image) {
+          tile.imageNode.destroy();
+        }
+        const placeholder = new Konva.Rect({
+          width: tile.width,
+          height: tile.height,
+          fill: PLACEHOLDER_COLOR,
+          stroke: PLACEHOLDER_BORDER,
+          strokeWidth: 1,
+          cornerRadius: 4,
+          opacity: 0.5,
+        });
+        tile.group.add(placeholder);
+        tile.imageNode = placeholder;
+
+        // Add "No data" text
+        const noDataText = new Konva.Text({
+          x: 0,
+          y: tile.height / 2 - 8,
+          width: tile.width,
+          text: `No ${props.selectedFilter ?? "filter"} data`,
+          fontSize: 11,
+          fontFamily: "sans-serif",
+          fill: "#999",
+          align: "center",
+          listening: false,
+        });
+        tile.group.add(noDataText);
+
+        // Keep label/badge on top
+        tile.badgeNode.moveToTop();
+        tile.labelNode.moveToTop();
+        tile.borderRect.moveToTop();
+        updateTileTransform(tile);
+      } else {
+        // Load new thumbnail
+        const img = new Image();
+        img.crossOrigin = "anonymous";
+        img.onload = () => {
+          if (!stage) return;
+          const nw = img.naturalWidth;
+          const nh = img.naturalHeight;
+          const scale = Math.min(TILE_SIZE / nw, TILE_SIZE / nh);
+          const scaledW = Math.round(nw * scale);
+          const scaledH = Math.round(nh * scale);
+
+          tile.width = scaledW;
+          tile.height = scaledH;
+          tile.borderRect.width(scaledW + 6);
+          tile.borderRect.height(scaledH + 6);
+          tile.labelNode.y(scaledH - 22);
+
+          // Remove old image node
+          if (tile.imageNode) {
+            tile.imageNode.destroy();
+          }
+          // Remove any "No data" text nodes
+          tile.group.find("Text").forEach((n: any) => {
+            if (n !== tile.labelNode && n !== tile.badgeNode && typeof n.text === "function" && n.text().includes("data")) {
+              n.destroy();
+            }
+          });
+
+          const konvaImg = new Konva.Image({
+            image: img,
+            width: scaledW,
+            height: scaledH,
+            cornerRadius: 4,
+          });
+          tile.group.add(konvaImg);
+          tile.imageNode = konvaImg;
+
+          tile.badgeNode.moveToTop();
+          tile.labelNode.moveToTop();
+          tile.borderRect.moveToTop();
+          updateTileTransform(tile);
+          tileLayer?.batchDraw();
+        };
+        img.src = url;
+      }
+    }
+    tileLayer?.batchDraw();
+  });
+
   // ── Reset global rotation ──────────────────────────────────────────
   const resetRotation = () => {
     setGlobalRotation(0);
