@@ -713,6 +713,12 @@ export const MosaicsTab: Component = () => {
                             </span>
                             {" \u00b7 "}
                             {formatIntegration(totalInt())}
+                            <Show when={(s.other_session_count ?? 0) > 0}>
+                              {" \u00b7 "}
+                              <span class="text-amber-400">
+                                +{s.other_session_count} more sessions
+                              </span>
+                            </Show>
                           </div>
                         </div>
                         <span class="text-theme-text-secondary text-xs ml-2">
@@ -943,6 +949,11 @@ export const MosaicsTab: Component = () => {
                             {m.first_session === m.last_session
                               ? m.first_session
                               : `${m.first_session} \u2013 ${m.last_session}`}
+                          </Show>
+                          <Show when={m.needs_review}>
+                            <span class="text-xs text-amber-400 border border-amber-400/30 rounded px-1.5 py-0.5">
+                              Needs Review
+                            </span>
                           </Show>
                         </div>
                       </div>

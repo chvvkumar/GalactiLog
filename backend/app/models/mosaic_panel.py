@@ -26,6 +26,7 @@ class MosaicPanel(Base):
 
     mosaic: Mapped["Mosaic"] = relationship(back_populates="panels")
     target: Mapped["Target"] = relationship()
+    sessions: Mapped[list["MosaicPanelSession"]] = relationship(back_populates="panel", cascade="all, delete-orphan")
 
     __table_args__ = (
         UniqueConstraint("mosaic_id", "target_id", "panel_label", name="uq_mosaic_panels_mosaic_target_label"),

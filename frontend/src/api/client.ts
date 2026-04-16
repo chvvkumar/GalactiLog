@@ -709,6 +709,17 @@ export const api = {
   dismissMosaicSuggestion: (id: string) =>
     fetchJson<{ status: string }>(`/mosaics/suggestions/${id}/dismiss`, { method: "POST" }),
 
+  getPanelSessions: (mosaicId: string, panelId: string) =>
+    fetchJson<import("../types").PanelSessionsResponse>(
+      `/mosaics/${mosaicId}/panels/${panelId}/sessions`
+    ),
+
+  updatePanelSessions: (mosaicId: string, panelId: string, include: string[], exclude: string[]) =>
+    fetchJson<{ status: string }>(`/mosaics/${mosaicId}/panels/${panelId}/sessions`, {
+      method: "PUT",
+      body: JSON.stringify({ include, exclude }),
+    }),
+
   // Custom Columns
   getCustomColumns: () =>
     fetchJson<CustomColumn[]>("/custom-columns"),

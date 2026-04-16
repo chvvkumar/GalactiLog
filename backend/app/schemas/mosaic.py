@@ -53,6 +53,7 @@ class PanelStats(BaseModel):
     grid_col: int | None = None
     rotation: int = 0
     flip_h: bool = False
+    available_session_count: int = 0
 
 
 class PanelThumbnail(BaseModel):
@@ -73,6 +74,7 @@ class MosaicSummary(BaseModel):
     completion_pct: float
     first_session: str | None = None
     last_session: str | None = None
+    needs_review: bool = False
 
 
 class MosaicPanelBatchItem(BaseModel):
@@ -99,6 +101,7 @@ class MosaicDetailResponse(BaseModel):
     panels: list[PanelStats]
     available_filters: list[str] = []
     default_filter: str | None = None
+    needs_review: bool = False
 
 
 class SuggestionPanelSession(BaseModel):
@@ -114,6 +117,25 @@ class AcceptSuggestionRequest(BaseModel):
     selected_panels: list[str] | None = None  # subset of panel_labels to accept; None = all
 
 
+class PanelSessionInfo(BaseModel):
+    session_date: str
+    status: str
+    total_frames: int
+    total_integration_seconds: float
+    filters: dict[str, dict[str, float | int]]
+
+
+class PanelSessionsResponse(BaseModel):
+    panel_id: str
+    panel_label: str
+    sessions: list[PanelSessionInfo]
+
+
+class SessionStatusUpdate(BaseModel):
+    include: list[str] = []
+    exclude: list[str] = []
+
+
 class MosaicSuggestionResponse(BaseModel):
     id: str
     suggested_name: str
@@ -123,4 +145,6 @@ class MosaicSuggestionResponse(BaseModel):
     panel_patterns: list[str] | None = None
     target_names: dict[str, str]
     sessions: list[SuggestionPanelSession]
+    session_dates: dict[str, list[str]] | None = None
+    other_session_count: int = 0
     status: str

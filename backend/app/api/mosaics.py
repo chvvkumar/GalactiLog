@@ -12,6 +12,7 @@ from app.database import get_session
 from app.models import Image, Target, User, UserSettings, SETTINGS_ROW_ID
 from app.models.mosaic import Mosaic
 from app.models.mosaic_panel import MosaicPanel
+from app.models.mosaic_panel_session import MosaicPanelSession
 from app.models.mosaic_suggestion import MosaicSuggestion
 from app.schemas.mosaic import (
     AcceptSuggestionRequest,
@@ -19,6 +20,7 @@ from app.schemas.mosaic import (
     MosaicPanelBatchItem, MosaicPanelBatchRequest,
     MosaicSummary, MosaicDetailResponse, PanelStats, MosaicSuggestionResponse,
     PanelThumbnail,
+    PanelSessionsResponse, PanelSessionInfo, SessionStatusUpdate,
 )
 from app.api.auth import get_current_user
 from app.services.mosaic_composite import build_mosaic_composite, find_default_filter
@@ -75,6 +77,45 @@ async def _panel_stats(panel: MosaicPanel, session: AsyncSession) -> PanelStats:
     ]
     if panel.object_pattern:
         base_filter.append(Image.raw_headers["OBJECT"].astext.ilike(panel.object_pattern))
+
+    # Check for ANY membership records (included or available)
+    any_membership_q = (
+        select(func.count(MosaicPanelSession.id))
+        .where(MosaicPanelSession.panel_id == panel.id)
+    )
+    any_membership_count = (await session.execute(any_membership_q)).scalar() or 0
+
+    included_dates_q = (
+        select(MosaicPanelSession.session_date)
+        .where(MosaicPanelSession.panel_id == panel.id, MosaicPanelSession.status == "included")
+    )
+    included_dates = [r[0] for r in (await session.execute(included_dates_q)).all()]
+
+    if any_membership_count > 0:
+        # Panel has membership records - scope to included sessions only
+        if included_dates:
+            base_filter.append(Image.session_date.in_(included_dates))
+        else:
+            # All sessions excluded - force empty result
+            base_filter.append(text("false"))
+
+    # Count available sessions
+    if any_membership_count > 0:
+        all_dates_filter = [
+            Image.resolved_target_id == panel.target_id,
+            Image.image_type == "LIGHT",
+        ]
+        if panel.object_pattern:
+            all_dates_filter.append(Image.raw_headers["OBJECT"].astext.ilike(panel.object_pattern))
+        all_dates_q = (
+            select(func.count(func.distinct(Image.session_date)))
+            .where(*all_dates_filter)
+            .where(Image.session_date.isnot(None))
+        )
+        total_session_count = (await session.execute(all_dates_q)).scalar() or 0
+        available_count = total_session_count - len(included_dates)
+    else:
+        available_count = 0
 
     q = (
         select(
@@ -166,17 +207,46 @@ async def _panel_stats(panel: MosaicPanel, session: AsyncSession) -> PanelStats:
         grid_col=panel.grid_col,
         rotation=panel.rotation,
         flip_h=panel.flip_h,
+        available_session_count=max(available_count, 0),
     )
 
 
 async def _batch_panel_stats(
     panels: list[MosaicPanel], session: AsyncSession
 ) -> dict[str, PanelStats]:
-    """Compute stats for multiple simple panels (no object_pattern) in 3 bulk queries.
+    """Compute stats for multiple simple panels (no object_pattern) in bulk queries.
+
+    Panels with session membership records are delegated to _panel_stats
+    one-by-one (each may have different included dates). Panels without
+    membership use the original 3-query bulk approach.
 
     Returns a dict keyed by str(panel.id).
     """
-    target_ids = list({p.target_id for p in panels})
+    # Check which panels have any membership records
+    all_panel_ids = [p.id for p in panels]
+    has_membership_q = (
+        select(func.distinct(MosaicPanelSession.panel_id))
+        .where(MosaicPanelSession.panel_id.in_(all_panel_ids))
+    )
+    panel_has_membership: set[str] = {
+        str(r[0]) for r in (await session.execute(has_membership_q)).all()
+    }
+
+    # Split panels into two groups
+    unscoped_panels = [p for p in panels if str(p.id) not in panel_has_membership]
+    scoped_panels = [p for p in panels if str(p.id) in panel_has_membership]
+
+    result: dict[str, PanelStats] = {}
+
+    # Handle scoped panels individually (each has different included dates)
+    for p in scoped_panels:
+        result[str(p.id)] = await _panel_stats(p, session)
+
+    # Handle unscoped panels in bulk
+    if not unscoped_panels:
+        return result
+
+    target_ids = list({p.target_id for p in unscoped_panels})
 
     # 1. Aggregation: integration, frames, last session date
     agg_q = (
@@ -233,9 +303,8 @@ async def _batch_panel_stats(
             thumb_url = f"/thumbnails/{filename}"
         thumb_map[tid] = (thumb_url, r[2], str(r[3]) if r[3] else None, r[4])
 
-    # Build PanelStats for each panel
-    result: dict[str, PanelStats] = {}
-    for p in panels:
+    # Build PanelStats for each unscoped panel
+    for p in unscoped_panels:
         target = p.target
         tid = str(p.target_id)
         agg = agg_map.get(tid, (0, 0, None))
@@ -371,6 +440,17 @@ async def get_suggestions(
 
     results = []
     for idx, r in enumerate(rows):
+        all_sessions = session_rows_by_idx.get(idx, [])
+        filtered_sessions = all_sessions
+        other_count = 0
+
+        if r.session_dates:
+            campaign_dates = set()
+            for dates in r.session_dates.values():
+                campaign_dates.update(dates)
+            filtered_sessions = [s for s in all_sessions if s.date in campaign_dates]
+            other_count = len(all_sessions) - len(filtered_sessions)
+
         results.append(MosaicSuggestionResponse(
             id=str(r.id),
             suggested_name=r.suggested_name,
@@ -379,7 +459,9 @@ async def get_suggestions(
             panel_labels=r.panel_labels,
             panel_patterns=r.panel_patterns,
             target_names={str(t): name_map.get(str(t), "Unknown") for t in set(r.target_ids)},
-            sessions=session_rows_by_idx.get(idx, []),
+            sessions=filtered_sessions,
+            session_dates=r.session_dates,
+            other_session_count=other_count,
             status=r.status,
         ))
 
@@ -403,6 +485,8 @@ async def accept_suggestion(
     mosaic = Mosaic(name=suggestion.suggested_name)
     session.add(mosaic)
     await session.flush()
+
+    from datetime import date as date_type
 
     # Create panels - multiple panels may share the same target_id
     # (SIMBAD often merges panel variants into one target)
@@ -431,6 +515,39 @@ async def accept_suggestion(
             object_pattern=obj_pattern,
         )
         session.add(panel)
+        await session.flush()  # get panel.id
+
+        # Seed session membership from suggestion's session_dates
+        campaign_dates = set()
+        if suggestion.session_dates and label in suggestion.session_dates:
+            for ds in suggestion.session_dates[label]:
+                d = date_type.fromisoformat(ds)
+                campaign_dates.add(d)
+                session.add(MosaicPanelSession(
+                    panel_id=panel.id,
+                    session_date=d,
+                    status="included",
+                ))
+
+        # Find additional sessions outside the campaign
+        base_filter = [
+            Image.resolved_target_id == target_id,
+            Image.image_type == "LIGHT",
+            Image.session_date.isnot(None),
+        ]
+        if obj_pattern:
+            base_filter.append(Image.raw_headers["OBJECT"].astext.ilike(obj_pattern))
+        all_dates_q = select(func.distinct(Image.session_date)).where(*base_filter)
+        all_dates = {r[0] for r in (await session.execute(all_dates_q)).all()}
+
+        for d in all_dates:
+            if d not in campaign_dates:
+                session.add(MosaicPanelSession(
+                    panel_id=panel.id,
+                    session_date=d,
+                    status="available",
+                ))
+
         panel_num += 1
         created += 1
 
@@ -445,6 +562,7 @@ async def accept_suggestion(
         total_integration_seconds=0,
         total_frames=0,
         completion_pct=0,
+        needs_review=False,
     )
 
 
@@ -499,9 +617,6 @@ async def list_mosaics(
     # Batch-fetch integration stats for all pattern panels using a single query
     # with per-(target_id, object_pattern) case expressions to avoid N+1.
     pattern_panels = [p for m in mosaics for p in m.panels if p.object_pattern]
-    # Key: (str(target_id), object_pattern) -> (integration, frames)
-    pattern_rows: dict[tuple[str, str], tuple[float, int]] = {}
-    pattern_dates: dict[tuple[str, str], tuple[str | None, str | None]] = {}
     if pattern_panels:
         # Build one OR condition per unique (target_id, pattern) pair
         unique_pairs = list({(p.target_id, p.object_pattern) for p in pattern_panels})
@@ -510,6 +625,29 @@ async def list_mosaics(
             (Image.raw_headers["OBJECT"].astext.ilike(pat))
             for tid, pat in unique_pairs
         ))
+
+        # Collect ALL membership records to distinguish "no records" from "records but none included"
+        all_panel_ids = [p.id for p in pattern_panels]
+        has_membership_q = (
+            select(func.distinct(MosaicPanelSession.panel_id))
+            .where(MosaicPanelSession.panel_id.in_(all_panel_ids))
+        )
+        panel_has_membership: set[str] = {
+            str(r[0]) for r in (await session.execute(has_membership_q)).all()
+        }
+
+        membership_q = (
+            select(MosaicPanelSession.panel_id, MosaicPanelSession.session_date)
+            .where(
+                MosaicPanelSession.panel_id.in_(all_panel_ids),
+                MosaicPanelSession.status == "included",
+            )
+        )
+        membership_rows = (await session.execute(membership_q)).all()
+        panel_included_dates: dict[str, set] = defaultdict(set)
+        for r in membership_rows:
+            panel_included_dates[str(r.panel_id)].add(r.session_date)
+
         # Fetch all matching rows in one query; aggregate by (target_id, pattern) in Python
         # since ILIKE patterns can't be used directly in GROUP BY.
         raw_q = (
@@ -531,31 +669,42 @@ async def list_mosaics(
         for (tid_str, pat), rx in pair_regexes.items():
             patterns_by_target[tid_str].append((pat, rx))
 
-        accum: dict[tuple[str, str], list[float]] = {
-            (str(tid), pat): [] for tid, pat in unique_pairs
-        }
-        accum_dates: dict[tuple[str, str], list[str]] = {
-            (str(tid), pat): [] for tid, pat in unique_pairs
-        }
+        pair_to_panels: dict[tuple[str, str], list[str]] = defaultdict(list)
+        for p in pattern_panels:
+            pair_to_panels[(str(p.target_id), p.object_pattern)].append(str(p.id))
+
+        panel_accum: dict[str, list[float]] = {str(p.id): [] for p in pattern_panels}
+        panel_accum_dates: dict[str, list[str]] = {str(p.id): [] for p in pattern_panels}
+
         for row in raw_rows:
             tid_str = str(row.resolved_target_id)
             obj_name = row.object_name or ""
             exp = row.exposure_time or 0.0
             for pat, rx in patterns_by_target.get(tid_str, []):
                 if rx.match(obj_name):
-                    accum[(tid_str, pat)].append(exp)
-                    if row.session_date:
-                        accum_dates[(tid_str, pat)].append(str(row.session_date))
+                    for pid in pair_to_panels.get((tid_str, pat), []):
+                        if pid not in panel_has_membership:
+                            # No membership records - legacy unscoped
+                            panel_accum[pid].append(exp)
+                            if row.session_date:
+                                panel_accum_dates[pid].append(str(row.session_date))
+                        elif pid in panel_included_dates and row.session_date in panel_included_dates[pid]:
+                            # Has membership with included dates - scoped
+                            panel_accum[pid].append(exp)
+                            if row.session_date:
+                                panel_accum_dates[pid].append(str(row.session_date))
+                        # else: has membership but session not included - skip
 
-        for key, exposures in accum.items():
-            pattern_rows[key] = (sum(exposures), len(exposures))
-        pattern_dates: dict[tuple[str, str], tuple[str | None, str | None]] = {}
-        for key, dates in accum_dates.items():
+        panel_stats_map: dict[str, tuple[float, int]] = {}
+        panel_dates_map: dict[str, tuple[str | None, str | None]] = {}
+        for pid, exposures in panel_accum.items():
+            panel_stats_map[pid] = (sum(exposures), len(exposures))
+        for pid, dates in panel_accum_dates.items():
             if dates:
                 sorted_d = sorted(dates)
-                pattern_dates[key] = (sorted_d[0], sorted_d[-1])
+                panel_dates_map[pid] = (sorted_d[0], sorted_d[-1])
             else:
-                pattern_dates[key] = (None, None)
+                panel_dates_map[pid] = (None, None)
 
     results = []
     for m in mosaics:
@@ -569,8 +718,8 @@ async def list_mosaics(
                 pi, pf = bulk_rows.get(str(p.target_id), (0, 0))
                 pf_date, pl_date = bulk_dates.get(str(p.target_id), (None, None))
             else:
-                pi, pf = pattern_rows.get((str(p.target_id), p.object_pattern), (0, 0))
-                pf_date, pl_date = pattern_dates.get((str(p.target_id), p.object_pattern), (None, None))
+                pi, pf = panel_stats_map.get(str(p.id), (0, 0))
+                pf_date, pl_date = panel_dates_map.get(str(p.id), (None, None))
             total_int += pi
             total_frames += pf
             panel_integrations.append(pi)
@@ -595,6 +744,7 @@ async def list_mosaics(
             completion_pct=round(completion, 1),
             first_session=mosaic_first,
             last_session=mosaic_last,
+            needs_review=m.needs_review,
         ))
     return results
 
@@ -679,6 +829,7 @@ async def get_mosaic_detail(
         panels=panels,
         available_filters=available_filters,
         default_filter=default_filter,
+        needs_review=mosaic.needs_review,
     )
 
 
@@ -1139,5 +1290,137 @@ async def remove_panel(
     if not panel or panel.mosaic_id != mosaic_id:
         raise HTTPException(404, "Panel not found")
     await session.delete(panel)
+    await session.commit()
+    return {"status": "ok"}
+
+
+@router.get("/{mosaic_id}/panels/{panel_id}/sessions", response_model=PanelSessionsResponse)
+async def get_panel_sessions(
+    mosaic_id: uuid.UUID,
+    panel_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    """List all sessions (included + available) for a panel with stats."""
+    panel_q = (
+        select(MosaicPanel)
+        .where(MosaicPanel.id == panel_id, MosaicPanel.mosaic_id == mosaic_id)
+    )
+    panel = (await session.execute(panel_q)).scalar_one_or_none()
+    if not panel:
+        raise HTTPException(404, "Panel not found")
+
+    # Get existing membership records
+    existing_q = select(MosaicPanelSession).where(MosaicPanelSession.panel_id == panel_id)
+    existing = {
+        str(r.session_date): r.status
+        for r in (await session.execute(existing_q)).scalars().all()
+    }
+
+    # Get all session dates from images
+    base_filter = [
+        Image.resolved_target_id == panel.target_id,
+        Image.image_type == "LIGHT",
+    ]
+    if panel.object_pattern:
+        base_filter.append(Image.raw_headers["OBJECT"].astext.ilike(panel.object_pattern))
+
+    img_q = (
+        select(
+            Image.session_date,
+            Image.filter_used,
+            func.count(Image.id).label("frames"),
+            func.sum(Image.exposure_time).label("integration"),
+        )
+        .where(*base_filter)
+        .where(Image.session_date.isnot(None))
+        .group_by(Image.session_date, Image.filter_used)
+    )
+    rows = (await session.execute(img_q)).all()
+
+    # Aggregate by session_date
+    date_data: dict[str, dict] = {}
+    for row in rows:
+        ds = str(row.session_date)
+        if ds not in date_data:
+            date_data[ds] = {"frames": 0, "integration": 0.0, "filters": {}}
+        date_data[ds]["frames"] += row.frames
+        date_data[ds]["integration"] += row.integration or 0
+        if row.filter_used:
+            date_data[ds]["filters"][row.filter_used] = {
+                "frames": row.frames,
+                "integration": row.integration or 0,
+            }
+
+    sessions_list = []
+    for ds in sorted(date_data.keys(), reverse=True):
+        status = existing.get(ds, "available")
+        d = date_data[ds]
+        sessions_list.append(PanelSessionInfo(
+            session_date=ds,
+            status=status,
+            total_frames=d["frames"],
+            total_integration_seconds=d["integration"],
+            filters=d["filters"],
+        ))
+
+    return PanelSessionsResponse(
+        panel_id=str(panel_id),
+        panel_label=panel.panel_label,
+        sessions=sessions_list,
+    )
+
+
+@router.put("/{mosaic_id}/panels/{panel_id}/sessions")
+async def update_panel_sessions(
+    mosaic_id: uuid.UUID,
+    panel_id: uuid.UUID,
+    body: SessionStatusUpdate,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    """Bulk include/exclude sessions for a panel."""
+    from datetime import date as date_type
+
+    panel_q = (
+        select(MosaicPanel)
+        .where(MosaicPanel.id == panel_id, MosaicPanel.mosaic_id == mosaic_id)
+    )
+    panel = (await session.execute(panel_q)).scalar_one_or_none()
+    if not panel:
+        raise HTTPException(404, "Panel not found")
+
+    for ds in body.include:
+        d = date_type.fromisoformat(ds)
+        existing = (await session.execute(
+            select(MosaicPanelSession).where(
+                MosaicPanelSession.panel_id == panel_id,
+                MosaicPanelSession.session_date == d,
+            )
+        )).scalar_one_or_none()
+        if existing:
+            existing.status = "included"
+        else:
+            session.add(MosaicPanelSession(
+                panel_id=panel_id,
+                session_date=d,
+                status="included",
+            ))
+
+    for ds in body.exclude:
+        d = date_type.fromisoformat(ds)
+        existing = (await session.execute(
+            select(MosaicPanelSession).where(
+                MosaicPanelSession.panel_id == panel_id,
+                MosaicPanelSession.session_date == d,
+            )
+        )).scalar_one_or_none()
+        if existing:
+            existing.status = "available"
+
+    mosaic = await session.get(Mosaic, mosaic_id)
+    if mosaic and mosaic.needs_review:
+        mosaic.needs_review = False
+
     await session.commit()
     return {"status": "ok"}
