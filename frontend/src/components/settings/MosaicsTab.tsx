@@ -71,6 +71,8 @@ export const MosaicsTab: Component = () => {
 
   const GAP_OPTIONS = [
     { label: "No grouping", value: 0 },
+    { label: "1 week", value: 7 },
+    { label: "2 weeks", value: 14 },
     { label: "1 month", value: 30 },
     { label: "3 months", value: 90 },
     { label: "6 months", value: 180 },
