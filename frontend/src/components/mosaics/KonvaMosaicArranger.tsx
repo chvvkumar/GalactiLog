@@ -844,6 +844,17 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
     setGlobalRotation(0);
   };
 
+  // ── Reset all tile transforms to defaults ─────────────────────────
+  const resetAllTransforms = () => {
+    for (const tile of tiles.values()) {
+      tile.rotation = 0;
+      tile.flipH = false;
+      updateTileTransform(tile);
+    }
+    setGlobalRotation(0);
+    scheduleSave();
+  };
+
   return (
     <div class="space-y-3">
       {/* Toolbar */}
@@ -913,9 +924,19 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
         <button
           class="px-2 py-1 rounded bg-theme-surface hover:bg-theme-hover transition-colors text-xs"
           onClick={resetRotation}
-          title="Reset rotation to 0"
+          title="Reset rotation to 0°"
         >
-          Reset
+          0&deg;
+        </button>
+
+        <div class="w-px h-5 bg-theme-border" />
+
+        <button
+          class="px-2 py-1 rounded bg-theme-surface hover:bg-theme-hover transition-colors text-xs"
+          onClick={resetAllTransforms}
+          title="Reset all tile rotations, flips, and global rotation to defaults"
+        >
+          Reset All
         </button>
 
         {/* Spacer to push filter to right */}
