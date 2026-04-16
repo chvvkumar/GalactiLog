@@ -28,6 +28,8 @@ class MosaicCreate(BaseModel):
 class MosaicUpdate(BaseModel):
     name: str | None = None
     notes: str | None = None
+    rotation_angle: float | None = None
+    pixel_coords: bool | None = None
 
 
 class PanelStats(BaseModel):
@@ -63,10 +65,20 @@ class MosaicSummary(BaseModel):
     completion_pct: float
 
 
+class MosaicPanelBatchItem(BaseModel):
+    panel_id: uuid.UUID
+    grid_row: int | None = None
+    grid_col: int | None = None
+    rotation: int | None = None
+    flip_h: bool | None = None
+
+
 class MosaicDetailResponse(BaseModel):
     id: str
     name: str
     notes: str | None = None
+    rotation_angle: float | None = None
+    pixel_coords: bool = False
     total_integration_seconds: float
     total_frames: int
     panels: list[PanelStats]
