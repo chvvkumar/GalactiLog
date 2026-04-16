@@ -5,6 +5,7 @@ import type { PanelStats } from "../types";
 import { formatIntegration, contentWidthClass } from "../utils/format";
 import { useSettingsContext } from "../components/SettingsProvider";
 import HelpPopover from "../components/HelpPopover";
+import { showToast } from "../components/Toast";
 import KonvaMosaicArranger from "../components/mosaics/KonvaMosaicArranger";
 
 const MosaicDetailPage: Component = () => {
@@ -152,10 +153,16 @@ const MosaicDetailPage: Component = () => {
                   rotationAngle={data().rotation_angle ?? 0}
                   pixelCoords={data().pixel_coords ?? false}
                   onSave={async (panels, rotationAngle) => {
-                    await api.batchUpdateMosaicPanels(params.mosaicId, panels, rotationAngle);
+                    try {
+                      await api.batchUpdateMosaicPanels(params.mosaicId, panels, rotationAngle);
+                    } catch (e) {
+                      showToast("Failed to save panel layout", "error", 5000);
+                      throw e;
+                    }
                   }}
                   onPixelCoordsConverted={() => {
-                    api.updateMosaic(params.mosaicId, { pixel_coords: true }).catch(console.error);
+                    api.updateMosaic(params.mosaicId, { pixel_coords: true })
+                      .catch(() => showToast("Failed to save coordinate conversion", "error", 5000));
                   }}
                 />
               </div>
