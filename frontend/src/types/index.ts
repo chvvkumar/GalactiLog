@@ -861,6 +861,8 @@ export interface MosaicDetailResponse {
   id: string;
   name: string;
   notes: string | null;
+  rotation_angle: number | null;
+  pixel_coords: boolean;
   total_integration_seconds: number;
   total_frames: number;
   panels: PanelStats[];
