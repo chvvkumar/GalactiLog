@@ -1,0 +1,13 @@
+.git
+node_modules
+frontend/node_modules
+backend/.venv
+__pycache__
+*.pyc
+.env
+docs/
+guides/
+images/
+*.md
+.github/
+backend/tests/
