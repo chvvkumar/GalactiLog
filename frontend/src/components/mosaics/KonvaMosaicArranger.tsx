@@ -1,4 +1,4 @@
-import { Component, createSignal, createEffect, onMount, onCleanup, Show } from "solid-js";
+import { Component, createSignal, createEffect, onMount, onCleanup, Show, For } from "solid-js";
 import Konva from "konva";
 import { api } from "../../api/client";
 import type { PanelStats } from "../../types";
@@ -26,6 +26,11 @@ export interface KonvaMosaicArrangerProps {
   panels: PanelStats[];
   rotationAngle: number;
   pixelCoords: boolean;
+  availableFilters: string[];
+  selectedFilter: string | null;
+  onFilterChange: (filter: string) => void;
+  filterLoading: boolean;
+  thumbnailOverrides: Record<string, string | null> | null;
   onSave: (
     panels: Array<{
       panel_id: string;
@@ -813,8 +818,31 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
           Reset
         </button>
 
+        {/* Spacer to push filter to right */}
+        <div class="flex-1" />
+
+        {/* Filter selector */}
+        <Show when={props.availableFilters.length > 0}>
+          <div class="flex items-center gap-2">
+            <label class="text-xs text-theme-text-secondary">Filter</label>
+            <select
+              class="px-2 py-1 rounded bg-theme-surface text-xs text-theme-text border border-theme-border"
+              value={props.selectedFilter ?? ""}
+              onChange={(e) => props.onFilterChange(e.currentTarget.value)}
+              disabled={props.filterLoading}
+            >
+              <For each={props.availableFilters}>
+                {(f) => <option value={f}>{f}</option>}
+              </For>
+            </select>
+            <Show when={props.filterLoading}>
+              <span class="text-xs text-theme-text-secondary">Loading...</span>
+            </Show>
+          </div>
+        </Show>
+
         <Show when={saving()}>
-          <span class="ml-auto text-xs text-theme-text-secondary">Saving...</span>
+          <span class="text-xs text-theme-text-secondary">Saving...</span>
         </Show>
       </div>
 
