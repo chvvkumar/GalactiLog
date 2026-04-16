@@ -156,7 +156,7 @@ const MosaicDetailPage: Component = () => {
                     await api.updateMosaic(params.mosaicId, { rotation_angle: rotationAngle });
                   }}
                   onPixelCoordsConverted={() => {
-                    api.updateMosaic(params.mosaicId, { pixel_coords: true });
+                    api.updateMosaic(params.mosaicId, { pixel_coords: true }).catch(console.error);
                   }}
                 />
               </div>

@@ -34,7 +34,7 @@ export interface KonvaMosaicArrangerProps {
       flip_h: boolean;
     }>,
     rotationAngle: number,
-  ) => void;
+  ) => void | Promise<void>;
   onPixelCoordsConverted: () => void;
 }
 
@@ -674,8 +674,14 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
         rotation: t.rotation,
         flip_h: t.flipH,
       }));
-      props.onSave(panelData, globalRotation());
-      props.onPixelCoordsConverted();
+      (async () => {
+        try {
+          await props.onSave(panelData, globalRotation());
+          props.onPixelCoordsConverted();
+        } catch (e) {
+          console.error("Legacy conversion save failed:", e);
+        }
+      })();
     }
 
     // Fit after initial build
