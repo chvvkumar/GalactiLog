@@ -77,6 +77,7 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
   const scheduleSave = () => {
     clearTimeout(saveTimer);
     saveTimer = setTimeout(() => {
+      setSaving(true);
       const panelData = Array.from(tiles.values()).map((t) => ({
         panel_id: t.panelId,
         grid_row: Math.round(t.y),
@@ -85,6 +86,7 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
         flip_h: t.flipH,
       }));
       props.onSave(panelData, globalRotation());
+      setSaving(false);
     }, SAVE_DEBOUNCE_MS);
   };
 
