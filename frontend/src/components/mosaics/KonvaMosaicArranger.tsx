@@ -448,10 +448,27 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
       const img = new Image();
       img.crossOrigin = "anonymous";
       img.onload = () => {
+        // Scale to actual aspect ratio, capping the larger dimension at TILE_SIZE
+        const nw = img.naturalWidth;
+        const nh = img.naturalHeight;
+        const scale = Math.min(TILE_SIZE / nw, TILE_SIZE / nh);
+        const scaledW = Math.round(nw * scale);
+        const scaledH = Math.round(nh * scale);
+
+        // Update tile dimensions to match actual image aspect ratio
+        tile.width = scaledW;
+        tile.height = scaledH;
+
+        // Resize the group and dependent nodes
+        borderRect.width(scaledW + 6);
+        borderRect.height(scaledH + 6);
+        labelNode.y(scaledH - 22);
+        labelBg.y(scaledH - 22);
+
         const konvaImg = new Konva.Image({
           image: img,
-          width: tileW,
-          height: tileH,
+          width: scaledW,
+          height: scaledH,
           cornerRadius: 4,
         });
         // Replace placeholder with loaded image
@@ -482,12 +499,17 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
     updateTileTransform(tile);
 
     // ── Drag events ────────────────────────────────────────────────
+    group.on("dragstart", () => {
+      stage?.draggable(false);
+    });
+
     group.on("dragmove", () => {
       group.x(snapVal(group.x()));
       group.y(snapVal(group.y()));
     });
 
     group.on("dragend", () => {
+      stage?.draggable(true);
       tile.x = group.x();
       tile.y = group.y();
 
@@ -497,6 +519,22 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
       } else {
         scheduleSave();
       }
+    });
+
+    // ── Right-click to select + rotate CW ────────────────────────
+    group.on("contextmenu", (e) => {
+      e.evt.preventDefault();
+      e.cancelBubble = true;
+      const prev = selectedId();
+      if (prev && prev !== tile.panelId) {
+        const prevTile = tiles.get(prev);
+        if (prevTile) updateSelectionVisual(prevTile, false);
+      }
+      setSelectedId(tile.panelId);
+      updateSelectionVisual(tile, true);
+      tile.rotation = (tile.rotation + 90) % 360;
+      updateTileTransform(tile);
+      scheduleSave();
     });
 
     // ── Click to select ────────────────────────────────────────────
