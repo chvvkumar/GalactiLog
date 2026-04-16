@@ -644,14 +644,31 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
 
     const isLegacy = !props.pixelCoords;
 
-    for (const panel of panels) {
-      let px = (panel.grid_col ?? 0);
-      let py = (panel.grid_row ?? 0);
+    // Count panels with null coordinates so we can auto-arrange them in a grid
+    const nullCount = panels.filter(
+      (p) => p.grid_col == null || p.grid_row == null,
+    ).length;
+    const nullCols = nullCount > 0 ? Math.ceil(Math.sqrt(nullCount)) : 1;
+    let nullIdx = 0;
 
-      if (isLegacy) {
-        // Convert small integer grid positions to pixel coordinates
-        px *= LEGACY_CELL_PX;
-        py *= LEGACY_CELL_PX;
+    for (const panel of panels) {
+      let px: number;
+      let py: number;
+
+      if (panel.grid_col == null || panel.grid_row == null) {
+        // Auto-arrange null-coordinate panels in a roughly square grid
+        px = (nullIdx % nullCols) * (TILE_SIZE + SNAP);
+        py = Math.floor(nullIdx / nullCols) * (TILE_SIZE + SNAP);
+        nullIdx++;
+      } else {
+        px = panel.grid_col;
+        py = panel.grid_row;
+
+        if (isLegacy) {
+          // Convert small integer grid positions to pixel coordinates
+          px *= LEGACY_CELL_PX;
+          py *= LEGACY_CELL_PX;
+        }
       }
 
       const tileW = TILE_SIZE;
