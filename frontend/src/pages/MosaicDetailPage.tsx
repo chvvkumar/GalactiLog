@@ -1,4 +1,4 @@
-import { Component, Show, For, createResource, createSignal, createMemo } from "solid-js";
+import { Component, Show, For, createResource, createSignal, createMemo, createEffect } from "solid-js";
 import { A, useParams } from "@solidjs/router";
 import { api } from "../api/client";
 import type { PanelStats } from "../types";
@@ -17,6 +17,17 @@ const MosaicDetailPage: Component = () => {
   type SortDir = "asc" | "desc";
   const [sortKey, setSortKey] = createSignal<SortKey>("panel");
   const [sortDir, setSortDir] = createSignal<SortDir>("asc");
+  const [selectedFilter, setSelectedFilter] = createSignal<string | null>(null);
+  const [filterLoading, setFilterLoading] = createSignal(false);
+  const [thumbnailOverrides, setThumbnailOverrides] = createSignal<Record<string, string | null> | null>(null);
+
+  // Initialize selected filter from API response
+  createEffect(() => {
+    const data = mosaic();
+    if (data && data.default_filter && selectedFilter() === null) {
+      setSelectedFilter(data.default_filter);
+    }
+  });
 
   const toggleSort = (key: SortKey) => {
     if (sortKey() === key) {
@@ -65,6 +76,23 @@ const MosaicDetailPage: Component = () => {
         setNotesSaving(false);
       }
     }, 1000);
+  };
+
+  const handleFilterChange = async (filter: string) => {
+    setSelectedFilter(filter);
+    setFilterLoading(true);
+    try {
+      const thumbnails = await api.getMosaicPanelThumbnails(params.mosaicId, filter);
+      const overrides: Record<string, string | null> = {};
+      for (const t of thumbnails) {
+        overrides[t.panel_id] = t.thumbnail_url;
+      }
+      setThumbnailOverrides(overrides);
+    } catch (e) {
+      showToast("Failed to load filter previews", "error", 5000);
+    } finally {
+      setFilterLoading(false);
+    }
   };
 
   return (
@@ -152,6 +180,11 @@ const MosaicDetailPage: Component = () => {
                   panels={data().panels}
                   rotationAngle={data().rotation_angle ?? 0}
                   pixelCoords={data().pixel_coords ?? false}
+                  availableFilters={data().available_filters ?? []}
+                  selectedFilter={selectedFilter()}
+                  onFilterChange={handleFilterChange}
+                  filterLoading={filterLoading()}
+                  thumbnailOverrides={thumbnailOverrides()}
                   onSave={async (panels, rotationAngle) => {
                     try {
                       await api.batchUpdateMosaicPanels(params.mosaicId, panels, rotationAngle);
