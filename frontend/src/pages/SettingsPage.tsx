@@ -38,6 +38,7 @@ const DisplayTab = lazy(() => import("../components/DisplayTab"));
 const AstroBinTab = lazy(() => import("../components/settings/AstroBinTab"));
 const CustomColumnsTab = lazy(() => import("../components/CustomColumnsTab"));
 const ActivityLogTab = lazy(() => import("../components/settings/ActivityLogTab"));
+const MetricsTab = lazy(() => import("../components/settings/MetricsTab").then(m => ({ default: m.MetricsTab })));
 
 const ALL_TABS = [
   { id: "scan", label: "Library" },
@@ -49,6 +50,7 @@ const ALL_TABS = [
   { id: "backup", label: "Backup & Restore", adminOnly: true },
   { id: "users", label: "Users", adminOnly: true },
   { id: "activity-log", label: "Activity Log", adminOnly: true },
+  { id: "metrics", label: "Metrics", adminOnly: true },
 ] as const;
 
 type TabId = (typeof ALL_TABS)[number]["id"];
@@ -98,6 +100,7 @@ export const SettingsPage: Component = () => {
             <li><strong class="text-theme-text-primary">Custom Columns</strong>: user-defined columns on targets, sessions, and rigs.</li>
             <li><strong class="text-theme-text-primary">Backup & Restore</strong> (admin): export and import the configuration as a versioned JSON file.</li>
             <li><strong class="text-theme-text-primary">Users</strong> (admin): manage accounts and roles.</li>
+            <li><strong class="text-theme-text-primary">Metrics</strong> (admin): live Prometheus metrics with API, database, job, and process health summaries.</li>
           </ul>
         </HelpPopover>
       </div>
@@ -149,6 +152,9 @@ export const SettingsPage: Component = () => {
         </Show>
         <Show when={activeTab() === "activity-log" && isAdmin()}>
           <ActivityLogTab />
+        </Show>
+        <Show when={activeTab() === "metrics" && isAdmin()}>
+          <MetricsTab />
         </Show>
       </Suspense>
     </div>
