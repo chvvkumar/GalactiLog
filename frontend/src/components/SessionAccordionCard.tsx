@@ -677,10 +677,46 @@ const SessionAccordionCard: Component<{
                   </span>
                 </div>
 
+                {/* Action buttons row — right-justified above thumbnails */}
+                <div class="flex justify-end flex-wrap gap-1.5 mt-2">
+                  <Show when={!isMultiRig()}>
+                    <button
+                      class="text-tiny px-1.5 py-0.5 border border-theme-border rounded text-theme-text-tertiary hover:text-theme-text-primary hover:border-theme-accent transition-colors cursor-pointer"
+                      onClick={() => copyAstrobinCsv()}
+                    >
+                      {csvCopiedRig() === "__all__" ? "Copied!" : "Astrobin CSV"}
+                    </button>
+                  </Show>
+                  <Show when={hasCoords()}>
+                    <For each={ninaInstances()}>
+                      {(inst) => (
+                        <button
+                          class="text-tiny px-1.5 py-0.5 border border-theme-border rounded text-theme-text-tertiary hover:text-theme-text-primary hover:border-theme-accent transition-colors cursor-pointer"
+                          onClick={() => sendToNina(inst)}
+                          disabled={sendingInstance() === `nina:${inst.name}`}
+                        >
+                          {sendingInstance() === `nina:${inst.name}` ? "Sent!" : `${inst.name}`}
+                        </button>
+                      )}
+                    </For>
+                    <For each={stellariumInstances()}>
+                      {(inst) => (
+                        <button
+                          class="text-tiny px-1.5 py-0.5 border border-theme-border rounded text-theme-text-tertiary hover:text-theme-text-primary hover:border-theme-accent transition-colors cursor-pointer"
+                          onClick={() => sendToStellarium(inst)}
+                          disabled={sendingInstance() === `stel:${inst.name}`}
+                        >
+                          {sendingInstance() === `stel:${inst.name}` ? "Sent!" : `${inst.name}`}
+                        </button>
+                      )}
+                    </For>
+                  </Show>
+                </div>
+
                 {/* Per-rig overview with thumbnails */}
                 <Show when={isMultiRig()} fallback={
                   /* Single-rig: compact one-liner + thumbnail */
-                  <div class="flex gap-3 mt-3 items-start">
+                  <div class="flex gap-3 mt-1 items-start">
                     <div class="flex-1 space-y-1">
                       <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-label">
                         <span><span class="text-theme-text-tertiary">Exp:</span> <span class="font-bold text-metric-gain">{detail().exposure_times.length > 0 ? detail().exposure_times.map(e => e + "s").join(", ") : "—"}</span></span>
@@ -697,38 +733,6 @@ const SessionAccordionCard: Component<{
                             </span>
                           )}
                         </For>
-                      </div>
-                      <div class="flex flex-wrap gap-1.5">
-                        <button
-                          class="text-tiny px-1.5 py-0.5 border border-theme-border rounded text-theme-text-tertiary hover:text-theme-text-primary hover:border-theme-accent transition-colors cursor-pointer"
-                          onClick={() => copyAstrobinCsv()}
-                        >
-                          {csvCopiedRig() === "__all__" ? "Copied!" : "Astrobin CSV"}
-                        </button>
-                        <Show when={hasCoords()}>
-                          <For each={ninaInstances()}>
-                            {(inst) => (
-                              <button
-                                class="text-tiny px-1.5 py-0.5 border border-theme-border rounded text-theme-text-tertiary hover:text-theme-text-primary hover:border-theme-accent transition-colors cursor-pointer"
-                                onClick={() => sendToNina(inst)}
-                                disabled={sendingInstance() === `nina:${inst.name}`}
-                              >
-                                {sendingInstance() === `nina:${inst.name}` ? "Sent!" : `${inst.name}`}
-                              </button>
-                            )}
-                          </For>
-                          <For each={stellariumInstances()}>
-                            {(inst) => (
-                              <button
-                                class="text-tiny px-1.5 py-0.5 border border-theme-border rounded text-theme-text-tertiary hover:text-theme-text-primary hover:border-theme-accent transition-colors cursor-pointer"
-                                onClick={() => sendToStellarium(inst)}
-                                disabled={sendingInstance() === `stel:${inst.name}`}
-                              >
-                                {sendingInstance() === `stel:${inst.name}` ? "Sent!" : `${inst.name}`}
-                              </button>
-                            )}
-                          </For>
-                        </Show>
                       </div>
                     </div>
                     <div class="w-[140px] h-[100px] flex-shrink-0 ml-auto rounded overflow-hidden">
@@ -803,32 +807,6 @@ const SessionAccordionCard: Component<{
                       </div>
                     )}
                   </For>
-                  <Show when={hasCoords() && (ninaInstances().length > 0 || stellariumInstances().length > 0)}>
-                    <div class="flex flex-wrap gap-1.5 mt-3">
-                      <For each={ninaInstances()}>
-                        {(inst) => (
-                          <button
-                            class="text-tiny px-1.5 py-0.5 border border-theme-border rounded text-theme-text-tertiary hover:text-theme-text-primary hover:border-theme-accent transition-colors cursor-pointer"
-                            onClick={() => sendToNina(inst)}
-                            disabled={sendingInstance() === `nina:${inst.name}`}
-                          >
-                            {sendingInstance() === `nina:${inst.name}` ? "Sent!" : `${inst.name}`}
-                          </button>
-                        )}
-                      </For>
-                      <For each={stellariumInstances()}>
-                        {(inst) => (
-                          <button
-                            class="text-tiny px-1.5 py-0.5 border border-theme-border rounded text-theme-text-tertiary hover:text-theme-text-primary hover:border-theme-accent transition-colors cursor-pointer"
-                            onClick={() => sendToStellarium(inst)}
-                            disabled={sendingInstance() === `stel:${inst.name}`}
-                          >
-                            {sendingInstance() === `stel:${inst.name}` ? "Sent!" : `${inst.name}`}
-                          </button>
-                        )}
-                      </For>
-                    </div>
-                  </Show>
                 </Show>
 
                 {/* Expandable detail table */}
