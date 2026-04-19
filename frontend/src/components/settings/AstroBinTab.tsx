@@ -191,7 +191,7 @@ export default function AstroBinTab() {
       <div class="flex-1 space-y-4">
         <InstanceList
           label="NINA Instances"
-          helpText="Configure NINA Advanced API instances. Each enabled instance with a URL will appear as a button on session cards, allowing you to send the target's coordinates directly to NINA's framing assistant. URL format: http://host:1888"
+          helpText="Configure NINA instances. Each enabled instance with a URL will appear as a button on session cards, sending the target's coordinates to NINA's framing assistant. URL format: http://host:1888"
           instances={ctx.settings()?.general.nina_instances ?? []}
           onChange={(instances) => saveInstances("nina_instances", instances)}
         />
