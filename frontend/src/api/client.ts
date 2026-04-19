@@ -833,4 +833,16 @@ export const api = {
     }
     return resp.json();
   },
+
+  sendToNina: (url: string, ra: number, dec: number) =>
+    fetchJson<{ ok: boolean; error?: string }>("/integrations/nina/send-coordinates", {
+      method: "POST",
+      body: JSON.stringify({ url, ra, dec }),
+    }),
+
+  sendToStellarium: (url: string, ra: number, dec: number, targetName: string | null) =>
+    fetchJson<{ ok: boolean; error?: string }>("/integrations/stellarium/send-coordinates", {
+      method: "POST",
+      body: JSON.stringify({ url, ra, dec, target_name: targetName }),
+    }),
 };

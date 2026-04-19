@@ -44,7 +44,7 @@ const ALL_TABS = [
   { id: "scan", label: "Library" },
   { id: "equipment", label: "Equipment" },
   { id: "display", label: "Display" },
-  { id: "astrobin", label: "AstroBin" },
+  { id: "astrobin", label: "AstroBin & NINA" },
   { id: "targets", label: "Target Management" },
   { id: "custom-columns", label: "Custom Columns" },
   { id: "backup", label: "Backup & Restore", adminOnly: true },
@@ -95,7 +95,7 @@ export const SettingsPage: Component = () => {
             <li><strong class="text-theme-text-primary">Library</strong>: scan triggers, auto-scan schedule, observer location, path and name rules, maintenance actions.</li>
             <li><strong class="text-theme-text-primary">Equipment</strong>: filter and equipment canonical names and alias merging.</li>
             <li><strong class="text-theme-text-primary">Display</strong>: theme, text size, filter badge style, timezone, content width, preview cache, metric visibility.</li>
-            <li><strong class="text-theme-text-primary">AstroBin</strong>: filter ID mapping and Bortle class used for AstroBin CSV export.</li>
+            <li><strong class="text-theme-text-primary">AstroBin & NINA</strong>: filter ID mapping, Bortle class, and NINA/Stellarium instance configuration for coordinate forwarding.</li>
             <li><strong class="text-theme-text-primary">Target Management</strong>: merge candidates, accepted merges, and unresolved files.</li>
             <li><strong class="text-theme-text-primary">Custom Columns</strong>: user-defined columns on targets, sessions, and rigs.</li>
             <li><strong class="text-theme-text-primary">Backup & Restore</strong> (admin): export and import the configuration as a versioned JSON file.</li>

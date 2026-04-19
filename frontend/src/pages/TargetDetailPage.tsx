@@ -570,6 +570,9 @@ const TargetDetailPage: Component = () => {
                         checked={selectedChartDates().includes(session.session_date)}
                         onCheckChange={() => toggleChartDate(session.session_date)}
                         targetId={params.targetId}
+                        ra={detail().ra}
+                        dec={detail().dec}
+                        targetName={detail().primary_name}
                       />
                     )}
                   </For>

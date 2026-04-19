@@ -1,5 +1,5 @@
 import { Component, Show, For, createSignal, createEffect, createMemo } from "solid-js";
-import type { SessionOverview, SessionDetail, FrameRecord } from "../types";
+import type { SessionOverview, SessionDetail, FrameRecord, IntegrationInstance } from "../types";
 import { api } from "../api/client";
 import ReferenceThumbnail from "./ReferenceThumbnail";
 import RawHeaderAccordion from "./RawHeaderAccordion";
@@ -46,6 +46,9 @@ const SessionAccordionCard: Component<{
   checked?: boolean;
   onCheckChange?: () => void;
   targetId?: string;
+  ra?: number | null;
+  dec?: number | null;
+  targetName?: string;
 }> = (props) => {
   let cardRef: HTMLTableRowElement | undefined;
   const settingsCtx = useSettingsContext();
@@ -161,6 +164,54 @@ const SessionAccordionCard: Component<{
       setCsvCopiedRig(key);
       setTimeout(() => setCsvCopiedRig(null), 2000);
     });
+  };
+
+  const ninaInstances = () =>
+    (settingsCtx.settings()?.general.nina_instances ?? []).filter(
+      (i: IntegrationInstance) => i.enabled && i.url
+    );
+  const stellariumInstances = () =>
+    (settingsCtx.settings()?.general.stellarium_instances ?? []).filter(
+      (i: IntegrationInstance) => i.enabled && i.url
+    );
+  const hasCoords = () => props.ra != null && props.dec != null;
+
+  const [sendingInstance, setSendingInstance] = createSignal<string | null>(null);
+
+  const sendToNina = async (inst: IntegrationInstance) => {
+    if (!hasCoords()) return;
+    const key = `nina:${inst.name}`;
+    setSendingInstance(key);
+    try {
+      const res = await api.sendToNina(inst.url, props.ra!, props.dec!);
+      if (res.ok) {
+        showToast(`Sent to NINA: ${inst.name}`);
+      } else {
+        showToast(`NINA ${inst.name}: ${res.error}`, "error");
+      }
+    } catch {
+      showToast(`Failed to reach NINA: ${inst.name}`, "error");
+    } finally {
+      setTimeout(() => setSendingInstance(null), 1500);
+    }
+  };
+
+  const sendToStellarium = async (inst: IntegrationInstance) => {
+    if (!hasCoords()) return;
+    const key = `stel:${inst.name}`;
+    setSendingInstance(key);
+    try {
+      const res = await api.sendToStellarium(inst.url, props.ra!, props.dec!, props.targetName ?? null);
+      if (res.ok) {
+        showToast(`Sent to Stellarium: ${inst.name}`);
+      } else {
+        showToast(`Stellarium ${inst.name}: ${res.error}`, "error");
+      }
+    } catch {
+      showToast(`Failed to reach Stellarium: ${inst.name}`, "error");
+    } finally {
+      setTimeout(() => setSendingInstance(null), 1500);
+    }
   };
 
   createEffect(() => {
@@ -647,13 +698,37 @@ const SessionAccordionCard: Component<{
                           )}
                         </For>
                       </div>
-                      <div>
+                      <div class="flex flex-wrap gap-1.5">
                         <button
                           class="text-tiny px-1.5 py-0.5 border border-theme-border rounded text-theme-text-tertiary hover:text-theme-text-primary hover:border-theme-accent transition-colors cursor-pointer"
                           onClick={() => copyAstrobinCsv()}
                         >
                           {csvCopiedRig() === "__all__" ? "Copied!" : "Astrobin CSV"}
                         </button>
+                        <Show when={hasCoords()}>
+                          <For each={ninaInstances()}>
+                            {(inst) => (
+                              <button
+                                class="text-tiny px-1.5 py-0.5 border border-theme-border rounded text-theme-text-tertiary hover:text-theme-text-primary hover:border-theme-accent transition-colors cursor-pointer"
+                                onClick={() => sendToNina(inst)}
+                                disabled={sendingInstance() === `nina:${inst.name}`}
+                              >
+                                {sendingInstance() === `nina:${inst.name}` ? "Sent!" : `NINA: ${inst.name}`}
+                              </button>
+                            )}
+                          </For>
+                          <For each={stellariumInstances()}>
+                            {(inst) => (
+                              <button
+                                class="text-tiny px-1.5 py-0.5 border border-theme-border rounded text-theme-text-tertiary hover:text-theme-text-primary hover:border-theme-accent transition-colors cursor-pointer"
+                                onClick={() => sendToStellarium(inst)}
+                                disabled={sendingInstance() === `stel:${inst.name}`}
+                              >
+                                {sendingInstance() === `stel:${inst.name}` ? "Sent!" : `Stellarium: ${inst.name}`}
+                              </button>
+                            )}
+                          </For>
+                        </Show>
                       </div>
                     </div>
                     <div class="w-[140px] h-[100px] flex-shrink-0 ml-auto rounded overflow-hidden">
@@ -728,6 +803,32 @@ const SessionAccordionCard: Component<{
                       </div>
                     )}
                   </For>
+                  <Show when={hasCoords() && (ninaInstances().length > 0 || stellariumInstances().length > 0)}>
+                    <div class="flex flex-wrap gap-1.5 mt-3">
+                      <For each={ninaInstances()}>
+                        {(inst) => (
+                          <button
+                            class="text-tiny px-1.5 py-0.5 border border-theme-border rounded text-theme-text-tertiary hover:text-theme-text-primary hover:border-theme-accent transition-colors cursor-pointer"
+                            onClick={() => sendToNina(inst)}
+                            disabled={sendingInstance() === `nina:${inst.name}`}
+                          >
+                            {sendingInstance() === `nina:${inst.name}` ? "Sent!" : `NINA: ${inst.name}`}
+                          </button>
+                        )}
+                      </For>
+                      <For each={stellariumInstances()}>
+                        {(inst) => (
+                          <button
+                            class="text-tiny px-1.5 py-0.5 border border-theme-border rounded text-theme-text-tertiary hover:text-theme-text-primary hover:border-theme-accent transition-colors cursor-pointer"
+                            onClick={() => sendToStellarium(inst)}
+                            disabled={sendingInstance() === `stel:${inst.name}`}
+                          >
+                            {sendingInstance() === `stel:${inst.name}` ? "Sent!" : `Stellarium: ${inst.name}`}
+                          </button>
+                        )}
+                      </For>
+                    </div>
+                  </Show>
                 </Show>
 
                 {/* Expandable detail table */}
