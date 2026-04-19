@@ -42,8 +42,8 @@ const ResolveTargetModal: Component<Props> = (props) => {
       const res = await api.orphanPreview(props.candidate.source_name);
       setPreview(res);
       setPrimaryName(res.primary_name);
-      setRa(res.ra != null ? String(res.ra) : "");
-      setDec(res.dec != null ? String(res.dec) : "");
+      setRa(res.ra != null ? String(Math.round(res.ra * 10000) / 10000) : "");
+      setDec(res.dec != null ? String(Math.round(res.dec * 10000) / 10000) : "");
       setObjectType(res.object_type ?? "");
       setCatalogId(res.catalog_id ?? "");
     } catch {
@@ -190,11 +190,11 @@ const ResolveTargetModal: Component<Props> = (props) => {
                     <div class="grid grid-cols-2 gap-3">
                       <div>
                         <label class={labelClass}>Object Type</label>
-                        <input type="text" class={inputClass} value={objectType()} onInput={(e) => setObjectType(e.currentTarget.value)} />
+                        <input type="text" class={inputClass} value={objectType()} onInput={(e) => setObjectType(e.currentTarget.value)} placeholder="e.g. Galaxy, Nebula, Asterism" />
                       </div>
                       <div>
                         <label class={labelClass}>Catalog ID</label>
-                        <input type="text" class={inputClass} value={catalogId()} onInput={(e) => setCatalogId(e.currentTarget.value)} />
+                        <input type="text" class={inputClass} value={catalogId()} onInput={(e) => setCatalogId(e.currentTarget.value)} placeholder="e.g. NGC 1234, IC 456" />
                       </div>
                     </div>
 
