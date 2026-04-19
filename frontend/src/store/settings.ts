@@ -1,8 +1,11 @@
-import { createResource, startTransition } from "solid-js";
+import { createSignal, createResource, startTransition } from "solid-js";
 import { api } from "../api/client";
 import type { SettingsResponse, GeneralSettings, FilterConfig, EquipmentConfig, DisplaySettings } from "../types";
 
-const [settingsData, { refetch: refetchSettings }] = createResource(() => api.getSettings());
+const [settingsGate, setSettingsGate] = createSignal(false);
+export function enableSettingsFetch() { setSettingsGate(true); }
+
+const [settingsData, { refetch: refetchSettings }] = createResource(settingsGate, () => api.getSettings());
 
 /** Refetch settings without triggering the Suspense boundary */
 const quietRefetch = () => startTransition(() => refetchSettings());
