@@ -296,8 +296,7 @@ async def orphan_preview(
     )
     await session.commit()
 
-    redis = await async_redis()
-    if redis:
+    async with async_redis() as redis:
         await redis.srem("target_resolver:negative", normalized)
 
     simbad_result = None
