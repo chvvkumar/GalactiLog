@@ -584,6 +584,14 @@ export interface GeneralSettings {
   use_imaging_night?: boolean;
   preview_resolution?: number;
   preview_cache_mb?: number;
+  nina_instances?: IntegrationInstance[];
+  stellarium_instances?: IntegrationInstance[];
+}
+
+export interface IntegrationInstance {
+  name: string;
+  url: string;
+  enabled: boolean;
 }
 
 export interface FilterConfig {

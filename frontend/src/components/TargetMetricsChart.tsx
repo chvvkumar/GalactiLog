@@ -395,11 +395,13 @@ export default function TargetMetricsChart(props: Props) {
       <div class="mb-3 flex flex-wrap items-center gap-3">
         <FilterTogglePills filters={allFilters()} />
         <Show when={isMultiRig()}>
-          <RigTogglePills
-            rigs={allRigs()}
-            enabledRigs={enabledRigs()}
-            onToggle={toggleRig}
-          />
+          <div class="ml-auto">
+            <RigTogglePills
+              rigs={allRigs()}
+              enabledRigs={enabledRigs()}
+              onToggle={toggleRig}
+            />
+          </div>
         </Show>
       </div>
       <div style={{ height: "220px" }}>

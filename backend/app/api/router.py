@@ -26,6 +26,7 @@ from .planning import router as planning_router
 from .bootstrap import router as bootstrap_router
 from .preview import router as preview_router
 from .activity import router as activity_router
+from .integrations import router as integrations_router
 from app.database import async_session
 from app.config import async_redis
 
@@ -46,6 +47,7 @@ api_router.include_router(planning_router)
 api_router.include_router(bootstrap_router)
 api_router.include_router(preview_router)
 api_router.include_router(activity_router)
+api_router.include_router(integrations_router)
 
 
 @api_router.get("/version")
