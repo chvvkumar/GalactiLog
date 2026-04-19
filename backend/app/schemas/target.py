@@ -195,6 +195,7 @@ class TargetDetailResponse(BaseModel):
     dec: float | None = None
     size_major: float | None = None
     size_minor: float | None = None
+    position_angle: float | None = None
     v_mag: float | None = None
     surface_brightness: float | None = None
     total_integration_seconds: float

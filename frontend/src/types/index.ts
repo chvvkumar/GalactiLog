@@ -124,6 +124,7 @@ export interface TargetDetailResponse {
   constellation: string | null;
   ra: number | null;
   dec: number | null;
+  position_angle: number | null;
   size_major: number | null;
   size_minor: number | null;
   v_mag: number | null;

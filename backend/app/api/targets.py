@@ -15,6 +15,26 @@ from sqlalchemy import select, or_, and_, func, cast, Float, Date, String, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
+
+
+def _parse_sexa_ra(s: str) -> float | None:
+    try:
+        parts = s.strip().split()
+        h, m, sec = float(parts[0]), float(parts[1]), float(parts[2])
+        return (h + m / 60 + sec / 3600) * 15
+    except (ValueError, IndexError):
+        return None
+
+
+def _parse_sexa_dec(s: str) -> float | None:
+    try:
+        s = s.strip()
+        sign = -1 if s.startswith("-") else 1
+        parts = s.lstrip("+-").split()
+        d, m, sec = float(parts[0]), float(parts[1]), float(parts[2])
+        return sign * (d + m / 60 + sec / 3600)
+    except (ValueError, IndexError):
+        return None
 from app.api.deps import get_current_user
 from app.config import settings, async_redis
 from app.models import Target, Image
@@ -761,6 +781,20 @@ async def get_target_detail(
 
     sorted_dates = sorted(sessions_map.keys())
 
+    # Fallback RA/Dec from FITS headers for obj: targets
+    fallback_ra: float | None = None
+    fallback_dec: float | None = None
+    if not target_obj and images:
+        for img in images:
+            hdrs = img.raw_headers or {}
+            ra_str = hdrs.get("OBJCTRA") or hdrs.get("RA")
+            dec_str = hdrs.get("OBJCTDEC") or hdrs.get("DEC")
+            if ra_str and dec_str:
+                fallback_ra = _parse_sexa_ra(str(ra_str))
+                fallback_dec = _parse_sexa_dec(str(dec_str))
+                if fallback_ra is not None and fallback_dec is not None:
+                    break
+
     # Fetch catalog memberships
     catalog_memberships = []
     if target_obj:
@@ -777,8 +811,9 @@ async def get_target_detail(
         primary_name=target_name,
         aliases=target_obj.aliases if target_obj else [],
         object_type=target_obj.object_type if target_obj else None,
-        ra=target_obj.ra if target_obj else None,
-        dec=target_obj.dec if target_obj else None,
+        ra=target_obj.ra if target_obj else fallback_ra,
+        dec=target_obj.dec if target_obj else fallback_dec,
+        position_angle=target_obj.position_angle if target_obj else None,
         total_integration_seconds=total_exp,
         total_frames=len(images),
         avg_hfr=statistics.mean(all_hfr) if all_hfr else None,

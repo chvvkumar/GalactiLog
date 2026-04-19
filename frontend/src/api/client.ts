@@ -830,10 +830,10 @@ export const api = {
     return resp.json();
   },
 
-  sendToNina: (url: string, ra: number, dec: number) =>
+  sendToNina: (url: string, ra: number, dec: number, position_angle?: number | null) =>
     fetchJson<{ ok: boolean; error?: string }>("/integrations/nina/send-coordinates", {
       method: "POST",
-      body: JSON.stringify({ url, ra, dec }),
+      body: JSON.stringify({ url, ra, dec, position_angle }),
     }),
 
   sendToStellarium: (url: string, ra: number, dec: number, targetName: string | null) =>
