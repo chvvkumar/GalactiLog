@@ -104,9 +104,7 @@ async function fetchWithRefresh(path: string, init: RequestInit): Promise<Respon
         ...init,
       });
     } else {
-      if (window.location.pathname !== "/login") {
-        window.location.href = "/login";
-      }
+      window.dispatchEvent(new CustomEvent("auth:expired"));
       throw new Error("Session expired");
     }
   }
@@ -154,9 +152,7 @@ export async function fetchJson<T>(path: string, init?: RequestInit, signal?: Ab
     if (ok) {
       return fetchJson<T>(path, init);
     }
-    if (window.location.pathname !== "/login") {
-      window.location.href = "/login";
-    }
+    window.dispatchEvent(new CustomEvent("auth:expired"));
     throw new Error("Session expired");
   }
 

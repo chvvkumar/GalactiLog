@@ -15,7 +15,6 @@ const AuthContext = createContext<AuthContextValue>();
 
 const API_BASE = import.meta.env.VITE_API_URL || "/api";
 
-/** Returns true when /api/health responds 200. */
 async function checkHealth(): Promise<boolean> {
   try {
     const r = await fetch(`${API_BASE}/health`, { cache: "no-store" });
@@ -104,6 +103,11 @@ export const AuthProvider: Component<ParentProps> = (props) => {
   const [loading, setLoading] = createSignal(true);
   const [serverStarting, setServerStarting] = createSignal(false);
 
+  // When any fetchJson call detects an expired session, clear the user
+  // so ProtectedRoute redirects to login (no hard page reload).
+  const onSessionExpired = () => { setUser(null); };
+  window.addEventListener("auth:expired", onSessionExpired);
+
   const refreshUser = async () => {
     try {
       const me = await api.getMe();
@@ -141,7 +145,6 @@ export const AuthProvider: Component<ParentProps> = (props) => {
       const me = await Promise.race([probeAuth(), timeout]);
       setUser(me);
     } catch {
-      // server-down, timeout, or network error → show startup screen
       setServerStarting(true);
       return;
     }
@@ -157,12 +160,13 @@ export const AuthProvider: Component<ParentProps> = (props) => {
       const me = await Promise.race([probeAuth(), timeout]);
       setUser(me);
     } catch {
-      // auth failed or timed out — user will be redirected to login
+      // auth failed or timed out
     }
     setLoading(false);
   };
 
   onMount(initAuth);
+  onCleanup(() => window.removeEventListener("auth:expired", onSessionExpired));
 
   return (
     <Show when={!serverStarting()} fallback={<StartupScreen onReady={onServerReady} />}>
