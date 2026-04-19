@@ -257,18 +257,18 @@ export default function SessionMetricsChart(props: Props) {
             <div class="text-tiny text-theme-text-tertiary uppercase tracking-wider">Metrics</div>
             <MetricTogglePills />
           </div>
-          <div class="mb-3">
+          <div class="mb-3 flex flex-wrap items-center gap-3">
             <FilterTogglePills filters={filters()} />
+            <Show when={(props.detail.rigs?.length ?? 0) > 1 && props.enabledRigs && props.onToggleRig}>
+              <div class="ml-auto">
+                <RigTogglePills
+                  rigs={props.detail.rigs.map(r => r.rig_label)}
+                  enabledRigs={props.enabledRigs!}
+                  onToggle={props.onToggleRig!}
+                />
+              </div>
+            </Show>
           </div>
-          <Show when={(props.detail.rigs?.length ?? 0) > 1 && props.enabledRigs && props.onToggleRig}>
-            <div class="mb-3">
-              <RigTogglePills
-                rigs={props.detail.rigs.map(r => r.rig_label)}
-                enabledRigs={props.enabledRigs!}
-                onToggle={props.onToggleRig!}
-              />
-            </div>
-          </Show>
           <div style={{ height: "200px" }}>
             <canvas ref={canvasRef} />
           </div>
