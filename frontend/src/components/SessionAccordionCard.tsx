@@ -653,64 +653,64 @@ const SessionAccordionCard: Component<{
                   </button>
                 <Show when={showSummary()}>
                 <div class="px-3 pb-3">
-                {/* Headline stats row */}
-                <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-label">
-                  <span>
-                    <span class="text-theme-text-tertiary">Integration:</span>{" "}
-                    <span class="font-bold text-metric-integration">{formatIntegration(detail().integration_seconds)}</span>
-                  </span>
-                  <span>
-                    <span class="text-theme-text-tertiary">Frames:</span>{" "}
-                    <span class="font-bold text-metric-frames">{detail().frame_count}</span>
-                  </span>
-                  <span>
-                    <span class="text-theme-text-tertiary">Gain / Offset:</span>{" "}
-                    <span class="font-bold text-metric-gain">
-                      {detail().gain !== null ? detail().gain : "—"} / {detail().offset !== null ? detail().offset : "—"}
+                {/* Headline stats row with action buttons */}
+                <div class="flex items-center gap-x-4 gap-y-1 text-label">
+                  <div class="flex flex-wrap items-center gap-x-4 gap-y-1">
+                    <span>
+                      <span class="text-theme-text-tertiary">Integration:</span>{" "}
+                      <span class="font-bold text-metric-integration">{formatIntegration(detail().integration_seconds)}</span>
                     </span>
-                  </span>
-                  <span>
-                    <span class="text-theme-text-tertiary">Time:</span>{" "}
-                    <span class="font-bold text-metric-time">
-                      {detail().first_frame_time ? `${formatTimeUtil(detail().first_frame_time!, settingsCtx.timezone(), settingsCtx.use24hTime())} → ${detail().last_frame_time ? formatTimeUtil(detail().last_frame_time!, settingsCtx.timezone(), settingsCtx.use24hTime()) : ""}` : "—"}
+                    <span>
+                      <span class="text-theme-text-tertiary">Frames:</span>{" "}
+                      <span class="font-bold text-metric-frames">{detail().frame_count}</span>
                     </span>
-                  </span>
-                </div>
-
-                {/* Action buttons row — right-justified above thumbnails */}
-                <div class="flex justify-end flex-wrap gap-1.5 mt-2">
-                  <Show when={!isMultiRig()}>
-                    <button
-                      class="text-tiny px-1.5 py-0.5 border border-theme-border rounded text-theme-text-tertiary hover:text-theme-text-primary hover:border-theme-accent transition-colors cursor-pointer"
-                      onClick={() => copyAstrobinCsv()}
-                    >
-                      {csvCopiedRig() === "__all__" ? "Copied!" : "Astrobin CSV"}
-                    </button>
-                  </Show>
-                  <Show when={hasCoords()}>
-                    <For each={ninaInstances()}>
-                      {(inst) => (
-                        <button
-                          class="text-tiny px-1.5 py-0.5 border border-theme-border rounded text-theme-text-tertiary hover:text-theme-text-primary hover:border-theme-accent transition-colors cursor-pointer"
-                          onClick={() => sendToNina(inst)}
-                          disabled={sendingInstance() === `nina:${inst.name}`}
-                        >
-                          {sendingInstance() === `nina:${inst.name}` ? "Sent!" : `${inst.name}`}
-                        </button>
-                      )}
-                    </For>
-                    <For each={stellariumInstances()}>
-                      {(inst) => (
-                        <button
-                          class="text-tiny px-1.5 py-0.5 border border-theme-border rounded text-theme-text-tertiary hover:text-theme-text-primary hover:border-theme-accent transition-colors cursor-pointer"
-                          onClick={() => sendToStellarium(inst)}
-                          disabled={sendingInstance() === `stel:${inst.name}`}
-                        >
-                          {sendingInstance() === `stel:${inst.name}` ? "Sent!" : `${inst.name}`}
-                        </button>
-                      )}
-                    </For>
-                  </Show>
+                    <span>
+                      <span class="text-theme-text-tertiary">Gain / Offset:</span>{" "}
+                      <span class="font-bold text-metric-gain">
+                        {detail().gain !== null ? detail().gain : "—"} / {detail().offset !== null ? detail().offset : "—"}
+                      </span>
+                    </span>
+                    <span>
+                      <span class="text-theme-text-tertiary">Time:</span>{" "}
+                      <span class="font-bold text-metric-time">
+                        {detail().first_frame_time ? `${formatTimeUtil(detail().first_frame_time!, settingsCtx.timezone(), settingsCtx.use24hTime())} → ${detail().last_frame_time ? formatTimeUtil(detail().last_frame_time!, settingsCtx.timezone(), settingsCtx.use24hTime()) : ""}` : "—"}
+                      </span>
+                    </span>
+                  </div>
+                  <div class="flex flex-wrap gap-1.5 ml-auto flex-shrink-0">
+                    <Show when={!isMultiRig()}>
+                      <button
+                        class="text-tiny px-1.5 py-0.5 border border-theme-border rounded text-theme-text-tertiary hover:text-theme-text-primary hover:border-theme-accent transition-colors cursor-pointer"
+                        onClick={() => copyAstrobinCsv()}
+                      >
+                        {csvCopiedRig() === "__all__" ? "Copied!" : "Astrobin CSV"}
+                      </button>
+                    </Show>
+                    <Show when={hasCoords()}>
+                      <For each={ninaInstances()}>
+                        {(inst) => (
+                          <button
+                            class="text-tiny px-1.5 py-0.5 border border-theme-border rounded text-theme-text-tertiary hover:text-theme-text-primary hover:border-theme-accent transition-colors cursor-pointer"
+                            onClick={() => sendToNina(inst)}
+                            disabled={sendingInstance() === `nina:${inst.name}`}
+                          >
+                            {sendingInstance() === `nina:${inst.name}` ? "Sent!" : `${inst.name}`}
+                          </button>
+                        )}
+                      </For>
+                      <For each={stellariumInstances()}>
+                        {(inst) => (
+                          <button
+                            class="text-tiny px-1.5 py-0.5 border border-theme-border rounded text-theme-text-tertiary hover:text-theme-text-primary hover:border-theme-accent transition-colors cursor-pointer"
+                            onClick={() => sendToStellarium(inst)}
+                            disabled={sendingInstance() === `stel:${inst.name}`}
+                          >
+                            {sendingInstance() === `stel:${inst.name}` ? "Sent!" : `${inst.name}`}
+                          </button>
+                        )}
+                      </For>
+                    </Show>
+                  </div>
                 </div>
 
                 {/* Per-rig overview with thumbnails */}
