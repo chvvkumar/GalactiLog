@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select, update, func
+from sqlalchemy import select, update, func, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 from app.database import get_session
@@ -12,7 +12,10 @@ from app.models.image import Image
 from app.models.merge_candidate import MergeCandidate
 from app.models.mosaic_panel import MosaicPanel
 from app.models.mosaic_suggestion import MosaicSuggestion
-from app.schemas.target import MergeCandidateResponse, MergedTargetResponse, MergeRequest
+from app.schemas.target import MergeCandidateResponse, MergedTargetResponse, MergeRequest, OrphanPreviewRequest, OrphanPreviewResponse, OrphanCreateRequest
+from app.models.simbad_cache import SimbadCache
+from app.models.sesame_cache import SesameCache
+from app.config import async_redis
 
 router = APIRouter(prefix="/targets", tags=["merges"])
 
@@ -122,6 +125,17 @@ async def merge_targets(
                 MergeCandidate.status == "pending",
             )
             .values(status="accepted", resolved_at=now)
+        )
+
+        # Also accept orphan candidates for this source_name
+        await session.execute(
+            update(MergeCandidate)
+            .where(
+                MergeCandidate.source_name == loser_name,
+                MergeCandidate.suggested_target_id.is_(None),
+                MergeCandidate.status == "pending",
+            )
+            .values(status="accepted", resolved_at=now, suggested_target_id=winner.id)
         )
 
     else:
@@ -236,7 +250,7 @@ async def list_merge_candidates(
     """List merge candidates, joined with suggested target name, ordered by similarity."""
     result = await session.execute(
         select(MergeCandidate, Target.primary_name.label("suggested_target_name"))
-        .join(Target, MergeCandidate.suggested_target_id == Target.id)
+        .outerjoin(Target, MergeCandidate.suggested_target_id == Target.id)
         .where(MergeCandidate.status == status)
         .order_by(MergeCandidate.similarity_score.desc())
     )
@@ -256,6 +270,162 @@ async def list_merge_candidates(
         )
         for mc, suggested_target_name in rows
     ]
+
+
+@router.post("/orphan-preview", response_model=OrphanPreviewResponse)
+async def orphan_preview(
+    body: OrphanPreviewRequest,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(require_admin),
+):
+    """Preview metadata for creating a target from an unresolved OBJECT name."""
+    from app.services.simbad import normalize_object_name, resolve_target_name_cached
+    from app.services.sesame import resolve_sesame_cached
+    from sqlalchemy.orm import Session as SyncSession
+    from app.database import engine as async_engine
+
+    source = body.source_name
+    normalized = normalize_object_name(source)
+
+    # Clear negative caches so the name gets a fresh attempt
+    await session.execute(
+        delete(SimbadCache).where(SimbadCache.query_name == normalized, SimbadCache.main_id.is_(None))
+    )
+    await session.execute(
+        delete(SesameCache).where(SesameCache.query_name == normalized, SesameCache.main_id.is_(None))
+    )
+    await session.commit()
+
+    redis = await async_redis()
+    if redis:
+        await redis.srem("target_resolver:negative", normalized)
+
+    simbad_result = None
+    with SyncSession(async_engine.sync_engine) as sync_db:
+        simbad_result = resolve_target_name_cached(source, sync_db)
+        if simbad_result is None:
+            simbad_result = resolve_sesame_cached(source, sync_db)
+
+    if simbad_result:
+        return OrphanPreviewResponse(
+            source_name=source,
+            resolved=True,
+            primary_name=simbad_result.get("primary_name", source),
+            catalog_id=simbad_result.get("catalog_id"),
+            ra=simbad_result.get("ra"),
+            dec=simbad_result.get("dec"),
+            object_type=simbad_result.get("object_type"),
+            constellation=simbad_result.get("constellation"),
+            size_major=simbad_result.get("size_major"),
+            size_minor=simbad_result.get("size_minor"),
+            position_angle=simbad_result.get("position_angle"),
+            v_mag=simbad_result.get("v_mag"),
+        )
+
+    # Fallback: extract RA/DEC from FITS headers
+    from app.api.targets import _parse_sexa_ra, _parse_sexa_dec
+
+    img_result = await session.execute(
+        select(Image)
+        .where(
+            Image.raw_headers["OBJECT"].astext == source,
+            Image.image_type == "LIGHT",
+        )
+        .limit(1)
+    )
+    img = img_result.scalar_one_or_none()
+
+    fallback_ra = None
+    fallback_dec = None
+    if img:
+        hdrs = img.raw_headers or {}
+        ra_str = hdrs.get("OBJCTRA") or hdrs.get("RA")
+        dec_str = hdrs.get("OBJCTDEC") or hdrs.get("DEC")
+        if ra_str and dec_str:
+            parsed_ra = _parse_sexa_ra(str(ra_str))
+            parsed_dec = _parse_sexa_dec(str(dec_str))
+            if parsed_ra is not None and parsed_dec is not None:
+                fallback_ra = parsed_ra
+                fallback_dec = parsed_dec
+            else:
+                try:
+                    fallback_ra = float(ra_str)
+                    fallback_dec = float(dec_str)
+                except (ValueError, TypeError):
+                    pass
+
+    return OrphanPreviewResponse(
+        source_name=source,
+        resolved=False,
+        primary_name=source,
+        ra=fallback_ra,
+        dec=fallback_dec,
+    )
+
+
+@router.post("/orphan-create")
+async def orphan_create(
+    body: OrphanCreateRequest,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(require_admin),
+):
+    """Create a new target from an orphan merge candidate and resolve its images."""
+    candidate = await session.get(MergeCandidate, body.candidate_id)
+    if not candidate:
+        raise HTTPException(status_code=404, detail="Merge candidate not found")
+    if candidate.status != "pending":
+        raise HTTPException(status_code=400, detail="Candidate is not pending")
+
+    now = datetime.now(timezone.utc)
+
+    target = Target(
+        primary_name=body.primary_name,
+        catalog_id=body.catalog_id,
+        aliases=[candidate.source_name] if candidate.source_name != body.primary_name else [],
+        ra=body.ra,
+        dec=body.dec,
+        object_type=body.object_type,
+    )
+    session.add(target)
+    await session.flush()
+
+    await session.execute(
+        update(Image)
+        .where(
+            Image.raw_headers["OBJECT"].astext == candidate.source_name,
+            Image.resolved_target_id.is_(None),
+        )
+        .values(resolved_target_id=target.id)
+    )
+
+    candidate.suggested_target_id = target.id
+    candidate.status = "accepted"
+    candidate.resolved_at = now
+
+    await session.commit()
+
+    # Run enrichment (sync, non-critical)
+    try:
+        from sqlalchemy.orm import Session as SyncSession
+        from app.database import engine as async_engine
+        from app.services.openngc import enrich_target_from_openngc
+        from app.services.sac import enrich_target_from_sac
+        from app.services.vizier import enrich_target_from_vizier
+
+        with SyncSession(async_engine.sync_engine) as sync_db:
+            db_target = sync_db.get(Target, target.id)
+            if db_target:
+                enrich_target_from_openngc(sync_db, db_target)
+                sync_db.commit()
+                if db_target.size_major is None:
+                    enrich_target_from_vizier(sync_db, db_target)
+                    sync_db.commit()
+                enrich_target_from_sac(sync_db, db_target)
+                sync_db.commit()
+    except Exception:
+        pass
+
+    return {"target_id": str(target.id)}
 
 
 @router.get("/merged-targets", response_model=list[MergedTargetResponse])
@@ -312,33 +482,7 @@ async def revert_merge_candidate(
 
     source_name = candidate.source_name
 
-    # Check if there's a soft-deleted target for this source name - if so, do a full unmerge
-    loser_result = await session.execute(
-        select(Target).where(
-            Target.merged_into_id == winner.id,
-            Target.primary_name == source_name,
-        )
-    )
-    loser = loser_result.scalar_one_or_none()
-
-    if loser:
-        # Target-to-target merge: reassign images back, restore target
-        loser_names = set([loser.primary_name] + list(loser.aliases or []))
-        for name in loser_names:
-            await session.execute(
-                update(Image)
-                .where(
-                    Image.resolved_target_id == winner.id,
-                    Image.raw_headers["OBJECT"].astext == name,
-                )
-                .values(resolved_target_id=loser.id)
-            )
-        winner.aliases = [a for a in (winner.aliases or []) if a not in loser_names]
-        loser.merged_into_id = None
-        loser.merged_at = None
-    else:
-        # Name-based merge: remove alias, un-resolve images
-        winner.aliases = [a for a in (winner.aliases or []) if a != source_name]
+    if candidate.method == "orphan":
         await session.execute(
             update(Image)
             .where(
@@ -347,9 +491,50 @@ async def revert_merge_candidate(
             )
             .values(resolved_target_id=None)
         )
+        remaining = await session.execute(
+            select(func.count(Image.id)).where(Image.resolved_target_id == winner.id)
+        )
+        if remaining.scalar_one() == 0:
+            await session.delete(winner)
+        candidate.suggested_target_id = None
+        candidate.status = "pending"
+        candidate.resolved_at = None
+    else:
+        loser_result = await session.execute(
+            select(Target).where(
+                Target.merged_into_id == winner.id,
+                Target.primary_name == source_name,
+            )
+        )
+        loser = loser_result.scalar_one_or_none()
 
-    candidate.status = "pending"
-    candidate.resolved_at = None
+        if loser:
+            loser_names = set([loser.primary_name] + list(loser.aliases or []))
+            for name in loser_names:
+                await session.execute(
+                    update(Image)
+                    .where(
+                        Image.resolved_target_id == winner.id,
+                        Image.raw_headers["OBJECT"].astext == name,
+                    )
+                    .values(resolved_target_id=loser.id)
+                )
+            winner.aliases = [a for a in (winner.aliases or []) if a not in loser_names]
+            loser.merged_into_id = None
+            loser.merged_at = None
+        else:
+            winner.aliases = [a for a in (winner.aliases or []) if a != source_name]
+            await session.execute(
+                update(Image)
+                .where(
+                    Image.resolved_target_id == winner.id,
+                    Image.raw_headers["OBJECT"].astext == source_name,
+                )
+                .values(resolved_target_id=None)
+            )
+
+        candidate.status = "pending"
+        candidate.resolved_at = None
 
     await session.commit()
     return {"status": "ok"}

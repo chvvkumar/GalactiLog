@@ -293,12 +293,40 @@ class MergeCandidateResponse(BaseModel):
     id: uuid.UUID
     source_name: str
     source_image_count: int
-    suggested_target_id: uuid.UUID
-    suggested_target_name: str
+    suggested_target_id: uuid.UUID | None = None
+    suggested_target_name: str | None = None
     similarity_score: float
     method: str
     status: str
     created_at: str
+
+
+class OrphanPreviewRequest(BaseModel):
+    source_name: str
+
+
+class OrphanPreviewResponse(BaseModel):
+    source_name: str
+    resolved: bool
+    primary_name: str
+    catalog_id: str | None = None
+    ra: float | None = None
+    dec: float | None = None
+    object_type: str | None = None
+    constellation: str | None = None
+    size_major: float | None = None
+    size_minor: float | None = None
+    position_angle: float | None = None
+    v_mag: float | None = None
+
+
+class OrphanCreateRequest(BaseModel):
+    candidate_id: uuid.UUID
+    primary_name: str
+    ra: float | None = None
+    dec: float | None = None
+    object_type: str | None = None
+    catalog_id: str | None = None
 
 
 class MergedTargetResponse(BaseModel):

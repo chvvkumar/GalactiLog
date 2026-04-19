@@ -7,6 +7,8 @@ import type {
   ObjectTypeCount,
   MergeCandidateResponse,
   MergedTargetResponse,
+  OrphanPreviewResponse,
+  OrphanCreateRequest,
   FilenameCandidateResponse,
   ScanResult,
   ScanStatus,
@@ -457,6 +459,18 @@ export const api = {
   revertMergeCandidate: (candidateId: string) =>
     fetchJson<{ status: string }>(`/targets/merge-candidates/${candidateId}/revert`, {
       method: "POST",
+    }),
+
+  orphanPreview: (sourceName: string) =>
+    fetchJson<OrphanPreviewResponse>("/targets/orphan-preview", {
+      method: "POST",
+      body: JSON.stringify({ source_name: sourceName }),
+    }),
+
+  orphanCreate: (body: OrphanCreateRequest) =>
+    fetchJson<{ target_id: string }>("/targets/orphan-create", {
+      method: "POST",
+      body: JSON.stringify(body),
     }),
 
   triggerDuplicateDetection: () =>

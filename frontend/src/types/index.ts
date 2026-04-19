@@ -390,12 +390,36 @@ export interface MergeCandidateResponse {
   id: string;
   source_name: string;
   source_image_count: number;
-  suggested_target_id: string;
-  suggested_target_name: string;
+  suggested_target_id: string | null;
+  suggested_target_name: string | null;
   similarity_score: number;
   method: string;
   status: string;
   created_at: string;
+}
+
+export interface OrphanPreviewResponse {
+  source_name: string;
+  resolved: boolean;
+  primary_name: string;
+  catalog_id: string | null;
+  ra: number | null;
+  dec: number | null;
+  object_type: string | null;
+  constellation: string | null;
+  size_major: number | null;
+  size_minor: number | null;
+  position_angle: number | null;
+  v_mag: number | null;
+}
+
+export interface OrphanCreateRequest {
+  candidate_id: string;
+  primary_name: string;
+  ra: number | null;
+  dec: number | null;
+  object_type: string | null;
+  catalog_id: string | null;
 }
 
 export interface MergedTargetResponse {
