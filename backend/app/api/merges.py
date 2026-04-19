@@ -282,7 +282,7 @@ async def orphan_preview(
     from app.services.simbad import normalize_object_name, resolve_target_name_cached
     from app.services.sesame import resolve_sesame_cached
     from sqlalchemy.orm import Session as SyncSession
-    from app.database import engine as async_engine
+    from app.database import sync_engine
 
     source = body.source_name
     normalized = normalize_object_name(source)
@@ -300,7 +300,7 @@ async def orphan_preview(
         await redis.srem("target_resolver:negative", normalized)
 
     simbad_result = None
-    with SyncSession(async_engine.sync_engine) as sync_db:
+    with SyncSession(sync_engine) as sync_db:
         simbad_result = resolve_target_name_cached(source, sync_db)
         if simbad_result is None:
             simbad_result = resolve_sesame_cached(source, sync_db)
@@ -406,12 +406,12 @@ async def orphan_create(
     # Run enrichment (sync, non-critical)
     try:
         from sqlalchemy.orm import Session as SyncSession
-        from app.database import engine as async_engine
+        from app.database import sync_engine
         from app.services.openngc import enrich_target_from_openngc
         from app.services.sac import enrich_target_from_sac
         from app.services.vizier import enrich_target_from_vizier
 
-        with SyncSession(async_engine.sync_engine) as sync_db:
+        with SyncSession(sync_engine) as sync_db:
             db_target = sync_db.get(Target, target.id)
             if db_target:
                 enrich_target_from_openngc(sync_db, db_target)
