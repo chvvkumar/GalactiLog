@@ -151,21 +151,19 @@ export const AuthProvider: Component<ParentProps> = (props) => {
     setLoading(false);
   };
 
-  const onServerReady = async () => {
+  const onServerReady = () => {
     setServerStarting(false);
-    try {
-      const timeout = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error("timeout")), 5000),
-      );
-      const me = await Promise.race([probeAuth(), timeout]);
-      setUser(me);
-    } catch {
-      // auth failed or timed out
-    }
-    setLoading(false);
+    initAuth();
   };
 
   onMount(initAuth);
+
+  // Failsafe: if auth is still loading after 15s, force completion
+  // so the app never stays stuck on "Loading..." forever.
+  setTimeout(() => {
+    if (loading()) setLoading(false);
+  }, 15000);
+
   onCleanup(() => window.removeEventListener("auth:expired", onSessionExpired));
 
   return (
