@@ -1,6 +1,5 @@
 import { createContext, createSignal, useContext, onMount, onCleanup, Show, type ParentProps, type Component } from "solid-js";
-import { api, setAuthRedirectSuppressed } from "../api/client";
-import { ApiError } from "../api/client";
+import { api } from "../api/client";
 import type { AuthUser } from "../types";
 
 interface AuthContextValue {
@@ -24,6 +23,33 @@ async function checkHealth(): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/**
+ * Direct auth probe that bypasses fetchJson entirely.
+ * Returns the authenticated user, or null if not authenticated.
+ * Throws on server-down conditions (502/503/504/network error).
+ */
+async function probeAuth(): Promise<AuthUser | null> {
+  let resp = await fetch(`${API_BASE}/auth/me`, { credentials: "same-origin" });
+
+  if (resp.status === 401) {
+    const refreshResp = await fetch(`${API_BASE}/auth/refresh`, {
+      method: "POST",
+      credentials: "same-origin",
+    });
+    if (refreshResp.ok) {
+      resp = await fetch(`${API_BASE}/auth/me`, { credentials: "same-origin" });
+    }
+  }
+
+  if (resp.ok) return resp.json();
+
+  if (resp.status === 502 || resp.status === 503 || resp.status === 504) {
+    throw new Error("server-down");
+  }
+
+  return null;
 }
 
 const StartupScreen: Component<{ onReady: () => void }> = (props) => {
@@ -101,43 +127,24 @@ export const AuthProvider: Component<ParentProps> = (props) => {
   const isAdmin = () => user()?.role === "admin";
 
   const initAuth = async () => {
-    // Clean up stale token from prior auth implementation
     try {
       if (localStorage.getItem("token") !== null) {
         localStorage.removeItem("token");
       }
     } catch {
-      // localStorage unavailable (private browsing, etc.)
+      // localStorage unavailable
     }
-    setAuthRedirectSuppressed(true);
     try {
-      // Timeout the initial auth check so a hanging upstream (nginx
-      // connected but backend not ready) falls through to the startup
-      // screen instead of showing "Loading..." forever.
       const timeout = new Promise<never>((_, reject) =>
         setTimeout(() => reject(new Error("timeout")), 5000),
       );
-      await Promise.race([refreshUser(), timeout]);
-    } catch (e) {
-      // 502/503/504 = nginx is up but backend isn't ready yet
-      // Network error (not ApiError) = nothing is listening yet
-      // Timeout = upstream accepted connection but never responded
-      // "Session expired" / "Unauthorized" = server is up, user just isn't authenticated
-      const isAuthError =
-        e instanceof Error &&
-        (e.message === "Session expired" || e.message === "Unauthorized");
-      const serverDown =
-        !isAuthError && (
-          !(e instanceof ApiError) ||
-          e.status === 502 || e.status === 503 || e.status === 504
-        );
-      if (serverDown) {
-        setServerStarting(true);
-        return;
-      }
-      // Auth errors fall through -- user will be redirected to login by ProtectedRoute
+      const me = await Promise.race([probeAuth(), timeout]);
+      setUser(me);
+    } catch {
+      // server-down, timeout, or network error → show startup screen
+      setServerStarting(true);
+      return;
     }
-    setAuthRedirectSuppressed(false);
     setLoading(false);
   };
 
@@ -147,11 +154,11 @@ export const AuthProvider: Component<ParentProps> = (props) => {
       const timeout = new Promise<never>((_, reject) =>
         setTimeout(() => reject(new Error("timeout")), 5000),
       );
-      await Promise.race([refreshUser(), timeout]);
+      const me = await Promise.race([probeAuth(), timeout]);
+      setUser(me);
     } catch {
-      // Server is up but user not authenticated or slow -- that's fine
+      // auth failed or timed out — user will be redirected to login
     }
-    setAuthRedirectSuppressed(false);
     setLoading(false);
   };
 
