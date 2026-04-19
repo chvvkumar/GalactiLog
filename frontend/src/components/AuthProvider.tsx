@@ -1,5 +1,5 @@
 import { createContext, createSignal, useContext, onMount, onCleanup, Show, type ParentProps, type Component } from "solid-js";
-import { api } from "../api/client";
+import { api, setAuthRedirectSuppressed } from "../api/client";
 import { ApiError } from "../api/client";
 import type { AuthUser } from "../types";
 
@@ -109,6 +109,7 @@ export const AuthProvider: Component<ParentProps> = (props) => {
     } catch {
       // localStorage unavailable (private browsing, etc.)
     }
+    setAuthRedirectSuppressed(true);
     try {
       // Timeout the initial auth check so a hanging upstream (nginx
       // connected but backend not ready) falls through to the startup
@@ -136,16 +137,21 @@ export const AuthProvider: Component<ParentProps> = (props) => {
       }
       // Auth errors fall through -- user will be redirected to login by ProtectedRoute
     }
+    setAuthRedirectSuppressed(false);
     setLoading(false);
   };
 
   const onServerReady = async () => {
     setServerStarting(false);
     try {
-      await refreshUser();
+      const timeout = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("timeout")), 5000),
+      );
+      await Promise.race([refreshUser(), timeout]);
     } catch {
-      // Server is up but user not authenticated -- that's fine
+      // Server is up but user not authenticated or slow -- that's fine
     }
+    setAuthRedirectSuppressed(false);
     setLoading(false);
   };
 

@@ -70,6 +70,8 @@ export class ApiError extends Error {
 }
 
 let refreshPromise: Promise<boolean> | null = null;
+let _suppressAuthRedirect = false;
+export function setAuthRedirectSuppressed(v: boolean) { _suppressAuthRedirect = v; }
 
 async function doRefresh(): Promise<boolean> {
   try {
@@ -104,7 +106,7 @@ async function fetchWithRefresh(path: string, init: RequestInit): Promise<Respon
         ...init,
       });
     } else {
-      if (window.location.pathname !== "/login") {
+      if (!_suppressAuthRedirect && window.location.pathname !== "/login") {
         window.location.href = "/login";
       }
       throw new Error("Session expired");
@@ -154,7 +156,7 @@ export async function fetchJson<T>(path: string, init?: RequestInit, signal?: Ab
     if (ok) {
       return fetchJson<T>(path, init);
     }
-    if (window.location.pathname !== "/login") {
+    if (!_suppressAuthRedirect && window.location.pathname !== "/login") {
       window.location.href = "/login";
     }
     throw new Error("Session expired");
