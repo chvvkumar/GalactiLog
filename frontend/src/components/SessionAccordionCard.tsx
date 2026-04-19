@@ -713,7 +713,7 @@ const SessionAccordionCard: Component<{
                                 onClick={() => sendToNina(inst)}
                                 disabled={sendingInstance() === `nina:${inst.name}`}
                               >
-                                {sendingInstance() === `nina:${inst.name}` ? "Sent!" : `NINA: ${inst.name}`}
+                                {sendingInstance() === `nina:${inst.name}` ? "Sent!" : `${inst.name}`}
                               </button>
                             )}
                           </For>
@@ -724,7 +724,7 @@ const SessionAccordionCard: Component<{
                                 onClick={() => sendToStellarium(inst)}
                                 disabled={sendingInstance() === `stel:${inst.name}`}
                               >
-                                {sendingInstance() === `stel:${inst.name}` ? "Sent!" : `Stellarium: ${inst.name}`}
+                                {sendingInstance() === `stel:${inst.name}` ? "Sent!" : `${inst.name}`}
                               </button>
                             )}
                           </For>
@@ -812,7 +812,7 @@ const SessionAccordionCard: Component<{
                             onClick={() => sendToNina(inst)}
                             disabled={sendingInstance() === `nina:${inst.name}`}
                           >
-                            {sendingInstance() === `nina:${inst.name}` ? "Sent!" : `NINA: ${inst.name}`}
+                            {sendingInstance() === `nina:${inst.name}` ? "Sent!" : `${inst.name}`}
                           </button>
                         )}
                       </For>
@@ -823,7 +823,7 @@ const SessionAccordionCard: Component<{
                             onClick={() => sendToStellarium(inst)}
                             disabled={sendingInstance() === `stel:${inst.name}`}
                           >
-                            {sendingInstance() === `stel:${inst.name}` ? "Sent!" : `Stellarium: ${inst.name}`}
+                            {sendingInstance() === `stel:${inst.name}` ? "Sent!" : `${inst.name}`}
                           </button>
                         )}
                       </For>
