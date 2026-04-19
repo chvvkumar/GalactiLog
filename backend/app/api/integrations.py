@@ -1,4 +1,5 @@
 import logging
+import re
 
 import httpx
 from fastapi import APIRouter
@@ -9,6 +10,26 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/integrations", tags=["integrations"])
 
 TIMEOUT = 5.0
+
+_CATALOG_RE = re.compile(
+    r"^(NGC|IC|M|Sh2|LDN|LBN|Abell|Ced|vdB|Cr|Mel|Barnard|PGC|UGC|Arp)\s*[-]?\s*\d+",
+    re.IGNORECASE,
+)
+
+
+def _extract_catalog_name(name: str) -> str | None:
+    m = _CATALOG_RE.match(name.strip())
+    return m.group(0) if m else None
+
+
+async def _stellarium_focus(client: httpx.AsyncClient, base: str, name: str) -> bool:
+    resp = await client.post(
+        f"{base}/api/main/focus",
+        content=f"target={name}",
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+    resp.raise_for_status()
+    return resp.text.strip().lower() == "true"
 
 
 class NinaRequest(BaseModel):
@@ -45,15 +66,19 @@ async def send_to_stellarium(req: StellariumRequest):
         async with httpx.AsyncClient(timeout=TIMEOUT) as client:
             focused = False
             if req.target_name:
-                try:
-                    resp = await client.post(
-                        f"{base}/api/main/focus",
-                        content=f"target={req.target_name}",
-                        headers={"Content-Type": "application/x-www-form-urlencoded"},
-                    )
-                    resp.raise_for_status()
-                    focused = True
-                except Exception:
+                catalog_name = _extract_catalog_name(req.target_name)
+                names_to_try = []
+                if catalog_name and catalog_name != req.target_name:
+                    names_to_try.append(catalog_name)
+                names_to_try.append(req.target_name)
+                for name in names_to_try:
+                    try:
+                        focused = await _stellarium_focus(client, base, name)
+                        if focused:
+                            break
+                    except Exception:
+                        pass
+                if not focused:
                     logger.debug("Stellarium focus by name failed for %r, falling back to RA/Dec", req.target_name)
 
             if not focused:
