@@ -279,6 +279,7 @@ async def orphan_preview(
     user: User = Depends(require_admin),
 ):
     """Preview metadata for creating a target from an unresolved OBJECT name."""
+    import asyncio
     from app.services.simbad import normalize_object_name, resolve_target_name_cached
     from app.services.sesame import resolve_sesame_cached
     from sqlalchemy.orm import Session as SyncSession
@@ -299,11 +300,14 @@ async def orphan_preview(
     async with async_redis() as redis:
         await redis.srem("target_resolver:negative", normalized)
 
-    simbad_result = None
-    with SyncSession(sync_engine) as sync_db:
-        simbad_result = resolve_target_name_cached(source, sync_db)
-        if simbad_result is None:
-            simbad_result = resolve_sesame_cached(source, sync_db)
+    def _resolve_sync():
+        with SyncSession(sync_engine) as sync_db:
+            result = resolve_target_name_cached(source, sync_db)
+            if result is None:
+                result = resolve_sesame_cached(source, sync_db)
+            return result
+
+    simbad_result = await asyncio.to_thread(_resolve_sync)
 
     if simbad_result:
         return OrphanPreviewResponse(
