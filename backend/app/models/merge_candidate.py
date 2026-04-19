@@ -14,8 +14,8 @@ class MergeCandidate(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     source_name: Mapped[str] = mapped_column(String(255), nullable=False)
     source_image_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    suggested_target_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("targets.id"), nullable=False
+    suggested_target_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("targets.id"), nullable=True
     )
     similarity_score: Mapped[float] = mapped_column(Float, nullable=False)
     method: Mapped[str] = mapped_column(String(20), nullable=False)

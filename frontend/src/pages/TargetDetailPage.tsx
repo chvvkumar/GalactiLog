@@ -572,6 +572,7 @@ const TargetDetailPage: Component = () => {
                         targetId={params.targetId}
                         ra={detail().ra}
                         dec={detail().dec}
+                        position_angle={detail().position_angle}
                         targetName={detail().primary_name}
                       />
                     )}

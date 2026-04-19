@@ -7,6 +7,8 @@ import type {
   ObjectTypeCount,
   MergeCandidateResponse,
   MergedTargetResponse,
+  OrphanPreviewResponse,
+  OrphanCreateRequest,
   FilenameCandidateResponse,
   ScanResult,
   ScanStatus,
@@ -459,6 +461,18 @@ export const api = {
       method: "POST",
     }),
 
+  orphanPreview: (sourceName: string) =>
+    fetchJson<OrphanPreviewResponse>("/targets/orphan-preview", {
+      method: "POST",
+      body: JSON.stringify({ source_name: sourceName }),
+    }),
+
+  orphanCreate: (body: OrphanCreateRequest) =>
+    fetchJson<{ target_id: string }>("/targets/orphan-create", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
   triggerDuplicateDetection: () =>
     fetchJson<{ status: string; task_id: string }>("/targets/detect-duplicates", {
       method: "POST",
@@ -830,10 +844,10 @@ export const api = {
     return resp.json();
   },
 
-  sendToNina: (url: string, ra: number, dec: number) =>
+  sendToNina: (url: string, ra: number, dec: number, position_angle?: number | null) =>
     fetchJson<{ ok: boolean; error?: string }>("/integrations/nina/send-coordinates", {
       method: "POST",
-      body: JSON.stringify({ url, ra, dec }),
+      body: JSON.stringify({ url, ra, dec, position_angle }),
     }),
 
   sendToStellarium: (url: string, ra: number, dec: number, targetName: string | null) =>

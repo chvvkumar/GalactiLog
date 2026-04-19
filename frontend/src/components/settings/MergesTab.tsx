@@ -6,6 +6,7 @@ import { UnresolvedFilesTab } from "./UnresolvedFilesTab";
 import HelpPopover from "../HelpPopover";
 import { emitWithToast } from "../../lib/emitWithToast";
 import type { MergeCandidateResponse } from "../../types";
+import ResolveTargetModal from "./ResolveTargetModal";
 
 export const MergesTab: Component = () => {
   const { isAdmin } = useAuth();
@@ -14,6 +15,7 @@ export const MergesTab: Component = () => {
   const [detecting, setDetecting] = createSignal(false);
   const [view, setView] = createSignal<"suggestions" | "merged" | "unresolved">("suggestions");
   const [unresolvedCount, setUnresolvedCount] = createSignal(0);
+  const [resolveCandidate, setResolveCandidate] = createSignal<MergeCandidateResponse | null>(null);
 
 
   const refresh = async () => {
@@ -34,19 +36,14 @@ export const MergesTab: Component = () => {
     api.getFilenameCandidateCount().then((r) => setUnresolvedCount(r.count)).catch(() => {});
   });
 
-  const handleMerge = async (candidate: MergeCandidateResponse) => {
-    try {
-      await api.mergeTargets(
-        candidate.suggested_target_id,
-        undefined,
-        candidate.source_name,
-      );
-      showToast(`Merged "${candidate.source_name}" into "${candidate.suggested_target_name}"`);
-      await refresh();
-      window.dispatchEvent(new Event("merges-changed"));
-    } catch {
-      showToast("Merge failed", "error");
-    }
+  const handleResolve = (candidate: MergeCandidateResponse) => {
+    setResolveCandidate(candidate);
+  };
+
+  const handleResolved = async () => {
+    setResolveCandidate(null);
+    await refresh();
+    window.dispatchEvent(new Event("merges-changed"));
   };
 
   const handleDismiss = async (candidate: MergeCandidateResponse) => {
@@ -147,20 +144,26 @@ export const MergesTab: Component = () => {
                   <div class="flex items-center justify-between p-3 bg-theme-base/50 border border-theme-border rounded-[var(--radius-sm)]">
                     <div class="flex-1">
                       <span class="text-theme-text-primary text-sm font-medium">{c.source_name}</span>
-                      <span class="text-theme-text-secondary text-xs mx-2">&rarr;</span>
-                      <span class="text-theme-accent text-sm">{c.suggested_target_name}</span>
+                      <Show when={c.suggested_target_name} fallback={
+                        <span class="text-yellow-400 text-xs ml-2">Unresolved</span>
+                      }>
+                        <span class="text-theme-text-secondary text-xs mx-2">&rarr;</span>
+                        <span class="text-theme-accent text-sm">{c.suggested_target_name}</span>
+                      </Show>
                       <div class="text-xs text-theme-text-secondary mt-0.5">
-                        {c.method === "simbad" ? "SIMBAD confirmed" : `${Math.round(c.similarity_score * 100)}% match`}
+                        <Show when={c.method === "simbad"}>SIMBAD confirmed</Show>
+                        <Show when={c.method === "trigram"}>{Math.round(c.similarity_score * 100)}% match</Show>
+                        <Show when={c.method === "orphan"}>No catalog match</Show>
                         {" \u00b7 "}{c.source_image_count} images
                       </div>
                     </div>
                     <Show when={isAdmin()}>
                       <div class="flex gap-2">
                         <button
-                          onClick={() => handleMerge(c)}
+                          onClick={() => handleResolve(c)}
                           class="px-2 py-1 text-xs border border-theme-accent/50 text-theme-accent rounded-[var(--radius-sm)] hover:bg-theme-accent/10 transition-colors"
                         >
-                          Merge
+                          {c.suggested_target_id ? "Merge" : "Resolve..."}
                         </button>
                         <button
                           onClick={() => handleDismiss(c)}
@@ -214,6 +217,15 @@ export const MergesTab: Component = () => {
           <UnresolvedFilesTab />
         </Show>
       </div>
+      <Show when={resolveCandidate()}>
+        {(c) => (
+          <ResolveTargetModal
+            candidate={c()}
+            onClose={() => setResolveCandidate(null)}
+            onResolved={handleResolved}
+          />
+        )}
+      </Show>
     </div>
   );
 };

@@ -48,6 +48,7 @@ const SessionAccordionCard: Component<{
   targetId?: string;
   ra?: number | null;
   dec?: number | null;
+  position_angle?: number | null;
   targetName?: string;
 }> = (props) => {
   let cardRef: HTMLTableRowElement | undefined;
@@ -183,7 +184,7 @@ const SessionAccordionCard: Component<{
     const key = `nina:${inst.name}`;
     setSendingInstance(key);
     try {
-      const res = await api.sendToNina(inst.url, props.ra!, props.dec!);
+      const res = await api.sendToNina(inst.url, props.ra!, props.dec!, props.position_angle);
       if (res.ok) {
         showToast(`Sent to NINA: ${inst.name}`);
       } else {
