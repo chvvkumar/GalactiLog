@@ -752,9 +752,6 @@ def detect_duplicate_targets():
         )
         unresolved = db.execute(unresolved_query).all()
 
-        if not unresolved:
-            return {"candidates_found": 0}
-
         # Get existing candidates to avoid duplicates. Include "dismissed" so
         # suggestions the user explicitly rejected don't come back on re-runs
         # triggered by scans, manual matches, or smart rebuilds.
@@ -873,6 +870,106 @@ def detect_duplicate_targets():
                 candidates_found += 1
 
         db.commit()
+
+        # --- Pass 2: Detect active targets sharing the same normalized name or overlapping aliases ---
+        # Re-fetch existing candidate names after the commit above so we skip
+        # anything just created in Pass 1.
+        existing_pass2 = db.execute(
+            sa_select(MergeCandidate.source_name).where(
+                MergeCandidate.status.in_(["pending", "accepted", "dismissed"])
+            )
+        )
+        existing_names_p2 = {row[0] for row in existing_pass2.all()}
+
+        # Load all active (non-merged) targets with their image counts
+        active_targets_query = sa_text("""
+            SELECT t.id, t.primary_name, t.aliases,
+                   (SELECT COUNT(*) FROM images i
+                    WHERE i.resolved_target_id = t.id) AS img_count
+            FROM targets t
+            WHERE t.merged_into_id IS NULL
+        """)
+        active_rows = db.execute(active_targets_query).all()
+
+        # Build a mapping from each normalized name to the list of targets that use it
+        # (either as primary_name or as an alias)
+        from collections import defaultdict
+        name_to_targets: dict[str, list[tuple]] = defaultdict(list)
+        for row in active_rows:
+            tid, pname, aliases, img_count = row
+            norm_primary = normalize_object_name(pname)
+            name_to_targets[norm_primary].append((tid, pname, img_count))
+            if aliases:
+                for alias in aliases:
+                    norm_alias = normalize_object_name(alias)
+                    name_to_targets[norm_alias].append((tid, pname, img_count))
+
+        # Find groups of targets that share any normalized name.
+        # Use union-find to merge overlapping groups.
+
+        # Map target id to its info
+        target_info = {row[0]: (row[1], row[3]) for row in active_rows}  # id -> (primary_name, img_count)
+
+        # For each normalized name that maps to multiple distinct targets, union them
+        visited_targets: dict = {}  # target_id -> group leader id
+
+        def find_leader(tid):
+            while visited_targets.get(tid, tid) != tid:
+                visited_targets[tid] = visited_targets.get(visited_targets[tid], visited_targets[tid])
+                tid = visited_targets[tid]
+            return tid
+
+        def union(tid1, tid2):
+            l1 = find_leader(tid1)
+            l2 = find_leader(tid2)
+            if l1 != l2:
+                visited_targets[l2] = l1
+
+        for norm_name, target_list in name_to_targets.items():
+            # Deduplicate target ids within this name
+            unique_ids = list({t[0] for t in target_list})
+            if len(unique_ids) < 2:
+                continue
+            # Union all targets sharing this name
+            for i in range(1, len(unique_ids)):
+                union(unique_ids[0], unique_ids[i])
+
+        # Collect groups
+        groups: dict[str, list] = defaultdict(list)
+        for tid in target_info:
+            leader = find_leader(tid)
+            if leader != tid or visited_targets.get(tid) is not None:
+                groups[find_leader(tid)].append(tid)
+
+        # Only keep groups with 2+ members
+        dup_candidates_found = 0
+        for leader, members in groups.items():
+            if len(members) < 2:
+                continue
+
+            # Pick the target with the most images as the suggested winner
+            members_with_info = [(tid, *target_info[tid]) for tid in members]
+            members_with_info.sort(key=lambda x: x[2], reverse=True)  # sort by img_count desc
+            winner_id = members_with_info[0][0]
+
+            for tid, pname, img_count in members_with_info[1:]:
+                if pname in existing_names_p2:
+                    continue
+                db.add(MergeCandidate(
+                    source_name=pname,
+                    source_image_count=img_count,
+                    suggested_target_id=winner_id,
+                    similarity_score=1.0,
+                    method="duplicate",
+                    status="pending",
+                ))
+                existing_names_p2.add(pname)
+                dup_candidates_found += 1
+                candidates_found += 1
+
+        if dup_candidates_found > 0:
+            db.commit()
+            logger.info("detect_duplicates: found %d duplicate-name candidates", dup_candidates_found)
 
     return {"candidates_found": candidates_found}
 

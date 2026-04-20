@@ -13,6 +13,8 @@ import { isFieldVisible } from "../utils/displaySettings";
 import { contentWidthClass } from "../utils/format";
 import HelpPopover from "../components/HelpPopover";
 import { timezoneLabel } from "../utils/dateTime";
+import MergeTargetModal from "../components/MergeTargetModal";
+import { useAuth } from "../components/AuthProvider";
 
 import { formatIntegration } from "../utils/format";
 
@@ -30,6 +32,7 @@ function formatSize(major: number | null, minor: number | null): string {
 const TargetDetailPage: Component = () => {
   const params = useParams<{ targetId: string }>();
   const [searchParams] = useSearchParams();
+  const auth = useAuth();
   const ctx = useSettingsContext();
   const { displaySettings, graphSettings, saveGraphSettings, timezone, contentWidth } = ctx;
   const tzLabel = () => timezoneLabel(timezone());
@@ -42,6 +45,7 @@ const TargetDetailPage: Component = () => {
   );
 
   const [showExport, setShowExport] = createSignal(false);
+  const [showMerge, setShowMerge] = createSignal(false);
   const [expandedSessions, setExpandedSessions] = createSignal<Set<string>>(new Set());
   const [sessionCache, setSessionCache] = createSignal<Record<string, SessionDetail>>({});
   const [targetChartExpanded, setTargetChartExpanded] = createSignal(graphSettings().target_chart_expanded);
@@ -198,6 +202,18 @@ const TargetDetailPage: Component = () => {
         />
       </Show>
 
+      <Show when={showMerge() && targetDetail()}>
+        <MergeTargetModal
+          targetId={params.targetId}
+          targetName={targetDetail()!.primary_name}
+          onClose={() => setShowMerge(false)}
+          onMerged={() => {
+            setShowMerge(false);
+            window.location.reload();
+          }}
+        />
+      </Show>
+
       <Show when={targetDetail()}>
         {(detail) => (
           <div class="px-4 sm:px-6 py-4 sm:py-5">
@@ -344,6 +360,14 @@ const TargetDetailPage: Component = () => {
                     <span class="mx-1.5">·</span>
                     <span>{detail().first_session_date} → {detail().last_session_date} ({tzLabel()})</span>
                   </div>
+                  <Show when={auth.isAdmin()}>
+                    <button
+                      class="px-4 py-1.5 bg-yellow-500/10 text-yellow-400 border border-yellow-500/20 rounded text-sm font-medium hover:bg-yellow-500/20 transition-colors shrink-0"
+                      onClick={() => setShowMerge(true)}
+                    >
+                      Merge
+                    </button>
+                  </Show>
                   <button
                     class="px-4 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded text-sm font-medium hover:bg-theme-accent/25 transition-colors shrink-0"
                     onClick={() => setShowExport(true)}
