@@ -204,7 +204,7 @@ const TargetDetailPage: Component = () => {
 
       <Show when={showMerge() && targetDetail()}>
         <MergeTargetModal
-          targetId={params.targetId}
+          targetId={targetDetail()!.target_id}
           targetName={targetDetail()!.primary_name}
           onClose={() => setShowMerge(false)}
           onMerged={() => {
