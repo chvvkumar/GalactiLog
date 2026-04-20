@@ -303,6 +303,7 @@ class MergeCandidateResponse(BaseModel):
     method: str
     status: str
     created_at: str
+    reason_text: str | None = None
 
 
 class OrphanPreviewRequest(BaseModel):
