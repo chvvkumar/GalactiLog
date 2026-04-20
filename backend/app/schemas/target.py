@@ -61,6 +61,9 @@ class SessionOverview(BaseModel):
     has_notes: bool = False
     rig_count: int = 1
     custom_values: dict[str, str] | None = None
+    ra: float | None = None
+    dec: float | None = None
+    position_angle: float | None = None
 
 
 class FrameHighlight(BaseModel):
