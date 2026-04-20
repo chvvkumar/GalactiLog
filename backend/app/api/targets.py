@@ -761,6 +761,22 @@ async def get_target_detail(
                 median_detected_stars=statistics.median(f_stars) if f_stars else None,
             ))
 
+        # Per-session coordinates from plate-solved headers
+        sess_ra_vals = []
+        sess_dec_vals = []
+        sess_rotator = None
+        for img in sess_images:
+            hdrs = img.raw_headers or {}
+            try:
+                ra_val = float(hdrs.get("RA", ""))
+                dec_val = float(hdrs.get("DEC", ""))
+                sess_ra_vals.append(ra_val)
+                sess_dec_vals.append(dec_val)
+            except (ValueError, TypeError):
+                pass
+            if img.rotator_position is not None:
+                sess_rotator = img.rotator_position
+
         session_overviews.append(SessionOverview(
             session_date=date_key,
             integration_seconds=sess_exp,
@@ -777,6 +793,9 @@ async def get_target_detail(
             has_notes=date_type.fromisoformat(date_key) in note_dates if date_key != "unknown" else False,
             rig_count=sess_rig_count,
             custom_values=session_custom_map.get(date_key),
+            ra=statistics.median(sess_ra_vals) if sess_ra_vals else None,
+            dec=statistics.median(sess_dec_vals) if sess_dec_vals else None,
+            position_angle=sess_rotator,
         ))
 
     sorted_dates = sorted(sessions_map.keys())
