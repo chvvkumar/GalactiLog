@@ -225,6 +225,7 @@ class TargetDetailResponse(BaseModel):
     distance_pc: float | None = None
     # Catalog memberships
     catalog_memberships: list[CatalogMembershipEntry] = []
+    name_locked: bool = False
 
 
 class SessionDetailResponse(BaseModel):
