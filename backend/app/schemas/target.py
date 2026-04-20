@@ -345,3 +345,28 @@ class MergeRequest(BaseModel):
     winner_id: uuid.UUID
     loser_id: uuid.UUID | None = None
     loser_name: str | None = None
+
+
+class MergePreviewRequest(BaseModel):
+    winner_id: uuid.UUID
+    loser_id: uuid.UUID | None = None
+    loser_name: str | None = None
+
+
+class MergePreviewSide(BaseModel):
+    id: uuid.UUID | None = None
+    primary_name: str
+    object_type: str | None = None
+    constellation: str | None = None
+    image_count: int = 0
+    session_count: int = 0
+    integration_seconds: float = 0.0
+    aliases: list[str] = []
+
+
+class MergePreviewResponse(BaseModel):
+    winner: MergePreviewSide
+    loser: MergePreviewSide
+    images_to_move: int = 0
+    mosaic_panels_to_move: int = 0
+    aliases_to_add: list[str] = []
