@@ -787,11 +787,15 @@ async def get_target_detail(
     if not target_obj and images:
         for img in images:
             hdrs = img.raw_headers or {}
-            ra_str = hdrs.get("OBJCTRA") or hdrs.get("RA")
-            dec_str = hdrs.get("OBJCTDEC") or hdrs.get("DEC")
+            ra_str = hdrs.get("RA") or hdrs.get("OBJCTRA")
+            dec_str = hdrs.get("DEC") or hdrs.get("OBJCTDEC")
             if ra_str and dec_str:
-                fallback_ra = _parse_sexa_ra(str(ra_str))
-                fallback_dec = _parse_sexa_dec(str(dec_str))
+                try:
+                    fallback_ra = float(ra_str)
+                    fallback_dec = float(dec_str)
+                except (ValueError, TypeError):
+                    fallback_ra = _parse_sexa_ra(str(ra_str))
+                    fallback_dec = _parse_sexa_dec(str(dec_str))
                 if fallback_ra is not None and fallback_dec is not None:
                     break
 
