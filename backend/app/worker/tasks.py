@@ -1345,6 +1345,9 @@ def _smart_rebuild_inner(manual: bool = False) -> dict:
         logger.info("smart_rebuild: re-derived catalog_id/common_name for %d targets", rederived)
 
         # Phase 5: Rebuild primary_name for any remaining mismatches
+        # Only rebuild when catalog_id or common_name can drive the name;
+        # skip targets where both are NULL and a non-trivial name already
+        # exists (e.g. manually created asterisms with FITS-derived names).
         result = session.execute(text("""
             UPDATE targets
             SET primary_name = CASE
@@ -1355,6 +1358,7 @@ def _smart_rebuild_inner(manual: bool = False) -> dict:
                 ELSE 'Unknown'
             END
             WHERE merged_into_id IS NULL
+              AND (catalog_id IS NOT NULL OR common_name IS NOT NULL)
               AND primary_name != CASE
                 WHEN catalog_id IS NOT NULL AND common_name IS NOT NULL
                     THEN catalog_id || ' - ' || common_name
