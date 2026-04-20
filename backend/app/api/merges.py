@@ -342,20 +342,15 @@ async def orphan_preview(
     fallback_dec = None
     if img:
         hdrs = img.raw_headers or {}
-        ra_str = hdrs.get("OBJCTRA") or hdrs.get("RA")
-        dec_str = hdrs.get("OBJCTDEC") or hdrs.get("DEC")
+        ra_str = hdrs.get("RA") or hdrs.get("OBJCTRA")
+        dec_str = hdrs.get("DEC") or hdrs.get("OBJCTDEC")
         if ra_str and dec_str:
-            parsed_ra = _parse_sexa_ra(str(ra_str))
-            parsed_dec = _parse_sexa_dec(str(dec_str))
-            if parsed_ra is not None and parsed_dec is not None:
-                fallback_ra = parsed_ra
-                fallback_dec = parsed_dec
-            else:
-                try:
-                    fallback_ra = float(ra_str)
-                    fallback_dec = float(dec_str)
-                except (ValueError, TypeError):
-                    pass
+            try:
+                fallback_ra = float(ra_str)
+                fallback_dec = float(dec_str)
+            except (ValueError, TypeError):
+                fallback_ra = _parse_sexa_ra(str(ra_str))
+                fallback_dec = _parse_sexa_dec(str(dec_str))
 
     return OrphanPreviewResponse(
         source_name=source,

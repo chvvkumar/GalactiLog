@@ -113,6 +113,9 @@ export interface SessionOverview {
   has_notes: boolean;
   rig_count: number;
   custom_values?: Record<string, string> | null;
+  ra: number | null;
+  dec: number | null;
+  position_angle: number | null;
 }
 
 export interface TargetDetailResponse {
