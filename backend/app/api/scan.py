@@ -1,4 +1,3 @@
-import asyncio
 import logging
 import os
 from pathlib import Path as FsPath
@@ -11,7 +10,7 @@ from app.config import async_redis, settings as app_settings
 from app.database import get_session
 from app.api.deps import get_current_user, require_admin
 from app.models.user import User
-from app.models import Image, Target
+from app.models import Image
 from app.models.user_settings import UserSettings, SETTINGS_ROW_ID
 import re as _re
 
@@ -25,8 +24,7 @@ from app.services.scan_state import (
     get_scan_state, get_failed_files, start_scanning, set_ingesting, set_idle, reset_scan,
     get_rebuild_state, request_cancel,
 )
-from app.services.simbad import resolve_target_name, normalize_object_name
-from app.worker.tasks import regenerate_thumbnail, run_scan, rebuild_targets, smart_rebuild_targets, retry_unresolved, backfill_csv_metrics, generate_reference_thumbnails, run_xmatch_enrichment, purge_and_regenerate_thumbnails
+from app.worker.tasks import regenerate_thumbnail, run_scan, rebuild_targets, smart_rebuild_targets, retry_unresolved, backfill_csv_metrics, generate_reference_thumbnails, purge_and_regenerate_thumbnails
 
 logger = logging.getLogger(__name__)
 
@@ -124,6 +122,17 @@ async def regenerate_thumbnails(
         }
 
 
+@router.get("/summary")
+async def get_scan_summary(_user=Depends(get_current_user)):
+    """Return the last scan summary from Redis, or null if not available."""
+    import json as _json
+    async with async_redis() as r:
+        raw = await r.get("galactilog:scan_summary")
+    if raw:
+        return _json.loads(raw)
+    return None
+
+
 @router.get("/status")
 async def scan_status(user: User = Depends(get_current_user)):
     """Return current scan state from Redis."""
@@ -162,121 +171,6 @@ async def reset_scan_state(user: User = Depends(require_admin)):
             "failed": state.failed,
             "total": state.total,
         }
-
-
-@router.post("/backfill-targets")
-async def backfill_targets(
-    session: AsyncSession = Depends(get_session),
-    user: User = Depends(require_admin),
-):
-    """Resolve targets for already-ingested images that have NULL resolved_target_id.
-
-    Only queries SIMBAD once per unique object name with a 0.5s delay between
-    requests to respect rate limits. Then bulk-updates all matching images.
-    """
-    # Step 1: Get distinct unresolved object names
-    result = await session.execute(
-        text("""
-            SELECT raw_headers->>'OBJECT' AS obj, COUNT(*) AS cnt
-            FROM images
-            WHERE resolved_target_id IS NULL
-              AND raw_headers->>'OBJECT' IS NOT NULL
-              AND raw_headers->>'OBJECT' != ''
-            GROUP BY raw_headers->>'OBJECT'
-            ORDER BY cnt DESC
-            LIMIT 500
-        """)
-    )
-    unresolved = result.all()
-
-    if not unresolved:
-        return {"status": "complete", "resolved": 0, "failed": 0, "images_updated": 0}
-
-    resolved_count = 0
-    failed_names = []
-    total_images_updated = 0
-
-    for object_name, image_count in unresolved:
-        normalized = normalize_object_name(object_name)
-
-        # Check if target already exists (from ongoing scan or previous backfill)
-        existing = await session.execute(
-            select(Target).where(Target.aliases.any(normalized))
-        )
-        target = existing.scalar_one_or_none()
-
-        if not target:
-            existing = await session.execute(
-                select(Target).where(Target.primary_name == object_name)
-            )
-            target = existing.scalar_one_or_none()
-
-        if not target:
-            # Query SIMBAD
-            simbad_result = await resolve_target_name(object_name)
-
-            if simbad_result:
-                # Check if SIMBAD primary_name already exists as a target
-                existing = await session.execute(
-                    select(Target).where(Target.primary_name == simbad_result["primary_name"])
-                )
-                target = existing.scalar_one_or_none()
-
-                if not target:
-                    aliases = [normalize_object_name(a) for a in simbad_result.get("aliases", [])]
-                    if normalized not in aliases:
-                        aliases.append(normalized)
-                    target = Target(
-                        primary_name=simbad_result["primary_name"],
-                        aliases=aliases,
-                        ra=simbad_result.get("ra"),
-                        dec=simbad_result.get("dec"),
-                        object_type=simbad_result.get("object_type"),
-                    )
-                    session.add(target)
-                    await session.flush()  # get target.id
-                else:
-                    # Add this name as alias if not already present
-                    if normalized not in target.aliases:
-                        target.aliases = [*target.aliases, normalized]
-                        await session.flush()
-
-                # Rate limit: 0.5s between SIMBAD queries
-                await asyncio.sleep(0.5)
-            else:
-                failed_names.append(object_name)
-                logger.info("Backfill: SIMBAD found no match for '%s' (%d images)", object_name, image_count)
-                await asyncio.sleep(0.5)
-                continue
-
-        # Bulk-update all images with this object name
-        update_result = await session.execute(
-            text("""
-                UPDATE images
-                SET resolved_target_id = :target_id
-                WHERE resolved_target_id IS NULL
-                  AND raw_headers->>'OBJECT' = :obj_name
-            """),
-            {"target_id": target.id, "obj_name": object_name},
-        )
-        updated = update_result.rowcount
-        total_images_updated += updated
-        resolved_count += 1
-        logger.info(
-            "Backfill: '%s' -> '%s' (%d images updated)",
-            object_name, target.primary_name, updated,
-        )
-
-    await session.commit()
-
-    return {
-        "status": "complete",
-        "unique_names_processed": len(unresolved),
-        "resolved": resolved_count,
-        "failed": len(failed_names),
-        "failed_names": failed_names,
-        "images_updated": total_images_updated,
-    }
 
 
 @router.post("/rebuild-targets")
@@ -346,21 +240,6 @@ async def trigger_reference_thumbnails(force: bool = False, user: User = Depends
 
         task = generate_reference_thumbnails.delay(force=force)
         return {"status": "accepted", "message": "Reference thumbnail generation queued as background task", "task_id": task.id}
-
-
-@router.post("/xmatch-enrichment")
-async def trigger_xmatch_enrichment(user: User = Depends(require_admin)):
-    """Run CDS xMatch bulk cross-matching for all targets."""
-    async with async_redis() as r:
-        state = await get_scan_state(r)
-        if state.state in ("scanning", "ingesting"):
-            raise HTTPException(
-                status_code=409,
-                detail="A scan is already running. Wait for it to complete first.",
-            )
-
-        task = run_xmatch_enrichment.delay()
-        return {"status": "accepted", "message": "xMatch enrichment queued as background task", "task_id": task.id}
 
 
 @router.post("/backfill-csv")

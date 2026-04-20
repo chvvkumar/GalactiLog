@@ -984,6 +984,17 @@ def detect_duplicate_targets():
             db.commit()
             logger.info("detect_duplicates: found %d duplicate-name candidates", dup_candidates_found)
 
+    # Update scan summary in Redis with duplicates_found count
+    try:
+        import json as _json
+        raw = _redis.get("galactilog:scan_summary")
+        if raw:
+            _summary = _json.loads(raw)
+            _summary["duplicates_found"] = candidates_found
+            _redis.set("galactilog:scan_summary", _json.dumps(_summary))
+    except Exception:
+        logger.warning("detect_duplicate_targets: failed to update scan_summary in Redis")
+
     return {"candidates_found": candidates_found}
 
 
@@ -1884,59 +1895,6 @@ def generate_reference_thumbnails(self, force: bool = False) -> dict:
             _db, redis=_redis, category="thumbnail", severity="info",
             event_type="ref_thumbnails_complete",
             message=f"Reference Thumbnails: fetched {fetched}/{total}",
-            details=stats, actor="system",
-        )
-    return stats
-
-
-@celery_app.task(bind=True)
-def run_xmatch_enrichment(self) -> dict:
-    """Run CDS xMatch bulk cross-matching."""
-    from app.services.xmatch import bulk_xmatch_targets
-
-    clear_cancel_sync(_redis)
-    set_rebuild_running_sync(_redis, "xmatch", "Running xMatch enrichment...")
-
-    with Session(_sync_engine) as session:
-        targets = session.execute(
-            select(Target).where(
-                Target.merged_into_id.is_(None),
-                Target.ra.isnot(None),
-                Target.dec.isnot(None),
-            )
-        ).scalars().all()
-
-        target_dicts = [
-            {"id": str(t.id), "ra": t.ra, "dec": t.dec}
-            for t in targets
-        ]
-
-        if is_cancel_requested_sync(_redis):
-            details = {"matched": 0, "total": len(target_dicts)}
-            set_rebuild_cancelled_sync(_redis, "xMatch cancelled before start", details)
-            with _activity_session() as _db:
-                _emit_activity_sync(
-                    _db, redis=_redis, category="rebuild", severity="info",
-                    event_type="rebuild_cancelled",
-                    message="xMatch Enrichment cancelled before start",
-                    details=details, actor="system",
-                )
-            return {"status": "cancelled", **details}
-
-        set_rebuild_progress_sync(
-            _redis, f"Cross-matching {len(target_dicts)} targets..."
-        )
-        results = bulk_xmatch_targets(target_dicts, "VII/118/ngc2000", radius_arcsec=60.0)
-
-    stats = {"matched": len(results), "total": len(target_dicts)}
-    set_rebuild_complete_sync(
-        _redis, f"xMatch: {len(results)}/{len(target_dicts)} matched", stats
-    )
-    with _activity_session() as _db:
-        _emit_activity_sync(
-            _db, redis=_redis, category="enrichment", severity="info",
-            event_type="xmatch_complete",
-            message=f"xMatch Enrichment: {len(results)}/{len(target_dicts)} matched",
             details=stats, actor="system",
         )
     return stats
