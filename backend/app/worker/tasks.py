@@ -1316,6 +1316,8 @@ def _smart_rebuild_inner(manual: bool = False) -> dict:
                 stats["rederived"] = rederived
                 session.commit()
                 return _emit_cancelled()
+            if target.name_locked:
+                continue
             # Try to find cached SIMBAD data for this target
             cached = get_cached_simbad(normalize_object_name(target.catalog_id or target.primary_name), session)
             if cached and not cached.get("_negative"):
@@ -1359,6 +1361,7 @@ def _smart_rebuild_inner(manual: bool = False) -> dict:
             END
             WHERE merged_into_id IS NULL
               AND (catalog_id IS NOT NULL OR common_name IS NOT NULL)
+              AND name_locked = FALSE
               AND primary_name != CASE
                 WHEN catalog_id IS NOT NULL AND common_name IS NOT NULL
                     THEN catalog_id || ' - ' || common_name
