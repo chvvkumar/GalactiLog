@@ -155,6 +155,7 @@ export interface TargetDetailResponse {
   distance_pc: number | null;
   // Catalog memberships
   catalog_memberships: CatalogMembershipEntry[];
+  name_locked: boolean;
 }
 
 export interface RigDetail {

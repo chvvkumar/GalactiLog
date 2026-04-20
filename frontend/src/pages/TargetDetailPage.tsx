@@ -1,7 +1,7 @@
 import { Component, Show, For, createResource, createSignal, createEffect, createMemo, on } from "solid-js";
 import { A, useParams, useSearchParams } from "@solidjs/router";
 import { api } from "../api/client";
-import type { TargetDetailResponse, SessionDetail } from "../types";
+import type { TargetDetailResponse, SessionDetail, TargetSearchResultFuzzy } from "../types";
 import SessionAccordionCard from "../components/SessionAccordionCard";
 import { showToast } from "../components/Toast";
 import FilterBadges from "../components/FilterBadges";
@@ -13,7 +13,7 @@ import { isFieldVisible } from "../utils/displaySettings";
 import { contentWidthClass } from "../utils/format";
 import HelpPopover from "../components/HelpPopover";
 import { timezoneLabel } from "../utils/dateTime";
-import MergeTargetModal from "../components/MergeTargetModal";
+import MergePreviewModal from "../components/MergePreviewModal";
 import { useAuth } from "../components/AuthProvider";
 
 import { formatIntegration } from "../utils/format";
@@ -29,6 +29,124 @@ function formatSize(major: number | null, minor: number | null): string {
   return `${major.toFixed(1)}' \u00d7 ${minor.toFixed(1)}'`;
 }
 
+// Two-step merge flow: search then preview
+interface MergeFromDetailFlowProps {
+  winnerId: string;
+  winnerName: string;
+  onClose: () => void;
+  onMerged: () => void;
+}
+
+const MergeFromDetailFlow: Component<MergeFromDetailFlowProps> = (props) => {
+  const [searchQuery, setSearchQuery] = createSignal("");
+  const [searchResults, setSearchResults] = createSignal<TargetSearchResultFuzzy[]>([]);
+  const [searching, setSearching] = createSignal(false);
+  const [selectedTarget, setSelectedTarget] = createSignal<TargetSearchResultFuzzy | null>(null);
+
+  let searchTimeout: ReturnType<typeof setTimeout>;
+
+  const handleSearch = (q: string) => {
+    setSearchQuery(q);
+    setSelectedTarget(null);
+    clearTimeout(searchTimeout);
+    if (q.trim().length < 2) {
+      setSearchResults([]);
+      return;
+    }
+    searchTimeout = setTimeout(async () => {
+      setSearching(true);
+      try {
+        const results = await api.searchTargets(q.trim());
+        setSearchResults(results.filter((t) => t.id !== props.winnerId));
+      } catch {
+        setSearchResults([]);
+      } finally {
+        setSearching(false);
+      }
+    }, 300);
+  };
+
+  const picked = selectedTarget();
+
+  return (
+    <Show
+      when={selectedTarget()}
+      fallback={
+        <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={props.onClose}>
+          <div
+            class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-lg)] max-w-lg w-full mx-4 max-h-[80vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div class="p-4 border-b border-theme-border">
+              <h3 class="text-theme-text-primary font-medium">
+                Merge into "{props.winnerName}"
+              </h3>
+              <p class="text-xs text-theme-text-secondary mt-1">
+                Search for a target to merge into this one. You will preview what changes before confirming.
+              </p>
+            </div>
+            <div class="p-4 space-y-3">
+              <div class="text-xs px-2 py-1.5 rounded bg-yellow-500/10 text-yellow-400 border border-yellow-500/20">
+                All images and sessions from the selected target will be moved here. You can revert from Settings &gt; Target Merges.
+              </div>
+              <div>
+                <label class="block text-xs text-theme-text-secondary mb-1">Search for target to merge</label>
+                <input
+                  type="text"
+                  class="w-full px-2 py-1.5 text-sm bg-theme-base border border-theme-border rounded-[var(--radius-sm)] text-theme-text-primary focus:border-theme-accent focus:outline-none"
+                  value={searchQuery()}
+                  onInput={(e) => handleSearch(e.currentTarget.value)}
+                  placeholder="Type to search targets..."
+                />
+              </div>
+              <Show when={searching()}>
+                <p class="text-xs text-theme-text-secondary">Searching...</p>
+              </Show>
+              <Show when={searchResults().length > 0}>
+                <div class="border border-theme-border rounded-[var(--radius-sm)] max-h-48 overflow-y-auto">
+                  <For each={searchResults()}>
+                    {(t) => (
+                      <button
+                        onClick={() => setSelectedTarget(t)}
+                        class="w-full text-left px-3 py-2 text-sm border-b border-theme-border last:border-b-0 transition-colors text-theme-text-primary hover:bg-theme-hover"
+                      >
+                        <span class="font-medium">{t.primary_name}</span>
+                        <Show when={t.object_type}>
+                          <span class="text-xs text-theme-text-secondary ml-2">{t.object_type}</span>
+                        </Show>
+                      </button>
+                    )}
+                  </For>
+                </div>
+              </Show>
+              <Show when={searchQuery().trim().length >= 2 && !searching() && searchResults().length === 0}>
+                <p class="text-xs text-theme-text-secondary">No targets found</p>
+              </Show>
+              <div class="flex justify-end gap-2 pt-2">
+                <button
+                  onClick={props.onClose}
+                  class="px-3 py-1.5 text-sm border border-theme-border text-theme-text-secondary rounded-[var(--radius-sm)] hover:text-theme-text-primary transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      }
+    >
+      {(t) => (
+        <MergePreviewModal
+          winnerId={props.winnerId}
+          loserId={t().id}
+          onClose={props.onClose}
+          onMerged={props.onMerged}
+        />
+      )}
+    </Show>
+  );
+};
+
 const TargetDetailPage: Component = () => {
   const params = useParams<{ targetId: string }>();
   const [searchParams] = useSearchParams();
@@ -39,7 +157,7 @@ const TargetDetailPage: Component = () => {
   const visible = (group: Parameters<typeof isFieldVisible>[1], field: string) =>
     isFieldVisible(displaySettings(), group, field);
 
-  const [targetDetail] = createResource(
+  const [targetDetail, { refetch: refetchDetail }] = createResource(
     () => params.targetId,
     (id) => api.getTargetDetail(id),
   );
@@ -56,6 +174,46 @@ const TargetDetailPage: Component = () => {
   const [targetNotes, setTargetNotes] = createSignal<string>("");
   const [notesSaving, setNotesSaving] = createSignal(false);
   let notesTimer: ReturnType<typeof setTimeout> | undefined;
+
+  // Rename/re-resolve signals
+  const [editing, setEditing] = createSignal(false);
+  const [editName, setEditName] = createSignal("");
+  const [savingIdentity, setSavingIdentity] = createSignal(false);
+
+  const handleRename = async () => {
+    const detail = targetDetail();
+    if (!detail) return;
+    const name = editName().trim();
+    if (!name || name === detail.primary_name) {
+      setEditing(false);
+      return;
+    }
+    setSavingIdentity(true);
+    try {
+      await api.updateTargetIdentity(detail.target_id, { primary_name: name });
+      setEditing(false);
+      await refetchDetail();
+    } catch (e: any) {
+      showToast(e?.message ?? "Rename failed", "error");
+    } finally {
+      setSavingIdentity(false);
+    }
+  };
+
+  const handleReResolve = async () => {
+    const detail = targetDetail();
+    if (!detail) return;
+    setSavingIdentity(true);
+    try {
+      await api.updateTargetIdentity(detail.target_id, { re_resolve: true });
+      await refetchDetail();
+      showToast("Re-resolve queued");
+    } catch (e: any) {
+      showToast(e?.message ?? "Re-resolve failed", "error");
+    } finally {
+      setSavingIdentity(false);
+    }
+  };
 
   // Initialize notes when data loads
   createEffect(() => {
@@ -203,13 +361,13 @@ const TargetDetailPage: Component = () => {
       </Show>
 
       <Show when={showMerge() && targetDetail()}>
-        <MergeTargetModal
-          targetId={targetDetail()!.target_id}
-          targetName={targetDetail()!.primary_name}
+        <MergeFromDetailFlow
+          winnerId={targetDetail()!.target_id}
+          winnerName={targetDetail()!.primary_name}
           onClose={() => setShowMerge(false)}
-          onMerged={() => {
+          onMerged={async () => {
             setShowMerge(false);
-            window.location.reload();
+            await refetchDetail();
           }}
         />
       </Show>
@@ -223,9 +381,69 @@ const TargetDetailPage: Component = () => {
               <div>
                 <div>
                   <div class="flex items-center gap-2">
-                    <h1 class="text-2xl font-semibold tracking-tight text-theme-text-primary">
-                      {detail().primary_name}
-                    </h1>
+                    <Show
+                      when={editing()}
+                      fallback={
+                        <>
+                          <h1 class="text-2xl font-semibold tracking-tight text-theme-text-primary">
+                            {detail().primary_name}
+                          </h1>
+                          <Show when={detail().name_locked}>
+                            <span class="text-theme-text-tertiary text-lg" title="Name manually locked">&#128274;</span>
+                          </Show>
+                          <Show when={auth.isAdmin()}>
+                            <button
+                              class="text-theme-text-tertiary hover:text-theme-text-primary transition-colors text-lg leading-none"
+                              title="Rename target"
+                              disabled={savingIdentity()}
+                              onClick={() => {
+                                setEditName(detail().primary_name);
+                                setEditing(true);
+                              }}
+                            >
+                              &#9998;
+                            </button>
+                            <button
+                              class="text-theme-text-tertiary hover:text-theme-text-primary transition-colors text-lg leading-none"
+                              title="Re-resolve from SIMBAD"
+                              disabled={savingIdentity()}
+                              onClick={handleReResolve}
+                            >
+                              &#8635;
+                            </button>
+                          </Show>
+                        </>
+                      }
+                    >
+                      <input
+                        type="text"
+                        class="text-2xl font-semibold tracking-tight bg-transparent border-b border-theme-accent text-theme-text-primary focus:outline-none min-w-0 flex-1"
+                        value={editName()}
+                        onInput={(e) => setEditName(e.currentTarget.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") handleRename();
+                          if (e.key === "Escape") setEditing(false);
+                        }}
+                        ref={(el) => { setTimeout(() => el?.focus(), 0); }}
+                        disabled={savingIdentity()}
+                      />
+                      <button
+                        class="text-theme-text-tertiary hover:text-green-400 transition-colors text-lg leading-none"
+                        title="Save"
+                        onClick={handleRename}
+                        disabled={savingIdentity()}
+                      >
+                        &#10003;
+                      </button>
+                      <button
+                        class="text-theme-text-tertiary hover:text-theme-error transition-colors text-lg leading-none"
+                        title="Cancel"
+                        onClick={() => setEditing(false)}
+                        disabled={savingIdentity()}
+                      >
+                        &#10005;
+                      </button>
+                    </Show>
                     <HelpPopover>
                       <p class="text-sm text-theme-text-secondary">
                         The Target Detail page shows everything GalactiLog knows about a single imaging target.
