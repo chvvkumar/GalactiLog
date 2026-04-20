@@ -478,6 +478,29 @@ export const api = {
       method: "POST",
     }),
 
+  mergePreview: (winnerId: string, loserId?: string, loserName?: string) =>
+    fetchJson<any>("/targets/merge-preview", {
+      method: "POST",
+      body: JSON.stringify({
+        winner_id: winnerId,
+        ...(loserId ? { loser_id: loserId } : {}),
+        ...(loserName ? { loser_name: loserName } : {}),
+      }),
+    }),
+
+  updateTargetIdentity: (targetId: string, body: {
+    primary_name?: string;
+    object_type?: string;
+    re_resolve?: boolean;
+  }) =>
+    fetchJson<any>(`/targets/${targetId}/identity`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+
+  getScanSummary: () =>
+    fetchJson<any>("/scan/summary"),
+
   // Filename resolution
   getFilenameCandidates: (status = "pending") =>
     fetchJson<FilenameCandidateResponse[]>(`/filename-resolution/candidates?status=${status}`),
@@ -791,9 +814,6 @@ export const api = {
     `${API_BASE}/targets/${encodeURIComponent(targetId)}/reference-thumbnail`,
 
   // Catalog enrichment tasks
-  triggerXmatchEnrichment: () =>
-    fetchJson<{ status: string; message: string; task_id?: string }>("/scan/xmatch-enrichment", { method: "POST" }),
-
   triggerReferenceThumbnails: (force = false) =>
     fetchJson<{ status: string; message: string; task_id?: string }>(`/scan/generate-reference-thumbnails${force ? "?force=true" : ""}`, { method: "POST" }),
 
