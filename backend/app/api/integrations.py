@@ -55,6 +55,10 @@ async def send_to_nina(req: NinaRequest):
             resp = await client.get(endpoint)
             resp.raise_for_status()
             if req.position_angle is not None:
+                # Delay to let NINA finish loading the sky survey image
+                # before setting rotation, otherwise set-coordinates resets it
+                import asyncio
+                await asyncio.sleep(1.5)
                 rot_endpoint = f"{base}/v2/api/framing/set-rotation?rotation={req.position_angle}"
                 try:
                     rot_resp = await client.get(rot_endpoint)
