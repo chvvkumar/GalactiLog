@@ -12,7 +12,7 @@ from typing import Any
 import fitsio
 import numpy as np
 from PIL import Image as PILImage
-from sqlalchemy import select, cast, Float
+from sqlalchemy import select, cast, Float, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from astropy.wcs import WCS
 
@@ -148,6 +148,7 @@ async def select_best_frame(
     target_id,
     object_pattern: str | None,
     session: AsyncSession,
+    included_dates: list | None = None,
 ):
     """Select the best LIGHT frame for a mosaic panel.
     Primary: lowest median_hfr > 0.
@@ -160,6 +161,11 @@ async def select_best_frame(
     ]
     if object_pattern:
         base_filter.append(Image.raw_headers["OBJECT"].astext.ilike(object_pattern))
+    if included_dates is not None:
+        if included_dates:
+            base_filter.append(Image.session_date.in_(included_dates))
+        else:
+            base_filter.append(text("false"))
 
     # Try best HFR first
     hfr_q = (
@@ -189,6 +195,7 @@ async def select_best_frame_for_filter(
     object_pattern: str | None,
     filter_name: str,
     session: AsyncSession,
+    included_dates: list | None = None,
 ) -> tuple[Any, float] | None:
     """Select the best LIGHT frame for a specific filter using quality scoring.
     Returns (frame, score) or None.
@@ -201,6 +208,11 @@ async def select_best_frame_for_filter(
     ]
     if object_pattern:
         base_filter.append(Image.raw_headers["OBJECT"].astext.ilike(object_pattern))
+    if included_dates is not None:
+        if included_dates:
+            base_filter.append(Image.session_date.in_(included_dates))
+        else:
+            base_filter.append(text("false"))
 
     q = select(Image).where(*base_filter)
     frames = list((await session.execute(q)).scalars().all())
@@ -213,11 +225,17 @@ async def select_best_frame_for_filter(
 async def find_default_filter(
     panels: list,
     session: AsyncSession,
+    panel_included_dates: dict[str, list] | None = None,
 ) -> tuple[str | None, list[str]]:
     """Find the best default filter across all panels, plus the list of available filters.
 
     Returns (default_filter, available_filters) where available_filters is sorted
     by total integration time descending.
+
+    panel_included_dates: mapping of panel.id -> list of included session dates.
+    When provided, only images from those sessions are considered.
+    A panel missing from the dict means no membership records exist (use all).
+    An empty list means all sessions excluded.
     """
     from sqlalchemy import func as sa_func
 
@@ -232,6 +250,14 @@ async def find_default_filter(
         ]
         if panel.object_pattern:
             base_filter.append(Image.raw_headers["OBJECT"].astext.ilike(panel.object_pattern))
+        if panel_included_dates is not None:
+            pid = str(panel.id)
+            if pid in panel_included_dates:
+                dates = panel_included_dates[pid]
+                if dates:
+                    base_filter.append(Image.session_date.in_(dates))
+                else:
+                    base_filter.append(text("false"))
 
         # Get filter integration totals
         fq = (
@@ -260,6 +286,14 @@ async def find_default_filter(
         ]
         if panel.object_pattern:
             base_filter.append(Image.raw_headers["OBJECT"].astext.ilike(panel.object_pattern))
+        if panel_included_dates is not None:
+            pid = str(panel.id)
+            if pid in panel_included_dates:
+                dates = panel_included_dates[pid]
+                if dates:
+                    base_filter.append(Image.session_date.in_(dates))
+                else:
+                    base_filter.append(text("false"))
 
         q = select(Image).where(*base_filter)
         frames = list((await session.execute(q)).scalars().all())
@@ -534,18 +568,27 @@ async def build_mosaic_composite(
     session: AsyncSession,
     tile_max_width: int = 400,
     filter_name: str | None = None,
+    panel_included_dates: dict[str, list] | None = None,
 ) -> bytes:
     """Full orchestrator: select frames, check cache, generate composite."""
     try:
         panel_frames = []
         for panel in panels:
+            included_dates = (
+                panel_included_dates.get(str(panel.id))
+                if panel_included_dates is not None else None
+            )
             if filter_name:
                 result = await select_best_frame_for_filter(
                     panel.target_id, panel.object_pattern, filter_name, session,
+                    included_dates=included_dates,
                 )
                 frame = result[0] if result else None
             else:
-                frame = await select_best_frame(panel.target_id, panel.object_pattern, session)
+                frame = await select_best_frame(
+                    panel.target_id, panel.object_pattern, session,
+                    included_dates=included_dates,
+                )
             if frame and frame.file_path:
                 panel_frames.append((panel, frame))
 

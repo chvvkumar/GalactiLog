@@ -65,6 +65,39 @@ def _parse_sexa_dec(s: str) -> float | None:
         return None
 
 
+async def _get_panel_included_dates(
+    panels: list[MosaicPanel], session: AsyncSession,
+) -> dict[str, list]:
+    """Build a mapping of panel_id -> included session dates.
+
+    Only panels that have membership records are included in the dict.
+    Panels without any membership records are omitted (meaning "use all sessions").
+    """
+    panel_ids = [p.id for p in panels]
+    if not panel_ids:
+        return {}
+
+    q = (
+        select(MosaicPanelSession.panel_id, MosaicPanelSession.session_date, MosaicPanelSession.status)
+        .where(MosaicPanelSession.panel_id.in_(panel_ids))
+    )
+    rows = (await session.execute(q)).all()
+
+    has_membership: set[str] = set()
+    included: dict[str, list] = {}
+    for panel_id, session_date, status in rows:
+        pid = str(panel_id)
+        has_membership.add(pid)
+        if status == "included":
+            included.setdefault(pid, []).append(session_date)
+
+    for pid in has_membership:
+        if pid not in included:
+            included[pid] = []
+
+    return included
+
+
 async def _panel_stats(panel: MosaicPanel, session: AsyncSession) -> PanelStats:
     """Compute stats for a single panel."""
     target = panel.target
@@ -816,7 +849,12 @@ async def get_mosaic_detail(
         total_frames += ps.total_frames
         panels.append(ps)
 
-    default_filter, available_filters = await find_default_filter(sorted_panels, session)
+    # Gather included session dates per panel for filter scoping
+    panel_included_dates = await _get_panel_included_dates(sorted_panels, session)
+
+    default_filter, available_filters = await find_default_filter(
+        sorted_panels, session, panel_included_dates=panel_included_dates,
+    )
 
     return MosaicDetailResponse(
         id=str(mosaic.id),
@@ -853,6 +891,7 @@ async def get_mosaic_composite(
         raise HTTPException(status_code=404, detail="Mosaic not found")
 
     panels = sorted(mosaic.panels, key=lambda p: p.sort_order)
+    panel_included_dates = await _get_panel_included_dates(panels, session)
 
     try:
         jpeg_bytes = await build_mosaic_composite(
@@ -860,6 +899,7 @@ async def get_mosaic_composite(
             panels=panels,
             session=session,
             filter_name=filter,
+            panel_included_dates=panel_included_dates,
         )
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
@@ -891,10 +931,16 @@ async def get_panel_thumbnails(
     if not mosaic:
         raise HTTPException(404, "Mosaic not found")
 
+    sorted_panels = sorted(mosaic.panels, key=lambda p: p.sort_order)
+    panel_included_dates = await _get_panel_included_dates(sorted_panels, session)
+
     results = []
-    for panel in sorted(mosaic.panels, key=lambda p: p.sort_order):
+    for panel in sorted_panels:
+        pid = str(panel.id)
+        included_dates = panel_included_dates.get(pid)
         result = await select_best_frame_for_filter(
             panel.target_id, panel.object_pattern, filter, session,
+            included_dates=included_dates,
         )
         if not result:
             results.append({
@@ -961,8 +1007,12 @@ async def get_panel_thumbnail_image(
     if cached:
         return Response(content=cached, media_type="image/jpeg")
 
+    panel_included_dates = await _get_panel_included_dates([panel], session)
+    included_dates = panel_included_dates.get(pid)
+
     result = await select_best_frame_for_filter(
         panel.target_id, panel.object_pattern, filter, session,
+        included_dates=included_dates,
     )
     if not result or not result[0].file_path:
         raise HTTPException(404, f"No frames for filter '{filter}' in this panel")
