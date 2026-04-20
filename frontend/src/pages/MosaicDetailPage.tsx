@@ -21,11 +21,11 @@ const MosaicDetailPage: Component = () => {
   const [filterLoading, setFilterLoading] = createSignal(false);
   const [thumbnailOverrides, setThumbnailOverrides] = createSignal<Record<string, string | null> | null>(null);
 
-  // Initialize selected filter from API response
+  // Initialize selected filter from API response and fetch filter-specific thumbnails
   createEffect(() => {
     const data = mosaic();
     if (data && data.default_filter && selectedFilter() === null) {
-      setSelectedFilter(data.default_filter);
+      handleFilterChange(data.default_filter);
     }
   });
 
