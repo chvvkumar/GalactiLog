@@ -5,6 +5,7 @@ import fitsio
 from PIL import Image as PILImage
 
 from app.services.stretch import normalize_to_unit, stretch_channel, resize_array
+from app.services.thumbnail import debayer_superpixel, _BAYER_OFFSETS
 
 
 def generate_preview(
@@ -19,10 +20,16 @@ def generate_preview(
     sensor resolution.
 
     Pipeline: read -> normalize -> flip -> resize (raw linear) -> MTF stretch -> save.
-    Handles mono (2D) and color (3D [3, H, W]) data.
+    Handles mono (2D), color (3D [3, H, W]), and Bayer-patterned (2D + BAYERPAT) data.
     """
     with fitsio.FITS(str(fits_path), "r") as fits:
+        header = fits[0].read_header()
         data = fits[0].read().astype(np.float32)
+
+    pat = header.get("BAYERPAT")
+    bayer = str(pat).strip().upper() if pat and str(pat).strip().upper() in _BAYER_OFFSETS else None
+    if bayer and data.ndim == 2:
+        data = debayer_superpixel(data, bayer)
 
     effective_width: int | None = None
     if max_width > 0:
