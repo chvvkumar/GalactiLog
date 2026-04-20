@@ -802,6 +802,7 @@ def detect_duplicate_targets():
                             suggested_target_id=target_id,
                             similarity_score=1.0,
                             method="simbad",
+                            reason_text=f'SIMBAD resolves "{obj_name}" to the same object as "{target_name}"',
                         ))
                         candidates_found += 1
                         matched = True
@@ -856,6 +857,7 @@ def detect_duplicate_targets():
                     suggested_target_id=target_id,
                     similarity_score=float(score),
                     method="trigram",
+                    reason_text=f'Name is {int(float(score) * 100)}% similar to "{target_name}"',
                 ))
                 candidates_found += 1
             else:
@@ -866,6 +868,7 @@ def detect_duplicate_targets():
                     similarity_score=0.0,
                     method="orphan",
                     status="pending",
+                    reason_text="No match found in SIMBAD or existing targets",
                 ))
                 candidates_found += 1
 
@@ -925,6 +928,9 @@ def detect_duplicate_targets():
             if l1 != l2:
                 visited_targets[l2] = l1
 
+        # Also track a representative shared name for each group leader
+        group_shared_name: dict = {}  # leader_id -> norm_name that triggered the union
+
         for norm_name, target_list in name_to_targets.items():
             # Deduplicate target ids within this name
             unique_ids = list({t[0] for t in target_list})
@@ -933,6 +939,10 @@ def detect_duplicate_targets():
             # Union all targets sharing this name
             for i in range(1, len(unique_ids)):
                 union(unique_ids[0], unique_ids[i])
+            # Record a shared name for this group (first one encountered wins)
+            leader_after = find_leader(unique_ids[0])
+            if leader_after not in group_shared_name:
+                group_shared_name[leader_after] = norm_name
 
         # Collect groups
         groups: dict[str, list] = defaultdict(list)
@@ -951,6 +961,8 @@ def detect_duplicate_targets():
             members_with_info = [(tid, *target_info[tid]) for tid in members]
             members_with_info.sort(key=lambda x: x[2], reverse=True)  # sort by img_count desc
             winner_id = members_with_info[0][0]
+            winner_name = members_with_info[0][1]
+            shared_name = group_shared_name.get(leader, "")
 
             for tid, pname, img_count in members_with_info[1:]:
                 if pname in existing_names_p2:
@@ -962,6 +974,7 @@ def detect_duplicate_targets():
                     similarity_score=1.0,
                     method="duplicate",
                     status="pending",
+                    reason_text=f'Shares alias "{shared_name}" with "{winner_name}"',
                 ))
                 existing_names_p2.add(pname)
                 dup_candidates_found += 1
