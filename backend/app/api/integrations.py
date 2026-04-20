@@ -57,18 +57,10 @@ async def send_to_nina(req: NinaRequest):
             resp = await client.get(endpoint)
             resp.raise_for_status()
             if req.position_angle is not None:
-                # Poll until NINA finishes loading the sky survey image,
-                # then set rotation. set-coordinates resets the framing
-                # rectangle so rotation must be applied after it settles.
-                for _ in range(8):
-                    await asyncio.sleep(0.5)
-                    try:
-                        info = await client.get(f"{base}/v2/api/framing/info")
-                        data = info.json()
-                        if data.get("Response", {}).get("Rectangle"):
-                            break
-                    except Exception:
-                        pass
+                # set-coordinates triggers a sky survey image reload which
+                # resets rotation. Wait for the reload to complete before
+                # applying rotation.
+                await asyncio.sleep(2)
                 rot_endpoint = f"{base}/v2/api/framing/set-rotation?rotation={req.position_angle}"
                 try:
                     rot_resp = await client.get(rot_endpoint)
