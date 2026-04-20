@@ -784,7 +784,6 @@ async def get_target_detail(
     # Fallback RA/Dec from FITS headers for obj: targets
     fallback_ra: float | None = None
     fallback_dec: float | None = None
-    fallback_pa: float | None = None
     if not target_obj and images:
         for img in images:
             hdrs = img.raw_headers or {}
@@ -795,6 +794,11 @@ async def get_target_detail(
                 fallback_dec = _parse_sexa_dec(str(dec_str))
                 if fallback_ra is not None and fallback_dec is not None:
                     break
+
+    # Fallback position angle from most recent image's rotator position
+    fallback_pa: float | None = None
+    effective_pa = target_obj.position_angle if target_obj else None
+    if effective_pa is None and images:
         for img in reversed(images):
             if img.rotator_position is not None:
                 fallback_pa = img.rotator_position
@@ -818,7 +822,7 @@ async def get_target_detail(
         object_type=target_obj.object_type if target_obj else None,
         ra=target_obj.ra if target_obj else fallback_ra,
         dec=target_obj.dec if target_obj else fallback_dec,
-        position_angle=target_obj.position_angle if target_obj else fallback_pa,
+        position_angle=effective_pa if effective_pa is not None else fallback_pa,
         total_integration_seconds=total_exp,
         total_frames=len(images),
         avg_hfr=statistics.mean(all_hfr) if all_hfr else None,
