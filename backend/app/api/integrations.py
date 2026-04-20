@@ -48,6 +48,8 @@ class StellariumRequest(BaseModel):
 
 @router.post("/nina/send-coordinates")
 async def send_to_nina(req: NinaRequest):
+    import asyncio
+
     base = req.url.rstrip("/")
     endpoint = f"{base}/v2/api/framing/set-coordinates?RAangle={req.ra}&DecAngle={req.dec}"
     try:
@@ -55,10 +57,18 @@ async def send_to_nina(req: NinaRequest):
             resp = await client.get(endpoint)
             resp.raise_for_status()
             if req.position_angle is not None:
-                # Delay to let NINA finish loading the sky survey image
-                # before setting rotation, otherwise set-coordinates resets it
-                import asyncio
-                await asyncio.sleep(1.5)
+                # Poll until NINA finishes loading the sky survey image,
+                # then set rotation. set-coordinates resets the framing
+                # rectangle so rotation must be applied after it settles.
+                for _ in range(8):
+                    await asyncio.sleep(0.5)
+                    try:
+                        info = await client.get(f"{base}/v2/api/framing/info")
+                        data = info.json()
+                        if data.get("Response", {}).get("Rectangle"):
+                            break
+                    except Exception:
+                        pass
                 rot_endpoint = f"{base}/v2/api/framing/set-rotation?rotation={req.position_angle}"
                 try:
                     rot_resp = await client.get(rot_endpoint)
