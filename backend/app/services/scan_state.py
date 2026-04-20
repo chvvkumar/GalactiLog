@@ -289,6 +289,22 @@ def check_complete_sync(r: sync_redis.Redis) -> None:
         from app.worker.tasks import smart_rebuild_targets, detect_mosaic_panels_task
         smart_rebuild_targets.apply_async(countdown=10)
         detect_mosaic_panels_task.apply_async(countdown=30)
+        # Write initial scan summary to Redis for /scan/summary endpoint
+        try:
+            import json as _json
+            from datetime import datetime as _dt
+            _summary = {
+                "completed_at": _dt.utcnow().isoformat() + "Z",
+                "files_ingested": snap.completed,
+                "targets_created": 0,
+                "targets_updated": 0,
+                "duplicates_found": 0,
+                "unresolved_names": 0,
+                "errors": snap.failed,
+            }
+            r.set("galactilog:scan_summary", _json.dumps(_summary))
+        except Exception:
+            logger.exception("scan_state: failed to write scan_summary to Redis")
 
 
 def start_scanning_sync(r: sync_redis.Redis) -> None:
