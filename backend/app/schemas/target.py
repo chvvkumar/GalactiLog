@@ -1,4 +1,5 @@
 import uuid
+from uuid import UUID
 
 from pydantic import BaseModel
 
@@ -370,3 +371,18 @@ class MergePreviewResponse(BaseModel):
     images_to_move: int = 0
     mosaic_panels_to_move: int = 0
     aliases_to_add: list[str] = []
+
+
+class TargetIdentityRequest(BaseModel):
+    primary_name: str | None = None
+    object_type: str | None = None
+    re_resolve: bool = False
+
+
+class TargetIdentityResponse(BaseModel):
+    id: UUID
+    primary_name: str
+    catalog_id: str | None
+    common_name: str | None
+    object_type: str | None
+    name_locked: bool

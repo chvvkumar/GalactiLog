@@ -12,7 +12,7 @@ from app.models.image import Image
 from app.models.merge_candidate import MergeCandidate
 from app.models.mosaic_panel import MosaicPanel
 from app.models.mosaic_suggestion import MosaicSuggestion
-from app.schemas.target import MergeCandidateResponse, MergedTargetResponse, MergeRequest, OrphanPreviewRequest, OrphanPreviewResponse, OrphanCreateRequest, MergePreviewRequest, MergePreviewResponse, MergePreviewSide
+from app.schemas.target import MergeCandidateResponse, MergedTargetResponse, MergeRequest, OrphanPreviewRequest, OrphanPreviewResponse, OrphanCreateRequest, MergePreviewRequest, MergePreviewResponse, MergePreviewSide, TargetIdentityRequest, TargetIdentityResponse
 from app.models.simbad_cache import SimbadCache
 from app.models.sesame_cache import SesameCache
 from app.config import async_redis
@@ -649,6 +649,89 @@ async def revert_merge_candidate(
 
     await session.commit()
     return {"status": "ok"}
+
+
+@router.put("/{target_id}/identity", response_model=TargetIdentityResponse)
+async def update_target_identity(
+    target_id: uuid.UUID,
+    body: TargetIdentityRequest,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(require_admin),
+):
+    """Rename a target or change its object type, optionally re-resolving via SIMBAD."""
+    target = await session.get(Target, target_id)
+    if not target or target.merged_into_id is not None:
+        raise HTTPException(status_code=404, detail="Target not found")
+
+    if body.re_resolve:
+        import asyncio
+        from app.services.simbad import resolve_target_name_cached, curate_simbad_result, normalize_object_name
+        from sqlalchemy.orm import Session as SyncSession
+        from app.database import sync_engine
+
+        lookup_name = target.catalog_id or target.primary_name
+        normalized = normalize_object_name(lookup_name)
+
+        # Delete negative cache entries for all of this target's aliases
+        all_names = [lookup_name] + list(target.aliases or [])
+        for name in all_names:
+            n = normalize_object_name(name)
+            await session.execute(
+                delete(SimbadCache).where(
+                    SimbadCache.query_name == n,
+                    SimbadCache.main_id.is_(None),
+                )
+            )
+        await session.flush()
+
+        def _resolve_sync():
+            with SyncSession(sync_engine) as sync_db:
+                return resolve_target_name_cached(lookup_name, sync_db)
+
+        result = await asyncio.to_thread(_resolve_sync)
+
+        if result:
+            curated = curate_simbad_result(result, fits_names=target.aliases or [])
+            target.primary_name = curated.get("primary_name", target.primary_name)
+            target.catalog_id = curated.get("catalog_id")
+            target.common_name = curated.get("common_name")
+            if curated.get("object_type"):
+                target.object_type = curated["object_type"]
+
+        target.name_locked = False
+
+    else:
+        category_to_simbad = {
+            "Emission Nebula": "HII",
+            "Reflection Nebula": "RNe",
+            "Dark Nebula": "DNe",
+            "Planetary Nebula": "PN",
+            "Supernova Remnant": "SNR",
+            "Galaxy": "G",
+            "Open Cluster": "OpC",
+            "Globular Cluster": "GlC",
+            "Star": "*",
+            "Other": "Other",
+        }
+
+        if body.primary_name is not None:
+            target.primary_name = body.primary_name
+            target.name_locked = True
+
+        if body.object_type is not None:
+            target.object_type = category_to_simbad.get(body.object_type, body.object_type)
+
+    await session.commit()
+    await session.refresh(target)
+
+    return TargetIdentityResponse(
+        id=target.id,
+        primary_name=target.primary_name,
+        catalog_id=target.catalog_id,
+        common_name=target.common_name,
+        object_type=target.object_type,
+        name_locked=target.name_locked,
+    )
 
 
 @router.post("/merge-candidates/{candidate_id}/dismiss")
