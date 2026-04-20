@@ -670,7 +670,6 @@ async def update_target_identity(
         from app.database import sync_engine
 
         lookup_name = target.catalog_id or target.primary_name
-        normalized = normalize_object_name(lookup_name)
 
         # Delete negative cache entries for all of this target's aliases
         all_names = [lookup_name] + list(target.aliases or [])
@@ -682,7 +681,18 @@ async def update_target_identity(
                     SimbadCache.main_id.is_(None),
                 )
             )
+            await session.execute(
+                delete(SesameCache).where(
+                    SesameCache.query_name == n,
+                    SesameCache.main_id.is_(None),
+                )
+            )
         await session.flush()
+
+        async with async_redis() as redis:
+            for name in all_names:
+                n = normalize_object_name(name)
+                await redis.srem("target_resolver:negative", n)
 
         def _resolve_sync():
             with SyncSession(sync_engine) as sync_db:
@@ -697,6 +707,13 @@ async def update_target_identity(
             target.common_name = curated.get("common_name")
             if curated.get("object_type"):
                 target.object_type = curated["object_type"]
+            existing_norm = {a.upper() for a in (target.aliases or [])}
+            new_aliases = list(target.aliases or [])
+            for alias in curated.get("aliases", []):
+                if alias.upper() not in existing_norm:
+                    new_aliases.append(alias)
+                    existing_norm.add(alias.upper())
+            target.aliases = new_aliases
 
         target.name_locked = False
 

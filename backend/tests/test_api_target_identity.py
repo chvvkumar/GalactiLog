@@ -37,16 +37,6 @@ async def test_rename_sets_name_locked():
     target = _make_target(name="NGC 7000", name_locked=False)
     admin = _make_admin()
 
-    # After commit+refresh the target reflects the updated values
-    updated_target = MagicMock(spec=Target)
-    updated_target.id = target.id
-    updated_target.primary_name = "My Custom Name"
-    updated_target.object_type = target.object_type
-    updated_target.catalog_id = target.catalog_id
-    updated_target.common_name = target.common_name
-    updated_target.merged_into_id = None
-    updated_target.name_locked = True
-
     mock_session = AsyncMock()
     mock_session.get = AsyncMock(return_value=target)
     mock_session.commit = AsyncMock()
