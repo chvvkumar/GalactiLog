@@ -316,6 +316,8 @@ def generate_panel_thumbnail(
     Returns (image, native_width) where native_width is the original sensor
     width in pixels before any downscaling.
     """
+    from app.services.thumbnail import get_bayer_pattern, debayer_superpixel
+
     # Read native dimensions before decimation
     with fitsio.FITS(str(fits_path), "r") as fits:
         info = fits[0].get_info()
@@ -328,7 +330,13 @@ def generate_panel_thumbnail(
         else:
             native_width = max(dims) if dims else max_width
 
-    data = _read_binned(fits_path, max_width)
+    bayer = get_bayer_pattern(fits_path)
+    if bayer:
+        with fitsio.FITS(str(fits_path), "r") as fits:
+            raw = fits[0].read().astype(np.float32)
+        data = debayer_superpixel(raw, bayer)
+    else:
+        data = _read_binned(fits_path, max_width)
 
     if data.ndim == 2:
         data = normalize_to_unit(data)

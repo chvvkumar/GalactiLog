@@ -10,6 +10,48 @@ from app.services.stretch import (
     resize_array,
 )
 
+_BAYER_OFFSETS = {
+    "RGGB": (0, 0),
+    "GRBG": (0, 1),
+    "GBRG": (1, 0),
+    "BGGR": (1, 1),
+}
+
+
+def debayer_superpixel(data: np.ndarray, pattern: str) -> np.ndarray:
+    """Debayer a 2D Bayer-patterned array using 2x2 superpixel binning.
+
+    Returns a [3, H//2, W//2] float32 array (channels-first RGB).
+    Each 2x2 cell yields one R, one B, and the mean of two G samples.
+    """
+    pattern = pattern.upper().strip()
+    if pattern not in _BAYER_OFFSETS:
+        raise ValueError(f"Unknown Bayer pattern: {pattern}")
+
+    r_row, r_col = _BAYER_OFFSETS[pattern]
+    b_row = 1 - r_row
+    b_col = 1 - r_col
+
+    h = (data.shape[0] // 2) * 2
+    w = (data.shape[1] // 2) * 2
+    d = data[:h, :w]
+
+    r = d[r_row::2, r_col::2].astype(np.float32)
+    b = d[b_row::2, b_col::2].astype(np.float32)
+    g = (d[r_row::2, b_col::2].astype(np.float32) +
+         d[b_row::2, r_col::2].astype(np.float32)) / 2.0
+
+    return np.stack([r, g, b], axis=0)
+
+
+def get_bayer_pattern(fits_path: Path) -> str | None:
+    """Read BAYERPAT from a FITS header, return None if absent."""
+    header = fitsio.read_header(str(fits_path), ext=0)
+    pat = header.get("BAYERPAT")
+    if pat and str(pat).strip().upper() in _BAYER_OFFSETS:
+        return str(pat).strip().upper()
+    return None
+
 
 def _read_binned(fits_path: Path, max_width: int) -> np.ndarray:
     """Read FITS pixel data and block-average-bin for thumbnail generation.
@@ -56,12 +98,15 @@ def generate_thumbnail(
     """Read a FITS file, resize raw data, apply MTF stretch, save JPEG.
 
     Pipeline: read → block-bin → flip → resize (raw linear) → MTF stretch → save.
-    Handles both mono (2D) and color (3D with shape [3, H, W]) data.
-
-    Block-binning before resize integrates noise across bins (sqrt(N) reduction
-    per axis) and prevents the aliasing that strided reads cause.
+    Handles mono (2D), color (3D [3, H, W]), and Bayer-patterned (2D + BAYERPAT) data.
     """
-    data = _read_binned(fits_path, max_width)
+    bayer = get_bayer_pattern(fits_path)
+    if bayer:
+        with fitsio.FITS(str(fits_path), "r") as fits:
+            raw = fits[0].read().astype(np.float32)
+        data = debayer_superpixel(raw, bayer)
+    else:
+        data = _read_binned(fits_path, max_width)
 
     if data.ndim == 2:
         # Mono: normalize, flip, resize, stretch
