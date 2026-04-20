@@ -36,6 +36,7 @@ class NinaRequest(BaseModel):
     url: str
     ra: float
     dec: float
+    position_angle: float | None = None
 
 
 class StellariumRequest(BaseModel):
@@ -53,6 +54,13 @@ async def send_to_nina(req: NinaRequest):
         async with httpx.AsyncClient(timeout=TIMEOUT) as client:
             resp = await client.get(endpoint)
             resp.raise_for_status()
+            if req.position_angle is not None:
+                rot_endpoint = f"{base}/v2/api/framing/set-rotation?rotation={req.position_angle}"
+                try:
+                    rot_resp = await client.get(rot_endpoint)
+                    rot_resp.raise_for_status()
+                except Exception as e:
+                    logger.warning("NINA set-rotation failed for %s: %s", base, e)
         return {"ok": True}
     except Exception as e:
         logger.warning("NINA send-coordinates failed for %s: %s", base, e)

@@ -861,6 +861,16 @@ def detect_duplicate_targets():
                     method="trigram",
                 ))
                 candidates_found += 1
+            else:
+                db.add(MergeCandidate(
+                    source_name=obj_name,
+                    source_image_count=img_count,
+                    suggested_target_id=None,
+                    similarity_score=0.0,
+                    method="orphan",
+                    status="pending",
+                ))
+                candidates_found += 1
 
         db.commit()
 
