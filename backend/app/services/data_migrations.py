@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 # Current data version - bump this and add a migration function when
 # code changes affect how stored target data is derived.
-DATA_VERSION = 8
+DATA_VERSION = 9
 
 
 def _migrate_v1_fix_catalog_designations(session: Session) -> str:
@@ -376,6 +376,30 @@ def _migrate_v8_fix_question_mark_galaxy(session: Session) -> str:
     return "; ".join(parts) if parts else "No changes needed"
 
 
+def _migrate_v9_stellarium_names(session: Session) -> str:
+    """Clear SIMBAD cache entries for common names that now resolve differently via Stellarium."""
+    from app.services.stellarium_names import get_stellarium_names
+    from app.models.simbad_cache import SimbadCache
+
+    stellarium = get_stellarium_names()
+    cleared = 0
+
+    for common_name, simbad_id in stellarium.items():
+        normalized = normalize_object_name(common_name)
+        cached = session.execute(
+            select(SimbadCache).where(SimbadCache.query_name == normalized)
+        ).scalar_one_or_none()
+
+        if cached and cached.main_id and cached.main_id != simbad_id:
+            session.delete(cached)
+            cleared += 1
+
+    if cleared:
+        session.flush()
+
+    return f"Cleared {cleared} stale SIMBAD cache entries for Stellarium name corrections"
+
+
 # Registry: version number -> (description, migration function)
 # Version numbers must be sequential starting from 1.
 MIGRATIONS: dict[int, tuple[str, Callable[[Session], str]]] = {
@@ -387,6 +411,7 @@ MIGRATIONS: dict[int, tuple[str, Callable[[Session], str]]] = {
     6: ("Clear negative VizieR cache, re-enrich targets, compute constellations", _migrate_v6_clear_negative_cache_and_reenrich),
     7: ("Load Tier 1 catalogs, match memberships, enrich from Gaia/SAC", _migrate_v8_tier1_and_catalogs),
     8: ("Fix Question Mark Galaxy mapping from NGC 4258 to NGC 5194 (M51)", _migrate_v8_fix_question_mark_galaxy),
+    9: ("Stellarium common name cache refresh", _migrate_v9_stellarium_names),
 }
 
 
