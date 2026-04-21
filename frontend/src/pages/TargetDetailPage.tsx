@@ -180,6 +180,37 @@ const TargetDetailPage: Component = () => {
   const [editName, setEditName] = createSignal("");
   const [savingIdentity, setSavingIdentity] = createSignal(false);
 
+  // Object type edit
+  const OBJECT_TYPE_OPTIONS = [
+    "Emission Nebula",
+    "Reflection Nebula",
+    "Dark Nebula",
+    "Planetary Nebula",
+    "Supernova Remnant",
+    "Galaxy",
+    "Open Cluster",
+    "Globular Cluster",
+    "Star",
+    "Other",
+  ];
+  const [editingObjectType, setEditingObjectType] = createSignal(false);
+  const [savingObjectType, setSavingObjectType] = createSignal(false);
+
+  const handleObjectTypeChange = async (value: string) => {
+    const detail = targetDetail();
+    if (!detail) return;
+    setSavingObjectType(true);
+    try {
+      await api.updateTargetIdentity(detail.target_id, { object_type: value });
+      setEditingObjectType(false);
+      await refetchDetail();
+    } catch (e: any) {
+      showToast(e?.message ?? "Failed to update object type", "error");
+    } finally {
+      setSavingObjectType(false);
+    }
+  };
+
   const handleRename = async () => {
     const detail = targetDetail();
     if (!detail) return;
@@ -459,10 +490,51 @@ const TargetDetailPage: Component = () => {
                       </ul>
                     </HelpPopover>
                   </div>
-                  <div class="text-xs text-theme-text-secondary mt-1 flex flex-wrap gap-x-2 gap-y-0.5">
-                    <Show when={detail().object_category}>
-                      <span>{detail().object_category}</span>
-                      <span>·</span>
+                  <div class="text-xs text-theme-text-secondary mt-1 flex flex-wrap gap-x-2 gap-y-0.5 items-center">
+                    <Show when={detail().object_category || auth.isAdmin()}>
+                      <Show
+                        when={editingObjectType() && auth.isAdmin()}
+                        fallback={
+                          <span class="flex items-center gap-1">
+                            <span>{detail().object_category ?? "Unknown type"}</span>
+                            <Show when={auth.isAdmin()}>
+                              <button
+                                class="text-theme-text-tertiary hover:text-theme-text-primary transition-colors leading-none"
+                                title="Edit object type"
+                                disabled={savingObjectType()}
+                                onClick={() => setEditingObjectType(true)}
+                              >
+                                &#9998;
+                              </button>
+                            </Show>
+                          </span>
+                        }
+                      >
+                        <span class="flex items-center gap-1">
+                          <select
+                            class="text-xs bg-theme-base border border-theme-accent rounded px-1 py-0.5 text-theme-text-primary focus:outline-none"
+                            disabled={savingObjectType()}
+                            value={detail().object_category ?? ""}
+                            onChange={(e) => handleObjectTypeChange(e.currentTarget.value)}
+                          >
+                            <option value="" disabled>Select type...</option>
+                            <For each={OBJECT_TYPE_OPTIONS}>
+                              {(opt) => <option value={opt}>{opt}</option>}
+                            </For>
+                          </select>
+                          <button
+                            class="text-theme-text-tertiary hover:text-theme-error transition-colors leading-none"
+                            title="Cancel"
+                            onClick={() => setEditingObjectType(false)}
+                            disabled={savingObjectType()}
+                          >
+                            &#10005;
+                          </button>
+                        </span>
+                      </Show>
+                      <Show when={!editingObjectType()}>
+                        <span>·</span>
+                      </Show>
                     </Show>
                     <Show when={detail().constellation}>
                       <span>{detail().constellation}</span>
