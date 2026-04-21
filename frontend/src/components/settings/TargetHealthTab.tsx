@@ -31,8 +31,8 @@ function toIssueCard(c: MergeCandidateResponse): IssueCardCandidate {
     similarity_score: c.similarity_score,
     method: c.method,
     status: c.status,
-    reason_text: (c as any).reason_text ?? null,
-    created_at: (c as any).created_at ?? null,
+    reason_text: c.reason_text ?? null,
+    created_at: c.created_at ?? null,
   };
 }
 

@@ -400,6 +400,7 @@ export interface MergeCandidateResponse {
   method: string;
   status: string;
   created_at: string;
+  reason_text: string | null;
 }
 
 export interface OrphanPreviewResponse {
