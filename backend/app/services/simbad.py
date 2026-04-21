@@ -321,6 +321,7 @@ COMMON_NAME_MAP: dict[str, str] = {
     "seagull nebula": "IC 2177",            # Stellarium: NGC 2029
     "seagull's wings": "IC 2177",           # Stellarium: Sh2-296
     "casper the friendly ghost nebula": "Sh2-136",  # Stellarium: NGC 2068 (wrong)
+    "horsehead nebula": "Barnard 33",               # Stellarium: IC 434 (emission nebula, not the dark nebula)
     # SIMBAD NAME format (group/region identifiers)
     "markarian's chain": "NAME Markarian Chain",
     "leo triplet": "NAME Leo Triplet",

@@ -469,12 +469,12 @@ class TestResolveTargetNameCached:
 # ---------------------------------------------------------------------------
 
 class TestGetSimbadId:
-    def test_stellarium_common_name(self):
-        """Stellarium names.dat resolves Horsehead Nebula to IC 434."""
-        assert _get_simbad_id("Horsehead Nebula") == "IC 434"
+    def test_horsehead_nebula_override(self):
+        """Override map resolves Horsehead Nebula to Barnard 33 (dark nebula), not Stellarium's IC 434."""
+        assert _get_simbad_id("Horsehead Nebula") == "Barnard 33"
 
-    def test_stellarium_case_insensitive(self):
-        assert _get_simbad_id("horsehead nebula") == "IC 434"
+    def test_horsehead_case_insensitive(self):
+        assert _get_simbad_id("horsehead nebula") == "Barnard 33"
 
     def test_override_map_takes_precedence(self):
         """Abbreviations in override map are checked before Stellarium."""
@@ -513,4 +513,4 @@ class TestGetSimbadId:
     def test_suffix_stripping_with_stellarium(self):
         """Descriptive suffix after ' - ' should be stripped, then checked in Stellarium."""
         result = _get_simbad_id("Horsehead Nebula - some description")
-        assert result == "IC 434"
+        assert result == "Barnard 33"
