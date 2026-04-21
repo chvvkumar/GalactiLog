@@ -293,42 +293,38 @@ async def _query_simbad(object_name: str) -> dict[str, Any] | None:
     return curate_simbad_result(raw)
 
 
-# Common names that SIMBAD's script interface doesn't resolve.
-# Maps colloquial/common names to SIMBAD-resolvable identifiers.
+# Override map for names that need special handling:
+# - Abbreviations not in Stellarium (e.g., "rho oph")
+# - SIMBAD NAME format identifiers (e.g., Markarian's Chain)
+# - Entries where Stellarium maps to a less-preferred ID (e.g., NGC instead of Messier)
+# - Entries not covered by Stellarium at all
+# Stellarium's names.dat covers ~1,364 common names; this map handles edge cases only.
 COMMON_NAME_MAP: dict[str, str] = {
-    "pinwheel galaxy": "M 101",
-    "flying bat nebula": "Sh2-129",
-    "beehive cluster": "M 44",
+    # Abbreviations / short forms not in Stellarium
+    "rho oph": "rho Oph",
     "wizard nebula": "NGC 7380",
-    "the wizard nebula": "NGC 7380",
-    "hamburger galaxy": "NGC 3628",
-    "fish head nebula": "IC 1795",
-    "dolphin nebula": "Sh2-308",
-    "fossil footprint nebula": "NGC 1491",
-    "spaghetti nebula": "Simeis 147",
-    "sadr region": "IC 1318",
-    "elephant's trunk nebula": "IC 1396A",
     "elephant's trunk neb": "IC 1396A",
     "gam cas nebula": "IC 63",
-    "markarian's chain": "NAME Markarian Chain",
-    "california nebula": "NGC 1499",
-    "heart nebula": "IC 1805",
-    "soul nebula": "IC 1848",
-    "bode's galaxy": "M 81",
     "moon": "Moon",
-    "north america nebula": "NGC 7000",
-    "east veil nebula": "NGC 6992",
-    "veil nebula": "NGC 6960",
-    "flaming star nebula": "IC 405",
-    "flame nebula": "NGC 2024",
-    "christmas tree cluster": "NGC 2264",
-    "cat's eye nebula": "NGC 6543",
+    "hickson 44": "HCG 44",
+    "ou 4": "PN Ou 4",
+    # Stellarium maps to NGC; we prefer Messier designation
+    "pinwheel galaxy": "M 101",
+    "beehive cluster": "M 44",
+    "bode's galaxy": "M 81",
     "sombrero galaxy": "M 104",
-    "question mark galaxy": "NGC 5194",
+    "andromeda galaxy": "M 31",
+    "triangulum pinwheel": "M 33",
+    # Stellarium maps to wrong or less-specific object
+    "elephant's trunk nebula": "IC 1396A",  # Stellarium: IC 1396 (whole region)
+    "spaghetti nebula": "Simeis 147",       # Stellarium: Sh2-240
+    "seagull nebula": "IC 2177",            # Stellarium: NGC 2029
+    "seagull's wings": "IC 2177",           # Stellarium: Sh2-296
+    "casper the friendly ghost nebula": "Sh2-136",  # Stellarium: NGC 2068 (wrong)
+    # SIMBAD NAME format (group/region identifiers)
+    "markarian's chain": "NAME Markarian Chain",
     "leo triplet": "NAME Leo Triplet",
-    "rho oph": "rho Oph",
-    "cave nebula": "Sh2-155",
-    "jellyfish nebula": "IC 443",
+    # Caldwell catalog (not in Stellarium, SIMBAD doesn't resolve "Caldwell N")
     "caldwell 1": "NGC 188",
     "caldwell 2": "NGC 40",
     "caldwell 3": "NGC 4236",
@@ -379,14 +375,6 @@ COMMON_NAME_MAP: dict[str, str] = {
     "caldwell 48": "NGC 2775",
     "caldwell 49": "NGC 2237",
     "caldwell 50": "NGC 2244",
-    "triangulum pinwheel": "M 33",
-    "andromeda galaxy": "M 31",
-    "seagull nebula": "IC 2177",
-    "seagull's wings": "IC 2177",
-    "spider nebula": "IC 417",
-    "casper the friendly ghost nebula": "Sh2-136",
-    "hickson 44": "HCG 44",
-    "ou 4": "PN Ou 4",
 }
 
 # Strip "Panel N" suffix to get the base object name
@@ -403,19 +391,28 @@ def _get_simbad_id(object_name: str) -> str:
     base = _PANEL_RE.sub("", object_name).strip()
     key = base.lower()
 
+    # 1. Small override map (abbreviations, Messier preferences, edge cases)
     if key in COMMON_NAME_MAP:
         return COMMON_NAME_MAP[key]
 
-    # Strip descriptive suffix after " - " (e.g. "SH2-224 - Rice Hat Nebula" -> "SH2-224")
+    # 2. Stellarium common names (~1,364 entries)
+    from app.services.stellarium_names import get_stellarium_names
+    stellarium = get_stellarium_names()
+    if key in stellarium:
+        return stellarium[key]
+
+    # 3. Strip descriptive suffix after " - " and check both maps
     if " - " in base:
         base_part = base.split(" - ", 1)[0].strip()
         base_key = base_part.lower()
         if base_key in COMMON_NAME_MAP:
             return COMMON_NAME_MAP[base_key]
+        if base_key in stellarium:
+            return stellarium[base_key]
         # Re-run catalog matchers on the stripped base
         base = base_part
 
-    # Sharpless catalog: "Sh2 174" -> "SH 2-174"
+    # 4. Sharpless catalog: "Sh2 174" -> "SH 2-174"
     m = _SH2_RE.match(base)
     if m:
         return f"SH 2-{m.group(1)}"

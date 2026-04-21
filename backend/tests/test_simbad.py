@@ -11,6 +11,7 @@ from app.services.simbad import (
     extract_common_name,
     build_primary_name,
     _fetch_tap_aliases,
+    _get_simbad_id,
 )
 
 
@@ -461,3 +462,55 @@ class TestResolveTargetNameCached:
         assert result is not None
         assert result["catalog_id"] == "NGC 7000"
         assert mock_get_cache.call_count == 2
+
+
+# ---------------------------------------------------------------------------
+# _get_simbad_id (override map + Stellarium integration)
+# ---------------------------------------------------------------------------
+
+class TestGetSimbadId:
+    def test_stellarium_common_name(self):
+        """Stellarium names.dat resolves Horsehead Nebula to IC 434."""
+        assert _get_simbad_id("Horsehead Nebula") == "IC 434"
+
+    def test_stellarium_case_insensitive(self):
+        assert _get_simbad_id("horsehead nebula") == "IC 434"
+
+    def test_override_map_takes_precedence(self):
+        """Abbreviations in override map are checked before Stellarium."""
+        assert _get_simbad_id("rho oph") == "rho Oph"
+
+    def test_question_mark_galaxy_resolves_to_m51(self):
+        result = _get_simbad_id("Question Mark Galaxy")
+        assert result == "NGC 5194"
+
+    def test_catalog_id_passes_through(self):
+        assert _get_simbad_id("NGC 7000") == "NGC 7000"
+
+    def test_whirlpool_galaxy(self):
+        assert _get_simbad_id("Whirlpool Galaxy") == "NGC 5194"
+
+    def test_andromeda_galaxy_uses_messier(self):
+        """Override map returns M 31 instead of Stellarium's NGC 224."""
+        assert _get_simbad_id("Andromeda Galaxy") == "M 31"
+
+    def test_lagoon_nebula(self):
+        """Stellarium names.dat resolves Lagoon Nebula to NGC 6523."""
+        assert _get_simbad_id("Lagoon Nebula") == "NGC 6523"
+
+    def test_override_beats_stellarium(self):
+        """Pinwheel Galaxy: override says M 101, Stellarium says NGC 598."""
+        assert _get_simbad_id("Pinwheel Galaxy") == "M 101"
+
+    def test_stellarium_only_entry(self):
+        """California Nebula removed from override; Stellarium covers it."""
+        assert _get_simbad_id("California Nebula") == "NGC 1499"
+
+    def test_caldwell_in_override(self):
+        """Caldwell entries not in Stellarium, handled by override map."""
+        assert _get_simbad_id("Caldwell 20") == "NGC 7000"
+
+    def test_suffix_stripping_with_stellarium(self):
+        """Descriptive suffix after ' - ' should be stripped, then checked in Stellarium."""
+        result = _get_simbad_id("Horsehead Nebula - some description")
+        assert result == "IC 434"
