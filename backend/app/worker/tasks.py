@@ -763,6 +763,7 @@ def detect_duplicate_targets():
         existing_names = {row[0] for row in existing.all()}
 
         candidates_found = 0
+        orphan_count = 0
 
         for obj_name, img_count in unresolved:
             if not obj_name or obj_name in existing_names:
@@ -871,6 +872,7 @@ def detect_duplicate_targets():
                     reason_text="No match found in SIMBAD or existing targets",
                 ))
                 candidates_found += 1
+                orphan_count += 1
 
         db.commit()
 
@@ -984,13 +986,14 @@ def detect_duplicate_targets():
             db.commit()
             logger.info("detect_duplicates: found %d duplicate-name candidates", dup_candidates_found)
 
-    # Update scan summary in Redis with duplicates_found count
+    # Update scan summary in Redis with duplicates_found and unresolved_names counts
     try:
         import json as _json
         raw = _redis.get("galactilog:scan_summary")
         if raw:
             _summary = _json.loads(raw)
             _summary["duplicates_found"] = candidates_found
+            _summary["unresolved_names"] = orphan_count
             _redis.set("galactilog:scan_summary", _json.dumps(_summary))
     except Exception:
         logger.warning("detect_duplicate_targets: failed to update scan_summary in Redis")
@@ -1425,6 +1428,18 @@ def _smart_rebuild_inner(manual: bool = False) -> dict:
 
     set_rebuild_complete_sync(_redis, message, stats)
     _invalidate_stats_cache()
+
+    # Update scan summary with targets_updated from aliases updated this run
+    try:
+        import json as _json
+        raw = _redis.get("galactilog:scan_summary")
+        if raw:
+            _summary = _json.loads(raw)
+            _summary["targets_updated"] = stats.get("aliases_updated", 0)
+            _redis.set("galactilog:scan_summary", _json.dumps(_summary))
+    except Exception:
+        logger.warning("smart_rebuild: failed to update scan_summary in Redis")
+
     if manual:
         with _activity_session() as _db:
             _emit_activity_sync(
