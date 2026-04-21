@@ -324,7 +324,7 @@ COMMON_NAME_MAP: dict[str, str] = {
     "christmas tree cluster": "NGC 2264",
     "cat's eye nebula": "NGC 6543",
     "sombrero galaxy": "M 104",
-    "question mark galaxy": "NGC 4258",
+    "question mark galaxy": "NGC 5194",
     "leo triplet": "NAME Leo Triplet",
     "rho oph": "rho Oph",
     "cave nebula": "Sh2-155",
