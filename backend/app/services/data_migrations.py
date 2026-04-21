@@ -348,7 +348,7 @@ def _migrate_v8_fix_question_mark_galaxy(session: Session) -> str:
 
     # Clear the stale SIMBAD cache entry so it re-resolves to NGC 5194
     deleted = session.execute(
-        text("DELETE FROM simbad_cache WHERE lookup_key = 'QUESTION MARK GALAXY'")
+        text("DELETE FROM simbad_cache WHERE query_name = 'QUESTION MARK GALAXY'")
     ).rowcount
     session.flush()
 
