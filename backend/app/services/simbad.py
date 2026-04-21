@@ -199,7 +199,7 @@ async def _fetch_tap_aliases(object_name: str) -> list[str]:
             # First line is the header ("id"), skip it
             if len(lines) <= 1:
                 return []
-            return [line.strip() for line in lines[1:] if line.strip()]
+            return [line.strip().strip('"') for line in lines[1:] if line.strip()]
     except (httpx.HTTPError, ValueError) as e:
         logger.warning("SIMBAD TAP alias query failed for '%s': %s", object_name, e)
         return []

@@ -380,6 +380,34 @@ class TestFetchTapAliases:
         assert result == []
 
     @pytest.mark.asyncio
+    async def test_strips_quotes_from_tap_response(self):
+        """TAP responses quote each value; function must strip those quotes."""
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.text = 'id\n"M  51"\n"NGC  5194"\n"NAME Whirlpool Galaxy"\n"[OKM2018] SWIFT J1329.9+4719"\n'
+        mock_resp.raise_for_status = MagicMock()
+
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(return_value=mock_resp)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("app.services.simbad.httpx.AsyncClient", return_value=mock_client):
+            result = await _fetch_tap_aliases("M  51")
+
+        assert result == ["M  51", "NGC  5194", "NAME Whirlpool Galaxy", "[OKM2018] SWIFT J1329.9+4719"]
+        # Verify quotes are not present in any alias
+        assert all(not a.startswith('"') and not a.endswith('"') for a in result)
+        # Verify catalog aliases can now be matched by curate_aliases
+        curated = curate_aliases(result)
+        # "M  51" normalizes to "M 51" which matches Messier pattern
+        assert "M 51" in curated
+        # "NGC  5194" normalizes to "NGC 5194" which matches NGC pattern
+        assert "NGC 5194" in curated
+        # Common name is extracted from NAME entry
+        assert "Whirlpool Galaxy" in curated
+
+    @pytest.mark.asyncio
     async def test_returns_empty_on_http_error(self):
         """On HTTP error, should log warning and return empty list."""
         mock_client = AsyncMock()
