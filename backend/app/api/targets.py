@@ -865,6 +865,7 @@ async def get_target_detail(
         reference_thumbnail_path=target_obj.reference_thumbnail_path if target_obj else None,
         distance_pc=target_obj.distance_pc if target_obj else None,
         catalog_memberships=catalog_memberships,
+        name_locked=target_obj.name_locked if target_obj else False,
     )
 
 

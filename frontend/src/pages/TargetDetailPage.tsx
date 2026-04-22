@@ -1,7 +1,7 @@
 import { Component, Show, For, createResource, createSignal, createEffect, createMemo, on } from "solid-js";
 import { A, useParams, useSearchParams } from "@solidjs/router";
 import { api } from "../api/client";
-import type { TargetDetailResponse, SessionDetail } from "../types";
+import type { TargetDetailResponse, SessionDetail, TargetSearchResultFuzzy, MergedTargetResponse } from "../types";
 import SessionAccordionCard from "../components/SessionAccordionCard";
 import { showToast } from "../components/Toast";
 import FilterBadges from "../components/FilterBadges";
@@ -13,6 +13,8 @@ import { isFieldVisible } from "../utils/displaySettings";
 import { contentWidthClass } from "../utils/format";
 import HelpPopover from "../components/HelpPopover";
 import { timezoneLabel } from "../utils/dateTime";
+import MergePreviewModal from "../components/MergePreviewModal";
+import { useAuth } from "../components/AuthProvider";
 
 import { formatIntegration } from "../utils/format";
 
@@ -27,31 +29,242 @@ function formatSize(major: number | null, minor: number | null): string {
   return `${major.toFixed(1)}' \u00d7 ${minor.toFixed(1)}'`;
 }
 
+// Two-step merge flow: search then preview
+interface MergeFromDetailFlowProps {
+  winnerId: string;
+  winnerName: string;
+  onClose: () => void;
+  onMerged: () => void;
+}
+
+const MergeFromDetailFlow: Component<MergeFromDetailFlowProps> = (props) => {
+  const [searchQuery, setSearchQuery] = createSignal("");
+  const [searchResults, setSearchResults] = createSignal<TargetSearchResultFuzzy[]>([]);
+  const [searching, setSearching] = createSignal(false);
+  const [selectedTarget, setSelectedTarget] = createSignal<TargetSearchResultFuzzy | null>(null);
+
+  let searchTimeout: ReturnType<typeof setTimeout>;
+
+  const handleSearch = (q: string) => {
+    setSearchQuery(q);
+    setSelectedTarget(null);
+    clearTimeout(searchTimeout);
+    if (q.trim().length < 2) {
+      setSearchResults([]);
+      return;
+    }
+    searchTimeout = setTimeout(async () => {
+      setSearching(true);
+      try {
+        const results = await api.searchTargets(q.trim());
+        setSearchResults(results.filter((t) => t.id !== props.winnerId));
+      } catch {
+        setSearchResults([]);
+      } finally {
+        setSearching(false);
+      }
+    }, 300);
+  };
+
+  const picked = selectedTarget();
+
+  return (
+    <Show
+      when={selectedTarget()}
+      fallback={
+        <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={props.onClose}>
+          <div
+            class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-lg)] max-w-lg w-full mx-4 max-h-[80vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div class="p-4 border-b border-theme-border">
+              <h3 class="text-theme-text-primary font-medium">
+                Merge into "{props.winnerName}"
+              </h3>
+              <p class="text-xs text-theme-text-secondary mt-1">
+                Search for a target to merge into this one. You will preview what changes before confirming.
+              </p>
+            </div>
+            <div class="p-4 space-y-3">
+              <div class="text-xs px-2 py-1.5 rounded bg-yellow-500/10 text-yellow-400 border border-yellow-500/20">
+                All images and sessions from the selected target will be moved here. You can revert from Settings &gt; Target Merges.
+              </div>
+              <div>
+                <label class="block text-xs text-theme-text-secondary mb-1">Search for target to merge</label>
+                <input
+                  type="text"
+                  class="w-full px-2 py-1.5 text-sm bg-theme-base border border-theme-border rounded-[var(--radius-sm)] text-theme-text-primary focus:border-theme-accent focus:outline-none"
+                  value={searchQuery()}
+                  onInput={(e) => handleSearch(e.currentTarget.value)}
+                  placeholder="Type to search targets..."
+                />
+              </div>
+              <Show when={searching()}>
+                <p class="text-xs text-theme-text-secondary">Searching...</p>
+              </Show>
+              <Show when={searchResults().length > 0}>
+                <div class="border border-theme-border rounded-[var(--radius-sm)] max-h-48 overflow-y-auto">
+                  <For each={searchResults()}>
+                    {(t) => (
+                      <button
+                        onClick={() => setSelectedTarget(t)}
+                        class="w-full text-left px-3 py-2 text-sm border-b border-theme-border last:border-b-0 transition-colors text-theme-text-primary hover:bg-theme-hover"
+                      >
+                        <span class="font-medium">{t.primary_name}</span>
+                        <Show when={t.object_type}>
+                          <span class="text-xs text-theme-text-secondary ml-2">{t.object_type}</span>
+                        </Show>
+                      </button>
+                    )}
+                  </For>
+                </div>
+              </Show>
+              <Show when={searchQuery().trim().length >= 2 && !searching() && searchResults().length === 0}>
+                <p class="text-xs text-theme-text-secondary">No targets found</p>
+              </Show>
+              <div class="flex justify-end gap-2 pt-2">
+                <button
+                  onClick={props.onClose}
+                  class="px-3 py-1.5 text-sm border border-theme-border text-theme-text-secondary rounded-[var(--radius-sm)] hover:text-theme-text-primary transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      }
+    >
+      {(t) => (
+        <MergePreviewModal
+          winnerId={props.winnerId}
+          loserId={t().id}
+          onClose={props.onClose}
+          onMerged={props.onMerged}
+        />
+      )}
+    </Show>
+  );
+};
+
 const TargetDetailPage: Component = () => {
   const params = useParams<{ targetId: string }>();
   const [searchParams] = useSearchParams();
+  const auth = useAuth();
   const ctx = useSettingsContext();
   const { displaySettings, graphSettings, saveGraphSettings, timezone, contentWidth } = ctx;
   const tzLabel = () => timezoneLabel(timezone());
   const visible = (group: Parameters<typeof isFieldVisible>[1], field: string) =>
     isFieldVisible(displaySettings(), group, field);
 
-  const [targetDetail] = createResource(
+  const [targetDetail, { refetch: refetchDetail }] = createResource(
     () => params.targetId,
     (id) => api.getTargetDetail(id),
   );
 
   const [showExport, setShowExport] = createSignal(false);
+  const [showMerge, setShowMerge] = createSignal(false);
   const [expandedSessions, setExpandedSessions] = createSignal<Set<string>>(new Set());
   const [sessionCache, setSessionCache] = createSignal<Record<string, SessionDetail>>({});
   const [targetChartExpanded, setTargetChartExpanded] = createSignal(graphSettings().target_chart_expanded);
   const [selectedChartDates, setSelectedChartDates] = createSignal<string[]>([]);
+
+  const [mergeHistory, { refetch: refetchMergeHistory }] = createResource(
+    () => params.targetId,
+    (id) => api.getMergeHistory(id),
+  );
+  const [mergeHistoryExpanded, setMergeHistoryExpanded] = createSignal(false);
+  const [undoingMerge, setUndoingMerge] = createSignal<string | null>(null);
 
   const [skyViewExpanded, setSkyViewExpanded] = createSignal(false);
   const [notesExpanded, setNotesExpanded] = createSignal(false);
   const [targetNotes, setTargetNotes] = createSignal<string>("");
   const [notesSaving, setNotesSaving] = createSignal(false);
   let notesTimer: ReturnType<typeof setTimeout> | undefined;
+
+  // Rename/re-resolve signals
+  const [editing, setEditing] = createSignal(false);
+  const [editName, setEditName] = createSignal("");
+  const [savingIdentity, setSavingIdentity] = createSignal(false);
+
+  // Object type edit
+  const OBJECT_TYPE_OPTIONS = [
+    "Emission Nebula",
+    "Reflection Nebula",
+    "Dark Nebula",
+    "Planetary Nebula",
+    "Supernova Remnant",
+    "Galaxy",
+    "Open Cluster",
+    "Globular Cluster",
+    "Star",
+    "Other",
+  ];
+  const [editingObjectType, setEditingObjectType] = createSignal(false);
+  const [savingObjectType, setSavingObjectType] = createSignal(false);
+
+  const handleObjectTypeChange = async (value: string) => {
+    const detail = targetDetail();
+    if (!detail) return;
+    setSavingObjectType(true);
+    try {
+      await api.updateTargetIdentity(detail.target_id, { object_type: value });
+      setEditingObjectType(false);
+      await refetchDetail();
+    } catch (e: any) {
+      showToast(e?.message ?? "Failed to update object type", "error");
+    } finally {
+      setSavingObjectType(false);
+    }
+  };
+
+  const handleRename = async () => {
+    const detail = targetDetail();
+    if (!detail) return;
+    const name = editName().trim();
+    if (!name || name === detail.primary_name) {
+      setEditing(false);
+      return;
+    }
+    setSavingIdentity(true);
+    try {
+      await api.updateTargetIdentity(detail.target_id, { primary_name: name });
+      setEditing(false);
+      await refetchDetail();
+    } catch (e: any) {
+      showToast(e?.message ?? "Rename failed", "error");
+    } finally {
+      setSavingIdentity(false);
+    }
+  };
+
+  const handleReResolve = async () => {
+    const detail = targetDetail();
+    if (!detail) return;
+    setSavingIdentity(true);
+    try {
+      await api.updateTargetIdentity(detail.target_id, { re_resolve: true });
+      await refetchDetail();
+      showToast("Re-resolve queued");
+    } catch (e: any) {
+      showToast(e?.message ?? "Re-resolve failed", "error");
+    } finally {
+      setSavingIdentity(false);
+    }
+  };
+
+  const handleUndoMerge = async (merged: MergedTargetResponse) => {
+    setUndoingMerge(merged.id);
+    try {
+      await api.unmergeTarget(merged.id);
+      showToast(`Unmerged "${merged.primary_name}"`);
+      await Promise.all([refetchMergeHistory(), refetchDetail()]);
+    } catch (e: any) {
+      showToast(e?.message ?? "Undo merge failed", "error");
+    } finally {
+      setUndoingMerge(null);
+    }
+  };
 
   // Initialize notes when data loads
   createEffect(() => {
@@ -198,6 +411,18 @@ const TargetDetailPage: Component = () => {
         />
       </Show>
 
+      <Show when={showMerge() && targetDetail()}>
+        <MergeFromDetailFlow
+          winnerId={targetDetail()!.target_id}
+          winnerName={targetDetail()!.primary_name}
+          onClose={() => setShowMerge(false)}
+          onMerged={async () => {
+            setShowMerge(false);
+            await Promise.all([refetchDetail(), refetchMergeHistory()]);
+          }}
+        />
+      </Show>
+
       <Show when={targetDetail()}>
         {(detail) => (
           <div class="px-4 sm:px-6 py-4 sm:py-5">
@@ -207,9 +432,69 @@ const TargetDetailPage: Component = () => {
               <div>
                 <div>
                   <div class="flex items-center gap-2">
-                    <h1 class="text-2xl font-semibold tracking-tight text-theme-text-primary">
-                      {detail().primary_name}
-                    </h1>
+                    <Show
+                      when={editing()}
+                      fallback={
+                        <>
+                          <h1 class="text-2xl font-semibold tracking-tight text-theme-text-primary">
+                            {detail().primary_name}
+                          </h1>
+                          <Show when={detail().name_locked}>
+                            <span class="text-theme-text-tertiary text-lg" title="Name manually locked">&#128274;</span>
+                          </Show>
+                          <Show when={auth.isAdmin()}>
+                            <button
+                              class="text-theme-text-tertiary hover:text-theme-text-primary transition-colors text-lg leading-none"
+                              title="Rename target"
+                              disabled={savingIdentity()}
+                              onClick={() => {
+                                setEditName(detail().primary_name);
+                                setEditing(true);
+                              }}
+                            >
+                              &#9998;
+                            </button>
+                            <button
+                              class="text-theme-text-tertiary hover:text-theme-text-primary transition-colors text-lg leading-none"
+                              title="Re-resolve from SIMBAD"
+                              disabled={savingIdentity()}
+                              onClick={handleReResolve}
+                            >
+                              &#8635;
+                            </button>
+                          </Show>
+                        </>
+                      }
+                    >
+                      <input
+                        type="text"
+                        class="text-2xl font-semibold tracking-tight bg-transparent border-b border-theme-accent text-theme-text-primary focus:outline-none min-w-0 flex-1"
+                        value={editName()}
+                        onInput={(e) => setEditName(e.currentTarget.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") handleRename();
+                          if (e.key === "Escape") setEditing(false);
+                        }}
+                        ref={(el) => { setTimeout(() => el?.focus(), 0); }}
+                        disabled={savingIdentity()}
+                      />
+                      <button
+                        class="text-theme-text-tertiary hover:text-green-400 transition-colors text-lg leading-none"
+                        title="Save"
+                        onClick={handleRename}
+                        disabled={savingIdentity()}
+                      >
+                        &#10003;
+                      </button>
+                      <button
+                        class="text-theme-text-tertiary hover:text-theme-error transition-colors text-lg leading-none"
+                        title="Cancel"
+                        onClick={() => setEditing(false)}
+                        disabled={savingIdentity()}
+                      >
+                        &#10005;
+                      </button>
+                    </Show>
                     <HelpPopover>
                       <p class="text-sm text-theme-text-secondary">
                         The Target Detail page shows everything GalactiLog knows about a single imaging target.
@@ -225,10 +510,51 @@ const TargetDetailPage: Component = () => {
                       </ul>
                     </HelpPopover>
                   </div>
-                  <div class="text-xs text-theme-text-secondary mt-1 flex flex-wrap gap-x-2 gap-y-0.5">
-                    <Show when={detail().object_category}>
-                      <span>{detail().object_category}</span>
-                      <span>·</span>
+                  <div class="text-xs text-theme-text-secondary mt-1 flex flex-wrap gap-x-2 gap-y-0.5 items-center">
+                    <Show when={detail().object_category || auth.isAdmin()}>
+                      <Show
+                        when={editingObjectType() && auth.isAdmin()}
+                        fallback={
+                          <span class="flex items-center gap-1">
+                            <span>{detail().object_category ?? "Unknown type"}</span>
+                            <Show when={auth.isAdmin()}>
+                              <button
+                                class="text-theme-text-tertiary hover:text-theme-text-primary transition-colors leading-none"
+                                title="Edit object type"
+                                disabled={savingObjectType()}
+                                onClick={() => setEditingObjectType(true)}
+                              >
+                                &#9998;
+                              </button>
+                            </Show>
+                          </span>
+                        }
+                      >
+                        <span class="flex items-center gap-1">
+                          <select
+                            class="text-xs bg-theme-base border border-theme-accent rounded px-1 py-0.5 text-theme-text-primary focus:outline-none"
+                            disabled={savingObjectType()}
+                            value={detail().object_category ?? ""}
+                            onChange={(e) => handleObjectTypeChange(e.currentTarget.value)}
+                          >
+                            <option value="" disabled>Select type...</option>
+                            <For each={OBJECT_TYPE_OPTIONS}>
+                              {(opt) => <option value={opt}>{opt}</option>}
+                            </For>
+                          </select>
+                          <button
+                            class="text-theme-text-tertiary hover:text-theme-error transition-colors leading-none"
+                            title="Cancel"
+                            onClick={() => setEditingObjectType(false)}
+                            disabled={savingObjectType()}
+                          >
+                            &#10005;
+                          </button>
+                        </span>
+                      </Show>
+                      <Show when={!editingObjectType()}>
+                        <span>·</span>
+                      </Show>
                     </Show>
                     <Show when={detail().constellation}>
                       <span>{detail().constellation}</span>
@@ -344,6 +670,14 @@ const TargetDetailPage: Component = () => {
                     <span class="mx-1.5">·</span>
                     <span>{detail().first_session_date} → {detail().last_session_date} ({tzLabel()})</span>
                   </div>
+                  <Show when={auth.isAdmin()}>
+                    <button
+                      class="px-4 py-1.5 bg-yellow-500/10 text-yellow-400 border border-yellow-500/20 rounded text-sm font-medium hover:bg-yellow-500/20 transition-colors shrink-0"
+                      onClick={() => setShowMerge(true)}
+                    >
+                      Merge
+                    </button>
+                  </Show>
                   <button
                     class="px-4 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded text-sm font-medium hover:bg-theme-accent/25 transition-colors shrink-0"
                     onClick={() => setShowExport(true)}
@@ -354,6 +688,54 @@ const TargetDetailPage: Component = () => {
               </div>
             </div>
 
+
+            {/* Merge History */}
+            <Show when={mergeHistory()?.length}>
+              <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4">
+                <button
+                  class="flex items-center gap-2 py-2 cursor-pointer group"
+                  onClick={() => setMergeHistoryExpanded((v) => !v)}
+                >
+                  <h3 class="text-xs font-semibold uppercase tracking-wider text-theme-text-secondary border-l-2 border-theme-accent pl-2 group-hover:text-theme-text-primary transition-colors">
+                    Merge History
+                    <span class="text-theme-text-tertiary font-normal normal-case tracking-normal ml-2">({mergeHistory()!.length})</span>
+                  </h3>
+                  <svg
+                    class={`w-3.5 h-3.5 transition-transform duration-200 text-theme-text-tertiary ${mergeHistoryExpanded() ? "rotate-180" : ""}`}
+                    viewBox="0 0 20 20"
+                    fill="currentColor"
+                  >
+                    <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
+                  </svg>
+                </button>
+                <Show when={mergeHistoryExpanded()}>
+                  <div class="mt-2 space-y-2">
+                    <For each={mergeHistory()}>
+                      {(merged) => (
+                        <div class="flex items-center justify-between p-3 bg-theme-surface border border-theme-border rounded-[var(--radius-sm)]">
+                          <div class="flex-1 min-w-0">
+                            <span class="text-theme-text-primary text-sm font-medium">{merged.primary_name}</span>
+                            <div class="text-xs text-theme-text-secondary mt-0.5">
+                              Merged on {new Date(merged.merged_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                              {" · "}{merged.image_count} {merged.image_count === 1 ? "image" : "images"}
+                            </div>
+                          </div>
+                          <Show when={auth.isAdmin()}>
+                            <button
+                              onClick={() => handleUndoMerge(merged)}
+                              disabled={undoingMerge() === merged.id}
+                              class="px-2 py-1 text-xs border border-theme-border text-theme-text-secondary rounded-[var(--radius-sm)] hover:text-theme-text-primary transition-colors disabled:opacity-50 shrink-0 ml-3"
+                            >
+                              {undoingMerge() === merged.id ? "Undoing..." : "Undo Merge"}
+                            </button>
+                          </Show>
+                        </div>
+                      )}
+                    </For>
+                  </div>
+                </Show>
+              </div>
+            </Show>
 
             {/* Sky View & Reference Thumbnail */}
             <Show when={detail().ra != null && detail().dec != null}>
@@ -499,9 +881,9 @@ const TargetDetailPage: Component = () => {
                 </HelpPopover>
               </div>
               <div class="overflow-x-auto">
-              <table class="w-full border-collapse min-w-[600px]">
+              <table class="w-full min-w-[600px]" style={{ "border-collapse": "separate", "border-spacing": "0 10px" }}>
                 <thead>
-                  <tr class="text-caption text-theme-text-tertiary uppercase tracking-wider border-b border-theme-border-em">
+                  <tr class="text-caption text-theme-text-tertiary uppercase tracking-wider">
                     <Show when={targetChartExpanded()}>
                       <th class="py-2 pl-4 pr-1 w-8">
                         <input
@@ -550,7 +932,6 @@ const TargetDetailPage: Component = () => {
                     <th class="py-2 px-2"></th>
                   </tr>
                 </thead>
-                <tbody>
                   <For each={detail().sessions}>
                     {(session) => (
                       <SessionAccordionCard
@@ -577,7 +958,6 @@ const TargetDetailPage: Component = () => {
                       />
                     )}
                   </For>
-                </tbody>
               </table>
               </div>
             </div>

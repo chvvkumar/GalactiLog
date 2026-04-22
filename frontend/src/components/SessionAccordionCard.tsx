@@ -484,12 +484,12 @@ const SessionAccordionCard: Component<{
   };
 
   return (
-    <>
+    <tbody class="session-card">
       {/* Collapsed header row */}
       <tr
         ref={cardRef}
-        class={`cursor-pointer hover:bg-theme-hover transition-all duration-150 text-xs border-t-2 border-theme-border-em ${
-          props.isExpanded ? "bg-theme-elevated font-medium" : ""
+        class={`cursor-pointer hover:bg-theme-hover transition-all duration-150 text-xs ${
+          props.isExpanded ? "font-medium" : ""
         }`}
         onClick={props.onToggle}
       >
@@ -585,8 +585,8 @@ const SessionAccordionCard: Component<{
 
       {/* Expanded content row */}
       <Show when={props.isExpanded}>
-        <tr class="bg-theme-surface">
-          <td colspan="12" class="px-4 pt-3 pb-4 border-t border-theme-border">
+        <tr>
+          <td colspan="12" class="px-4 pt-3 pb-4 bg-theme-surface">
           <Show when={!props.detail}>
             <div class="py-4 text-theme-text-secondary text-sm">Loading session data...</div>
           </Show>
@@ -971,7 +971,7 @@ const SessionAccordionCard: Component<{
           </td>
         </tr>
       </Show>
-    </>
+    </tbody>
   );
 };
 

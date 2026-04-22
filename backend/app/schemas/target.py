@@ -1,4 +1,5 @@
 import uuid
+from uuid import UUID
 
 from pydantic import BaseModel
 
@@ -224,6 +225,7 @@ class TargetDetailResponse(BaseModel):
     distance_pc: float | None = None
     # Catalog memberships
     catalog_memberships: list[CatalogMembershipEntry] = []
+    name_locked: bool = False
 
 
 class SessionDetailResponse(BaseModel):
@@ -302,6 +304,8 @@ class MergeCandidateResponse(BaseModel):
     method: str
     status: str
     created_at: str
+    resolved_at: str | None = None
+    reason_text: str | None = None
 
 
 class OrphanPreviewRequest(BaseModel):
@@ -345,3 +349,43 @@ class MergeRequest(BaseModel):
     winner_id: uuid.UUID
     loser_id: uuid.UUID | None = None
     loser_name: str | None = None
+
+
+class MergePreviewRequest(BaseModel):
+    winner_id: uuid.UUID
+    loser_id: uuid.UUID | None = None
+    loser_name: str | None = None
+
+
+class MergePreviewSide(BaseModel):
+    id: uuid.UUID | None = None
+    primary_name: str
+    object_type: str | None = None
+    constellation: str | None = None
+    image_count: int = 0
+    session_count: int = 0
+    integration_seconds: float = 0.0
+    aliases: list[str] = []
+
+
+class MergePreviewResponse(BaseModel):
+    winner: MergePreviewSide
+    loser: MergePreviewSide
+    images_to_move: int = 0
+    mosaic_panels_to_move: int = 0
+    aliases_to_add: list[str] = []
+
+
+class TargetIdentityRequest(BaseModel):
+    primary_name: str | None = None
+    object_type: str | None = None
+    re_resolve: bool = False
+
+
+class TargetIdentityResponse(BaseModel):
+    id: UUID
+    primary_name: str
+    catalog_id: str | None
+    common_name: str | None
+    object_type: str | None
+    name_locked: bool

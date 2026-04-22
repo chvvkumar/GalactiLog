@@ -752,9 +752,6 @@ def detect_duplicate_targets():
         )
         unresolved = db.execute(unresolved_query).all()
 
-        if not unresolved:
-            return {"candidates_found": 0}
-
         # Get existing candidates to avoid duplicates. Include "dismissed" so
         # suggestions the user explicitly rejected don't come back on re-runs
         # triggered by scans, manual matches, or smart rebuilds.
@@ -766,6 +763,7 @@ def detect_duplicate_targets():
         existing_names = {row[0] for row in existing.all()}
 
         candidates_found = 0
+        orphan_count = 0
 
         for obj_name, img_count in unresolved:
             if not obj_name or obj_name in existing_names:
@@ -805,6 +803,7 @@ def detect_duplicate_targets():
                             suggested_target_id=target_id,
                             similarity_score=1.0,
                             method="simbad",
+                            reason_text=f'SIMBAD resolves "{obj_name}" to the same object as "{target_name}"',
                         ))
                         candidates_found += 1
                         matched = True
@@ -859,6 +858,7 @@ def detect_duplicate_targets():
                     suggested_target_id=target_id,
                     similarity_score=float(score),
                     method="trigram",
+                    reason_text=f'Name is {int(float(score) * 100)}% similar to "{target_name}"',
                 ))
                 candidates_found += 1
             else:
@@ -869,10 +869,134 @@ def detect_duplicate_targets():
                     similarity_score=0.0,
                     method="orphan",
                     status="pending",
+                    reason_text="No match found in SIMBAD or existing targets",
                 ))
                 candidates_found += 1
+                orphan_count += 1
 
         db.commit()
+
+        # --- Pass 2: Detect active targets sharing the same normalized name or overlapping aliases ---
+        # Re-fetch existing candidate names after the commit above so we skip
+        # anything just created in Pass 1.
+        existing_pass2 = db.execute(
+            sa_select(MergeCandidate.source_name).where(
+                MergeCandidate.status.in_(["pending", "accepted", "dismissed"])
+            )
+        )
+        existing_names_p2 = {row[0] for row in existing_pass2.all()}
+
+        # Load all active (non-merged) targets with their image counts
+        active_targets_query = sa_text("""
+            SELECT t.id, t.primary_name, t.aliases,
+                   (SELECT COUNT(*) FROM images i
+                    WHERE i.resolved_target_id = t.id) AS img_count
+            FROM targets t
+            WHERE t.merged_into_id IS NULL
+        """)
+        active_rows = db.execute(active_targets_query).all()
+
+        # Build a mapping from each normalized name to the list of targets that use it
+        # (either as primary_name or as an alias)
+        from collections import defaultdict
+        name_to_targets: dict[str, list[tuple]] = defaultdict(list)
+        for row in active_rows:
+            tid, pname, aliases, img_count = row
+            norm_primary = normalize_object_name(pname)
+            name_to_targets[norm_primary].append((tid, pname, img_count))
+            if aliases:
+                for alias in aliases:
+                    norm_alias = normalize_object_name(alias)
+                    name_to_targets[norm_alias].append((tid, pname, img_count))
+
+        # Find groups of targets that share any normalized name.
+        # Use union-find to merge overlapping groups.
+
+        # Map target id to its info
+        target_info = {row[0]: (row[1], row[3]) for row in active_rows}  # id -> (primary_name, img_count)
+
+        # For each normalized name that maps to multiple distinct targets, union them
+        visited_targets: dict = {}  # target_id -> group leader id
+
+        def find_leader(tid):
+            while visited_targets.get(tid, tid) != tid:
+                visited_targets[tid] = visited_targets.get(visited_targets[tid], visited_targets[tid])
+                tid = visited_targets[tid]
+            return tid
+
+        def union(tid1, tid2):
+            l1 = find_leader(tid1)
+            l2 = find_leader(tid2)
+            if l1 != l2:
+                visited_targets[l2] = l1
+
+        # Also track a representative shared name for each group leader
+        group_shared_name: dict = {}  # leader_id -> norm_name that triggered the union
+
+        for norm_name, target_list in name_to_targets.items():
+            # Deduplicate target ids within this name
+            unique_ids = list({t[0] for t in target_list})
+            if len(unique_ids) < 2:
+                continue
+            # Union all targets sharing this name
+            for i in range(1, len(unique_ids)):
+                union(unique_ids[0], unique_ids[i])
+            # Record a shared name for this group (first one encountered wins)
+            leader_after = find_leader(unique_ids[0])
+            if leader_after not in group_shared_name:
+                group_shared_name[leader_after] = norm_name
+
+        # Collect groups
+        groups: dict[str, list] = defaultdict(list)
+        for tid in target_info:
+            leader = find_leader(tid)
+            if leader != tid or visited_targets.get(tid) is not None:
+                groups[find_leader(tid)].append(tid)
+
+        # Only keep groups with 2+ members
+        dup_candidates_found = 0
+        for leader, members in groups.items():
+            if len(members) < 2:
+                continue
+
+            # Pick the target with the most images as the suggested winner
+            members_with_info = [(tid, *target_info[tid]) for tid in members]
+            members_with_info.sort(key=lambda x: x[2], reverse=True)  # sort by img_count desc
+            winner_id = members_with_info[0][0]
+            winner_name = members_with_info[0][1]
+            shared_name = group_shared_name.get(leader, "")
+
+            for tid, pname, img_count in members_with_info[1:]:
+                if pname in existing_names_p2:
+                    continue
+                db.add(MergeCandidate(
+                    source_name=pname,
+                    source_image_count=img_count,
+                    suggested_target_id=winner_id,
+                    similarity_score=1.0,
+                    method="duplicate",
+                    status="pending",
+                    reason_text=f'Shares alias "{shared_name}" with "{winner_name}"',
+                ))
+                existing_names_p2.add(pname)
+                dup_candidates_found += 1
+                candidates_found += 1
+
+        if dup_candidates_found > 0:
+            db.commit()
+            logger.info("detect_duplicates: found %d duplicate-name candidates", dup_candidates_found)
+
+    # Update scan summary in Redis with duplicates_found and unresolved_names counts
+    try:
+        import json as _json
+        raw = _redis.get("galactilog:scan_summary")
+        if raw:
+            _summary = _json.loads(raw)
+            _summary["duplicates_found"] = candidates_found
+            _summary["unresolved_names"] = orphan_count
+            _redis.set("galactilog:scan_summary", _json.dumps(_summary))
+    except Exception:
+        logger.warning("detect_duplicate_targets: failed to update scan_summary in Redis")
 
     return {"candidates_found": candidates_found}
 
@@ -1219,6 +1343,8 @@ def _smart_rebuild_inner(manual: bool = False) -> dict:
                 stats["rederived"] = rederived
                 session.commit()
                 return _emit_cancelled()
+            if target.name_locked:
+                continue
             # Try to find cached SIMBAD data for this target
             cached = get_cached_simbad(normalize_object_name(target.catalog_id or target.primary_name), session)
             if cached and not cached.get("_negative"):
@@ -1248,6 +1374,9 @@ def _smart_rebuild_inner(manual: bool = False) -> dict:
         logger.info("smart_rebuild: re-derived catalog_id/common_name for %d targets", rederived)
 
         # Phase 5: Rebuild primary_name for any remaining mismatches
+        # Only rebuild when catalog_id or common_name can drive the name;
+        # skip targets where both are NULL and a non-trivial name already
+        # exists (e.g. manually created asterisms with FITS-derived names).
         result = session.execute(text("""
             UPDATE targets
             SET primary_name = CASE
@@ -1258,6 +1387,8 @@ def _smart_rebuild_inner(manual: bool = False) -> dict:
                 ELSE 'Unknown'
             END
             WHERE merged_into_id IS NULL
+              AND (catalog_id IS NOT NULL OR common_name IS NOT NULL)
+              AND name_locked = FALSE
               AND primary_name != CASE
                 WHEN catalog_id IS NOT NULL AND common_name IS NOT NULL
                     THEN catalog_id || ' - ' || common_name
@@ -1297,6 +1428,18 @@ def _smart_rebuild_inner(manual: bool = False) -> dict:
 
     set_rebuild_complete_sync(_redis, message, stats)
     _invalidate_stats_cache()
+
+    # Update scan summary with targets_updated from aliases updated this run
+    try:
+        import json as _json
+        raw = _redis.get("galactilog:scan_summary")
+        if raw:
+            _summary = _json.loads(raw)
+            _summary["targets_updated"] = stats.get("aliases_updated", 0)
+            _redis.set("galactilog:scan_summary", _json.dumps(_summary))
+    except Exception:
+        logger.warning("smart_rebuild: failed to update scan_summary in Redis")
+
     if manual:
         with _activity_session() as _db:
             _emit_activity_sync(
@@ -1767,59 +1910,6 @@ def generate_reference_thumbnails(self, force: bool = False) -> dict:
             _db, redis=_redis, category="thumbnail", severity="info",
             event_type="ref_thumbnails_complete",
             message=f"Reference Thumbnails: fetched {fetched}/{total}",
-            details=stats, actor="system",
-        )
-    return stats
-
-
-@celery_app.task(bind=True)
-def run_xmatch_enrichment(self) -> dict:
-    """Run CDS xMatch bulk cross-matching."""
-    from app.services.xmatch import bulk_xmatch_targets
-
-    clear_cancel_sync(_redis)
-    set_rebuild_running_sync(_redis, "xmatch", "Running xMatch enrichment...")
-
-    with Session(_sync_engine) as session:
-        targets = session.execute(
-            select(Target).where(
-                Target.merged_into_id.is_(None),
-                Target.ra.isnot(None),
-                Target.dec.isnot(None),
-            )
-        ).scalars().all()
-
-        target_dicts = [
-            {"id": str(t.id), "ra": t.ra, "dec": t.dec}
-            for t in targets
-        ]
-
-        if is_cancel_requested_sync(_redis):
-            details = {"matched": 0, "total": len(target_dicts)}
-            set_rebuild_cancelled_sync(_redis, "xMatch cancelled before start", details)
-            with _activity_session() as _db:
-                _emit_activity_sync(
-                    _db, redis=_redis, category="rebuild", severity="info",
-                    event_type="rebuild_cancelled",
-                    message="xMatch Enrichment cancelled before start",
-                    details=details, actor="system",
-                )
-            return {"status": "cancelled", **details}
-
-        set_rebuild_progress_sync(
-            _redis, f"Cross-matching {len(target_dicts)} targets..."
-        )
-        results = bulk_xmatch_targets(target_dicts, "VII/118/ngc2000", radius_arcsec=60.0)
-
-    stats = {"matched": len(results), "total": len(target_dicts)}
-    set_rebuild_complete_sync(
-        _redis, f"xMatch: {len(results)}/{len(target_dicts)} matched", stats
-    )
-    with _activity_session() as _db:
-        _emit_activity_sync(
-            _db, redis=_redis, category="enrichment", severity="info",
-            event_type="xmatch_complete",
-            message=f"xMatch Enrichment: {len(results)}/{len(target_dicts)} matched",
             details=stats, actor="system",
         )
     return stats

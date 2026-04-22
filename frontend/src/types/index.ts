@@ -155,6 +155,7 @@ export interface TargetDetailResponse {
   distance_pc: number | null;
   // Catalog memberships
   catalog_memberships: CatalogMembershipEntry[];
+  name_locked: boolean;
 }
 
 export interface RigDetail {
@@ -399,6 +400,8 @@ export interface MergeCandidateResponse {
   method: string;
   status: string;
   created_at: string;
+  resolved_at: string | null;
+  reason_text: string | null;
 }
 
 export interface OrphanPreviewResponse {

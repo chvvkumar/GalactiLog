@@ -12,7 +12,7 @@ from app.models.image import Image
 from app.models.merge_candidate import MergeCandidate
 from app.models.mosaic_panel import MosaicPanel
 from app.models.mosaic_suggestion import MosaicSuggestion
-from app.schemas.target import MergeCandidateResponse, MergedTargetResponse, MergeRequest, OrphanPreviewRequest, OrphanPreviewResponse, OrphanCreateRequest
+from app.schemas.target import MergeCandidateResponse, MergedTargetResponse, MergeRequest, OrphanPreviewRequest, OrphanPreviewResponse, OrphanCreateRequest, MergePreviewRequest, MergePreviewResponse, MergePreviewSide, TargetIdentityRequest, TargetIdentityResponse
 from app.models.simbad_cache import SimbadCache
 from app.models.sesame_cache import SesameCache
 from app.config import async_redis
@@ -145,6 +145,119 @@ async def merge_targets(
     return {"status": "ok"}
 
 
+@router.post("/merge-preview", response_model=MergePreviewResponse)
+async def merge_preview(
+    body: MergePreviewRequest,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(require_admin),
+):
+    """Preview the effect of a merge without making any changes."""
+    if body.loser_id is None and body.loser_name is None:
+        raise HTTPException(status_code=400, detail="Either loser_id or loser_name must be provided")
+
+    # Load winner
+    winner = await session.get(Target, body.winner_id)
+    if not winner or winner.merged_into_id is not None:
+        raise HTTPException(status_code=404, detail="Winner target not found")
+
+    # Compute winner stats
+    winner_image_result = await session.execute(
+        select(
+            func.count(Image.id).label("image_count"),
+            func.count(func.distinct(Image.session_date)).label("session_count"),
+            func.coalesce(func.sum(Image.exposure_time), 0.0).label("integration_seconds"),
+        ).where(Image.resolved_target_id == winner.id)
+    )
+    winner_stats = winner_image_result.one()
+
+    winner_side = MergePreviewSide(
+        id=winner.id,
+        primary_name=winner.primary_name,
+        object_type=winner.object_type,
+        constellation=winner.constellation,
+        image_count=winner_stats.image_count or 0,
+        session_count=winner_stats.session_count or 0,
+        integration_seconds=float(winner_stats.integration_seconds or 0.0),
+        aliases=list(winner.aliases or []),
+    )
+
+    if body.loser_id is not None:
+        loser = await session.get(Target, body.loser_id)
+        if not loser or loser.merged_into_id is not None:
+            raise HTTPException(status_code=404, detail="Loser target not found")
+
+        # Compute loser stats
+        loser_image_result = await session.execute(
+            select(
+                func.count(Image.id).label("image_count"),
+                func.count(func.distinct(Image.session_date)).label("session_count"),
+                func.coalesce(func.sum(Image.exposure_time), 0.0).label("integration_seconds"),
+            ).where(Image.resolved_target_id == loser.id)
+        )
+        loser_stats = loser_image_result.one()
+
+        # Count mosaic panels to move
+        panel_count_result = await session.execute(
+            select(func.count(MosaicPanel.id)).where(MosaicPanel.target_id == loser.id)
+        )
+        panels_to_move = panel_count_result.scalar_one() or 0
+
+        # Compute aliases that would be added to winner
+        existing = set(list(winner.aliases or []) + [winner.primary_name])
+        aliases_to_add = []
+        if loser.primary_name not in existing:
+            aliases_to_add.append(loser.primary_name)
+        for alias in (loser.aliases or []):
+            if alias not in existing and alias not in aliases_to_add:
+                aliases_to_add.append(alias)
+
+        loser_side = MergePreviewSide(
+            id=loser.id,
+            primary_name=loser.primary_name,
+            object_type=loser.object_type,
+            constellation=loser.constellation,
+            image_count=loser_stats.image_count or 0,
+            session_count=loser_stats.session_count or 0,
+            integration_seconds=float(loser_stats.integration_seconds or 0.0),
+            aliases=list(loser.aliases or []),
+        )
+
+        return MergePreviewResponse(
+            winner=winner_side,
+            loser=loser_side,
+            images_to_move=loser_stats.image_count or 0,
+            mosaic_panels_to_move=panels_to_move,
+            aliases_to_add=aliases_to_add,
+        )
+
+    else:
+        # loser_name path: count unresolved images with that OBJECT header
+        loser_name = body.loser_name
+        unresolved_result = await session.execute(
+            select(func.count(Image.id)).where(
+                Image.raw_headers["OBJECT"].astext == loser_name,
+                Image.resolved_target_id.is_(None),
+            )
+        )
+        unresolved_count = unresolved_result.scalar_one() or 0
+
+        loser_side = MergePreviewSide(
+            primary_name=loser_name,
+            image_count=unresolved_count,
+        )
+
+        existing = set(list(winner.aliases or []) + [winner.primary_name])
+        aliases_to_add = [loser_name] if loser_name not in existing else []
+
+        return MergePreviewResponse(
+            winner=winner_side,
+            loser=loser_side,
+            images_to_move=unresolved_count,
+            mosaic_panels_to_move=0,
+            aliases_to_add=aliases_to_add,
+        )
+
+
 @router.post("/detect-duplicates")
 async def trigger_duplicate_detection(user: User = Depends(require_admin)):
     """Manually trigger duplicate target detection."""
@@ -267,6 +380,8 @@ async def list_merge_candidates(
             method=mc.method,
             status=mc.status,
             created_at=mc.created_at.isoformat() if mc.created_at else "",
+            resolved_at=mc.resolved_at.isoformat() if mc.resolved_at else None,
+            reason_text=mc.reason_text,
         )
         for mc, suggested_target_name in rows
     ]
@@ -461,6 +576,46 @@ async def list_merged_targets(
     ]
 
 
+@router.get("/{target_id}/merge-history", response_model=list[MergedTargetResponse])
+async def get_merge_history(
+    target_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    """Return all targets that were merged into a given target."""
+    target = await session.get(Target, target_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="Target not found")
+
+    winner_alias = aliased(Target, name="winner")
+
+    result = await session.execute(
+        select(
+            Target,
+            winner_alias.primary_name.label("merged_into_name"),
+            func.count(Image.id).label("image_count"),
+        )
+        .join(winner_alias, Target.merged_into_id == winner_alias.id)
+        .outerjoin(Image, Image.resolved_target_id == winner_alias.id)
+        .where(Target.merged_into_id == target_id)
+        .group_by(Target.id, winner_alias.primary_name)
+        .order_by(Target.merged_at.desc())
+    )
+    rows = result.all()
+
+    return [
+        MergedTargetResponse(
+            id=loser.id,
+            primary_name=loser.primary_name,
+            merged_into_id=loser.merged_into_id,
+            merged_into_name=merged_into_name,
+            merged_at=loser.merged_at.isoformat() if loser.merged_at else "",
+            image_count=image_count,
+        )
+        for loser, merged_into_name, image_count in rows
+    ]
+
+
 @router.post("/merge-candidates/{candidate_id}/revert")
 async def revert_merge_candidate(
     candidate_id: uuid.UUID,
@@ -536,6 +691,106 @@ async def revert_merge_candidate(
 
     await session.commit()
     return {"status": "ok"}
+
+
+@router.put("/{target_id}/identity", response_model=TargetIdentityResponse)
+async def update_target_identity(
+    target_id: uuid.UUID,
+    body: TargetIdentityRequest,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(require_admin),
+):
+    """Rename a target or change its object type, optionally re-resolving via SIMBAD."""
+    target = await session.get(Target, target_id)
+    if not target or target.merged_into_id is not None:
+        raise HTTPException(status_code=404, detail="Target not found")
+
+    if body.re_resolve:
+        import asyncio
+        from app.services.simbad import resolve_target_name_cached, curate_simbad_result, normalize_object_name
+        from sqlalchemy.orm import Session as SyncSession
+        from app.database import sync_engine
+
+        lookup_name = target.catalog_id or target.primary_name
+
+        # Delete negative cache entries for all of this target's aliases
+        all_names = [lookup_name] + list(target.aliases or [])
+        for name in all_names:
+            n = normalize_object_name(name)
+            await session.execute(
+                delete(SimbadCache).where(
+                    SimbadCache.query_name == n,
+                    SimbadCache.main_id.is_(None),
+                )
+            )
+            await session.execute(
+                delete(SesameCache).where(
+                    SesameCache.query_name == n,
+                    SesameCache.main_id.is_(None),
+                )
+            )
+        await session.flush()
+
+        async with async_redis() as redis:
+            for name in all_names:
+                n = normalize_object_name(name)
+                await redis.srem("target_resolver:negative", n)
+
+        def _resolve_sync():
+            with SyncSession(sync_engine) as sync_db:
+                return resolve_target_name_cached(lookup_name, sync_db)
+
+        result = await asyncio.to_thread(_resolve_sync)
+
+        if result:
+            curated = curate_simbad_result(result, fits_names=target.aliases or [])
+            target.primary_name = curated.get("primary_name", target.primary_name)
+            target.catalog_id = curated.get("catalog_id")
+            target.common_name = curated.get("common_name")
+            if curated.get("object_type"):
+                target.object_type = curated["object_type"]
+            existing_norm = {a.upper() for a in (target.aliases or [])}
+            new_aliases = list(target.aliases or [])
+            for alias in curated.get("aliases", []):
+                if alias.upper() not in existing_norm:
+                    new_aliases.append(alias)
+                    existing_norm.add(alias.upper())
+            target.aliases = new_aliases
+
+        target.name_locked = False
+
+    else:
+        category_to_simbad = {
+            "Emission Nebula": "HII",
+            "Reflection Nebula": "RNe",
+            "Dark Nebula": "DNe",
+            "Planetary Nebula": "PN",
+            "Supernova Remnant": "SNR",
+            "Galaxy": "G",
+            "Open Cluster": "OpC",
+            "Globular Cluster": "GlC",
+            "Star": "*",
+            "Other": "Other",
+        }
+
+        if body.primary_name is not None:
+            target.primary_name = body.primary_name
+            target.name_locked = True
+
+        if body.object_type is not None:
+            target.object_type = category_to_simbad.get(body.object_type, body.object_type)
+
+    await session.commit()
+    await session.refresh(target)
+
+    return TargetIdentityResponse(
+        id=target.id,
+        primary_name=target.primary_name,
+        catalog_id=target.catalog_id,
+        common_name=target.common_name,
+        object_type=target.object_type,
+        name_locked=target.name_locked,
+    )
 
 
 @router.post("/merge-candidates/{candidate_id}/dismiss")

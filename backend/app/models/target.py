@@ -1,7 +1,8 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import String, Float, Index, ForeignKey, DateTime, Text
+from sqlalchemy import String, Float, Index, ForeignKey, DateTime, Text, Boolean
+from sqlalchemy import text
 from sqlalchemy.dialects.postgresql import ARRAY, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -36,6 +37,7 @@ class Target(Base):
     reference_thumbnail_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     # Gaia DR3 (star clusters)
     distance_pc: Mapped[float | None] = mapped_column(Float, nullable=True)
+    name_locked: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"), default=False)
 
     images: Mapped[list["Image"]] = relationship(back_populates="target")
 

@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 # Current data version - bump this and add a migration function when
 # code changes affect how stored target data is derived.
-DATA_VERSION = 7
+DATA_VERSION = 9
 
 
 def _migrate_v1_fix_catalog_designations(session: Session) -> str:
@@ -337,6 +337,69 @@ def _migrate_v8_tier1_and_catalogs(session: Session) -> str:
     return "; ".join(parts) if parts else "No changes needed"
 
 
+def _migrate_v8_fix_question_mark_galaxy(session: Session) -> str:
+    """Fix wrong SIMBAD cache mapping for Question Mark Galaxy.
+
+    The COMMON_NAME_MAP previously mapped "question mark galaxy" to NGC 4258
+    (M106), but the correct object is NGC 5194 (M51). Clear the stale cache
+    entry so it gets re-resolved, and remove the alias from M106 if present.
+    """
+    from app.models import Target
+
+    # Clear the stale SIMBAD cache entry so it re-resolves to NGC 5194
+    deleted = session.execute(
+        text("DELETE FROM simbad_cache WHERE query_name = 'QUESTION MARK GALAXY'")
+    ).rowcount
+    session.flush()
+
+    # Remove "QUESTION MARK GALAXY" from M106's aliases if it snuck in
+    m106 = session.execute(
+        select(Target).where(
+            Target.catalog_id == "NGC 4258",
+            Target.merged_into_id.is_(None),
+        )
+    ).scalar_one_or_none()
+
+    alias_removed = False
+    if m106 and m106.aliases:
+        cleaned = [a for a in m106.aliases if a.upper() != "QUESTION MARK GALAXY"]
+        if len(cleaned) != len(m106.aliases):
+            m106.aliases = cleaned
+            alias_removed = True
+            session.flush()
+
+    parts = []
+    if deleted:
+        parts.append(f"{deleted} stale cache entry cleared for QUESTION MARK GALAXY")
+    if alias_removed:
+        parts.append("removed QUESTION MARK GALAXY alias from NGC 4258")
+    return "; ".join(parts) if parts else "No changes needed"
+
+
+def _migrate_v9_stellarium_names(session: Session) -> str:
+    """Clear SIMBAD cache entries for common names that now resolve differently via Stellarium."""
+    from app.services.stellarium_names import get_stellarium_names
+    from app.models.simbad_cache import SimbadCache
+
+    stellarium = get_stellarium_names()
+    cleared = 0
+
+    for common_name, simbad_id in stellarium.items():
+        normalized = normalize_object_name(common_name)
+        cached = session.execute(
+            select(SimbadCache).where(SimbadCache.query_name == normalized)
+        ).scalar_one_or_none()
+
+        if cached and cached.main_id and cached.main_id != simbad_id:
+            session.delete(cached)
+            cleared += 1
+
+    if cleared:
+        session.flush()
+
+    return f"Cleared {cleared} stale SIMBAD cache entries for Stellarium name corrections"
+
+
 # Registry: version number -> (description, migration function)
 # Version numbers must be sequential starting from 1.
 MIGRATIONS: dict[int, tuple[str, Callable[[Session], str]]] = {
@@ -347,6 +410,8 @@ MIGRATIONS: dict[int, tuple[str, Callable[[Session], str]]] = {
     5: ("Strip panel suffixes from target aliases", _migrate_v5_strip_panel_aliases),
     6: ("Clear negative VizieR cache, re-enrich targets, compute constellations", _migrate_v6_clear_negative_cache_and_reenrich),
     7: ("Load Tier 1 catalogs, match memberships, enrich from Gaia/SAC", _migrate_v8_tier1_and_catalogs),
+    8: ("Fix Question Mark Galaxy mapping from NGC 4258 to NGC 5194 (M51)", _migrate_v8_fix_question_mark_galaxy),
+    9: ("Stellarium common name cache refresh", _migrate_v9_stellarium_names),
 }
 
 
