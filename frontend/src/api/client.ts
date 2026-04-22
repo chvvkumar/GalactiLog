@@ -436,6 +436,9 @@ export const api = {
   getMergedTargets: () =>
     fetchJson<MergedTargetResponse[]>("/targets/merged-targets"),
 
+  getMergeHistory: (targetId: string) =>
+    fetchJson<MergedTargetResponse[]>(`/targets/${encodeURIComponent(targetId)}/merge-history`),
+
   mergeTargets: (winnerId: string, loserId?: string, loserName?: string) =>
     fetchJson<{ status: string }>("/targets/merge", {
       method: "POST",

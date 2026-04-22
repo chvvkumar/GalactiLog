@@ -30,7 +30,7 @@ const EquipmentGroupingSectionHelp: Component = () => (
 
 const FiltersTab = lazy(() => import("../components/settings/FiltersTab").then(m => ({ default: m.FiltersTab })));
 const EquipmentTab = lazy(() => import("../components/settings/EquipmentTab").then(m => ({ default: m.EquipmentTab })));
-const TargetHealthTab = lazy(() => import("../components/settings/TargetHealthTab").then(m => ({ default: m.TargetHealthTab })));
+const TargetManagementTab = lazy(() => import("../components/settings/TargetManagementTab").then(m => ({ default: m.TargetManagementTab })));
 const UsersTab = lazy(() => import("../components/settings/UsersTab").then(m => ({ default: m.UsersTab })));
 const BackupRestoreTab = lazy(() => import("../components/settings/BackupRestoreTab").then(m => ({ default: m.BackupRestoreTab })));
 const ScanManager = lazy(() => import("../components/ScanManager"));
@@ -45,7 +45,7 @@ const ALL_TABS = [
   { id: "equipment", label: "Equipment" },
   { id: "display", label: "Display" },
   { id: "astrobin", label: "AstroBin & NINA" },
-  { id: "targets", label: "Target Health" },
+  { id: "targets", label: "Target Management" },
   { id: "custom-columns", label: "Custom Columns" },
   { id: "backup", label: "Backup & Restore", adminOnly: true },
   { id: "users", label: "Users", adminOnly: true },
@@ -54,10 +54,6 @@ const ALL_TABS = [
 ] as const;
 
 type TabId = (typeof ALL_TABS)[number]["id"];
-
-const TargetManagementTab: Component = () => {
-  return <TargetHealthTab />;
-};
 
 export const SettingsPage: Component = () => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -96,7 +92,7 @@ export const SettingsPage: Component = () => {
             <li><strong class="text-theme-text-primary">Equipment</strong>: filter and equipment canonical names and alias merging.</li>
             <li><strong class="text-theme-text-primary">Display</strong>: theme, text size, filter badge style, timezone, content width, preview cache, metric visibility.</li>
             <li><strong class="text-theme-text-primary">AstroBin & NINA</strong>: filter ID mapping, Bortle class, and NINA/Stellarium instance configuration for coordinate forwarding.</li>
-            <li><strong class="text-theme-text-primary">Target Health</strong>: merge candidates, accepted merges, unresolved files, and advanced maintenance actions.</li>
+            <li><strong class="text-theme-text-primary">Target Management</strong>: duplicate candidates, unresolved names, and maintenance actions.</li>
             <li><strong class="text-theme-text-primary">Custom Columns</strong>: user-defined columns on targets, sessions, and rigs.</li>
             <li><strong class="text-theme-text-primary">Backup & Restore</strong> (admin): export and import the configuration as a versioned JSON file.</li>
             <li><strong class="text-theme-text-primary">Users</strong> (admin): manage accounts and roles.</li>

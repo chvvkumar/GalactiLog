@@ -1,7 +1,7 @@
 import { Component, Show, For, createResource, createSignal, createEffect, createMemo, on } from "solid-js";
 import { A, useParams, useSearchParams } from "@solidjs/router";
 import { api } from "../api/client";
-import type { TargetDetailResponse, SessionDetail, TargetSearchResultFuzzy } from "../types";
+import type { TargetDetailResponse, SessionDetail, TargetSearchResultFuzzy, MergedTargetResponse } from "../types";
 import SessionAccordionCard from "../components/SessionAccordionCard";
 import { showToast } from "../components/Toast";
 import FilterBadges from "../components/FilterBadges";
@@ -169,6 +169,13 @@ const TargetDetailPage: Component = () => {
   const [targetChartExpanded, setTargetChartExpanded] = createSignal(graphSettings().target_chart_expanded);
   const [selectedChartDates, setSelectedChartDates] = createSignal<string[]>([]);
 
+  const [mergeHistory, { refetch: refetchMergeHistory }] = createResource(
+    () => params.targetId,
+    (id) => api.getMergeHistory(id),
+  );
+  const [mergeHistoryExpanded, setMergeHistoryExpanded] = createSignal(false);
+  const [undoingMerge, setUndoingMerge] = createSignal<string | null>(null);
+
   const [skyViewExpanded, setSkyViewExpanded] = createSignal(false);
   const [notesExpanded, setNotesExpanded] = createSignal(false);
   const [targetNotes, setTargetNotes] = createSignal<string>("");
@@ -243,6 +250,19 @@ const TargetDetailPage: Component = () => {
       showToast(e?.message ?? "Re-resolve failed", "error");
     } finally {
       setSavingIdentity(false);
+    }
+  };
+
+  const handleUndoMerge = async (merged: MergedTargetResponse) => {
+    setUndoingMerge(merged.id);
+    try {
+      await api.unmergeTarget(merged.id);
+      showToast(`Unmerged "${merged.primary_name}"`);
+      await Promise.all([refetchMergeHistory(), refetchDetail()]);
+    } catch (e: any) {
+      showToast(e?.message ?? "Undo merge failed", "error");
+    } finally {
+      setUndoingMerge(null);
     }
   };
 
@@ -398,7 +418,7 @@ const TargetDetailPage: Component = () => {
           onClose={() => setShowMerge(false)}
           onMerged={async () => {
             setShowMerge(false);
-            await refetchDetail();
+            await Promise.all([refetchDetail(), refetchMergeHistory()]);
           }}
         />
       </Show>
@@ -668,6 +688,54 @@ const TargetDetailPage: Component = () => {
               </div>
             </div>
 
+
+            {/* Merge History */}
+            <Show when={mergeHistory()?.length}>
+              <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4">
+                <button
+                  class="flex items-center gap-2 py-2 cursor-pointer group"
+                  onClick={() => setMergeHistoryExpanded((v) => !v)}
+                >
+                  <h3 class="text-xs font-semibold uppercase tracking-wider text-theme-text-secondary border-l-2 border-theme-accent pl-2 group-hover:text-theme-text-primary transition-colors">
+                    Merge History
+                    <span class="text-theme-text-tertiary font-normal normal-case tracking-normal ml-2">({mergeHistory()!.length})</span>
+                  </h3>
+                  <svg
+                    class={`w-3.5 h-3.5 transition-transform duration-200 text-theme-text-tertiary ${mergeHistoryExpanded() ? "rotate-180" : ""}`}
+                    viewBox="0 0 20 20"
+                    fill="currentColor"
+                  >
+                    <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
+                  </svg>
+                </button>
+                <Show when={mergeHistoryExpanded()}>
+                  <div class="mt-2 space-y-2">
+                    <For each={mergeHistory()}>
+                      {(merged) => (
+                        <div class="flex items-center justify-between p-3 bg-theme-surface border border-theme-border rounded-[var(--radius-sm)]">
+                          <div class="flex-1 min-w-0">
+                            <span class="text-theme-text-primary text-sm font-medium">{merged.primary_name}</span>
+                            <div class="text-xs text-theme-text-secondary mt-0.5">
+                              Merged on {new Date(merged.merged_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                              {" · "}{merged.image_count} {merged.image_count === 1 ? "image" : "images"}
+                            </div>
+                          </div>
+                          <Show when={auth.isAdmin()}>
+                            <button
+                              onClick={() => handleUndoMerge(merged)}
+                              disabled={undoingMerge() === merged.id}
+                              class="px-2 py-1 text-xs border border-theme-border text-theme-text-secondary rounded-[var(--radius-sm)] hover:text-theme-text-primary transition-colors disabled:opacity-50 shrink-0 ml-3"
+                            >
+                              {undoingMerge() === merged.id ? "Undoing..." : "Undo Merge"}
+                            </button>
+                          </Show>
+                        </div>
+                      )}
+                    </For>
+                  </div>
+                </Show>
+              </div>
+            </Show>
 
             {/* Sky View & Reference Thumbnail */}
             <Show when={detail().ra != null && detail().dec != null}>

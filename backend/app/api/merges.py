@@ -575,6 +575,46 @@ async def list_merged_targets(
     ]
 
 
+@router.get("/{target_id}/merge-history", response_model=list[MergedTargetResponse])
+async def get_merge_history(
+    target_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    """Return all targets that were merged into a given target."""
+    target = await session.get(Target, target_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="Target not found")
+
+    winner_alias = aliased(Target, name="winner")
+
+    result = await session.execute(
+        select(
+            Target,
+            winner_alias.primary_name.label("merged_into_name"),
+            func.count(Image.id).label("image_count"),
+        )
+        .join(winner_alias, Target.merged_into_id == winner_alias.id)
+        .outerjoin(Image, Image.resolved_target_id == winner_alias.id)
+        .where(Target.merged_into_id == target_id)
+        .group_by(Target.id, winner_alias.primary_name)
+        .order_by(Target.merged_at.desc())
+    )
+    rows = result.all()
+
+    return [
+        MergedTargetResponse(
+            id=loser.id,
+            primary_name=loser.primary_name,
+            merged_into_id=loser.merged_into_id,
+            merged_into_name=merged_into_name,
+            merged_at=loser.merged_at.isoformat() if loser.merged_at else "",
+            image_count=image_count,
+        )
+        for loser, merged_into_name, image_count in rows
+    ]
+
+
 @router.post("/merge-candidates/{candidate_id}/revert")
 async def revert_merge_candidate(
     candidate_id: uuid.UUID,
