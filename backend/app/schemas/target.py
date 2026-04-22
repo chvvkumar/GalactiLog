@@ -304,6 +304,7 @@ class MergeCandidateResponse(BaseModel):
     method: str
     status: str
     created_at: str
+    resolved_at: str | None = None
     reason_text: str | None = None
 
 

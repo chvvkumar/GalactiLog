@@ -380,6 +380,7 @@ async def list_merge_candidates(
             method=mc.method,
             status=mc.status,
             created_at=mc.created_at.isoformat() if mc.created_at else "",
+            resolved_at=mc.resolved_at.isoformat() if mc.resolved_at else None,
             reason_text=mc.reason_text,
         )
         for mc, suggested_target_name in rows

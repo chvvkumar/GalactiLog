@@ -400,6 +400,7 @@ export interface MergeCandidateResponse {
   method: string;
   status: string;
   created_at: string;
+  resolved_at: string | null;
   reason_text: string | null;
 }
 

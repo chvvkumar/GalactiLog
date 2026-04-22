@@ -4,6 +4,7 @@ import { useAuth } from "../AuthProvider";
 import type { MergeCandidateResponse } from "../../types";
 import DuplicatesSection from "./DuplicatesSection";
 import UnresolvedSection from "./UnresolvedSection";
+import MergeHistorySection from "./MergeHistorySection";
 import MaintenanceSection from "./MaintenanceSection";
 
 interface ScanSummary {
@@ -20,12 +21,17 @@ export const TargetManagementTab: Component = () => {
   const { isAdmin } = useAuth();
 
   const [pending, setPending] = createSignal<MergeCandidateResponse[]>([]);
+  const [accepted, setAccepted] = createSignal<MergeCandidateResponse[]>([]);
   const [scanSummary, setScanSummary] = createSignal<ScanSummary | null>(null);
 
   const refresh = async () => {
     try {
-      const p = await api.getMergeCandidates("pending");
+      const [p, a] = await Promise.all([
+        api.getMergeCandidates("pending"),
+        api.getMergeCandidates("accepted"),
+      ]);
       setPending(p);
+      setAccepted(a);
     } catch {
       // non-blocking
     }
@@ -100,6 +106,9 @@ export const TargetManagementTab: Component = () => {
 
       {/* Unresolved Names section */}
       <UnresolvedSection candidates={unresolved} onAction={refresh} />
+
+      {/* Merge History section */}
+      <MergeHistorySection candidates={accepted} onAction={refresh} />
 
       {/* Maintenance section */}
       <MaintenanceSection onMaintenanceComplete={refresh} />
