@@ -1,5 +1,6 @@
 import { Component, For, Show, createSignal } from "solid-js";
 import type { Accessor } from "solid-js";
+import { A } from "@solidjs/router";
 import { api } from "../../api/client";
 import { showToast } from "../Toast";
 import { useAuth } from "../AuthProvider";
@@ -93,9 +94,22 @@ const MergeHistorySection: Component<MergeHistorySectionProps> = (props) => {
                             </span>
                             <Show when={c.suggested_target_name}>
                               <span class="text-theme-text-tertiary text-xs mx-1">&rarr;</span>
-                              <span class="text-sm font-medium text-theme-accent">
-                                {c.suggested_target_name}
-                              </span>
+                              <Show
+                                when={c.suggested_target_id}
+                                fallback={
+                                  <span class="text-sm font-medium text-theme-accent">
+                                    {c.suggested_target_name}
+                                  </span>
+                                }
+                              >
+                                <A
+                                  href={`/targets/${encodeURIComponent(c.suggested_target_id!)}`}
+                                  class="text-sm font-medium text-theme-accent hover:underline"
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  {c.suggested_target_name}
+                                </A>
+                              </Show>
                             </Show>
                           </div>
 
