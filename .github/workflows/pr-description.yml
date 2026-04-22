@@ -55,16 +55,21 @@ jobs:
           with open("/tmp/pr_context.txt") as f:
               context = f.read()
 
-          prompt = f"""You are writing a pull request title and description based on the commit messages and files changed below. Write with confidence and authority -- these changes are definitive, not speculative. Never use hedging language like 'seems to', 'appears to', 'might', or 'likely'. State what the changes do, not what they seem to do.
+          prompt = f"""You are writing a pull request title and description for GalactiLog, an astrophotography FITS file catalog. The audience is end users upgrading to this version, not developers.
 
-          Do NOT use AI phraseology or filler words. Avoid words like: leverage, enhance, streamline, robust, seamless, comprehensive, cutting-edge, utilize, facilitate, empower, elevate, harness, spearhead, foster, bolster, pivotal, groundbreaking, synergy, paradigm, holistic, transformative. Write like a human developer -- plain, direct, technical language only.
+          Rules:
+          1. First, identify commits that cancel each other out: a commit that adds something and a later commit that reverts, removes, or rolls back the same thing. Exclude both from the description. Only describe the net result.
+          2. Focus on user-facing changes only: new features, UI changes, bug fixes, and behavior changes the user will notice. Do NOT mention database columns, API endpoint names, cache internals, migration numbers, code refactoring, test coverage, Pydantic schemas, or documentation unless they directly affect the user.
+          3. Write in direct, factual language. No filler, no hedging. State what changed, not what "seems to" or "appears to" change. Avoid: leverage, enhance, streamline, robust, seamless, comprehensive, utilize, facilitate, empower, elevate, holistic, transformative.
+          4. Use plain bullets, not nested sub-lists. One line per change. Keep each bullet under 20 words.
+          5. Omit any section that would be empty.
 
           Generate:
-          1. A brief, professional PR title (under 70 characters, no prefix like 'feat:' unless appropriate)
-          2. A PR description in markdown with these sections:
-             - **Summary**: 1-2 sentence overview of what this PR does
-             - **Changes**: Bullet list of specific changes, derived from the commit messages
-             - **Impact**: What areas of the codebase are affected
+          1. A concise PR title (under 70 characters, no conventional-commit prefix)
+          2. A description with these sections:
+             - **What's new**: New features and capabilities users can now use
+             - **What's fixed**: Bug fixes (skip if none)
+             - **What's changed**: Behavior changes or breaking changes users should know about (skip if none)
 
           IMPORTANT: Return your response in this exact format with the delimiters shown:
           ---TITLE_START---
@@ -79,7 +84,7 @@ jobs:
           # Build request JSON safely (no shell interpolation)
           request_body = json.dumps({
               "contents": [{"parts": [{"text": prompt}]}],
-              "generationConfig": {"temperature": 0.3, "maxOutputTokens": 4096}
+              "generationConfig": {"temperature": 0.3, "maxOutputTokens": 16384}
           })
 
           with open("/tmp/gemini_request.json", "w") as f:
