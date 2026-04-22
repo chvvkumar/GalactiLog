@@ -11,6 +11,7 @@ from app.services.simbad import (
     extract_common_name,
     build_primary_name,
     _fetch_tap_aliases,
+    _get_simbad_id,
 )
 
 
@@ -380,6 +381,34 @@ class TestFetchTapAliases:
         assert result == []
 
     @pytest.mark.asyncio
+    async def test_strips_quotes_from_tap_response(self):
+        """TAP responses quote each value; function must strip those quotes."""
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.text = 'id\n"M  51"\n"NGC  5194"\n"NAME Whirlpool Galaxy"\n"[OKM2018] SWIFT J1329.9+4719"\n'
+        mock_resp.raise_for_status = MagicMock()
+
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(return_value=mock_resp)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("app.services.simbad.httpx.AsyncClient", return_value=mock_client):
+            result = await _fetch_tap_aliases("M  51")
+
+        assert result == ["M  51", "NGC  5194", "NAME Whirlpool Galaxy", "[OKM2018] SWIFT J1329.9+4719"]
+        # Verify quotes are not present in any alias
+        assert all(not a.startswith('"') and not a.endswith('"') for a in result)
+        # Verify catalog aliases can now be matched by curate_aliases
+        curated = curate_aliases(result)
+        # "M  51" normalizes to "M 51" which matches Messier pattern
+        assert "M 51" in curated
+        # "NGC  5194" normalizes to "NGC 5194" which matches NGC pattern
+        assert "NGC 5194" in curated
+        # Common name is extracted from NAME entry
+        assert "Whirlpool Galaxy" in curated
+
+    @pytest.mark.asyncio
     async def test_returns_empty_on_http_error(self):
         """On HTTP error, should log warning and return empty list."""
         mock_client = AsyncMock()
@@ -433,3 +462,55 @@ class TestResolveTargetNameCached:
         assert result is not None
         assert result["catalog_id"] == "NGC 7000"
         assert mock_get_cache.call_count == 2
+
+
+# ---------------------------------------------------------------------------
+# _get_simbad_id (override map + Stellarium integration)
+# ---------------------------------------------------------------------------
+
+class TestGetSimbadId:
+    def test_horsehead_nebula_override(self):
+        """Override map resolves Horsehead Nebula to Barnard 33 (dark nebula), not Stellarium's IC 434."""
+        assert _get_simbad_id("Horsehead Nebula") == "Barnard 33"
+
+    def test_horsehead_case_insensitive(self):
+        assert _get_simbad_id("horsehead nebula") == "Barnard 33"
+
+    def test_override_map_takes_precedence(self):
+        """Abbreviations in override map are checked before Stellarium."""
+        assert _get_simbad_id("rho oph") == "rho Oph"
+
+    def test_question_mark_galaxy_resolves_to_m51(self):
+        result = _get_simbad_id("Question Mark Galaxy")
+        assert result == "NGC 5194"
+
+    def test_catalog_id_passes_through(self):
+        assert _get_simbad_id("NGC 7000") == "NGC 7000"
+
+    def test_whirlpool_galaxy(self):
+        assert _get_simbad_id("Whirlpool Galaxy") == "NGC 5194"
+
+    def test_andromeda_galaxy_uses_messier(self):
+        """Override map returns M 31 instead of Stellarium's NGC 224."""
+        assert _get_simbad_id("Andromeda Galaxy") == "M 31"
+
+    def test_lagoon_nebula(self):
+        """Stellarium names.dat resolves Lagoon Nebula to NGC 6523."""
+        assert _get_simbad_id("Lagoon Nebula") == "NGC 6523"
+
+    def test_override_beats_stellarium(self):
+        """Pinwheel Galaxy: override says M 101, Stellarium says NGC 598."""
+        assert _get_simbad_id("Pinwheel Galaxy") == "M 101"
+
+    def test_stellarium_only_entry(self):
+        """California Nebula removed from override; Stellarium covers it."""
+        assert _get_simbad_id("California Nebula") == "NGC 1499"
+
+    def test_caldwell_in_override(self):
+        """Caldwell entries not in Stellarium, handled by override map."""
+        assert _get_simbad_id("Caldwell 20") == "NGC 7000"
+
+    def test_suffix_stripping_with_stellarium(self):
+        """Descriptive suffix after ' - ' should be stripped, then checked in Stellarium."""
+        result = _get_simbad_id("Horsehead Nebula - some description")
+        assert result == "Barnard 33"

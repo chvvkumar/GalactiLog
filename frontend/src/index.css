@@ -245,3 +245,57 @@ option {
   animation: sidebar-rail-icon-in 200ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
   animation-delay: calc(var(--i, 0) * 40ms);
 }
+
+/* ── Session card styling ──
+   Each session is a <tbody class="session-card"> inside a border-separate table.
+   Borders + rounded corners are applied to <td> elements to form a visual card. */
+@layer components {
+  .session-card > tr > td {
+    background-color: var(--color-bg-surface);
+  }
+
+  .session-card > tr:first-child > td {
+    border-top: 1px solid var(--color-border-emphasis);
+  }
+
+  .session-card > tr:last-child > td {
+    border-bottom: 1px solid var(--color-border-emphasis);
+  }
+
+  .session-card > tr > td:first-child {
+    border-left: 1px solid var(--color-border-emphasis);
+  }
+
+  .session-card > tr > td:last-child {
+    border-right: 1px solid var(--color-border-emphasis);
+  }
+
+  /* Collapsed (single row): all four corners */
+  .session-card > tr:only-child > td:first-child {
+    border-top-left-radius: var(--radius-sm);
+    border-bottom-left-radius: var(--radius-sm);
+  }
+
+  .session-card > tr:only-child > td:last-child {
+    border-top-right-radius: var(--radius-sm);
+    border-bottom-right-radius: var(--radius-sm);
+  }
+
+  /* Expanded: first row top corners only */
+  .session-card > tr:first-child:not(:only-child) > td:first-child {
+    border-top-left-radius: var(--radius-sm);
+  }
+
+  .session-card > tr:first-child:not(:only-child) > td:last-child {
+    border-top-right-radius: var(--radius-sm);
+  }
+
+  /* Expanded: last row bottom corners only */
+  .session-card > tr:last-child:not(:only-child) > td:first-child {
+    border-bottom-left-radius: var(--radius-sm);
+  }
+
+  .session-card > tr:last-child:not(:only-child) > td:last-child {
+    border-bottom-right-radius: var(--radius-sm);
+  }
+}

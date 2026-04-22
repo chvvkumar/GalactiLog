@@ -22,3 +22,4 @@ class MergeCandidate(Base):
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    reason_text: Mapped[str | None] = mapped_column(String(500), nullable=True)

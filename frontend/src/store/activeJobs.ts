@@ -41,12 +41,11 @@ export function rebuildStatusToJob(r: RebuildStatus): ActiveJob | null {
   const startedAt = r.started_at != null ? r.started_at * 1000 : Date.now();
 
   const modeLabel: Record<string, string> = {
-    smart: "Fix Orphans",
+    smart: "Repairing Target Links",
     full: "Full Rebuild",
-    retry: "Re-resolve Targets",
-    xmatch: "Catalog Match",
-    ref_thumbnails: "Fetch DSS Thumbnails",
-    regen: "Regenerate Thumbnails",
+    retry: "Retrying Failed Lookups",
+    ref_thumbnails: "Fetching Reference Images",
+    regen: "Regenerating Thumbnails",
   };
 
   return {
