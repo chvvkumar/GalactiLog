@@ -881,9 +881,9 @@ const TargetDetailPage: Component = () => {
                 </HelpPopover>
               </div>
               <div class="overflow-x-auto">
-              <table class="w-full border-collapse min-w-[600px]">
+              <table class="w-full min-w-[600px]" style={{ "border-collapse": "separate", "border-spacing": "0 10px" }}>
                 <thead>
-                  <tr class="text-caption text-theme-text-tertiary uppercase tracking-wider border-b border-theme-border-em">
+                  <tr class="text-caption text-theme-text-tertiary uppercase tracking-wider">
                     <Show when={targetChartExpanded()}>
                       <th class="py-2 pl-4 pr-1 w-8">
                         <input
@@ -932,7 +932,6 @@ const TargetDetailPage: Component = () => {
                     <th class="py-2 px-2"></th>
                   </tr>
                 </thead>
-                <tbody>
                   <For each={detail().sessions}>
                     {(session) => (
                       <SessionAccordionCard
@@ -959,7 +958,6 @@ const TargetDetailPage: Component = () => {
                       />
                     )}
                   </For>
-                </tbody>
               </table>
               </div>
             </div>
