@@ -311,6 +311,104 @@ const TargetDetailPage: Component = () => {
 
   const selectNoDates = () => setSelectedChartDates([]);
 
+  const [csvCopied, setCsvCopied] = createSignal(false);
+  const [csvLoading, setCsvLoading] = createSignal(false);
+
+  const copyMultiSessionAstrobinCsv = async () => {
+    const dates = selectedChartDates();
+    if (dates.length === 0) return;
+
+    const cache = sessionCache();
+    const missingDates = dates.filter((d) => !cache[d]);
+
+    if (missingDates.length > 0) {
+      setCsvLoading(true);
+      try {
+        const results = await Promise.all(
+          missingDates.map((d) => api.getSessionDetail(params.targetId, d))
+        );
+        const newCache = { ...sessionCache() };
+        missingDates.forEach((d, i) => {
+          newCache[d] = results[i];
+        });
+        setSessionCache(newCache);
+      } catch (e: any) {
+        showToast(e?.message ?? "Failed to load session details", "error");
+        setCsvLoading(false);
+        return;
+      }
+      setCsvLoading(false);
+    }
+
+    const aliasMap = ctx.filterAliasMap();
+    const abFilterIds = ctx.settings()?.general.astrobin_filter_ids ?? {};
+    const bortle = ctx.settings()?.general.astrobin_bortle ?? "";
+
+    const lookupAbId = (filterName: string) => {
+      const canonical = aliasMap[filterName] ?? filterName;
+      return abFilterIds[canonical] ?? abFilterIds[filterName] ?? "";
+    };
+
+    const median = (vals: number[]) => {
+      if (vals.length === 0) return null;
+      const s = [...vals].sort((a, b) => a - b);
+      const mid = Math.floor(s.length / 2);
+      return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
+    };
+
+    const header =
+      "date,filter,number,duration,binning,gain,sensorCooling,fNumber,bortle,meanSqm,meanFwhm,temperature";
+    const allRows: string[] = [];
+    const updatedCache = sessionCache();
+
+    for (const date of dates) {
+      const d = updatedCache[date];
+      if (!d) continue;
+
+      const buildRows = (
+        filterDetails: typeof d.filter_details,
+        gain: number | null,
+        sensorTemp: number | null,
+        fwhm: number | null,
+        ambientTemp: number | null
+      ) => {
+        for (const f of filterDetails) {
+          const filterId = lookupAbId(f.filter_name);
+          const g = gain !== null ? gain : "";
+          const cooling = sensorTemp !== null ? Math.round(sensorTemp) : "";
+          const mFwhm = fwhm !== null ? fwhm.toFixed(2) : "";
+          const temp = ambientTemp !== null ? ambientTemp.toFixed(2) : "";
+          allRows.push(
+            `${d.session_date},${filterId},${f.frame_count},${f.exposure_time ?? ""},,${g},${cooling},,${bortle},,${mFwhm},${temp}`
+          );
+        }
+      };
+
+      if (d.rigs.length > 1) {
+        for (const rig of d.rigs) {
+          const temps = rig.frames
+            .map((f) => f.sensor_temp)
+            .filter((t): t is number => t !== null);
+          const fwhms = rig.frames
+            .map((f) => f.fwhm)
+            .filter((v): v is number => v !== null);
+          const ambTemps = rig.frames
+            .map((f) => f.ambient_temp)
+            .filter((v): v is number => v !== null);
+          buildRows(rig.filter_details, rig.gain, median(temps), median(fwhms), median(ambTemps));
+        }
+      } else {
+        buildRows(d.filter_details, d.gain, d.sensor_temp, d.median_fwhm, d.median_ambient_temp);
+      }
+    }
+
+    const csv = [header, ...allRows].join("\n");
+    navigator.clipboard.writeText(csv).then(() => {
+      setCsvCopied(true);
+      setTimeout(() => setCsvCopied(false), 2000);
+    });
+  };
+
   const pendingLoads = new Set<string>();
   const MAX_CONCURRENT_LOADS = 2;
   const loadQueue: string[] = [];
@@ -879,32 +977,43 @@ const TargetDetailPage: Component = () => {
                     Each card is one imaging session on this target. Expand a card to see per-frame details (exposure, filter, camera temperature, HFR, guiding). Example: compare two sessions of the same target to pick the better one for stacking.
                   </p>
                 </HelpPopover>
+                <Show when={selectedChartDates().length > 0}>
+                  <button
+                    class="ml-auto text-tiny px-2 py-0.5 border border-theme-border rounded text-theme-text-tertiary hover:text-theme-text-primary hover:border-theme-accent transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                    onClick={copyMultiSessionAstrobinCsv}
+                    disabled={csvLoading()}
+                  >
+                    {csvCopied()
+                      ? "Copied!"
+                      : csvLoading()
+                        ? "Loading..."
+                        : `AstroBin CSV (${selectedChartDates().length})`}
+                  </button>
+                </Show>
               </div>
               <div class="overflow-x-auto">
               <table class="w-full min-w-[600px]" style={{ "border-collapse": "separate", "border-spacing": "0 10px" }}>
                 <thead>
                   <tr class="text-caption text-theme-text-tertiary uppercase tracking-wider">
-                    <Show when={targetChartExpanded()}>
-                      <th class="py-2 pl-4 pr-1 w-8">
-                        <input
-                          type="checkbox"
-                          checked={selectedChartDates().length === detail().sessions.length}
-                          ref={(el) => {
-                            createEffect(() => {
-                              const len = selectedChartDates().length;
-                              const total = detail().sessions.length;
-                              el.indeterminate = len > 0 && len < total;
-                            });
-                          }}
-                          onChange={(e) => {
-                            if (e.currentTarget.checked) selectAllDates();
-                            else selectNoDates();
-                          }}
-                          class="w-3.5 h-3.5 rounded border-theme-border cursor-pointer"
-                          title="Select all / none"
-                        />
-                      </th>
-                    </Show>
+                    <th class="py-2 pl-4 pr-1 w-8">
+                      <input
+                        type="checkbox"
+                        checked={selectedChartDates().length === detail().sessions.length}
+                        ref={(el) => {
+                          createEffect(() => {
+                            const len = selectedChartDates().length;
+                            const total = detail().sessions.length;
+                            el.indeterminate = len > 0 && len < total;
+                          });
+                        }}
+                        onChange={(e) => {
+                          if (e.currentTarget.checked) selectAllDates();
+                          else selectNoDates();
+                        }}
+                        class="w-3.5 h-3.5 rounded border-theme-border cursor-pointer"
+                        title="Select all / none"
+                      />
+                    </th>
                     <th class="py-2 px-4 text-left font-medium">Date ({tzLabel()})</th>
                     <th class="py-2 px-2 text-right font-medium"></th>
                     <th class="py-2 px-2 text-right font-medium">Frames</th>
@@ -947,7 +1056,7 @@ const TargetDetailPage: Component = () => {
                           detected_stars: visible("quality", "detected_stars"),
                           guiding_rms: visible("guiding", "rms_total"),
                         }}
-                        showCheckbox={targetChartExpanded()}
+                        showCheckbox={true}
                         checked={selectedChartDates().includes(session.session_date)}
                         onCheckChange={() => toggleChartDate(session.session_date)}
                         targetId={params.targetId}
