@@ -106,30 +106,34 @@ const ComboRow: Component<{ combo: EquipmentComboMetrics }> = (props) => {
           </div>
         </td>
       </tr>
-      <Show when={expanded()}>
-        <tr class="bg-theme-surface-alt">
-          <td colspan="8" class="p-0 overflow-x-auto">
-            <table class="w-full text-xs min-w-[500px]">
-              <thead>
-                <tr class="border-b border-theme-border">
-                  <th class="text-left text-theme-text-secondary font-normal py-1 pl-8 pr-2 text-tiny uppercase tracking-wide">Filter</th>
-                  <th class="text-right text-theme-text-secondary font-normal py-1 px-2 text-tiny uppercase tracking-wide">Frames</th>
-                  <th class="text-right text-theme-text-secondary font-normal py-1 px-2 text-tiny uppercase tracking-wide">Integration</th>
-                  <th class="text-right text-theme-text-secondary font-normal py-1 px-2 text-tiny uppercase tracking-wide">Med HFR</th>
-                  <th class="text-right text-theme-text-secondary font-normal py-1 px-2 text-tiny uppercase tracking-wide">Best HFR</th>
-                  <th class="text-right text-theme-text-secondary font-normal py-1 px-2 text-tiny uppercase tracking-wide">Med Ecc</th>
-                  <th class="text-right text-theme-text-secondary font-normal py-1 px-2 text-tiny uppercase tracking-wide">Med FWHM</th>
-                </tr>
-              </thead>
-              <tbody>
-                <For each={props.combo.filter_breakdown}>
-                  {(row) => <FilterBreakdownRow row={row} />}
-                </For>
-              </tbody>
-            </table>
-          </td>
-        </tr>
-      </Show>
+      <tr class={`bg-theme-surface-alt`}>
+        <td colspan="8" class="p-0">
+          <div class={`grid transition-[grid-template-rows] duration-200 ${expanded() ? "grid-rows-[1fr]" : "grid-rows-[0fr]"}`}>
+            <div class="overflow-hidden">
+              <div class="overflow-x-auto">
+                <table class="w-full text-xs min-w-[500px]">
+                  <thead>
+                    <tr class="border-b border-theme-border">
+                      <th class="text-left text-theme-text-secondary font-normal py-1 pl-8 pr-2 text-tiny uppercase tracking-wide">Filter</th>
+                      <th class="text-right text-theme-text-secondary font-normal py-1 px-2 text-tiny uppercase tracking-wide">Frames</th>
+                      <th class="text-right text-theme-text-secondary font-normal py-1 px-2 text-tiny uppercase tracking-wide">Integration</th>
+                      <th class="text-right text-theme-text-secondary font-normal py-1 px-2 text-tiny uppercase tracking-wide">Med HFR</th>
+                      <th class="text-right text-theme-text-secondary font-normal py-1 px-2 text-tiny uppercase tracking-wide">Best HFR</th>
+                      <th class="text-right text-theme-text-secondary font-normal py-1 px-2 text-tiny uppercase tracking-wide">Med Ecc</th>
+                      <th class="text-right text-theme-text-secondary font-normal py-1 px-2 text-tiny uppercase tracking-wide">Med FWHM</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <For each={props.combo.filter_breakdown}>
+                      {(row) => <FilterBreakdownRow row={row} />}
+                    </For>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </td>
+      </tr>
     </>
   );
 };

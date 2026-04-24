@@ -84,9 +84,11 @@ const CollapsibleSection: Component<{ id: string; label: string; active?: boolea
         </span>
         <span class={`text-caption transition-transform ${collapsed() ? "-rotate-90" : ""}`}>&#9660;</span>
       </button>
-      <Show when={!collapsed()}>
-        <div class="mt-2">{props.children}</div>
-      </Show>
+      <div class={`grid transition-[grid-template-rows] duration-200 ${collapsed() ? "grid-rows-[0fr]" : "grid-rows-[1fr]"}`}>
+        <div class="overflow-hidden">
+          <div class="mt-2">{props.children}</div>
+        </div>
+      </div>
     </section>
   );
 };

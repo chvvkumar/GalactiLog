@@ -534,18 +534,20 @@ export default function DisplayTab() {
                           <span class={`pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow transition-transform ${gs().enabled ? "translate-x-4" : "translate-x-0"}`} />
                         </button>
                       </div>
-                      <Show when={!isCollapsed()}>
-                        <div class={`px-4 pb-3 grid grid-cols-2 sm:grid-cols-3 gap-2 ${!gs().enabled ? "opacity-40" : ""}`}>
-                          <For each={Object.entries(group.fieldLabels)}>
-                            {([fieldKey, fieldLabel]) => (
-                              <label class="flex items-center gap-2 text-sm text-theme-text-primary cursor-pointer">
-                                <input type="checkbox" checked={gs().fields[fieldKey] ?? false} disabled={!gs().enabled} onChange={() => toggleField(group.key, fieldKey)} class="rounded border-theme-border bg-theme-base text-theme-accent focus:ring-theme-accent focus:ring-offset-0 h-4 w-4" />
-                                {fieldLabel}
-                              </label>
-                            )}
-                          </For>
+                      <div class={`grid transition-[grid-template-rows] duration-200 ${isCollapsed() ? "grid-rows-[0fr]" : "grid-rows-[1fr]"}`}>
+                        <div class="overflow-hidden">
+                          <div class={`px-4 pb-3 grid grid-cols-2 sm:grid-cols-3 gap-2 ${!gs().enabled ? "opacity-40" : ""}`}>
+                            <For each={Object.entries(group.fieldLabels)}>
+                              {([fieldKey, fieldLabel]) => (
+                                <label class="flex items-center gap-2 text-sm text-theme-text-primary cursor-pointer">
+                                  <input type="checkbox" checked={gs().fields[fieldKey] ?? false} disabled={!gs().enabled} onChange={() => toggleField(group.key, fieldKey)} class="rounded border-theme-border bg-theme-base text-theme-accent focus:ring-theme-accent focus:ring-offset-0 h-4 w-4" />
+                                  {fieldLabel}
+                                </label>
+                              )}
+                            </For>
+                          </div>
                         </div>
-                      </Show>
+                      </div>
                     </div>
                   );
                 }}

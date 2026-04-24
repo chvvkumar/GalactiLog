@@ -283,11 +283,15 @@ const HistoryRow: Component<{ event: ActivityEvent }> = (props) => {
           </span>
         </Show>
       </div>
-      <Show when={expanded() && hasDetails()}>
-        <div class="pb-2 pl-[7rem]">
-          <RowDetails event={props.event} />
+      <div class={`grid transition-[grid-template-rows] duration-200 ${expanded() ? "grid-rows-[1fr]" : "grid-rows-[0fr]"}`}>
+        <div class="overflow-hidden">
+          <Show when={hasDetails()}>
+            <div class="pb-2 pl-[7rem]">
+              <RowDetails event={props.event} />
+            </div>
+          </Show>
         </div>
-      </Show>
+      </div>
     </div>
   );
 };
