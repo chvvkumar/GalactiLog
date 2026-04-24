@@ -51,11 +51,13 @@ async def list_activity(
 ):
     """Return paginated activity events, newest first.
 
-    Keyset pagination via `cursor` (encodes timestamp + id of last row from
-    previous page). `since` is used by the error toast poller.
+    Only top-level events (parent_id IS NULL) are returned. Children are
+    batch-loaded and nested under their parent's `children` field.
     """
-    count_q = select(func.count(ActivityEvent.id))
-    items_q = select(ActivityEvent)
+    top_level_filter = ActivityEvent.parent_id.is_(None)
+
+    count_q = select(func.count(ActivityEvent.id)).where(top_level_filter)
+    items_q = select(ActivityEvent).where(top_level_filter)
 
     valid_sev = [s for s in severity if s in _VALID_SEVERITIES]
     if valid_sev:
@@ -99,8 +101,28 @@ async def list_activity(
         last = rows[-1]
         next_cursor = _encode_cursor(last.timestamp, last.id)
 
+    parent_ids = [r.id for r in rows]
+    children_by_parent: dict[int, list[ActivityItem]] = {}
+    if parent_ids:
+        children_q = (
+            select(ActivityEvent)
+            .where(ActivityEvent.parent_id.in_(parent_ids))
+            .order_by(ActivityEvent.timestamp.asc())
+        )
+        children_result = await session.execute(children_q)
+        for child in children_result.scalars().all():
+            children_by_parent.setdefault(child.parent_id, []).append(
+                ActivityItem.model_validate(child)
+            )
+
+    items = []
+    for r in rows:
+        item = ActivityItem.model_validate(r)
+        item.children = children_by_parent.get(r.id) or None
+        items.append(item)
+
     return PaginatedActivityResponse(
-        items=[ActivityItem.model_validate(r) for r in rows],
+        items=items,
         next_cursor=next_cursor,
         total=total,
     )
