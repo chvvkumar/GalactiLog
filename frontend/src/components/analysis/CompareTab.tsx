@@ -111,20 +111,20 @@ const CompareTab: Component<Props> = (props) => {
         </div>
       </Show>
 
-      <Show when={data() && canCompare()}>
+      <Show when={data.latest && canCompare()}>
         <div style={{ height: "200px" }} class="relative mb-4">
           <BoxPlotChart
-            groups={[data()!.group_a.box, data()!.group_b.box]}
+            groups={[data.latest!.group_a.box, data.latest!.group_b.box]}
             loading={data.loading}
             metricLabel={Y_METRICS.find((m) => m.value === metric())?.label}
           />
         </div>
 
-        <div class="text-sm text-theme-text-primary mb-3 font-medium">{data()!.verdict}</div>
+        <div class="text-sm text-theme-text-primary mb-3 font-medium">{data.latest!.verdict}</div>
 
         <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
-          <StatsCard stats={data()!.group_a.stats} label={data()!.group_a.name} />
-          <StatsCard stats={data()!.group_b.stats} label={data()!.group_b.name} />
+          <StatsCard stats={data.latest!.group_a.stats} label={data.latest!.group_a.name} />
+          <StatsCard stats={data.latest!.group_b.stats} label={data.latest!.group_b.name} />
         </div>
       </Show>
     </div>

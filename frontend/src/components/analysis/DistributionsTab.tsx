@@ -106,7 +106,7 @@ const DistributionsTab: Component<Props> = (props) => {
         </div>
       </div>
 
-      <Show when={mode() === "histogram"}>
+      <div style={{ display: mode() === "histogram" ? undefined : "none" }}>
         <div class="flex flex-wrap items-center gap-3 mb-4">
           <label class="text-sm text-theme-text-secondary">Metric:</label>
           <select class={selectClass} value={histMetric()} onChange={(e) => setHistMetric(e.currentTarget.value)}>
@@ -114,16 +114,16 @@ const DistributionsTab: Component<Props> = (props) => {
           </select>
         </div>
         <div style={{ height: "450px" }} class="relative">
-          <HistogramChart data={histData()} loading={histData.loading} />
+          <HistogramChart data={histData.latest} loading={histData.loading} />
         </div>
-        <Show when={histData()?.stats}>
+        <Show when={histData.latest?.stats}>
           <div class="mt-3">
-            <StatsCard stats={histData()!.stats} label={`${ALL_METRICS.find((m) => m.value === histMetric())?.label} (skewness: ${histData()!.skewness.toFixed(2)})`} />
+            <StatsCard stats={histData.latest!.stats} label={`${ALL_METRICS.find((m) => m.value === histMetric())?.label} (skewness: ${histData.latest!.skewness.toFixed(2)})`} />
           </div>
         </Show>
-      </Show>
+      </div>
 
-      <Show when={mode() === "boxplot"}>
+      <div style={{ display: mode() === "boxplot" ? undefined : "none" }}>
         <div class="flex flex-wrap items-center gap-3 mb-4">
           <label class="text-sm text-theme-text-secondary">Metric:</label>
           <select class={selectClass} value={boxMetric()} onChange={(e) => setBoxMetric(e.currentTarget.value)}>
@@ -134,14 +134,14 @@ const DistributionsTab: Component<Props> = (props) => {
             {GROUP_OPTIONS.map((o) => <option value={o.value}>{o.label}</option>)}
           </select>
         </div>
-        <div style={{ height: `${Math.max(200, (boxData()?.groups?.length || 3) * 60)}px` }} class="relative">
+        <div style={{ height: `${Math.max(200, (boxData.latest?.groups?.length || 3) * 60)}px` }} class="relative">
           <BoxPlotChart
-            groups={boxData()?.groups || []}
+            groups={boxData.latest?.groups || []}
             loading={boxData.loading}
             metricLabel={Y_METRICS.find((m) => m.value === boxMetric())?.label}
           />
         </div>
-      </Show>
+      </div>
     </div>
   );
 };

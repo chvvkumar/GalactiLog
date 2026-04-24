@@ -133,6 +133,10 @@
   --font-mono: 'Cascadia Code', 'Fira Code', monospace;
 }
 
+html {
+  scrollbar-gutter: stable;
+}
+
 body {
   background-color: var(--color-bg-base);
   color: var(--color-text-primary);

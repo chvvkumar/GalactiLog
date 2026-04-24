@@ -41,7 +41,7 @@ const MatrixTab: Component<Props> = (props) => {
   );
 
   const cellMap = createMemo(() => {
-    const d = data();
+    const d = data.latest;
     type Cell = NonNullable<typeof d>["cells"][number];
     if (!d) return new Map<string, Cell>();
     const map = new Map<string, Cell>();
@@ -60,17 +60,17 @@ const MatrixTab: Component<Props> = (props) => {
       <h3 class="text-base font-medium text-theme-text-primary mb-3">Correlation Matrix</h3>
       <p class="text-xs text-theme-text-tertiary mb-3">Pearson r for all metric pairs. Click a cell to explore in the Correlation tab.</p>
 
-      {data.loading && !data() && (
+      {data.loading && !data.latest && (
         <div class="text-sm text-theme-text-secondary py-8 text-center">Computing correlations...</div>
       )}
 
-      {data() && (
+      {data.latest && (
         <div class="overflow-x-auto">
           <table class="text-xs border-collapse">
             <thead>
               <tr>
                 <th class="p-1"></th>
-                <For each={data()!.x_metrics}>
+                <For each={data.latest!.x_metrics}>
                   {(xm) => (
                     <th class="p-1.5 text-theme-text-secondary font-normal whitespace-nowrap" style={{ "writing-mode": "vertical-lr", transform: "rotate(180deg)" }}>
                       {X_LABELS[xm] || xm}
@@ -80,11 +80,11 @@ const MatrixTab: Component<Props> = (props) => {
               </tr>
             </thead>
             <tbody>
-              <For each={data()!.y_metrics}>
+              <For each={data.latest!.y_metrics}>
                 {(ym) => (
                   <tr>
                     <td class="p-1.5 text-theme-text-secondary whitespace-nowrap text-right pr-2">{Y_LABELS[ym] || ym}</td>
-                    <For each={data()!.x_metrics}>
+                    <For each={data.latest!.x_metrics}>
                       {(xm) => {
                         const cell = () => getCell(xm, ym);
                         return (
