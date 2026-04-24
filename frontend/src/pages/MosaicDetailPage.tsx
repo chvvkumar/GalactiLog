@@ -96,7 +96,7 @@ const MosaicDetailPage: Component = () => {
   };
 
   return (
-    <div class={`min-h-[calc(100vh-57px)] bg-theme-base ${contentWidthClass(ctx.contentWidth())}`}>
+    <div class={`page-enter min-h-[calc(100vh-57px)] bg-theme-base ${contentWidthClass(ctx.contentWidth())}`}>
       {/* Back nav */}
       <div class="px-4 py-3 border-b border-theme-border">
         <A href="/mosaics" class="text-theme-text-secondary hover:text-theme-text-primary text-sm transition-colors">

@@ -250,6 +250,20 @@ option {
   animation-delay: calc(var(--i, 0) * 40ms);
 }
 
+/* Page & tab transitions */
+@keyframes content-fade-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.page-enter {
+  animation: content-fade-in 200ms ease-out both;
+}
+
+.tab-fade-in {
+  animation: content-fade-in 150ms ease-out both;
+}
+
 /* ── Session card styling ──
    Each session is a <tbody class="session-card"> inside a border-separate table.
    Borders + rounded corners are applied to <td> elements to form a visual card. */

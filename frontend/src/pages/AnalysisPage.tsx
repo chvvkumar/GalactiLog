@@ -111,7 +111,7 @@ const AnalysisPage: Component = () => {
     }`;
 
   return (
-    <div class={`p-4 space-y-4 ${contentWidthClass(ctx.contentWidth())}`}>
+    <div class={`page-enter p-4 space-y-4 ${contentWidthClass(ctx.contentWidth())}`}>
       <div class="flex items-center gap-2">
         <h1 class="text-xl font-semibold tracking-tight text-theme-text-primary">Analysis</h1>
         <HelpPopover>
@@ -221,8 +221,8 @@ const AnalysisPage: Component = () => {
 
         <div style={{ display: activeTab() === "correlation" ? undefined : "none" }}>
           <Show when={visited().has("correlation")}>
-            <Suspense>
-              <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
+            <Suspense fallback={<div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 flex items-center justify-center min-h-[200px]"><span class="text-theme-text-secondary text-sm">Loading...</span></div>}>
+              <div class="tab-fade-in rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
                 <div class="flex items-center gap-2">
                   <h2 class="text-sm font-semibold text-theme-text-primary">Correlation</h2>
                   <HelpPopover>
@@ -242,8 +242,8 @@ const AnalysisPage: Component = () => {
         </div>
         <div style={{ display: activeTab() === "distributions" ? undefined : "none" }}>
           <Show when={visited().has("distributions")}>
-            <Suspense>
-              <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
+            <Suspense fallback={<div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 flex items-center justify-center min-h-[200px]"><span class="text-theme-text-secondary text-sm">Loading...</span></div>}>
+              <div class="tab-fade-in rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
                 <div class="flex items-center gap-2">
                   <h2 class="text-sm font-semibold text-theme-text-primary">Distributions</h2>
                   <HelpPopover>
@@ -263,8 +263,8 @@ const AnalysisPage: Component = () => {
         </div>
         <div style={{ display: activeTab() === "timeseries" ? undefined : "none" }}>
           <Show when={visited().has("timeseries")}>
-            <Suspense>
-              <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
+            <Suspense fallback={<div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 flex items-center justify-center min-h-[200px]"><span class="text-theme-text-secondary text-sm">Loading...</span></div>}>
+              <div class="tab-fade-in rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
                 <div class="flex items-center gap-2">
                   <h2 class="text-sm font-semibold text-theme-text-primary">Time Series</h2>
                   <HelpPopover>
@@ -284,8 +284,8 @@ const AnalysisPage: Component = () => {
         </div>
         <div style={{ display: activeTab() === "matrix" ? undefined : "none" }}>
           <Show when={visited().has("matrix")}>
-            <Suspense>
-              <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
+            <Suspense fallback={<div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 flex items-center justify-center min-h-[200px]"><span class="text-theme-text-secondary text-sm">Loading...</span></div>}>
+              <div class="tab-fade-in rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
                 <div class="flex items-center gap-2">
                   <h2 class="text-sm font-semibold text-theme-text-primary">Matrix</h2>
                   <HelpPopover>
@@ -306,8 +306,8 @@ const AnalysisPage: Component = () => {
         </div>
         <div style={{ display: activeTab() === "compare" ? undefined : "none" }}>
           <Show when={visited().has("compare")}>
-            <Suspense>
-              <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
+            <Suspense fallback={<div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 flex items-center justify-center min-h-[200px]"><span class="text-theme-text-secondary text-sm">Loading...</span></div>}>
+              <div class="tab-fade-in rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
                 <div class="flex items-center gap-2">
                   <h2 class="text-sm font-semibold text-theme-text-primary">Compare</h2>
                   <HelpPopover>

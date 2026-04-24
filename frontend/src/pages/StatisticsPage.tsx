@@ -17,7 +17,7 @@ const StatisticsPage: Component = () => {
   const [timelineView, setTimelineView] = createSignal<"timeline" | "calendar">("timeline");
 
   return (
-    <div class={`p-4 space-y-4 ${contentWidthClass(ctx.contentWidth())}`}>
+    <div class={`page-enter p-4 space-y-4 ${contentWidthClass(ctx.contentWidth())}`}>
       <div class="flex items-center gap-2">
         <h1 class="text-xl font-semibold tracking-tight text-theme-text-primary">Statistics</h1>
         <HelpPopover>
@@ -102,14 +102,18 @@ const StatisticsPage: Component = () => {
                 </button>
               </div>
               <Show when={timelineView() === "timeline"}>
-                <ImagingTimeline
-                  monthly={data().timeline_monthly}
-                  weekly={data().timeline_weekly}
-                  daily={data().timeline_daily}
-                />
+                <div class="tab-fade-in">
+                  <ImagingTimeline
+                    monthly={data().timeline_monthly}
+                    weekly={data().timeline_weekly}
+                    daily={data().timeline_daily}
+                  />
+                </div>
               </Show>
               <Show when={timelineView() === "calendar"}>
-                <ImagingCalendar />
+                <div class="tab-fade-in">
+                  <ImagingCalendar />
+                </div>
               </Show>
             </section>
           </div>

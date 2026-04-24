@@ -49,7 +49,7 @@ const DashboardPage: Component = () => {
 
   return (
     <DashboardFilterProvider>
-      <div class="flex" data-layout="sidebar-main">
+      <div class="page-enter flex" data-layout="sidebar-main">
         {/* Desktop sidebar */}
         <div
           class="hidden lg:flex relative border-r border-theme-border-em h-[calc(100vh-57px)] sticky top-[57px] self-start shrink-0"
