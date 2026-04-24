@@ -316,6 +316,8 @@ export interface ActivityEvent {
   target_id: number | null;
   actor: string | null;
   duration_ms: number | null;
+  parent_id: number | null;
+  children: ActivityEvent[] | null;
 }
 
 export interface ActiveJob {

@@ -296,6 +296,53 @@ const HistoryRow: Component<{ event: ActivityEvent }> = (props) => {
   );
 };
 
+const ParentHistoryRow: Component<{ event: ActivityEvent }> = (props) => {
+  const [childrenExpanded, setChildrenExpanded] = createSignal(false);
+  const childCount = () => props.event.children?.length ?? 0;
+  const hasChildren = () => childCount() > 0;
+
+  return (
+    <div>
+      <div class="flex items-start">
+        <div class="flex-1 min-w-0">
+          <HistoryRow event={props.event} />
+        </div>
+        <Show when={hasChildren()}>
+          <button
+            onClick={() => setChildrenExpanded((v) => !v)}
+            class="flex items-center gap-1 px-1.5 py-1.5 text-[10px] text-theme-text-secondary hover:text-theme-text-primary transition-colors flex-shrink-0"
+            title={childrenExpanded() ? "Collapse sub-tasks" : "Expand sub-tasks"}
+          >
+            <span>{childCount()} sub-task{childCount() !== 1 ? "s" : ""}</span>
+            <span
+              class={`transition-transform duration-200 ${
+                childrenExpanded() ? "rotate-90" : ""
+              }`}
+            >
+              {"›"}
+            </span>
+          </button>
+        </Show>
+      </div>
+      <Show when={hasChildren()}>
+        <div
+          class={`grid transition-[grid-template-rows] duration-200 ${
+            childrenExpanded() ? "grid-rows-[1fr]" : "grid-rows-[0fr]"
+          }`}
+        >
+          <div class="overflow-hidden">
+            <div class="pl-4 border-l border-theme-border ml-4">
+              <For each={props.event.children!}>
+                {(child) => <HistoryRow event={child} />}
+              </For>
+            </div>
+          </div>
+        </div>
+      </Show>
+    </div>
+  );
+};
+
 const FilterPill: Component<{
   label: string;
   active: boolean;
@@ -506,7 +553,7 @@ const ActivityFeed: Component = () => {
           <Show when={!loading()}>
             <div class="space-y-0">
               <For each={items()}>
-                {(event) => <HistoryRow event={event} />}
+                {(event) => <ParentHistoryRow event={event} />}
               </For>
             </div>
 
