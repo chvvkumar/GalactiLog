@@ -10,6 +10,7 @@ from sqlalchemy.orm import selectinload
 
 from app.database import get_session
 from app.models import Image, Target, User, UserSettings, SETTINGS_ROW_ID
+from app.models.custom_column import CustomColumn, CustomColumnValue, AppliesTo
 from app.models.mosaic import Mosaic
 from app.models.mosaic_panel import MosaicPanel
 from app.models.mosaic_panel_session import MosaicPanelSession
@@ -739,6 +740,25 @@ async def list_mosaics(
             else:
                 panel_dates_map[pid] = (None, None)
 
+    # Batch-load custom column values for all mosaics
+    mosaic_ids = [m.id for m in mosaics]
+    custom_values_map: dict[str, dict[str, str]] = {}
+    if mosaic_ids:
+        cv_q = (
+            select(CustomColumnValue.mosaic_id, CustomColumn.slug, CustomColumnValue.value)
+            .join(CustomColumn)
+            .where(
+                CustomColumnValue.mosaic_id.in_(mosaic_ids),
+                CustomColumn.applies_to == AppliesTo.mosaic,
+            )
+        )
+        cv_rows = (await session.execute(cv_q)).all()
+        for mid, slug, val in cv_rows:
+            mid_str = str(mid)
+            if mid_str not in custom_values_map:
+                custom_values_map[mid_str] = {}
+            custom_values_map[mid_str][slug] = val
+
     results = []
     for m in mosaics:
         total_int = 0
@@ -778,6 +798,7 @@ async def list_mosaics(
             first_session=mosaic_first,
             last_session=mosaic_last,
             needs_review=m.needs_review,
+            custom_values=custom_values_map.get(str(m.id)),
         ))
     return results
 
