@@ -6,6 +6,8 @@ import { formatIntegration, contentWidthClass } from "../utils/format";
 import { useSettingsContext } from "../components/SettingsProvider";
 import HelpPopover from "../components/HelpPopover";
 import { showToast } from "../components/Toast";
+import InlineEditCell from "../components/InlineEditCell";
+import { isColumnVisible } from "../utils/displaySettings";
 import KonvaMosaicArranger from "../components/mosaics/KonvaMosaicArranger";
 
 const MosaicDetailPage: Component = () => {
@@ -62,6 +64,9 @@ const MosaicDetailPage: Component = () => {
 
   const sortIndicator = (key: SortKey) => sortKey() === key ? (sortDir() === "asc" ? " \u25B2" : " \u25BC") : "";
 
+  const mosaicCustomColumns = () =>
+    (ctx.customColumns() ?? []).filter(c => c.applies_to === "mosaic");
+
   const [notes, setNotes] = createSignal("");
   const [notesSaving, setNotesSaving] = createSignal(false);
   let notesTimer: ReturnType<typeof setTimeout> | undefined;
@@ -111,18 +116,43 @@ const MosaicDetailPage: Component = () => {
           <div class="rounded-[var(--radius-md)] bg-theme-surface border border-theme-border p-4 space-y-6">
             {/* Header */}
             <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
-              <div class="flex items-center gap-2">
-                <h2 class="text-sm font-semibold text-theme-text-primary">{data().name}</h2>
-                <HelpPopover>
-                  <p class="text-sm text-theme-text-secondary">
-                    The Mosaic Detail page shows all panels belonging to this mosaic project along with their individual and combined statistics.
-                  </p>
-                  <ul class="list-disc list-inside space-y-1 text-sm text-theme-text-secondary">
-                    <li>The <strong class="text-theme-text-primary">panel table</strong> lists each panel's target, integration time, frame count, and last session date. Click column headers to sort.</li>
-                    <li>Click a panel's target name to navigate to its full Target Detail page.</li>
-                    <li>Use <strong class="text-theme-text-primary">Notes</strong> to record project-level information like imaging goals, completion status, or processing notes.</li>
-                  </ul>
-                </HelpPopover>
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                  <h2 class="text-sm font-semibold text-theme-text-primary">{data().name}</h2>
+                  <HelpPopover>
+                    <p class="text-sm text-theme-text-secondary">
+                      The Mosaic Detail page shows all panels belonging to this mosaic project along with their individual and combined statistics.
+                    </p>
+                    <ul class="list-disc list-inside space-y-1 text-sm text-theme-text-secondary">
+                      <li>The <strong class="text-theme-text-primary">panel table</strong> lists each panel's target, integration time, frame count, and last session date. Click column headers to sort.</li>
+                      <li>Click a panel's target name to navigate to its full Target Detail page.</li>
+                      <li>Use <strong class="text-theme-text-primary">Notes</strong> to record project-level information like imaging goals, completion status, or processing notes.</li>
+                    </ul>
+                  </HelpPopover>
+                </div>
+                <div class="flex items-center gap-4">
+                  <For each={mosaicCustomColumns()}>
+                    {(col) => (
+                      <Show when={isColumnVisible(ctx.columnVisibility(), "mosaic_table", "custom", col.slug)}>
+                        <div class="flex items-center gap-1.5 text-sm">
+                          <span class="text-theme-text-tertiary text-xs">{col.name}:</span>
+                          <InlineEditCell
+                            columnType={col.column_type}
+                            value={data().custom_values?.[col.slug]}
+                            dropdownOptions={col.dropdown_options}
+                            onSave={(val) => {
+                              api.setCustomValue({
+                                column_id: col.id,
+                                mosaic_id: params.mosaicId,
+                                value: val,
+                              });
+                            }}
+                          />
+                        </div>
+                      </Show>
+                    )}
+                  </For>
+                </div>
               </div>
               <div class="flex gap-4 text-xs text-theme-text-secondary">
                 <span>{data().panels.length} panels</span>
