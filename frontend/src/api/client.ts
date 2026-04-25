@@ -789,7 +789,8 @@ export const api = {
 
   setCustomValue: (body: {
     column_id: string;
-    target_id: string;
+    target_id?: string | null;
+    mosaic_id?: string | null;
     session_date?: string | null;
     rig_label?: string | null;
     value: string;
