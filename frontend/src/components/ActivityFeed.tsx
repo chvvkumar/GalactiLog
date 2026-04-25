@@ -464,6 +464,25 @@ const ActivityFeed: Component = () => {
 
   const jobs = () => activeJobs();
   const jobCount = () => jobs().length;
+  const [showClearConfirm, setShowClearConfirm] = createSignal(false);
+  const [clearing, setClearing] = createSignal(false);
+
+  const handleClear = async () => {
+    setShowClearConfirm(false);
+    setClearing(true);
+    try {
+      await api.clearActivityLog();
+      batch(() => {
+        setItems([]);
+        setNextCursor(null);
+        setTotal(0);
+        setLatestId(null);
+        setNewCount(0);
+      });
+    } catch { /* ignore */ } finally {
+      setClearing(false);
+    }
+  };
 
   return (
     <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] flex flex-col h-full min-h-0">
@@ -476,6 +495,37 @@ const ActivityFeed: Component = () => {
             </span>
           </Show>
         </div>
+        <Show
+          when={!showClearConfirm()}
+          fallback={
+            <div class="flex items-center gap-1.5">
+              <span class="text-xs text-theme-text-secondary">Clear all?</span>
+              <button
+                onClick={handleClear}
+                disabled={clearing()}
+                class="px-2 py-0.5 text-xs text-theme-error border border-theme-error/40 rounded hover:bg-theme-error/10 transition-colors disabled:opacity-50"
+              >
+                Yes
+              </button>
+              <button
+                onClick={() => setShowClearConfirm(false)}
+                class="px-2 py-0.5 text-xs text-theme-text-secondary border border-theme-border rounded hover:text-theme-text-primary transition-colors"
+              >
+                No
+              </button>
+            </div>
+          }
+        >
+          <Show when={items().length > 0}>
+            <button
+              onClick={() => setShowClearConfirm(true)}
+              class="text-xs text-theme-text-secondary hover:text-theme-text-primary transition-colors"
+              title="Clear activity log"
+            >
+              Clear
+            </button>
+          </Show>
+        </Show>
       </div>
 
       <Show when={hasActiveJobs()}>
