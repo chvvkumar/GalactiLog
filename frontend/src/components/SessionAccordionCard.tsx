@@ -620,20 +620,22 @@ const SessionAccordionCard: Component<{
                       </svg>
                     </div>
                   </button>
-                  <Show when={showNotes()}>
-                    <div class="px-3 pb-3">
-                      <textarea
-                        class="w-full bg-theme-elevated border border-theme-border rounded px-3 py-2 text-sm text-theme-text-primary placeholder-theme-text-secondary resize-y min-h-[50px]"
-                        placeholder="Add notes for this session..."
-                        value={sessionNote()}
-                        onInput={(e) => {
-                          const val = e.currentTarget.value;
-                          setSessionNote(val);
-                          saveSessionNote(val);
-                        }}
-                      />
+                  <div class={`grid transition-[grid-template-rows] duration-200 ${showNotes() ? "grid-rows-[1fr]" : "grid-rows-[0fr]"}`}>
+                    <div class="overflow-hidden">
+                      <div class="px-3 pb-3">
+                        <textarea
+                          class="w-full bg-theme-elevated border border-theme-border rounded px-3 py-2 text-sm text-theme-text-primary placeholder-theme-text-secondary resize-y min-h-[50px]"
+                          placeholder="Add notes for this session..."
+                          value={sessionNote()}
+                          onInput={(e) => {
+                            const val = e.currentTarget.value;
+                            setSessionNote(val);
+                            saveSessionNote(val);
+                          }}
+                        />
+                      </div>
                     </div>
-                  </Show>
+                  </div>
                 </div>
 
                 {/* Session Summary (collapsible) */}
@@ -652,7 +654,8 @@ const SessionAccordionCard: Component<{
                       <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
                     </svg>
                   </button>
-                <Show when={showSummary()}>
+                <div class={`grid transition-[grid-template-rows] duration-200 ${showSummary() ? "grid-rows-[1fr]" : "grid-rows-[0fr]"}`}>
+                <div class="overflow-hidden">
                 <div class="px-3 pb-3">
                 {/* Headline stats row with action buttons */}
                 <div class="flex items-center gap-x-4 gap-y-1 text-label">
@@ -817,66 +820,69 @@ const SessionAccordionCard: Component<{
                 >
                   {showDetails() ? "▾ Hide Details" : "▸ Show Details"}
                 </button>
-                <Show when={showDetails()}>
-                  <div class="mt-3 overflow-x-auto">
-                    <table class="w-full text-xs" style={{ "border-collapse": "collapse" }}>
-                      <thead>
-                        <tr class="text-tiny text-theme-text-tertiary uppercase tracking-wider border-b border-theme-border">
-                          <Show when={isMultiRig()}><th class="text-left px-2 pb-1.5 pt-2.5">Rig</th></Show>
-                          <th class="text-left px-2 pb-1.5 pt-2.5">Filter</th>
-                          <th class="text-right px-2 pb-1.5 pt-2.5">Frames</th>
-                          <th class="text-right px-2 pb-1.5 pt-2.5">Integration</th>
-                          <th class="text-right px-2 pb-1.5 pt-2.5">HFR</th>
-                          <th class="text-right px-2 pb-1.5 pt-2.5">Ecc</th>
-                          <th class="text-right px-2 pb-1.5 pt-2.5">Exp</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        <Show when={isMultiRig()} fallback={
-                          <For each={detail().filter_details}>
-                            {(f) => (
-                              <tr class="border-b border-theme-border/50 hover:bg-theme-hover transition-colors duration-100">
-                                <td class="py-1.5 px-2 text-theme-text-primary">{f.filter_name}</td>
-                                <td class="py-1.5 px-2 text-right text-theme-text-primary">{f.frame_count}</td>
-                                <td class="py-1.5 px-2 text-right text-theme-text-secondary">{formatIntegration(f.integration_seconds)}</td>
-                                <td class="py-1.5 px-2 text-right text-metric-hfr">{f.median_hfr?.toFixed(2) ?? "—"}</td>
-                                <td class="py-1.5 px-2 text-right text-metric-eccentricity">{f.median_eccentricity?.toFixed(2) ?? "—"}</td>
-                                <td class="py-1.5 px-2 text-right text-theme-text-secondary">{f.exposure_time ?? "—"}s</td>
-                              </tr>
-                            )}
-                          </For>
-                        }>
-                          <For each={detail().rigs}>
-                            {(rig, index) => (
-                              <For each={rig.filter_details}>
-                                {(f, fi) => (
-                                  <tr class={`border-b border-theme-border/50 hover:bg-theme-hover transition-colors duration-100 ${fi() === 0 && index() > 0 ? "border-t-2 border-t-theme-border" : ""}`}>
-                                    {fi() === 0 ? (
-                                      <td class="py-1.5 px-2 text-theme-text-secondary align-top" rowSpan={rig.filter_details.length}>
-                                        <span class="flex items-center gap-1.5">
-                                          <span class="w-2 h-2 rounded-full inline-block flex-shrink-0" style={{ "background-color": rigColor(index()) }} />
-                                          <span class="text-tiny">{rig.telescope ?? ""}</span>
-                                        </span>
-                                      </td>
-                                    ) : null}
-                                    <td class="py-1.5 px-2 text-theme-text-primary">{f.filter_name}</td>
-                                    <td class="py-1.5 px-2 text-right text-theme-text-primary">{f.frame_count}</td>
-                                    <td class="py-1.5 px-2 text-right text-theme-text-secondary">{formatIntegration(f.integration_seconds)}</td>
-                                    <td class="py-1.5 px-2 text-right text-metric-hfr">{f.median_hfr?.toFixed(2) ?? "—"}</td>
-                                    <td class="py-1.5 px-2 text-right text-metric-eccentricity">{f.median_eccentricity?.toFixed(2) ?? "—"}</td>
-                                    <td class="py-1.5 px-2 text-right text-theme-text-secondary">{f.exposure_time ?? "—"}s</td>
-                                  </tr>
-                                )}
-                              </For>
-                            )}
-                          </For>
-                        </Show>
-                      </tbody>
-                    </table>
+                <div class={`grid transition-[grid-template-rows] duration-200 ${showDetails() ? "grid-rows-[1fr]" : "grid-rows-[0fr]"}`}>
+                  <div class="overflow-hidden">
+                    <div class="mt-3 overflow-x-auto">
+                      <table class="w-full text-xs" style={{ "border-collapse": "collapse" }}>
+                        <thead>
+                          <tr class="text-tiny text-theme-text-tertiary uppercase tracking-wider border-b border-theme-border">
+                            <Show when={isMultiRig()}><th class="text-left px-2 pb-1.5 pt-2.5">Rig</th></Show>
+                            <th class="text-left px-2 pb-1.5 pt-2.5">Filter</th>
+                            <th class="text-right px-2 pb-1.5 pt-2.5">Frames</th>
+                            <th class="text-right px-2 pb-1.5 pt-2.5">Integration</th>
+                            <th class="text-right px-2 pb-1.5 pt-2.5">HFR</th>
+                            <th class="text-right px-2 pb-1.5 pt-2.5">Ecc</th>
+                            <th class="text-right px-2 pb-1.5 pt-2.5">Exp</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <Show when={isMultiRig()} fallback={
+                            <For each={detail().filter_details}>
+                              {(f) => (
+                                <tr class="border-b border-theme-border/50 hover:bg-theme-hover transition-colors duration-100">
+                                  <td class="py-1.5 px-2 text-theme-text-primary">{f.filter_name}</td>
+                                  <td class="py-1.5 px-2 text-right text-theme-text-primary">{f.frame_count}</td>
+                                  <td class="py-1.5 px-2 text-right text-theme-text-secondary">{formatIntegration(f.integration_seconds)}</td>
+                                  <td class="py-1.5 px-2 text-right text-metric-hfr">{f.median_hfr?.toFixed(2) ?? "—"}</td>
+                                  <td class="py-1.5 px-2 text-right text-metric-eccentricity">{f.median_eccentricity?.toFixed(2) ?? "—"}</td>
+                                  <td class="py-1.5 px-2 text-right text-theme-text-secondary">{f.exposure_time ?? "—"}s</td>
+                                </tr>
+                              )}
+                            </For>
+                          }>
+                            <For each={detail().rigs}>
+                              {(rig, index) => (
+                                <For each={rig.filter_details}>
+                                  {(f, fi) => (
+                                    <tr class={`border-b border-theme-border/50 hover:bg-theme-hover transition-colors duration-100 ${fi() === 0 && index() > 0 ? "border-t-2 border-t-theme-border" : ""}`}>
+                                      {fi() === 0 ? (
+                                        <td class="py-1.5 px-2 text-theme-text-secondary align-top" rowSpan={rig.filter_details.length}>
+                                          <span class="flex items-center gap-1.5">
+                                            <span class="w-2 h-2 rounded-full inline-block flex-shrink-0" style={{ "background-color": rigColor(index()) }} />
+                                            <span class="text-tiny">{rig.telescope ?? ""}</span>
+                                          </span>
+                                        </td>
+                                      ) : null}
+                                      <td class="py-1.5 px-2 text-theme-text-primary">{f.filter_name}</td>
+                                      <td class="py-1.5 px-2 text-right text-theme-text-primary">{f.frame_count}</td>
+                                      <td class="py-1.5 px-2 text-right text-theme-text-secondary">{formatIntegration(f.integration_seconds)}</td>
+                                      <td class="py-1.5 px-2 text-right text-metric-hfr">{f.median_hfr?.toFixed(2) ?? "—"}</td>
+                                      <td class="py-1.5 px-2 text-right text-metric-eccentricity">{f.median_eccentricity?.toFixed(2) ?? "—"}</td>
+                                      <td class="py-1.5 px-2 text-right text-theme-text-secondary">{f.exposure_time ?? "—"}s</td>
+                                    </tr>
+                                  )}
+                                </For>
+                              )}
+                            </For>
+                          </Show>
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
-                </Show>
                 </div>
-                </Show>
+                </div>
+                </div>
+                </div>
                 </div>
 
                 {/* Session Insights */}
@@ -898,22 +904,26 @@ const SessionAccordionCard: Component<{
                         <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
                       </svg>
                     </button>
-                    <Show when={showInsights()}>
-                      <div class="px-3 pb-3 space-y-1">
-                        <For each={detail().insights}>
-                          {(insight) => (
-                            <div class={`text-xs ${INSIGHT_STYLES[insight.level]}`}>
-                              {INSIGHT_ICONS[insight.level]} {insight.message}
-                            </div>
-                          )}
-                        </For>
+                    <div class={`grid transition-[grid-template-rows] duration-200 ${showInsights() ? "grid-rows-[1fr]" : "grid-rows-[0fr]"}`}>
+                      <div class="overflow-hidden">
+                        <div class="px-3 pb-3 space-y-1">
+                          <For each={detail().insights}>
+                            {(insight) => (
+                              <div class={`text-xs ${INSIGHT_STYLES[insight.level]}`}>
+                                {INSIGHT_ICONS[insight.level]} {insight.message}
+                              </div>
+                            )}
+                          </For>
+                        </div>
                       </div>
-                    </Show>
+                    </div>
                   </div>
                 </Show>
 
                 {/* Session Metrics Chart */}
-                <SessionMetricsChart detail={detail()} enabledRigs={enabledRigs()} onToggleRig={toggleRig} />
+                <div class="tab-fade-in">
+                  <SessionMetricsChart detail={detail()} enabledRigs={enabledRigs()} onToggleRig={toggleRig} />
+                </div>
 
                 {/* Row 4: Per-Frame Table (collapsed) */}
                 <div class="bg-theme-elevated border border-theme-border-em rounded-[var(--radius-sm)]">
@@ -933,33 +943,35 @@ const SessionAccordionCard: Component<{
                       <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
                     </svg>
                   </button>
-                  <Show when={showFrames()}>
-                    <div class="px-3 pb-3">
-                    <Show when={isMultiRig()} fallback={
-                      <div class="overflow-x-auto max-h-[600px] overflow-y-auto">
-                        {renderFrameTable(props.detail!.frames, props.detail!.median_hfr, props.detail!.median_eccentricity)}
+                  <div class={`grid transition-[grid-template-rows] duration-200 ${showFrames() ? "grid-rows-[1fr]" : "grid-rows-[0fr]"}`}>
+                    <div class="overflow-hidden">
+                      <div class="px-3 pb-3">
+                      <Show when={isMultiRig()} fallback={
+                        <div class="overflow-x-auto max-h-[600px] overflow-y-auto">
+                          {renderFrameTable(props.detail!.frames, props.detail!.median_hfr, props.detail!.median_eccentricity)}
+                        </div>
+                      }>
+                        <For each={props.detail!.rigs}>
+                          {(rig, index) => (
+                            <Show when={enabledRigs().includes(rig.rig_label)}>
+                              <div class="mt-2 first:mt-0">
+                                <div class="flex items-center gap-2 mb-1">
+                                  <span class="w-2 h-2 rounded-full inline-block"
+                                    style={{ "background-color": rigColor(index()) }} />
+                                  <span class="text-xs font-semibold text-theme-text-primary">{rig.rig_label}</span>
+                                  <span class="text-tiny text-theme-text-tertiary">{rig.frame_count} frames</span>
+                                </div>
+                                <div class="overflow-x-auto max-h-[600px] overflow-y-auto">
+                                  {renderFrameTable(rig.frames, rig.median_hfr, rig.median_eccentricity)}
+                                </div>
+                              </div>
+                            </Show>
+                          )}
+                        </For>
+                      </Show>
                       </div>
-                    }>
-                      <For each={props.detail!.rigs}>
-                        {(rig, index) => (
-                          <Show when={enabledRigs().includes(rig.rig_label)}>
-                            <div class="mt-2 first:mt-0">
-                              <div class="flex items-center gap-2 mb-1">
-                                <span class="w-2 h-2 rounded-full inline-block"
-                                  style={{ "background-color": rigColor(index()) }} />
-                                <span class="text-xs font-semibold text-theme-text-primary">{rig.rig_label}</span>
-                                <span class="text-tiny text-theme-text-tertiary">{rig.frame_count} frames</span>
-                              </div>
-                              <div class="overflow-x-auto max-h-[600px] overflow-y-auto">
-                                {renderFrameTable(rig.frames, rig.median_hfr, rig.median_eccentricity)}
-                              </div>
-                            </div>
-                          </Show>
-                        )}
-                      </For>
-                    </Show>
                     </div>
-                  </Show>
+                  </div>
                 </div>
 
                 {/* Row 5: FITS Headers */}

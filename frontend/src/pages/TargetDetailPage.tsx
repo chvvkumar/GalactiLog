@@ -484,7 +484,7 @@ const TargetDetailPage: Component = () => {
   };
 
   return (
-    <div class={`min-h-[calc(100vh-57px)] bg-theme-base ${contentWidthClass(contentWidth())}`}>
+    <div class={`page-enter min-h-[calc(100vh-57px)] bg-theme-base ${contentWidthClass(contentWidth())}`}>
       {/* Back nav */}
       <div class="px-4 py-3 border-b border-theme-border">
         <A href="/" class="text-theme-text-secondary hover:text-theme-text-primary text-sm transition-colors">

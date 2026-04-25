@@ -316,6 +316,8 @@ export interface ActivityEvent {
   target_id: number | null;
   actor: string | null;
   duration_ms: number | null;
+  parent_id: number | null;
+  children: ActivityEvent[] | null;
 }
 
 export interface ActiveJob {
@@ -898,6 +900,7 @@ export interface MosaicSummary {
   first_session: string | null;
   last_session: string | null;
   needs_review?: boolean;
+  custom_values?: Record<string, string> | null;
 }
 
 export interface MosaicDetailResponse {
@@ -969,7 +972,7 @@ export interface CustomColumn {
   name: string;
   slug: string;
   column_type: "boolean" | "text" | "dropdown";
-  applies_to: "target" | "session" | "rig";
+  applies_to: "target" | "session" | "rig" | "mosaic";
   dropdown_options: string[] | null;
   display_order: number;
   created_by: string;
@@ -992,4 +995,5 @@ export interface ColumnVisibility {
   dashboard: TableColumnVisibility;
   session_table: TableColumnVisibility;
   session_detail: TableColumnVisibility;
+  mosaic_table: TableColumnVisibility;
 }

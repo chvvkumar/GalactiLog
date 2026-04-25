@@ -75,6 +75,7 @@ class MosaicSummary(BaseModel):
     first_session: str | None = None
     last_session: str | None = None
     needs_review: bool = False
+    custom_values: dict[str, str] | None = None
 
 
 class MosaicPanelBatchItem(BaseModel):

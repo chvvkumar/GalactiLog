@@ -96,7 +96,7 @@ const MosaicDetailPage: Component = () => {
   };
 
   return (
-    <div class={`min-h-[calc(100vh-57px)] bg-theme-base ${contentWidthClass(ctx.contentWidth())}`}>
+    <div class={`page-enter min-h-[calc(100vh-57px)] bg-theme-base ${contentWidthClass(ctx.contentWidth())}`}>
       {/* Back nav */}
       <div class="px-4 py-3 border-b border-theme-border">
         <A href="/mosaics" class="text-theme-text-secondary hover:text-theme-text-primary text-sm transition-colors">
@@ -321,131 +321,133 @@ const MosaicDetailPage: Component = () => {
                         <span class="text-theme-text-secondary text-xs">{expanded() ? "\u25B2" : "\u25BC"}</span>
                       </button>
 
-                      <Show when={expanded()}>
-                        <div class="border-t border-theme-border">
-                          {/* Included sessions */}
-                          <Show when={included().length > 0}>
-                            <div class="p-3 space-y-2">
-                              <div class="text-xs font-medium text-theme-text-secondary">Included ({included().length})</div>
-                              <table class="w-full text-xs">
-                                <thead>
-                                  <tr class="text-theme-text-secondary">
-                                    <th class="px-2 py-1 text-left">Date</th>
-                                    <th class="px-2 py-1 text-left">Filters</th>
-                                    <th class="px-2 py-1 text-right">Frames</th>
-                                    <th class="px-2 py-1 text-right">Integration</th>
-                                    <th class="px-2 py-1"></th>
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  <For each={included()}>
-                                    {(sess) => (
-                                      <tr class="border-t border-theme-border/30 hover:bg-theme-base/30">
-                                        <td class="px-2 py-1 text-theme-text-primary">{sess.session_date}</td>
-                                        <td class="px-2 py-1 text-theme-text-secondary">
-                                          {Object.entries(sess.filters).map(([f, d]) => `${f}: ${d.frames}`).join(", ")}
-                                        </td>
-                                        <td class="px-2 py-1 text-right text-theme-text-secondary">{sess.total_frames}</td>
-                                        <td class="px-2 py-1 text-right text-theme-text-secondary">{formatIntegration(sess.total_integration_seconds)}</td>
-                                        <td class="px-2 py-1 text-right">
-                                          <button
-                                            onClick={() => handleExclude([sess.session_date])}
-                                            class="text-xs text-theme-text-secondary hover:text-theme-danger transition-colors"
-                                          >
-                                            Remove
-                                          </button>
-                                        </td>
-                                      </tr>
-                                    )}
-                                  </For>
-                                </tbody>
-                              </table>
-                            </div>
-                          </Show>
+                      <div class={`grid transition-[grid-template-rows] duration-200 ${expanded() ? "grid-rows-[1fr]" : "grid-rows-[0fr]"}`}>
+                        <div class="overflow-hidden">
+                          <div class="border-t border-theme-border">
+                            {/* Included sessions */}
+                            <Show when={included().length > 0}>
+                              <div class="p-3 space-y-2">
+                                <div class="text-xs font-medium text-theme-text-secondary">Included ({included().length})</div>
+                                <table class="w-full text-xs">
+                                  <thead>
+                                    <tr class="text-theme-text-secondary">
+                                      <th class="px-2 py-1 text-left">Date</th>
+                                      <th class="px-2 py-1 text-left">Filters</th>
+                                      <th class="px-2 py-1 text-right">Frames</th>
+                                      <th class="px-2 py-1 text-right">Integration</th>
+                                      <th class="px-2 py-1"></th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    <For each={included()}>
+                                      {(sess) => (
+                                        <tr class="border-t border-theme-border/30 hover:bg-theme-base/30">
+                                          <td class="px-2 py-1 text-theme-text-primary">{sess.session_date}</td>
+                                          <td class="px-2 py-1 text-theme-text-secondary">
+                                            {Object.entries(sess.filters).map(([f, d]) => `${f}: ${d.frames}`).join(", ")}
+                                          </td>
+                                          <td class="px-2 py-1 text-right text-theme-text-secondary">{sess.total_frames}</td>
+                                          <td class="px-2 py-1 text-right text-theme-text-secondary">{formatIntegration(sess.total_integration_seconds)}</td>
+                                          <td class="px-2 py-1 text-right">
+                                            <button
+                                              onClick={() => handleExclude([sess.session_date])}
+                                              class="text-xs text-theme-text-secondary hover:text-theme-danger transition-colors"
+                                            >
+                                              Remove
+                                            </button>
+                                          </td>
+                                        </tr>
+                                      )}
+                                    </For>
+                                  </tbody>
+                                </table>
+                              </div>
+                            </Show>
 
-                          {/* Available sessions */}
-                          <Show when={available().length > 0}>
-                            <div class="p-3 space-y-2 border-t border-theme-border/50">
-                              <div class="flex items-center justify-between">
-                                <div class="text-xs font-medium text-amber-400">Available ({available().length})</div>
+                            {/* Available sessions */}
+                            <Show when={available().length > 0}>
+                              <div class="p-3 space-y-2 border-t border-theme-border/50">
+                                <div class="flex items-center justify-between">
+                                  <div class="text-xs font-medium text-amber-400">Available ({available().length})</div>
+                                  <button
+                                    onClick={() => handleInclude(available().map((s) => s.session_date))}
+                                    class="text-xs text-theme-accent hover:underline"
+                                  >
+                                    Include all
+                                  </button>
+                                </div>
+                                <table class="w-full text-xs">
+                                  <thead>
+                                    <tr class="text-theme-text-secondary">
+                                      <th class="px-2 py-1 text-left">Date</th>
+                                      <th class="px-2 py-1 text-left">Filters</th>
+                                      <th class="px-2 py-1 text-right">Frames</th>
+                                      <th class="px-2 py-1 text-right">Integration</th>
+                                      <th class="px-2 py-1"></th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    <For each={available()}>
+                                      {(sess) => (
+                                        <tr class="border-t border-theme-border/30 hover:bg-theme-base/30 opacity-60">
+                                          <td class="px-2 py-1 text-theme-text-primary">{sess.session_date}</td>
+                                          <td class="px-2 py-1 text-theme-text-secondary">
+                                            {Object.entries(sess.filters).map(([f, d]) => `${f}: ${d.frames}`).join(", ")}
+                                          </td>
+                                          <td class="px-2 py-1 text-right text-theme-text-secondary">{sess.total_frames}</td>
+                                          <td class="px-2 py-1 text-right text-theme-text-secondary">{formatIntegration(sess.total_integration_seconds)}</td>
+                                          <td class="px-2 py-1 text-right">
+                                            <div class="flex gap-2 justify-end">
+                                              <button
+                                                onClick={() => handleInclude([sess.session_date])}
+                                                class="text-xs text-theme-accent hover:underline"
+                                              >
+                                                Include
+                                              </button>
+                                              <button
+                                                onClick={() => handleIncludeAsNewPanel(sess.session_date)}
+                                                class="text-xs text-theme-accent hover:underline"
+                                              >
+                                                As new panel
+                                              </button>
+                                            </div>
+                                          </td>
+                                        </tr>
+                                      )}
+                                    </For>
+                                  </tbody>
+                                </table>
+                              </div>
+                            </Show>
+
+                            <Show when={!panelSessions.loading && included().length === 0 && available().length === 0}>
+                              <div class="p-3 text-xs text-theme-text-secondary">No sessions found for this panel.</div>
+                            </Show>
+
+                            <Show when={included().length === 0 && !panelSessions.loading}>
+                              <div class="p-3 border-t border-theme-border/50 flex justify-end">
                                 <button
-                                  onClick={() => handleInclude(available().map((s) => s.session_date))}
-                                  class="text-xs text-theme-accent hover:underline"
+                                  onClick={async () => {
+                                    if (!window.confirm(`Delete panel "${panel.panel_label}"?`)) return;
+                                    const data = mosaic();
+                                    if (!data) return;
+                                    try {
+                                      await api.removeMosaicPanel(data.id, panel.panel_id);
+                                      showToast(`Deleted panel "${panel.panel_label}"`);
+                                      refetch();
+                                    } catch {
+                                      showToast("Failed to delete panel", "error");
+                                    }
+                                  }}
+                                  class="text-xs text-theme-text-secondary hover:text-theme-danger transition-colors"
                                 >
-                                  Include all
+                                  Delete panel
                                 </button>
                               </div>
-                              <table class="w-full text-xs">
-                                <thead>
-                                  <tr class="text-theme-text-secondary">
-                                    <th class="px-2 py-1 text-left">Date</th>
-                                    <th class="px-2 py-1 text-left">Filters</th>
-                                    <th class="px-2 py-1 text-right">Frames</th>
-                                    <th class="px-2 py-1 text-right">Integration</th>
-                                    <th class="px-2 py-1"></th>
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  <For each={available()}>
-                                    {(sess) => (
-                                      <tr class="border-t border-theme-border/30 hover:bg-theme-base/30 opacity-60">
-                                        <td class="px-2 py-1 text-theme-text-primary">{sess.session_date}</td>
-                                        <td class="px-2 py-1 text-theme-text-secondary">
-                                          {Object.entries(sess.filters).map(([f, d]) => `${f}: ${d.frames}`).join(", ")}
-                                        </td>
-                                        <td class="px-2 py-1 text-right text-theme-text-secondary">{sess.total_frames}</td>
-                                        <td class="px-2 py-1 text-right text-theme-text-secondary">{formatIntegration(sess.total_integration_seconds)}</td>
-                                        <td class="px-2 py-1 text-right">
-                                          <div class="flex gap-2 justify-end">
-                                            <button
-                                              onClick={() => handleInclude([sess.session_date])}
-                                              class="text-xs text-theme-accent hover:underline"
-                                            >
-                                              Include
-                                            </button>
-                                            <button
-                                              onClick={() => handleIncludeAsNewPanel(sess.session_date)}
-                                              class="text-xs text-theme-accent hover:underline"
-                                            >
-                                              As new panel
-                                            </button>
-                                          </div>
-                                        </td>
-                                      </tr>
-                                    )}
-                                  </For>
-                                </tbody>
-                              </table>
-                            </div>
-                          </Show>
-
-                          <Show when={!panelSessions.loading && included().length === 0 && available().length === 0}>
-                            <div class="p-3 text-xs text-theme-text-secondary">No sessions found for this panel.</div>
-                          </Show>
-
-                          <Show when={included().length === 0 && !panelSessions.loading}>
-                            <div class="p-3 border-t border-theme-border/50 flex justify-end">
-                              <button
-                                onClick={async () => {
-                                  if (!window.confirm(`Delete panel "${panel.panel_label}"?`)) return;
-                                  const data = mosaic();
-                                  if (!data) return;
-                                  try {
-                                    await api.removeMosaicPanel(data.id, panel.panel_id);
-                                    showToast(`Deleted panel "${panel.panel_label}"`);
-                                    refetch();
-                                  } catch {
-                                    showToast("Failed to delete panel", "error");
-                                  }
-                                }}
-                                class="text-xs text-theme-text-secondary hover:text-theme-danger transition-colors"
-                              >
-                                Delete panel
-                              </button>
-                            </div>
-                          </Show>
+                            </Show>
+                          </div>
                         </div>
-                      </Show>
+                      </div>
                     </div>
                   );
                 }}

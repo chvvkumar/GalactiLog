@@ -7,7 +7,7 @@ import { contentWidthClass } from "../utils/format";
 const MosaicsPage: Component = () => {
   const ctx = useSettingsContext();
   return (
-    <div class={`p-4 space-y-6 ${contentWidthClass(ctx.contentWidth())}`}>
+    <div class={`page-enter p-4 space-y-6 ${contentWidthClass(ctx.contentWidth())}`}>
       <div class="flex items-center gap-2">
         <h1 class="text-xl font-semibold tracking-tight text-theme-text-primary">Mosaics</h1>
         <HelpPopover>

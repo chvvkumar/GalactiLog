@@ -21,6 +21,7 @@ class AppliesTo(str, enum.Enum):
     target = "target"
     session = "session"
     rig = "rig"
+    mosaic = "mosaic"
 
 
 class CustomColumn(Base):
@@ -50,8 +51,11 @@ class CustomColumnValue(Base):
     column_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("custom_columns.id", ondelete="CASCADE"), nullable=False,
     )
-    target_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("targets.id", ondelete="CASCADE"), nullable=False,
+    target_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("targets.id", ondelete="CASCADE"), nullable=True,
+    )
+    mosaic_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("mosaics.id", ondelete="CASCADE"), nullable=True,
     )
     session_date: Mapped[datetime | None] = mapped_column(Date, nullable=True)
     rig_label: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -66,11 +70,14 @@ class CustomColumnValue(Base):
     __table_args__ = (
         Index(
             "uq_custom_column_value",
-            "column_id", "target_id",
+            "column_id",
+            func.coalesce(target_id, "00000000-0000-0000-0000-000000000000"),
+            func.coalesce(mosaic_id, "00000000-0000-0000-0000-000000000000"),
             func.coalesce(session_date, "1970-01-01"),
             func.coalesce(rig_label, ""),
             unique=True,
         ),
         Index("ix_custom_column_values_target", "target_id"),
         Index("ix_custom_column_values_column", "column_id"),
+        Index("ix_custom_column_values_mosaic", "mosaic_id"),
     )

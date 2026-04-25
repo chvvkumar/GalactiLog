@@ -26,7 +26,7 @@ render(
   () => (
     <AuthProvider>
       <SettingsProvider>
-        <Suspense fallback={<div />}>
+        <Suspense fallback={<div class="flex items-center justify-center min-h-screen"><span class="text-theme-text-secondary text-sm">Loading...</span></div>}>
           <Router root={App}>
             <Route path="/login" component={LoginPage} />
             <Route path="/" component={Protected(DashboardPage)} />

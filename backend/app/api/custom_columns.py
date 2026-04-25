@@ -151,7 +151,34 @@ async def get_custom_values(
     return [
         CustomColumnValueResponse(
             column_id=str(v.column_id), column_slug=slug,
-            target_id=str(v.target_id), session_date=v.session_date,
+            target_id=str(v.target_id) if v.target_id else None,
+            mosaic_id=str(v.mosaic_id) if v.mosaic_id else None,
+            session_date=v.session_date,
+            rig_label=v.rig_label, value=v.value,
+            updated_by=str(v.updated_by), updated_at=v.updated_at,
+        )
+        for v, slug in rows
+    ]
+
+
+@router.get("/values/mosaic/{mosaic_id}", response_model=list[CustomColumnValueResponse])
+async def get_mosaic_custom_values(
+    mosaic_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    q = (
+        select(CustomColumnValue, CustomColumn.slug)
+        .join(CustomColumn)
+        .where(CustomColumnValue.mosaic_id == mosaic_id)
+    )
+    rows = (await session.execute(q)).all()
+    return [
+        CustomColumnValueResponse(
+            column_id=str(v.column_id), column_slug=slug,
+            target_id=str(v.target_id) if v.target_id else None,
+            mosaic_id=str(v.mosaic_id) if v.mosaic_id else None,
+            session_date=v.session_date,
             rig_label=v.rig_label, value=v.value,
             updated_by=str(v.updated_by), updated_at=v.updated_at,
         )
@@ -166,7 +193,8 @@ async def set_custom_value(
     user: User = Depends(get_current_user),
 ):
     col_id = uuid.UUID(body.column_id)
-    target_id = uuid.UUID(body.target_id)
+    target_id = uuid.UUID(body.target_id) if body.target_id else None
+    mosaic_id = uuid.UUID(body.mosaic_id) if body.mosaic_id else None
 
     col = await session.get(CustomColumn, col_id)
     if not col:
@@ -179,8 +207,15 @@ async def set_custom_value(
 
     conditions = [
         CustomColumnValue.column_id == col_id,
-        CustomColumnValue.target_id == target_id,
     ]
+    if target_id is not None:
+        conditions.append(CustomColumnValue.target_id == target_id)
+    else:
+        conditions.append(CustomColumnValue.target_id.is_(None))
+    if mosaic_id is not None:
+        conditions.append(CustomColumnValue.mosaic_id == mosaic_id)
+    else:
+        conditions.append(CustomColumnValue.mosaic_id.is_(None))
     if body.session_date is not None:
         conditions.append(CustomColumnValue.session_date == body.session_date)
     else:
@@ -201,6 +236,7 @@ async def set_custom_value(
         val = CustomColumnValue(
             column_id=col_id,
             target_id=target_id,
+            mosaic_id=mosaic_id,
             session_date=body.session_date,
             rig_label=body.rig_label,
             value=body.value,

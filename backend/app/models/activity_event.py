@@ -30,3 +30,9 @@ class ActivityEvent(Base):
     )
     actor: Mapped[str | None] = mapped_column(String(64), nullable=True)
     duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    parent_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("activity_events.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )

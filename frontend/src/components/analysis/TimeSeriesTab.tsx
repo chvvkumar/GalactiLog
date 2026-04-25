@@ -72,7 +72,7 @@ const TimeSeriesTab: Component<Props> = (props) => {
       </div>
       <div style={{ height: "500px" }} class="relative">
         <TimeSeriesChart
-          data={data()}
+          data={data.latest}
           loading={data.loading}
           smoothing={smoothing()}
           metricLabel={ALL_METRICS.find((m) => m.value === metric())?.label}

@@ -133,6 +133,10 @@
   --font-mono: 'Cascadia Code', 'Fira Code', monospace;
 }
 
+html {
+  scrollbar-gutter: stable;
+}
+
 body {
   background-color: var(--color-bg-base);
   color: var(--color-text-primary);
@@ -244,6 +248,20 @@ option {
 .sidebar-rail-icon {
   animation: sidebar-rail-icon-in 200ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
   animation-delay: calc(var(--i, 0) * 40ms);
+}
+
+/* Page & tab transitions */
+@keyframes content-fade-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.page-enter {
+  animation: content-fade-in 200ms ease-out both;
+}
+
+.tab-fade-in {
+  animation: content-fade-in 150ms ease-out both;
 }
 
 /* ── Session card styling ──

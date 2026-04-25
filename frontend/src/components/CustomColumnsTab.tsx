@@ -66,7 +66,7 @@ export default function CustomColumnsTab() {
   const refetch = ctx.refetchCustomColumns;
   const [newName, setNewName] = createSignal("");
   const [newType, setNewType] = createSignal<"boolean" | "text" | "dropdown">("boolean");
-  const [newAppliesTo, setNewAppliesTo] = createSignal<"target" | "session" | "rig">("target");
+  const [newAppliesTo, setNewAppliesTo] = createSignal<"target" | "session" | "rig" | "mosaic">("target");
   const [newOptions, setNewOptions] = createSignal<string[]>([]);
   const [editingId, setEditingId] = createSignal<string | null>(null);
   const [editName, setEditName] = createSignal("");
@@ -173,6 +173,7 @@ export default function CustomColumnsTab() {
               <option value="target">Target</option>
               <option value="session">Session</option>
               <option value="rig">Rig</option>
+              <option value="mosaic">Mosaic</option>
             </select>
           </div>
           <button

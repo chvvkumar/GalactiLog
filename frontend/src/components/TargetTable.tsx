@@ -52,7 +52,7 @@ const TargetTable: Component<{ targets: TargetAggregation[] }> = (props) => {
   const targetCustomColumns = () => (ctx.customColumns() ?? []).filter(c => c.applies_to === "target");
 
   function handleColumnToggle(kind: "builtin" | "custom", key: string, visible: boolean) {
-    const v = vis() ?? { dashboard: { builtin: {}, custom: {} }, session_table: { builtin: {}, custom: {} }, session_detail: { builtin: {}, custom: {} } };
+    const v = vis() ?? { dashboard: { builtin: {}, custom: {} }, session_table: { builtin: {}, custom: {} }, session_detail: { builtin: {}, custom: {} }, mosaic_table: { builtin: {}, custom: {} } };
     const updated = structuredClone(v);
     if (!updated.dashboard) updated.dashboard = { builtin: {}, custom: {} };
     if (!updated.dashboard[kind]) updated.dashboard[kind] = {};
