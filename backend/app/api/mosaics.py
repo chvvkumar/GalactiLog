@@ -890,6 +890,18 @@ async def get_mosaic_detail(
         sorted_panels, session, panel_included_dates=panel_included_dates,
     )
 
+    # Load custom column values for this mosaic
+    cv_q = (
+        select(CustomColumnValue.mosaic_id, CustomColumn.slug, CustomColumnValue.value)
+        .join(CustomColumn)
+        .where(
+            CustomColumnValue.mosaic_id == mosaic.id,
+            CustomColumn.applies_to == AppliesTo.mosaic,
+        )
+    )
+    cv_rows = (await session.execute(cv_q)).all()
+    custom_values = {slug: val for _, slug, val in cv_rows} if cv_rows else None
+
     return MosaicDetailResponse(
         id=str(mosaic.id),
         name=mosaic.name,
@@ -902,6 +914,7 @@ async def get_mosaic_detail(
         available_filters=available_filters,
         default_filter=default_filter,
         needs_review=mosaic.needs_review,
+        custom_values=custom_values,
     )
 
 

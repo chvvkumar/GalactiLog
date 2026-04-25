@@ -103,6 +103,7 @@ class MosaicDetailResponse(BaseModel):
     available_filters: list[str] = []
     default_filter: str | None = None
     needs_review: bool = False
+    custom_values: dict[str, str] | None = None
 
 
 class SuggestionPanelSession(BaseModel):
