@@ -18,7 +18,7 @@ const SessionTable: Component<{
   const sessionCustomCols = () => (ctx.customColumns() ?? []).filter(c => c.applies_to === "session");
 
   function handleColumnToggle(kind: "builtin" | "custom", key: string, visible: boolean) {
-    const vis = ctx.columnVisibility() ?? { dashboard: { builtin: {}, custom: {} }, session_table: { builtin: {}, custom: {} }, session_detail: { builtin: {}, custom: {} } };
+    const vis = ctx.columnVisibility() ?? { dashboard: { builtin: {}, custom: {} }, session_table: { builtin: {}, custom: {} }, session_detail: { builtin: {}, custom: {} }, mosaic_table: { builtin: {}, custom: {} } };
     const updated = structuredClone(vis);
     if (!updated.session_table) updated.session_table = { builtin: {}, custom: {} };
     if (!updated.session_table[kind]) updated.session_table[kind] = {};
