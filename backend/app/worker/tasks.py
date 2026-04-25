@@ -222,12 +222,15 @@ def run_scan(self, include_calibration: bool = True) -> dict:
         if removed:
             msg += f", {removed} deleted files purged from catalog"
         with _activity_session() as _db:
-            _emit_activity_sync(
+            scan_activity_id = _emit_activity_sync(
                 _db, redis=_redis, category="scan", severity="info",
                 event_type="scan_complete", message=msg,
                 details={"completed": 0, "failed": 0, "already_known": cataloged, "removed": removed},
                 actor="system",
             )
+        generate_reference_thumbnails.apply_async(countdown=20, kwargs={"parent_activity_id": scan_activity_id})
+        detect_duplicate_targets.apply_async(countdown=30, kwargs={"parent_activity_id": scan_activity_id})
+        backfill_dark_hours.apply_async(countdown=45, kwargs={"parent_activity_id": scan_activity_id})
         return {"status": "complete", "new_files_queued": 0, "already_known": cataloged, "removed": removed}
 
     # Transition to ingesting with final total - ingest tasks are already running
@@ -235,11 +238,8 @@ def run_scan(self, include_calibration: bool = True) -> dict:
     # Some tasks may have already completed during discovery, check now
     check_complete_sync(_redis)
 
-    # Queue post-scan tasks after ingest
-    # (smart_rebuild_targets + detect_mosaic_panels_task are chained from check_complete_sync)
-    detect_duplicate_targets.apply_async(countdown=30)
-    backfill_dark_hours.apply_async(countdown=45)
-
+    # Post-scan tasks (smart_rebuild, detect_mosaic, detect_duplicates, backfill_dark_hours,
+    # generate_reference_thumbnails) are dispatched from check_complete_sync with parent_activity_id.
     _invalidate_stats_cache()
 
     return {
@@ -723,7 +723,7 @@ def regenerate_thumbnail(self, image_id: str, fits_path: str, thumb_path: str) -
 
 
 @celery_app.task(name="detect_duplicate_targets")
-def detect_duplicate_targets():
+def detect_duplicate_targets(parent_activity_id: int | None = None):
     """Detect potential duplicate targets by comparing unresolved names against resolved targets.
 
     Strategy:
@@ -1230,7 +1230,7 @@ SMART_REBUILD_LOCK_TTL = 300  # 5 minutes
 
 
 @celery_app.task(bind=True)
-def smart_rebuild_targets(self, manual: bool = False) -> dict:
+def smart_rebuild_targets(self, manual: bool = False, parent_activity_id: int | None = None) -> dict:
     """Quick fix: repair target data using only local DB + SIMBAD cache.
 
     No SIMBAD network calls. Fixes:
@@ -1246,12 +1246,12 @@ def smart_rebuild_targets(self, manual: bool = False) -> dict:
         return {"status": "skipped", "reason": "already running"}
 
     try:
-        return _smart_rebuild_inner(manual=manual)
+        return _smart_rebuild_inner(manual=manual, parent_activity_id=parent_activity_id)
     finally:
         _redis.delete(SMART_REBUILD_LOCK)
 
 
-def _smart_rebuild_inner(manual: bool = False) -> dict:
+def _smart_rebuild_inner(manual: bool = False, parent_activity_id: int | None = None) -> dict:
     logger.info("smart_rebuild: starting")
     clear_cancel_sync(_redis)
     set_rebuild_running_sync(_redis, "smart", "Running quick fix...")
@@ -1260,13 +1260,14 @@ def _smart_rebuild_inner(manual: bool = False) -> dict:
     def _emit_cancelled(extra: dict | None = None) -> dict:
         details = {**stats, **(extra or {})}
         set_rebuild_cancelled_sync(_redis, "Quick Fix cancelled", details)
-        if manual:
+        if manual or parent_activity_id:
             with _activity_session() as _db:
                 _emit_activity_sync(
                     _db, redis=_redis, category="rebuild", severity="info",
                     event_type="rebuild_cancelled",
                     message="Quick Fix cancelled by user",
                     details=details, actor="system",
+                    parent_id=parent_activity_id,
                 )
         logger.info("smart_rebuild: cancelled")
         return {"status": "cancelled", **details}
@@ -1413,8 +1414,8 @@ def _smart_rebuild_inner(manual: bool = False) -> dict:
         session.commit()
 
     # Queue post-fix tasks
-    detect_duplicate_targets.apply_async(countdown=5)
-    detect_mosaic_panels_task.apply_async(countdown=15)
+    detect_duplicate_targets.apply_async(countdown=5, kwargs={"parent_activity_id": parent_activity_id})
+    detect_mosaic_panels_task.apply_async(countdown=15, kwargs={"parent_activity_id": parent_activity_id})
 
     # Build summary message
     parts = []
@@ -1440,13 +1441,14 @@ def _smart_rebuild_inner(manual: bool = False) -> dict:
     except Exception:
         logger.warning("smart_rebuild: failed to update scan_summary in Redis")
 
-    if manual:
+    if manual or parent_activity_id:
         with _activity_session() as _db:
             _emit_activity_sync(
                 _db, redis=_redis, category="rebuild", severity="info",
                 event_type="rebuild_complete",
                 message=f"Quick Fix: {message}",
                 details=stats, actor="system",
+                parent_id=parent_activity_id,
             )
     logger.info("smart_rebuild: done - %s", stats)
     return {"status": "complete", **stats}
@@ -1457,7 +1459,7 @@ MOSAIC_DETECT_LOCK_TTL = 120  # 2 minutes
 
 
 @celery_app.task(name="detect_mosaic_panels_task")
-def detect_mosaic_panels_task():
+def detect_mosaic_panels_task(parent_activity_id: int | None = None):
     """Run mosaic panel detection as a background Celery task."""
     if not _redis.set(MOSAIC_DETECT_LOCK, "1", nx=True, ex=MOSAIC_DETECT_LOCK_TTL):
         logger.info("detect_mosaic_panels_task: already running, skipping")
@@ -1487,6 +1489,7 @@ def detect_mosaic_panels_task():
                     event_type="mosaic_detection_complete",
                     message=f"Mosaic detection complete: {count} new suggestion{'s' if count != 1 else ''} found",
                     details={"candidates": count}, actor="system",
+                    parent_id=parent_activity_id,
                 )
         except Exception:
             logger.warning("detect_mosaic_panels_task: failed to emit mosaic_detection_complete")
@@ -1640,7 +1643,7 @@ DARK_HOURS_LOCK_TTL = 300  # 5 minutes
 
 
 @celery_app.task
-def backfill_dark_hours() -> dict:
+def backfill_dark_hours(parent_activity_id: int | None = None) -> dict:
     """Compute astronomical dark hours for all imaging dates missing from site_dark_hours.
 
     Extracts site coordinates from FITS headers, then batch-computes dark hours
@@ -1847,7 +1850,7 @@ def detect_filename_targets():
 
 
 @celery_app.task(bind=True)
-def generate_reference_thumbnails(self, force: bool = False) -> dict:
+def generate_reference_thumbnails(self, force: bool = False, parent_activity_id: int | None = None) -> dict:
     """Fetch DSS reference thumbnails for all targets."""
     from app.services.skyview import fetch_reference_thumbnail
 
@@ -1897,6 +1900,7 @@ def generate_reference_thumbnails(self, force: bool = False) -> dict:
                 event_type="rebuild_cancelled",
                 message=f"Reference Thumbnails cancelled after {fetched}/{total}",
                 details=stats, actor="system",
+                parent_id=parent_activity_id,
             )
         return {"status": "cancelled", **stats}
 
@@ -1911,6 +1915,7 @@ def generate_reference_thumbnails(self, force: bool = False) -> dict:
             event_type="ref_thumbnails_complete",
             message=f"Reference Thumbnails: fetched {fetched}/{total}",
             details=stats, actor="system",
+            parent_id=parent_activity_id,
         )
     return stats
 

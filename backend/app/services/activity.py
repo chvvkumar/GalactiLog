@@ -59,6 +59,7 @@ def _build_event(
     target_id: UUID | None = None,
     actor: str | None = None,
     duration_ms: int | None = None,
+    parent_id: int | None = None,
 ) -> ActivityEvent:
     return ActivityEvent(
         severity=severity,
@@ -69,6 +70,7 @@ def _build_event(
         target_id=target_id,
         actor=actor,
         duration_ms=duration_ms,
+        parent_id=parent_id,
     )
 
 
@@ -93,26 +95,30 @@ async def emit(
     target_id: UUID | None = None,
     actor: str | None = None,
     duration_ms: int | None = None,
-) -> None:
+    parent_id: int | None = None,
+) -> int | None:
     """Insert one ActivityEvent row and publish to Redis pubsub activity:new."""
     if not _validate(severity, category):
-        return
+        return None
     event = _build_event(
         category=category, severity=severity, event_type=event_type,
         message=message, details=details, target_id=target_id,
-        actor=actor, duration_ms=duration_ms,
+        actor=actor, duration_ms=duration_ms, parent_id=parent_id,
     )
     try:
         db.add(event)
+        await db.flush()
+        event_id = event.id
         await db.commit()
     except Exception:
         logger.exception("activity.emit: DB insert failed for event_type=%s", event_type)
-        return
+        return None
     try:
         async with async_redis() as r:
             await r.publish("activity:new", _pubsub_payload(event))
     except Exception:
         logger.warning("activity.emit: Redis publish failed for event_type=%s", event_type)
+    return event_id
 
 
 def emit_sync(
@@ -127,22 +133,26 @@ def emit_sync(
     target_id: UUID | None = None,
     actor: str | None = None,
     duration_ms: int | None = None,
-) -> None:
+    parent_id: int | None = None,
+) -> int | None:
     """Sync version of emit() for Celery tasks."""
     if not _validate(severity, category):
-        return
+        return None
     event = _build_event(
         category=category, severity=severity, event_type=event_type,
         message=message, details=details, target_id=target_id,
-        actor=actor, duration_ms=duration_ms,
+        actor=actor, duration_ms=duration_ms, parent_id=parent_id,
     )
     try:
         db.add(event)
+        db.flush()
+        event_id = event.id
         db.commit()
     except Exception:
         logger.exception("activity.emit_sync: DB insert failed for event_type=%s", event_type)
-        return
+        return None
     try:
         redis.publish("activity:new", _pubsub_payload(event))
     except Exception:
         logger.warning("activity.emit_sync: Redis publish failed for event_type=%s", event_type)
+    return event_id

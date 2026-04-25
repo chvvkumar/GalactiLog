@@ -17,6 +17,9 @@ let cachedSuggestions: MosaicSuggestionResponse[] | null = null;
 let cachedMosaics: MosaicSummary[] | null = null;
 
 import { formatIntegration } from "../../utils/format";
+import InlineEditCell from "../InlineEditCell";
+import ColumnPicker from "../ColumnPicker";
+import { isColumnVisible } from "../../utils/displaySettings";
 
 export const MosaicsTab: Component = () => {
   const { isAdmin } = useAuth();
@@ -66,6 +69,31 @@ export const MosaicsTab: Component = () => {
 
   // Delete confirmation
   const [confirmDeleteId, setConfirmDeleteId] = createSignal<string | null>(null);
+
+  // Collapse state
+  const [keywordsCollapsed, setKeywordsCollapsed] = createSignal(false);
+  const [suggestionsCollapsed, setSuggestionsCollapsed] = createSignal(false);
+  const [mosaicsCollapsed, setMosaicsCollapsed] = createSignal(false);
+
+  // Custom column support for mosaics
+  const mosaicCustomColumns = () =>
+    (settingsCtx.customColumns() ?? []).filter(c => c.applies_to === "mosaic");
+
+  const vis = () => settingsCtx.columnVisibility();
+
+  function handleColumnToggle(kind: "builtin" | "custom", key: string, visible: boolean) {
+    const v = vis() ?? {
+      dashboard: { builtin: {}, custom: {} },
+      session_table: { builtin: {}, custom: {} },
+      session_detail: { builtin: {}, custom: {} },
+      mosaic_table: { builtin: {}, custom: {} },
+    };
+    const updated = structuredClone(v);
+    if (!updated.mosaic_table) updated.mosaic_table = { builtin: {}, custom: {} };
+    if (!updated.mosaic_table[kind]) updated.mosaic_table[kind] = {};
+    updated.mosaic_table[kind][key] = visible;
+    settingsCtx.saveColumnVisibility(updated);
+  }
 
   const keywords = () => settingsCtx.settings()?.general?.mosaic_keywords ?? ["Panel", "P"];
 
@@ -490,15 +518,27 @@ export const MosaicsTab: Component = () => {
     }
   };
 
+  // Compute total column count for expanded row colspan
+  const totalColumns = () => {
+    let count = 1; // Name always visible
+    if (isColumnVisible(vis(), "mosaic_table", "builtin", "panels")) count++;
+    if (isColumnVisible(vis(), "mosaic_table", "builtin", "integration")) count++;
+    if (isColumnVisible(vis(), "mosaic_table", "builtin", "frames")) count++;
+    if (isColumnVisible(vis(), "mosaic_table", "builtin", "date_range")) count++;
+    count += mosaicCustomColumns().filter(c => isColumnVisible(vis(), "mosaic_table", "custom", c.slug)).length;
+    count++; // actions column
+    return count;
+  };
+
   return (
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
-      {/* Left column: Detection + Suggestions */}
-      <div class="space-y-4">
+    <div class="space-y-4">
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
 
       {/* Detection Keywords */}
       <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-4 space-y-3">
-        <div class="flex justify-between items-center">
+        <div class="flex justify-between items-center cursor-pointer select-none" onClick={() => setKeywordsCollapsed(!keywordsCollapsed())}>
           <div class="flex items-center gap-2">
+            <span class="text-theme-text-secondary text-xs">{keywordsCollapsed() ? "▶" : "▼"}</span>
             <h3 class="text-theme-text-primary font-medium">Detection Keywords</h3>
             <HelpPopover title="Detection Keywords">
               <p>Token strings used to detect mosaic panels inside target names. When a target name contains a keyword followed by a number, the target is treated as a panel candidate.</p>
@@ -508,7 +548,7 @@ export const MosaicsTab: Component = () => {
           </div>
           <Show when={isAdmin()}>
             <button
-              onClick={handleDetect}
+              onClick={(e) => { e.stopPropagation(); handleDetect(); }}
               disabled={detecting()}
               class="px-4 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded text-sm font-medium disabled:opacity-50 hover:bg-theme-accent/25 transition-colors"
             >
@@ -516,6 +556,7 @@ export const MosaicsTab: Component = () => {
             </button>
           </Show>
         </div>
+        <Show when={!keywordsCollapsed()}>
         <div class="flex flex-wrap gap-2">
           <For each={keywords()}>
             {(kw) => (
@@ -552,12 +593,14 @@ export const MosaicsTab: Component = () => {
             </button>
           </div>
         </Show>
+        </Show>
       </div>
 
       {/* Auto-detected Suggestions */}
       <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-4 space-y-3">
-        <div class="flex justify-between items-center">
+        <div class="flex justify-between items-center cursor-pointer select-none" onClick={() => setSuggestionsCollapsed(!suggestionsCollapsed())}>
           <div class="flex items-center gap-2">
+            <span class="text-theme-text-secondary text-xs">{suggestionsCollapsed() ? "▶" : "▼"}</span>
             <h3 class="text-theme-text-primary font-medium">
               Suggestions ({suggestionFilter() ? `${filteredSuggestions().length}/` : ""}{suggestions().length})
             </h3>
@@ -571,6 +614,7 @@ export const MosaicsTab: Component = () => {
           <Show when={isAdmin()}>
             <select
               value={campaignGap()}
+              onClick={(e) => e.stopPropagation()}
               onChange={async (e) => {
                 const val = parseInt(e.currentTarget.value, 10);
                 try {
@@ -594,6 +638,7 @@ export const MosaicsTab: Component = () => {
             </select>
           </Show>
         </div>
+        <Show when={!suggestionsCollapsed()}>
         <Show when={suggestions().length > 4}>
           <input
             type="text"
@@ -680,7 +725,7 @@ export const MosaicsTab: Component = () => {
                   });
                 };
                 const sortIcon = (key: SortKey) =>
-                  sortKey() === key ? (sortAsc() ? " \u25B4" : " \u25BE") : "";
+                  sortKey() === key ? (sortAsc() ? " ▴" : " ▾") : "";
 
                 return (
                   <div class="bg-theme-elevated border border-theme-border-em rounded-[var(--radius-sm)] overflow-hidden">
@@ -707,14 +752,14 @@ export const MosaicsTab: Component = () => {
                           </span>
                           <div class="text-xs text-theme-text-secondary mt-0.5">
                             {s.panel_labels.length} panels
-                            {" \u00b7 "}
+                            {" · "}
                             <span classList={{ "text-theme-warning": totalFrames() === 0 }}>
                               {totalFrames()} frames
                             </span>
-                            {" \u00b7 "}
+                            {" · "}
                             {formatIntegration(totalInt())}
                             <Show when={(s.other_session_count ?? 0) > 0}>
-                              {" \u00b7 "}
+                              {" · "}
                               <span class="text-amber-400">
                                 +{s.other_session_count} more sessions
                               </span>
@@ -722,7 +767,7 @@ export const MosaicsTab: Component = () => {
                           </div>
                         </div>
                         <span class="text-theme-text-secondary text-xs ml-2">
-                          {expandedSuggestion() === s.id ? "\u25B2" : "\u25BC"}
+                          {expandedSuggestion() === s.id ? "▲" : "▼"}
                         </span>
                       </button>
                       <Show when={isAdmin()}>
@@ -806,7 +851,7 @@ export const MosaicsTab: Component = () => {
                                     <td class="px-3 py-1.5 text-theme-text-primary">{sess.panel_label}</td>
                                     <td class="px-3 py-1.5 text-theme-text-secondary">{sess.object_name}</td>
                                     <td class="px-3 py-1.5 text-theme-text-secondary">{sess.date}</td>
-                                    <td class="px-3 py-1.5 text-theme-text-secondary">{sess.filter_used || "\u2014"}</td>
+                                    <td class="px-3 py-1.5 text-theme-text-secondary">{sess.filter_used || "—"}</td>
                                     <td class="px-3 py-1.5 text-theme-text-secondary text-right">{sess.frames}</td>
                                     <td class="px-3 py-1.5 text-theme-text-secondary text-right">{formatIntegration(sess.integration_seconds)}</td>
                                   </tr>
@@ -824,14 +869,16 @@ export const MosaicsTab: Component = () => {
             </For>
           </div>
         </Show>
+        </Show>
       </div>
 
-      </div>{/* end left column */}
+      </div>{/* end top row grid */}
 
-      {/* Right column: Existing Mosaics */}
+      {/* Mosaics section - full width */}
       <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-4 space-y-3">
-        <div class="flex justify-between items-center">
+        <div class="flex justify-between items-center cursor-pointer select-none" onClick={() => setMosaicsCollapsed(!mosaicsCollapsed())}>
           <div class="flex items-center gap-2">
+            <span class="text-theme-text-secondary text-xs">{mosaicsCollapsed() ? "▶" : "▼"}</span>
             <h3 class="text-theme-text-primary font-medium">
               Mosaics ({mosaics().length})
             </h3>
@@ -841,6 +888,7 @@ export const MosaicsTab: Component = () => {
               <p>Example: "M31 Mosaic 2x3" holds six target panels; opening the mosaic detail page shows the composite image and per-panel progress.</p>
             </HelpPopover>
           </div>
+          <div class="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
           <Show when={isAdmin()}>
             <div class="flex gap-2">
               <Show when={selectedMosaicIds().size > 0 && !bulkAction()}>
@@ -851,6 +899,18 @@ export const MosaicsTab: Component = () => {
                   Delete Selected ({selectedMosaicIds().size})
                 </button>
               </Show>
+              <Show when={mosaics().some(m => m.needs_review)}>
+                <button
+                  onClick={async (e) => {
+                    e.stopPropagation();
+                    await api.clearMosaicReviews();
+                    await refresh();
+                  }}
+                  class="px-3 py-1.5 text-sm border border-theme-border text-theme-text-secondary rounded-[var(--radius-sm)] hover:text-theme-text-primary hover:border-theme-accent transition-colors"
+                >
+                  Clear All Reviews
+                </button>
+              </Show>
               <button
                 onClick={() => setShowCreate(!showCreate())}
                 class="px-3 py-1.5 text-sm border border-theme-border text-theme-text-secondary rounded-[var(--radius-sm)] hover:text-theme-text-primary hover:border-theme-accent transition-colors"
@@ -859,8 +919,10 @@ export const MosaicsTab: Component = () => {
               </button>
             </div>
           </Show>
+          </div>
         </div>
 
+        <Show when={!mosaicsCollapsed()}>
         {/* Bulk delete progress bar */}
         <Show when={bulkAction() === "deleting"}>
           <div class="space-y-1.5">
@@ -916,246 +978,321 @@ export const MosaicsTab: Component = () => {
             <p class="text-sm text-theme-text-secondary">No mosaics yet.</p>
           }
         >
-          <div class="space-y-2">
-            <For each={mosaics()}>
-              {(m) => (
-                <div class="bg-theme-elevated border border-theme-border-em rounded-[var(--radius-sm)] overflow-hidden">
-                  {/* Collapsed header */}
-                  <div class="flex items-center p-3">
-                    <Show when={isAdmin()}>
-                      <input
-                        type="checkbox"
-                        checked={selectedMosaicIds().has(m.id)}
-                        onChange={() => toggleMosaicSelection(m.id)}
-                        class="accent-[var(--color-accent)] mr-2 shrink-0"
-                      />
+          <table class="w-full text-sm border-collapse">
+            <thead>
+              <tr class="sticky top-0 bg-theme-surface border-b border-theme-border-em z-10">
+                <th class="text-left py-2 px-3 text-label font-medium uppercase tracking-wider text-theme-text-tertiary whitespace-nowrap">Name</th>
+                <Show when={isColumnVisible(vis(), "mosaic_table", "builtin", "panels")}>
+                  <th class="text-right py-2 px-3 text-label font-medium uppercase tracking-wider text-theme-text-tertiary whitespace-nowrap">Panels</th>
+                </Show>
+                <Show when={isColumnVisible(vis(), "mosaic_table", "builtin", "integration")}>
+                  <th class="text-right py-2 px-3 text-label font-medium uppercase tracking-wider text-theme-text-tertiary whitespace-nowrap">Integration</th>
+                </Show>
+                <Show when={isColumnVisible(vis(), "mosaic_table", "builtin", "frames")}>
+                  <th class="text-right py-2 px-3 text-label font-medium uppercase tracking-wider text-theme-text-tertiary whitespace-nowrap">Frames</th>
+                </Show>
+                <Show when={isColumnVisible(vis(), "mosaic_table", "builtin", "date_range")}>
+                  <th class="text-right py-2 px-3 text-label font-medium uppercase tracking-wider text-theme-text-tertiary whitespace-nowrap">Date Range</th>
+                </Show>
+                <For each={mosaicCustomColumns()}>
+                  {(col) => (
+                    <Show when={isColumnVisible(vis(), "mosaic_table", "custom", col.slug)}>
+                      <th class="text-right py-2 px-3 text-label font-medium uppercase tracking-wider text-theme-text-tertiary whitespace-nowrap">{col.name}</th>
                     </Show>
-                    <button
-                      onClick={() => toggleExpand(m.id)}
-                      class="flex-1 flex items-center justify-between text-left hover:bg-theme-base/80 transition-colors"
-                    >
-                      <div class="flex-1">
-                        <span class="text-theme-text-primary text-sm font-medium">
-                          {m.name}
-                        </span>
-                        <div class="text-xs text-theme-text-secondary mt-0.5">
-                          {m.panel_count} panels
-                          {" \u00b7 "}
-                          {formatIntegration(m.total_integration_seconds)} integration
-                          {" \u00b7 "}
-                          {m.total_frames} frames
-                          <Show when={m.first_session}>
-                            {" \u00b7 "}
-                            {m.first_session === m.last_session
-                              ? m.first_session
-                              : `${m.first_session} \u2013 ${m.last_session}`}
+                  )}
+                </For>
+                <th class="text-left py-2 px-3 text-label font-medium uppercase tracking-wider text-theme-text-tertiary whitespace-nowrap">
+                  <ColumnPicker
+                    table="mosaic_table"
+                    builtinColumns={[
+                      { key: "name", label: "Name", alwaysVisible: true },
+                      { key: "panels", label: "Panels" },
+                      { key: "integration", label: "Integration" },
+                      { key: "frames", label: "Frames" },
+                      { key: "date_range", label: "Date Range" },
+                    ]}
+                    customColumns={mosaicCustomColumns()}
+                    visibility={vis()}
+                    onToggle={handleColumnToggle}
+                  />
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              <For each={mosaics()}>
+                {(m) => (
+                  <>
+                    <tr class="border-b border-theme-border hover:bg-theme-base/30 cursor-pointer" onClick={() => toggleExpand(m.id)}>
+                      {/* Name cell */}
+                      <td class="py-2.5 px-3 text-theme-text-primary text-sm">
+                        <div class="flex items-center gap-2">
+                          <Show when={isAdmin()}>
+                            <input
+                              type="checkbox"
+                              checked={selectedMosaicIds().has(m.id)}
+                              onChange={() => toggleMosaicSelection(m.id)}
+                              onClick={(e) => e.stopPropagation()}
+                              class="accent-[var(--color-accent)] shrink-0"
+                            />
                           </Show>
+                          <span class="font-medium">{m.name}</span>
                           <Show when={m.needs_review}>
-                            <span class="text-xs text-amber-400 border border-amber-400/30 rounded px-1.5 py-0.5">
+                            <span class="text-xs text-amber-400 border border-amber-400/30 rounded px-1.5 py-0.5 whitespace-nowrap">
                               Needs Review
                             </span>
                           </Show>
                         </div>
-                      </div>
-                      <span class="text-theme-text-secondary text-xs">
-                        {expandedId() === m.id ? "\u25B2" : "\u25BC"}
-                      </span>
-                    </button>
-                    <div class="flex items-center gap-2 ml-3 shrink-0">
-                      <Show when={isAdmin()}>
-                        <Show
-                          when={confirmDeleteId() === m.id}
-                          fallback={
-                            <button
-                              onClick={() => setConfirmDeleteId(m.id)}
-                              disabled={!!bulkAction()}
-                              class="px-2 py-1.5 text-sm border border-theme-border text-theme-text-secondary rounded hover:text-theme-danger hover:border-theme-danger transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                            >
-                              Delete
-                            </button>
-                          }
-                        >
-                          <div class="flex items-center gap-2">
-                            <span class="text-xs text-theme-danger">Delete?</span>
-                            <button
-                              onClick={() => handleDeleteMosaic(m.id)}
-                              class="px-2 py-1.5 text-sm border border-theme-error/50 text-theme-error rounded-[var(--radius-sm)] hover:bg-theme-error/10 transition-colors"
-                            >
-                              Confirm
-                            </button>
-                            <button
-                              onClick={() => setConfirmDeleteId(null)}
-                              class="px-2 py-1.5 text-sm border border-theme-border text-theme-text-secondary rounded hover:text-theme-text-primary transition-colors"
-                            >
-                              Cancel
-                            </button>
-                          </div>
-                        </Show>
+                      </td>
+                      {/* Panels cell */}
+                      <Show when={isColumnVisible(vis(), "mosaic_table", "builtin", "panels")}>
+                        <td class="py-2.5 px-3 text-right tabular-nums">{m.panel_count}</td>
                       </Show>
-                      <a
-                        href={`/mosaics/${m.id}`}
-                        class="px-4 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded text-sm font-medium hover:bg-theme-accent/25 transition-colors"
-                      >
-                        Detail
-                      </a>
-                    </div>
-                  </div>
-
-                  {/* Expanded detail */}
-                  <Show when={expandedId() === m.id}>
-                    <div class="p-3 border-t border-theme-border space-y-3">
-                      {/* Rename */}
-                      <Show when={isAdmin()}>
-                        <Show
-                          when={renamingId() === m.id}
-                          fallback={
-                            <button
-                              onClick={() => { setRenamingId(m.id); setRenameValue(m.name); }}
-                              class="text-xs text-theme-text-secondary hover:text-theme-text-primary transition-colors"
-                              title="Rename mosaic"
-                            >
-                              Rename
-                            </button>
-                          }
-                        >
-                          <div class="flex gap-2 items-center">
-                            <input
-                              type="text"
-                              value={renameValue()}
-                              onInput={(e) => setRenameValue(e.currentTarget.value)}
-                              onKeyDown={(e) => e.key === "Enter" && handleRename(m.id)}
-                              class="flex-1 px-2 py-1 text-sm bg-theme-base border border-theme-border rounded-[var(--radius-sm)] text-theme-text-primary focus:outline-none focus:border-theme-accent"
-                            />
-                            <button
-                              onClick={() => handleRename(m.id)}
-                              class="px-2 py-1 text-xs border border-theme-accent/50 text-theme-accent rounded-[var(--radius-sm)] hover:bg-theme-accent/10 transition-colors"
-                            >
-                              Save
-                            </button>
-                            <button
-                              onClick={() => setRenamingId(null)}
-                              class="px-2 py-1 text-xs border border-theme-border text-theme-text-secondary rounded hover:text-theme-text-primary transition-colors"
-                            >
-                              Cancel
-                            </button>
-                          </div>
-                        </Show>
+                      {/* Integration cell */}
+                      <Show when={isColumnVisible(vis(), "mosaic_table", "builtin", "integration")}>
+                        <td class="py-2.5 px-3 text-right tabular-nums">{formatIntegration(m.total_integration_seconds)}</td>
                       </Show>
+                      {/* Frames cell */}
+                      <Show when={isColumnVisible(vis(), "mosaic_table", "builtin", "frames")}>
+                        <td class="py-2.5 px-3 text-right tabular-nums">{m.total_frames}</td>
+                      </Show>
+                      {/* Date Range cell */}
+                      <Show when={isColumnVisible(vis(), "mosaic_table", "builtin", "date_range")}>
+                        <td class="py-2.5 px-3 text-right text-theme-text-secondary text-xs">
+                          <Show when={m.first_session} fallback={"—"}>
+                            {m.first_session === m.last_session
+                              ? m.first_session
+                              : `${m.first_session} – ${m.last_session}`}
+                          </Show>
+                        </td>
+                      </Show>
+                      {/* Custom column cells */}
+                      <For each={mosaicCustomColumns()}>
+                        {(col) => (
+                          <Show when={isColumnVisible(vis(), "mosaic_table", "custom", col.slug)}>
+                            <td class="py-2.5 px-3 text-right" onClick={(e) => e.stopPropagation()}>
+                              <InlineEditCell
+                                columnType={col.column_type}
+                                value={m.custom_values?.[col.slug]}
+                                dropdownOptions={col.dropdown_options}
+                                onSave={(val) => {
+                                  api.setCustomValue({
+                                    column_id: col.id,
+                                    mosaic_id: m.id,
+                                    value: val,
+                                  });
+                                }}
+                              />
+                            </td>
+                          </Show>
+                        )}
+                      </For>
+                      {/* Actions cell */}
+                      <td class="py-2.5 px-3" onClick={(e) => e.stopPropagation()}>
+                        <div class="flex items-center justify-end gap-2">
+                          <Show when={isAdmin()}>
+                            <Show
+                              when={confirmDeleteId() === m.id}
+                              fallback={
+                                <button
+                                  onClick={() => setConfirmDeleteId(m.id)}
+                                  disabled={!!bulkAction()}
+                                  class="px-2 py-1.5 text-sm border border-theme-border text-theme-text-secondary rounded hover:text-theme-danger hover:border-theme-danger transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                  Delete
+                                </button>
+                              }
+                            >
+                              <div class="flex items-center gap-2">
+                                <span class="text-xs text-theme-danger">Delete?</span>
+                                <button
+                                  onClick={() => handleDeleteMosaic(m.id)}
+                                  class="px-2 py-1.5 text-sm border border-theme-error/50 text-theme-error rounded-[var(--radius-sm)] hover:bg-theme-error/10 transition-colors"
+                                >
+                                  Confirm
+                                </button>
+                                <button
+                                  onClick={() => setConfirmDeleteId(null)}
+                                  class="px-2 py-1.5 text-sm border border-theme-border text-theme-text-secondary rounded hover:text-theme-text-primary transition-colors"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            </Show>
+                          </Show>
+                          <a
+                            href={`/mosaics/${m.id}`}
+                            class="px-4 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded text-sm font-medium hover:bg-theme-accent/25 transition-colors"
+                          >
+                            Detail
+                          </a>
+                          <span class="text-theme-text-secondary text-xs ml-1">
+                            {expandedId() === m.id ? "▲" : "▼"}
+                          </span>
+                        </div>
+                      </td>
+                    </tr>
 
-                      {/* Panel list */}
-                      <Show when={details()[m.id]}>
-                        {(detail) => (
-                          <div class="space-y-2">
-                            <For each={detail().panels}>
-                              {(p) => (
-                                <div class="flex items-center justify-between p-2 bg-theme-elevated border border-theme-border-em rounded-[var(--radius-sm)]">
-                                  <div class="flex-1">
-                                    <span class="text-theme-text-primary text-sm">
-                                      {p.panel_label}
-                                    </span>
-                                    <span class="text-theme-text-secondary text-xs ml-2">
-                                      {p.target_name}
-                                    </span>
-                                    <div class="text-xs text-theme-text-secondary mt-0.5">
-                                      {formatIntegration(p.total_integration_seconds)}
-                                      {" \u00b7 "}
-                                      {p.total_frames} frames
-                                    </div>
-                                  </div>
-                                  <Show when={isAdmin()}>
-                                    <button
-                                      onClick={() => handleRemovePanel(m.id, p.panel_id)}
-                                      class="px-2 py-1 text-xs border border-theme-border text-theme-text-secondary rounded hover:text-theme-danger hover:border-theme-danger transition-colors"
-                                    >
-                                      Remove
-                                    </button>
+                    {/* Expanded detail row */}
+                    <Show when={expandedId() === m.id}>
+                      <tr>
+                        <td colspan={totalColumns()} class="p-0">
+                          <div class="p-3 border-b border-theme-border bg-theme-base/20 space-y-3">
+                            {/* Rename */}
+                            <Show when={isAdmin()}>
+                              <Show
+                                when={renamingId() === m.id}
+                                fallback={
+                                  <button
+                                    onClick={() => { setRenamingId(m.id); setRenameValue(m.name); }}
+                                    class="text-xs text-theme-text-secondary hover:text-theme-text-primary transition-colors"
+                                    title="Rename mosaic"
+                                  >
+                                    Rename
+                                  </button>
+                                }
+                              >
+                                <div class="flex gap-2 items-center">
+                                  <input
+                                    type="text"
+                                    value={renameValue()}
+                                    onInput={(e) => setRenameValue(e.currentTarget.value)}
+                                    onKeyDown={(e) => e.key === "Enter" && handleRename(m.id)}
+                                    class="flex-1 px-2 py-1 text-sm bg-theme-base border border-theme-border rounded-[var(--radius-sm)] text-theme-text-primary focus:outline-none focus:border-theme-accent"
+                                  />
+                                  <button
+                                    onClick={() => handleRename(m.id)}
+                                    class="px-2 py-1 text-xs border border-theme-accent/50 text-theme-accent rounded-[var(--radius-sm)] hover:bg-theme-accent/10 transition-colors"
+                                  >
+                                    Save
+                                  </button>
+                                  <button
+                                    onClick={() => setRenamingId(null)}
+                                    class="px-2 py-1 text-xs border border-theme-border text-theme-text-secondary rounded hover:text-theme-text-primary transition-colors"
+                                  >
+                                    Cancel
+                                  </button>
+                                </div>
+                              </Show>
+                            </Show>
+
+                            {/* Panel list */}
+                            <Show when={details()[m.id]}>
+                              {(detail) => (
+                                <div class="space-y-2">
+                                  <For each={detail().panels}>
+                                    {(p) => (
+                                      <div class="flex items-center justify-between p-2 bg-theme-elevated border border-theme-border-em rounded-[var(--radius-sm)]">
+                                        <div class="flex-1">
+                                          <span class="text-theme-text-primary text-sm">
+                                            {p.panel_label}
+                                          </span>
+                                          <span class="text-theme-text-secondary text-xs ml-2">
+                                            {p.target_name}
+                                          </span>
+                                          <div class="text-xs text-theme-text-secondary mt-0.5">
+                                            {formatIntegration(p.total_integration_seconds)}
+                                            {" · "}
+                                            {p.total_frames} frames
+                                          </div>
+                                        </div>
+                                        <Show when={isAdmin()}>
+                                          <button
+                                            onClick={() => handleRemovePanel(m.id, p.panel_id)}
+                                            class="px-2 py-1 text-xs border border-theme-border text-theme-text-secondary rounded hover:text-theme-danger hover:border-theme-danger transition-colors"
+                                          >
+                                            Remove
+                                          </button>
+                                        </Show>
+                                      </div>
+                                    )}
+                                  </For>
+                                  <Show when={detail().panels.length === 0}>
+                                    <p class="text-xs text-theme-text-secondary">
+                                      No panels yet. Add targets as panels below.
+                                    </p>
                                   </Show>
                                 </div>
                               )}
-                            </For>
-                            <Show when={detail().panels.length === 0}>
-                              <p class="text-xs text-theme-text-secondary">
-                                No panels yet. Add targets as panels below.
-                              </p>
                             </Show>
-                          </div>
-                        )}
-                      </Show>
 
-                      {/* Add panel */}
-                      <Show when={isAdmin()}>
-                        <Show
-                          when={addingPanelFor() === m.id}
-                          fallback={
-                            <button
-                              onClick={() => {
-                                setAddingPanelFor(m.id);
-                                setPanelSearch("");
-                                setPanelLabel("");
-                                setSelectedTarget(null);
-                                setSearchResults([]);
-                              }}
-                              class="px-2 py-1 text-xs border border-theme-border text-theme-text-secondary rounded hover:text-theme-text-primary transition-colors"
-                            >
-                              + Add Panel
-                            </button>
-                          }
-                        >
-                          <div class="p-2 bg-theme-elevated border border-theme-border-em rounded-[var(--radius-sm)] space-y-2">
-                            <div class="relative">
-                              <input
-                                type="text"
-                                value={panelSearch()}
-                                onInput={(e) => handlePanelSearch(e.currentTarget.value)}
-                                placeholder="Search targets..."
-                                class="w-full px-2 py-1.5 text-sm bg-theme-base border border-theme-border rounded-[var(--radius-sm)] text-theme-text-primary placeholder:text-theme-text-secondary/50 focus:outline-none focus:border-theme-accent"
-                              />
-                              <Show when={searchResults().length > 0}>
-                                <div class="absolute z-10 w-full mt-1 bg-theme-surface border border-theme-border rounded-[var(--radius-sm)] shadow-[var(--shadow-sm)] max-h-40 overflow-y-auto">
-                                  <For each={searchResults()}>
-                                    {(t) => (
-                                      <button
-                                        onClick={() => selectTarget(t)}
-                                        class="w-full text-left px-2 py-1.5 text-sm text-theme-text-primary hover:bg-theme-base/50 transition-colors"
-                                      >
-                                        {t.primary_name}
-                                      </button>
-                                    )}
-                                  </For>
+                            {/* Add panel */}
+                            <Show when={isAdmin()}>
+                              <Show
+                                when={addingPanelFor() === m.id}
+                                fallback={
+                                  <button
+                                    onClick={() => {
+                                      setAddingPanelFor(m.id);
+                                      setPanelSearch("");
+                                      setPanelLabel("");
+                                      setSelectedTarget(null);
+                                      setSearchResults([]);
+                                    }}
+                                    class="px-2 py-1 text-xs border border-theme-border text-theme-text-secondary rounded hover:text-theme-text-primary transition-colors"
+                                  >
+                                    + Add Panel
+                                  </button>
+                                }
+                              >
+                                <div class="p-2 bg-theme-elevated border border-theme-border-em rounded-[var(--radius-sm)] space-y-2">
+                                  <div class="relative">
+                                    <input
+                                      type="text"
+                                      value={panelSearch()}
+                                      onInput={(e) => handlePanelSearch(e.currentTarget.value)}
+                                      placeholder="Search targets..."
+                                      class="w-full px-2 py-1.5 text-sm bg-theme-base border border-theme-border rounded-[var(--radius-sm)] text-theme-text-primary placeholder:text-theme-text-secondary/50 focus:outline-none focus:border-theme-accent"
+                                    />
+                                    <Show when={searchResults().length > 0}>
+                                      <div class="absolute z-10 w-full mt-1 bg-theme-surface border border-theme-border rounded-[var(--radius-sm)] shadow-[var(--shadow-sm)] max-h-40 overflow-y-auto">
+                                        <For each={searchResults()}>
+                                          {(t) => (
+                                            <button
+                                              onClick={() => selectTarget(t)}
+                                              class="w-full text-left px-2 py-1.5 text-sm text-theme-text-primary hover:bg-theme-base/50 transition-colors"
+                                            >
+                                              {t.primary_name}
+                                            </button>
+                                          )}
+                                        </For>
+                                      </div>
+                                    </Show>
+                                  </div>
+                                  <input
+                                    type="text"
+                                    value={panelLabel()}
+                                    onInput={(e) => setPanelLabel(e.currentTarget.value)}
+                                    placeholder="Panel label (e.g., Panel 1)..."
+                                    class="w-full px-2 py-1.5 text-sm bg-theme-base border border-theme-border rounded-[var(--radius-sm)] text-theme-text-primary placeholder:text-theme-text-secondary/50 focus:outline-none focus:border-theme-accent"
+                                  />
+                                  <div class="flex gap-2">
+                                    <button
+                                      onClick={() => handleAddPanel(m.id)}
+                                      class="px-2 py-1 text-xs border border-theme-accent/50 text-theme-accent rounded-[var(--radius-sm)] hover:bg-theme-accent/10 transition-colors"
+                                    >
+                                      Add
+                                    </button>
+                                    <button
+                                      onClick={() => setAddingPanelFor(null)}
+                                      class="px-2 py-1 text-xs border border-theme-border text-theme-text-secondary rounded hover:text-theme-text-primary transition-colors"
+                                    >
+                                      Cancel
+                                    </button>
+                                  </div>
                                 </div>
                               </Show>
-                            </div>
-                            <input
-                              type="text"
-                              value={panelLabel()}
-                              onInput={(e) => setPanelLabel(e.currentTarget.value)}
-                              placeholder="Panel label (e.g., Panel 1)..."
-                              class="w-full px-2 py-1.5 text-sm bg-theme-base border border-theme-border rounded-[var(--radius-sm)] text-theme-text-primary placeholder:text-theme-text-secondary/50 focus:outline-none focus:border-theme-accent"
-                            />
-                            <div class="flex gap-2">
-                              <button
-                                onClick={() => handleAddPanel(m.id)}
-                                class="px-2 py-1 text-xs border border-theme-accent/50 text-theme-accent rounded-[var(--radius-sm)] hover:bg-theme-accent/10 transition-colors"
-                              >
-                                Add
-                              </button>
-                              <button
-                                onClick={() => setAddingPanelFor(null)}
-                                class="px-2 py-1 text-xs border border-theme-border text-theme-text-secondary rounded hover:text-theme-text-primary transition-colors"
-                              >
-                                Cancel
-                              </button>
-                            </div>
-                          </div>
-                        </Show>
-                      </Show>
+                            </Show>
 
-                    </div>
-                  </Show>
-                </div>
-              )}
-            </For>
-          </div>
+                          </div>
+                        </td>
+                      </tr>
+                    </Show>
+                  </>
+                )}
+              </For>
+            </tbody>
+          </table>
+        </Show>
         </Show>
       </div>
     </div>

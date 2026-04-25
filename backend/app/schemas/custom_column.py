@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 class CustomColumnCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     column_type: str = Field(..., pattern=r"^(boolean|text|dropdown)$")
-    applies_to: str = Field(..., pattern=r"^(target|session|rig)$")
+    applies_to: str = Field(..., pattern=r"^(target|session|rig|mosaic)$")
     dropdown_options: list[str] | None = None
 
 
@@ -34,7 +34,8 @@ class CustomColumnResponse(BaseModel):
 
 class CustomColumnValueSet(BaseModel):
     column_id: str
-    target_id: str
+    target_id: str | None = None
+    mosaic_id: str | None = None
     session_date: date | None = None
     rig_label: str | None = None
     value: str
@@ -43,7 +44,8 @@ class CustomColumnValueSet(BaseModel):
 class CustomColumnValueResponse(BaseModel):
     column_id: str
     column_slug: str
-    target_id: str
+    target_id: str | None = None
+    mosaic_id: str | None = None
     session_date: date | None = None
     rig_label: str | None = None
     value: str

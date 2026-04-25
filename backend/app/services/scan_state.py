@@ -225,6 +225,7 @@ def check_complete_sync(r: sync_redis.Redis) -> None:
         if snap.removed:
             parts.append(f"{snap.removed} deleted file{'s' if snap.removed != 1 else ''} purged")
         msg = "Scan complete: " + (", ".join(parts) if parts else "no changes")
+        scan_activity_id = None
         try:
             from app.config import settings as _cfg
             _engine = create_engine(
@@ -232,7 +233,7 @@ def check_complete_sync(r: sync_redis.Redis) -> None:
                 pool_pre_ping=True,
             )
             with _SyncSession(_engine) as _db:
-                emit_sync(
+                scan_activity_id = emit_sync(
                     _db, redis=r, category="scan", severity="info",
                     event_type="scan_complete", message=msg,
                     details={
@@ -269,6 +270,7 @@ def check_complete_sync(r: sync_redis.Redis) -> None:
                             message=f"Thumbnail regen: {len(thumb_failures)} failure{'s' if len(thumb_failures) != 1 else ''}",
                             details={"failed_files": thumb_failures, "truncated": len(raw) > 500},
                             actor="system",
+                            parent_id=scan_activity_id,
                         )
                     if fits_failures:
                         emit_sync(
@@ -277,6 +279,7 @@ def check_complete_sync(r: sync_redis.Redis) -> None:
                             message=f"Scan completed with {len(fits_failures)} file failure{'s' if len(fits_failures) != 1 else ''}",
                             details={"failed_files": fits_failures, "truncated": len(raw) > 500},
                             actor="system",
+                            parent_id=scan_activity_id,
                         )
         except Exception:
             logger.exception("scan_state: failed to emit scan_complete activity")
@@ -286,9 +289,16 @@ def check_complete_sync(r: sync_redis.Redis) -> None:
         except Exception:
             pass
         # Chain post-scan maintenance tasks
-        from app.worker.tasks import smart_rebuild_targets, detect_mosaic_panels_task
-        smart_rebuild_targets.apply_async(countdown=10)
-        detect_mosaic_panels_task.apply_async(countdown=30)
+        from app.worker.tasks import (
+            smart_rebuild_targets, detect_mosaic_panels_task,
+            generate_reference_thumbnails, detect_duplicate_targets,
+            backfill_dark_hours,
+        )
+        smart_rebuild_targets.apply_async(countdown=10, kwargs={"parent_activity_id": scan_activity_id})
+        generate_reference_thumbnails.apply_async(countdown=20, kwargs={"parent_activity_id": scan_activity_id})
+        detect_mosaic_panels_task.apply_async(countdown=30, kwargs={"parent_activity_id": scan_activity_id})
+        detect_duplicate_targets.apply_async(countdown=30, kwargs={"parent_activity_id": scan_activity_id})
+        backfill_dark_hours.apply_async(countdown=45, kwargs={"parent_activity_id": scan_activity_id})
         # Write initial scan summary to Redis for /scan/summary endpoint
         try:
             import json as _json

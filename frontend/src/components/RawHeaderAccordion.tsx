@@ -1,4 +1,4 @@
-import { Component, For, Show, createSignal } from "solid-js";
+import { Component, For, createSignal } from "solid-js";
 
 const RawHeaderAccordion: Component<{ headers: Record<string, unknown> | null }> = (props) => {
   const [open, setOpen] = createSignal(false);
@@ -26,28 +26,30 @@ const RawHeaderAccordion: Component<{ headers: Record<string, unknown> | null }>
           <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
         </svg>
       </button>
-      <Show when={open()}>
-        <div class="px-3 pb-3 max-h-64 overflow-y-auto">
-          <table class="w-full text-xs">
-            <thead class="sticky top-0 bg-theme-base">
-              <tr class="text-theme-text-secondary">
-                <th class="text-left py-1 px-2 font-normal">Key</th>
-                <th class="text-left py-1 px-2 font-normal">Value</th>
-              </tr>
-            </thead>
-            <tbody>
-              <For each={entries()}>
-                {([key, value]) => (
-                  <tr class="border-t border-theme-border/30">
-                    <td class="py-1 px-2 text-theme-text-secondary font-mono">{key}</td>
-                    <td class="py-1 px-2 text-theme-text-primary font-mono break-all">{String(value)}</td>
-                  </tr>
-                )}
-              </For>
-            </tbody>
-          </table>
+      <div class={`grid transition-[grid-template-rows] duration-200 ${open() ? "grid-rows-[1fr]" : "grid-rows-[0fr]"}`}>
+        <div class="overflow-hidden">
+          <div class="px-3 pb-3 max-h-64 overflow-y-auto">
+            <table class="w-full text-xs">
+              <thead class="sticky top-0 bg-theme-base">
+                <tr class="text-theme-text-secondary">
+                  <th class="text-left py-1 px-2 font-normal">Key</th>
+                  <th class="text-left py-1 px-2 font-normal">Value</th>
+                </tr>
+              </thead>
+              <tbody>
+                <For each={entries()}>
+                  {([key, value]) => (
+                    <tr class="border-t border-theme-border/30">
+                      <td class="py-1 px-2 text-theme-text-secondary font-mono">{key}</td>
+                      <td class="py-1 px-2 text-theme-text-primary font-mono break-all">{String(value)}</td>
+                    </tr>
+                  )}
+                </For>
+              </tbody>
+            </table>
+          </div>
         </div>
-      </Show>
+      </div>
     </div>
   );
 };

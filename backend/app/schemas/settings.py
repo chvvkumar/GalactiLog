@@ -65,6 +65,7 @@ class ColumnVisibility(BaseModel):
     dashboard: TableColumnVisibility = TableColumnVisibility()
     session_table: TableColumnVisibility = TableColumnVisibility()
     session_detail: TableColumnVisibility = TableColumnVisibility()
+    mosaic_table: TableColumnVisibility = TableColumnVisibility()
 
 
 class GraphSettings(BaseModel):

@@ -64,7 +64,7 @@ export const SettingsPage: Component = () => {
   const activeTab = () => (tabs().some((t) => t.id === searchParams.tab) ? (searchParams.tab as TabId) : "scan");
 
   return (
-    <div class={`p-4 space-y-6 ${contentWidthClass(ctx.contentWidth())}`}>
+    <div class={`page-enter p-4 space-y-6 ${contentWidthClass(ctx.contentWidth())}`}>
       <h1 class="text-xl font-semibold tracking-tight text-theme-text-primary">Settings</h1>
 
       {/* Tab bar */}
@@ -104,10 +104,12 @@ export const SettingsPage: Component = () => {
       {/* Tab content */}
       <Suspense fallback={<div class="text-theme-text-secondary text-sm p-4">Loading...</div>}>
         <Show when={activeTab() === "scan"}>
-          <ScanManager />
+          <div class="tab-fade-in">
+            <ScanManager />
+          </div>
         </Show>
         <Show when={activeTab() === "equipment"}>
-          <div class="rounded-[var(--radius-md)] bg-theme-surface border border-theme-border p-4 space-y-6">
+          <div class="tab-fade-in rounded-[var(--radius-md)] bg-theme-surface border border-theme-border p-4 space-y-6">
             <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
               <div class="flex items-center gap-2">
                 <h2 class="text-sm font-semibold text-theme-text-primary">Filters</h2>
@@ -129,28 +131,44 @@ export const SettingsPage: Component = () => {
           </div>
         </Show>
         <Show when={activeTab() === "display"}>
-          <DisplayTab />
+          <div class="tab-fade-in">
+            <DisplayTab />
+          </div>
         </Show>
         <Show when={activeTab() === "astrobin"}>
-          <AstroBinTab />
+          <div class="tab-fade-in">
+            <AstroBinTab />
+          </div>
         </Show>
         <Show when={activeTab() === "targets"}>
-          <TargetManagementTab />
+          <div class="tab-fade-in">
+            <TargetManagementTab />
+          </div>
         </Show>
         <Show when={activeTab() === "custom-columns"}>
-          <CustomColumnsTab />
+          <div class="tab-fade-in">
+            <CustomColumnsTab />
+          </div>
         </Show>
         <Show when={activeTab() === "backup" && isAdmin()}>
-          <BackupRestoreTab />
+          <div class="tab-fade-in">
+            <BackupRestoreTab />
+          </div>
         </Show>
         <Show when={activeTab() === "users" && isAdmin()}>
-          <UsersTab />
+          <div class="tab-fade-in">
+            <UsersTab />
+          </div>
         </Show>
         <Show when={activeTab() === "activity-log" && isAdmin()}>
-          <ActivityLogTab />
+          <div class="tab-fade-in">
+            <ActivityLogTab />
+          </div>
         </Show>
         <Show when={activeTab() === "metrics" && isAdmin()}>
-          <MetricsTab />
+          <div class="tab-fade-in">
+            <MetricsTab />
+          </div>
         </Show>
       </Suspense>
     </div>

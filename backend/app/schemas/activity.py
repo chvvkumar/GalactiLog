@@ -18,6 +18,8 @@ class ActivityItem(BaseModel):
     target_id: UUID | None = None
     actor: str | None = None
     duration_ms: int | None = None
+    parent_id: int | None = None
+    children: list[ActivityItem] | None = None
 
     model_config = {"from_attributes": True}
 

@@ -671,6 +671,9 @@ export const api = {
   getMosaics: () =>
     fetchJson<import("../types").MosaicSummary[]>("/mosaics"),
 
+  clearMosaicReviews: () =>
+    fetchJson<void>("/mosaics/clear-reviews", { method: "POST" }),
+
   createMosaic: (name: string, notes?: string, panels?: { target_id: string; panel_label: string }[]) =>
     fetchJson<import("../types").MosaicSummary>("/mosaics", {
       method: "POST",
@@ -789,7 +792,8 @@ export const api = {
 
   setCustomValue: (body: {
     column_id: string;
-    target_id: string;
+    target_id?: string | null;
+    mosaic_id?: string | null;
     session_date?: string | null;
     rig_label?: string | null;
     value: string;

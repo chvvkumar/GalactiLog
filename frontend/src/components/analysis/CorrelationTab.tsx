@@ -76,7 +76,7 @@ const CorrelationTab: Component<Props> = (props) => {
   );
 
   const filteredData = () => {
-    const d = data();
+    const d = data.latest;
     if (!d || !hideOutliers()) return d;
     const pts = d.points.filter((p) => !p.outlier);
     return { ...d, points: pts };
@@ -153,10 +153,10 @@ const CorrelationTab: Component<Props> = (props) => {
       </div>
 
       {/* Stats cards */}
-      <Show when={data()?.x_stats && data()?.y_stats}>
+      <Show when={data.latest?.x_stats && data.latest?.y_stats}>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-2 mt-3">
-          <StatsCard stats={data()!.x_stats!} label={`X: ${X_OPTIONS.find((o) => o.value === customX())?.label}`} />
-          <StatsCard stats={data()!.y_stats!} label={`Y: ${Y_OPTIONS.find((o) => o.value === customY())?.label}`} />
+          <StatsCard stats={data.latest!.x_stats!} label={`X: ${X_OPTIONS.find((o) => o.value === customX())?.label}`} />
+          <StatsCard stats={data.latest!.y_stats!} label={`Y: ${Y_OPTIONS.find((o) => o.value === customY())?.label}`} />
         </div>
       </Show>
     </div>
