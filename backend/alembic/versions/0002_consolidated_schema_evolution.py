@@ -227,8 +227,81 @@ def upgrade() -> None:
 
     conn.execute(text("UPDATE mosaics SET needs_review = true"))
 
+    # -- Activity events: parent_id for hierarchical grouping (was 0003) -----
+
+    if not _column_exists("activity_events", "parent_id"):
+        op.add_column(
+            "activity_events",
+            sa.Column(
+                "parent_id",
+                sa.BigInteger(),
+                sa.ForeignKey("activity_events.id", ondelete="CASCADE"),
+                nullable=True,
+            ),
+        )
+    op.execute(text(
+        "CREATE INDEX IF NOT EXISTS ix_activity_events_parent_id "
+        "ON activity_events (parent_id)"
+    ))
+
+    # -- Custom columns: mosaic support (was 0004) ----------------------------
+
+    op.alter_column("custom_column_values", "target_id", nullable=True)
+
+    op.execute(text("ALTER TYPE applies_to_enum ADD VALUE IF NOT EXISTS 'mosaic'"))
+
+    _add_col(
+        "custom_column_values",
+        sa.Column(
+            "mosaic_id",
+            UUID(as_uuid=True),
+            sa.ForeignKey("mosaics.id", ondelete="CASCADE"),
+            nullable=True,
+        ),
+    )
+    op.execute(text(
+        "CREATE INDEX IF NOT EXISTS ix_custom_column_values_mosaic "
+        "ON custom_column_values (mosaic_id)"
+    ))
+
+    # Rebuild unique constraint to include mosaic_id
+    try:
+        op.drop_index("uq_custom_column_value", table_name="custom_column_values")
+    except Exception:
+        pass  # index may not exist yet on fresh installs
+    op.execute(text("""
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_custom_column_value
+        ON custom_column_values (
+            column_id,
+            COALESCE(target_id, '00000000-0000-0000-0000-000000000000'),
+            COALESCE(mosaic_id, '00000000-0000-0000-0000-000000000000'),
+            COALESCE(session_date, '1970-01-01'),
+            COALESCE(rig_label, '')
+        )
+    """))
+
 
 def downgrade() -> None:
+    # -- Undo mosaic custom columns (was 0004) --------------------------------
+    op.drop_index("uq_custom_column_value", table_name="custom_column_values")
+    op.execute(text("""
+        CREATE UNIQUE INDEX uq_custom_column_value
+        ON custom_column_values (
+            column_id, target_id,
+            COALESCE(session_date, '1970-01-01'),
+            COALESCE(rig_label, '')
+        )
+    """))
+    op.execute(text("DROP INDEX IF EXISTS ix_custom_column_values_mosaic"))
+    if _column_exists("custom_column_values", "mosaic_id"):
+        op.drop_column("custom_column_values", "mosaic_id")
+    op.alter_column("custom_column_values", "target_id", nullable=False)
+
+    # -- Undo activity parent_id (was 0003) -----------------------------------
+    op.execute(text("DROP INDEX IF EXISTS ix_activity_events_parent_id"))
+    if _column_exists("activity_events", "parent_id"):
+        op.drop_column("activity_events", "parent_id")
+
     op.execute(text("DROP TABLE IF EXISTS mosaic_panel_sessions"))
     op.execute(text("DROP TABLE IF EXISTS target_catalog_memberships"))
     op.execute(text("DROP TABLE IF EXISTS activity_events"))
