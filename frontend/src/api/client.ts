@@ -671,6 +671,9 @@ export const api = {
   getMosaics: () =>
     fetchJson<import("../types").MosaicSummary[]>("/mosaics"),
 
+  clearMosaicReviews: () =>
+    fetchJson<void>("/mosaics/clear-reviews", { method: "POST" }),
+
   createMosaic: (name: string, notes?: string, panels?: { target_id: string; panel_label: string }[]) =>
     fetchJson<import("../types").MosaicSummary>("/mosaics", {
       method: "POST",

@@ -614,6 +614,19 @@ async def dismiss_suggestion(
     return {"status": "ok"}
 
 
+@router.post("/clear-reviews")
+async def clear_all_reviews(
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    from sqlalchemy import update
+    await session.execute(
+        update(Mosaic).where(Mosaic.needs_review == True).values(needs_review=False)
+    )
+    await session.commit()
+    return {"ok": True}
+
+
 @router.get("", response_model=list[MosaicSummary])
 async def list_mosaics(
     session: AsyncSession = Depends(get_session),

@@ -899,6 +899,18 @@ export const MosaicsTab: Component = () => {
                   Delete Selected ({selectedMosaicIds().size})
                 </button>
               </Show>
+              <Show when={mosaics().some(m => m.needs_review)}>
+                <button
+                  onClick={async (e) => {
+                    e.stopPropagation();
+                    await api.clearMosaicReviews();
+                    await refresh();
+                  }}
+                  class="px-3 py-1.5 text-sm border border-theme-border text-theme-text-secondary rounded-[var(--radius-sm)] hover:text-theme-text-primary hover:border-theme-accent transition-colors"
+                >
+                  Clear All Reviews
+                </button>
+              </Show>
               <button
                 onClick={() => setShowCreate(!showCreate())}
                 class="px-3 py-1.5 text-sm border border-theme-border text-theme-text-secondary rounded-[var(--radius-sm)] hover:text-theme-text-primary hover:border-theme-accent transition-colors"
