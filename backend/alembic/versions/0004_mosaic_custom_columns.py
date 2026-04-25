@@ -16,6 +16,8 @@ depends_on = None
 
 
 def upgrade() -> None:
+    op.alter_column("custom_column_values", "target_id", nullable=True)
+
     op.execute("ALTER TYPE applies_to_enum ADD VALUE IF NOT EXISTS 'mosaic'")
 
     op.add_column(
@@ -54,3 +56,4 @@ def downgrade() -> None:
     )
     op.drop_index("ix_custom_column_values_mosaic", table_name="custom_column_values")
     op.drop_column("custom_column_values", "mosaic_id")
+    op.alter_column("custom_column_values", "target_id", nullable=False)
