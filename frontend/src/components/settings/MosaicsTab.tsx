@@ -17,6 +17,9 @@ let cachedSuggestions: MosaicSuggestionResponse[] | null = null;
 let cachedMosaics: MosaicSummary[] | null = null;
 
 import { formatIntegration } from "../../utils/format";
+import InlineEditCell from "../InlineEditCell";
+import ColumnPicker from "../ColumnPicker";
+import { isColumnVisible } from "../../utils/displaySettings";
 
 export const MosaicsTab: Component = () => {
   const { isAdmin } = useAuth();
@@ -66,6 +69,31 @@ export const MosaicsTab: Component = () => {
 
   // Delete confirmation
   const [confirmDeleteId, setConfirmDeleteId] = createSignal<string | null>(null);
+
+  // Collapse state
+  const [keywordsCollapsed, setKeywordsCollapsed] = createSignal(false);
+  const [suggestionsCollapsed, setSuggestionsCollapsed] = createSignal(false);
+  const [mosaicsCollapsed, setMosaicsCollapsed] = createSignal(false);
+
+  // Custom column support for mosaics
+  const mosaicCustomColumns = () =>
+    (settingsCtx.customColumns() ?? []).filter(c => c.applies_to === "mosaic");
+
+  const vis = () => settingsCtx.columnVisibility();
+
+  function handleColumnToggle(kind: "builtin" | "custom", key: string, visible: boolean) {
+    const v = vis() ?? {
+      dashboard: { builtin: {}, custom: {} },
+      session_table: { builtin: {}, custom: {} },
+      session_detail: { builtin: {}, custom: {} },
+      mosaic_table: { builtin: {}, custom: {} },
+    };
+    const updated = structuredClone(v);
+    if (!updated.mosaic_table) updated.mosaic_table = { builtin: {}, custom: {} };
+    if (!updated.mosaic_table[kind]) updated.mosaic_table[kind] = {};
+    updated.mosaic_table[kind][key] = visible;
+    settingsCtx.saveColumnVisibility(updated);
+  }
 
   const keywords = () => settingsCtx.settings()?.general?.mosaic_keywords ?? ["Panel", "P"];
 
@@ -491,14 +519,14 @@ export const MosaicsTab: Component = () => {
   };
 
   return (
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
-      {/* Left column: Detection + Suggestions */}
-      <div class="space-y-4">
+    <div class="space-y-4">
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
 
       {/* Detection Keywords */}
       <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-4 space-y-3">
-        <div class="flex justify-between items-center">
+        <div class="flex justify-between items-center cursor-pointer select-none" onClick={() => setKeywordsCollapsed(!keywordsCollapsed())}>
           <div class="flex items-center gap-2">
+            <span class="text-theme-text-secondary text-xs">{keywordsCollapsed() ? "▶" : "▼"}</span>
             <h3 class="text-theme-text-primary font-medium">Detection Keywords</h3>
             <HelpPopover title="Detection Keywords">
               <p>Token strings used to detect mosaic panels inside target names. When a target name contains a keyword followed by a number, the target is treated as a panel candidate.</p>
@@ -508,7 +536,7 @@ export const MosaicsTab: Component = () => {
           </div>
           <Show when={isAdmin()}>
             <button
-              onClick={handleDetect}
+              onClick={(e) => { e.stopPropagation(); handleDetect(); }}
               disabled={detecting()}
               class="px-4 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded text-sm font-medium disabled:opacity-50 hover:bg-theme-accent/25 transition-colors"
             >
@@ -516,6 +544,7 @@ export const MosaicsTab: Component = () => {
             </button>
           </Show>
         </div>
+        <Show when={!keywordsCollapsed()}>
         <div class="flex flex-wrap gap-2">
           <For each={keywords()}>
             {(kw) => (
@@ -552,12 +581,14 @@ export const MosaicsTab: Component = () => {
             </button>
           </div>
         </Show>
+        </Show>
       </div>
 
       {/* Auto-detected Suggestions */}
       <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-4 space-y-3">
-        <div class="flex justify-between items-center">
+        <div class="flex justify-between items-center cursor-pointer select-none" onClick={() => setSuggestionsCollapsed(!suggestionsCollapsed())}>
           <div class="flex items-center gap-2">
+            <span class="text-theme-text-secondary text-xs">{suggestionsCollapsed() ? "▶" : "▼"}</span>
             <h3 class="text-theme-text-primary font-medium">
               Suggestions ({suggestionFilter() ? `${filteredSuggestions().length}/` : ""}{suggestions().length})
             </h3>
@@ -571,6 +602,7 @@ export const MosaicsTab: Component = () => {
           <Show when={isAdmin()}>
             <select
               value={campaignGap()}
+              onClick={(e) => e.stopPropagation()}
               onChange={async (e) => {
                 const val = parseInt(e.currentTarget.value, 10);
                 try {
@@ -594,6 +626,7 @@ export const MosaicsTab: Component = () => {
             </select>
           </Show>
         </div>
+        <Show when={!suggestionsCollapsed()}>
         <Show when={suggestions().length > 4}>
           <input
             type="text"
@@ -824,14 +857,16 @@ export const MosaicsTab: Component = () => {
             </For>
           </div>
         </Show>
+        </Show>
       </div>
 
-      </div>{/* end left column */}
+      </div>{/* end top row grid */}
 
-      {/* Right column: Existing Mosaics */}
+      {/* Mosaics section - full width */}
       <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-4 space-y-3">
-        <div class="flex justify-between items-center">
+        <div class="flex justify-between items-center cursor-pointer select-none" onClick={() => setMosaicsCollapsed(!mosaicsCollapsed())}>
           <div class="flex items-center gap-2">
+            <span class="text-theme-text-secondary text-xs">{mosaicsCollapsed() ? "▶" : "▼"}</span>
             <h3 class="text-theme-text-primary font-medium">
               Mosaics ({mosaics().length})
             </h3>
@@ -841,6 +876,16 @@ export const MosaicsTab: Component = () => {
               <p>Example: "M31 Mosaic 2x3" holds six target panels; opening the mosaic detail page shows the composite image and per-panel progress.</p>
             </HelpPopover>
           </div>
+          <div class="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+          <Show when={mosaicCustomColumns().length > 0}>
+            <ColumnPicker
+              table="mosaic_table"
+              builtinColumns={[]}
+              customColumns={mosaicCustomColumns()}
+              visibility={vis()}
+              onToggle={handleColumnToggle}
+            />
+          </Show>
           <Show when={isAdmin()}>
             <div class="flex gap-2">
               <Show when={selectedMosaicIds().size > 0 && !bulkAction()}>
@@ -859,8 +904,10 @@ export const MosaicsTab: Component = () => {
               </button>
             </div>
           </Show>
+          </div>
         </div>
 
+        <Show when={!mosaicsCollapsed()}>
         {/* Bulk delete progress bar */}
         <Show when={bulkAction() === "deleting"}>
           <div class="space-y-1.5">
@@ -955,6 +1002,27 @@ export const MosaicsTab: Component = () => {
                               Needs Review
                             </span>
                           </Show>
+                          <For each={mosaicCustomColumns()}>
+                            {(col) => (
+                              <Show when={isColumnVisible(vis(), "mosaic_table", "custom", col.slug)}>
+                                <span class="inline-flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                                  <span class="text-theme-text-tertiary">{col.name}:</span>
+                                  <InlineEditCell
+                                    columnType={col.column_type}
+                                    value={m.custom_values?.[col.slug]}
+                                    dropdownOptions={col.dropdown_options}
+                                    onSave={(val) => {
+                                      api.setCustomValue({
+                                        column_id: col.id,
+                                        mosaic_id: m.id,
+                                        value: val,
+                                      });
+                                    }}
+                                  />
+                                </span>
+                              </Show>
+                            )}
+                          </For>
                         </div>
                       </div>
                       <span class="text-theme-text-secondary text-xs">
@@ -1156,6 +1224,7 @@ export const MosaicsTab: Component = () => {
               )}
             </For>
           </div>
+        </Show>
         </Show>
       </div>
     </div>
