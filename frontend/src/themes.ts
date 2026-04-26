@@ -695,10 +695,10 @@ export interface TextSizePreset {
 }
 
 export const TEXT_SIZES: TextSizePreset[] = [
-  { id: "small", label: "Small", fontSize: "13px" },
-  { id: "medium", label: "Medium", fontSize: "14px" },
-  { id: "large", label: "Large", fontSize: "16px" },
-  { id: "x-large", label: "Extra Large", fontSize: "18px" },
+  { id: "small", label: "Small", fontSize: "14px" },
+  { id: "medium", label: "Medium", fontSize: "16px" },
+  { id: "large", label: "Large", fontSize: "18px" },
+  { id: "x-large", label: "Extra Large", fontSize: "20px" },
 ];
 
 export const DEFAULT_TEXT_SIZE = "large";

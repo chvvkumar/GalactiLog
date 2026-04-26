@@ -2,6 +2,7 @@ import { Component, createSignal, createEffect, onMount, onCleanup, Show, For } 
 import Konva from "konva";
 import { api } from "../../api/client";
 import type { PanelStats } from "../../types";
+import { formatIntegration } from "../../utils/format";
 
 // ── Constants ──────────────────────────────────────────────────────────
 const SNAP = 5;
@@ -20,6 +21,10 @@ const ZOOM_STEP = 0.1;
 const FIT_PADDING = 40;
 const SWAP_DURATION = 0.2; // seconds
 const SAVE_DEBOUNCE_MS = 500;
+const INTEGRATION_BG = "rgba(0,0,0,0.55)";
+const DELTA_GREEN = "rgba(34,197,94,0.85)";
+const DELTA_AMBER = "rgba(245,158,11,0.85)";
+const DELTA_RED = "rgba(239,68,68,0.85)";
 
 // ── Props ──────────────────────────────────────────────────────────────
 export interface KonvaMosaicArrangerProps {
@@ -57,8 +62,14 @@ interface TileState {
   group: Konva.Group;
   imageNode: Konva.Image | Konva.Rect;
   labelNode: Konva.Text;
+  labelBg: Konva.Rect;
   badgeNode: Konva.Text;
+  badgeBg: Konva.Rect;
   borderRect: Konva.Rect;
+  integrationNode: Konva.Text;
+  integrationBg: Konva.Rect;
+  deltaNode: Konva.Text;
+  deltaBg: Konva.Rect;
 }
 
 // ── Component ──────────────────────────────────────────────────────────
@@ -76,6 +87,7 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
   const [globalRotation, setGlobalRotation] = createSignal(props.rotationAngle ?? 0);
   const [zoom, setZoom] = createSignal(1.0);
   const [saving, setSaving] = createSignal(false);
+  const [showOverlays, setShowOverlays] = createSignal(true);
 
   let saveTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -351,7 +363,9 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
     // Update badge
     const bt = badgeText(tile.rotation, tile.flipH);
     tile.badgeNode.text(bt);
-    tile.badgeNode.visible(bt.length > 0);
+    const overlayOn = showOverlays();
+    tile.badgeNode.visible(overlayOn && bt.length > 0);
+    tile.badgeBg.visible(overlayOn && bt.length > 0);
 
     tileLayer?.batchDraw();
   };
@@ -363,6 +377,7 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
     y: number,
     tileW: number,
     tileH: number,
+    maxIntegration: number,
   ): TileState => {
     const group = new Konva.Group({
       x,
@@ -438,6 +453,70 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
       listening: false,
     });
 
+    // Integration time overlay (bottom-right)
+    const intText = formatIntegration(panel.total_integration_seconds);
+    const integrationNode = new Konva.Text({
+      text: intText,
+      fontSize: 11,
+      fontFamily: "sans-serif",
+      fill: "white",
+      padding: 3,
+      listening: false,
+    });
+    integrationNode.x(tileW - integrationNode.width() - 4);
+    integrationNode.y(tileH - 22);
+    const integrationBg = new Konva.Rect({
+      x: integrationNode.x(),
+      y: integrationNode.y(),
+      width: integrationNode.width(),
+      height: integrationNode.height(),
+      fill: INTEGRATION_BG,
+      cornerRadius: 3,
+      listening: false,
+    });
+
+    // Delta badge (top-right) — deficit relative to the panel with most integration
+    const deficit = maxIntegration - panel.total_integration_seconds;
+    const pct = maxIntegration > 0 ? panel.total_integration_seconds / maxIntegration : 1;
+    let deltaText = "";
+    let deltaColor = DELTA_GREEN;
+    if (deficit > 60 && maxIntegration > 0) {
+      deltaText = `−${formatIntegration(deficit)}`;
+      deltaColor = pct >= 0.8 ? DELTA_GREEN : pct >= 0.4 ? DELTA_AMBER : DELTA_RED;
+    }
+    const deltaNode = new Konva.Text({
+      text: deltaText,
+      fontSize: 11,
+      fontFamily: "sans-serif",
+      fill: "white",
+      padding: 3,
+      visible: deltaText.length > 0,
+      listening: false,
+    });
+    deltaNode.x(tileW - deltaNode.width() - 4);
+    deltaNode.y(4);
+    const deltaBg = new Konva.Rect({
+      x: deltaNode.x(),
+      y: deltaNode.y(),
+      width: deltaNode.width(),
+      height: deltaNode.height(),
+      fill: deltaColor,
+      cornerRadius: 3,
+      visible: deltaText.length > 0,
+      listening: false,
+    });
+
+    // Apply overlay visibility
+    const overlayVisible = showOverlays();
+    labelNode.visible(overlayVisible);
+    labelBg.visible(overlayVisible);
+    badgeNode.visible(overlayVisible && bt.length > 0);
+    badgeBg.visible(overlayVisible && bt.length > 0);
+    integrationNode.visible(overlayVisible);
+    integrationBg.visible(overlayVisible);
+    deltaNode.visible(overlayVisible && deltaText.length > 0);
+    deltaBg.visible(overlayVisible && deltaText.length > 0);
+
     const tile: TileState = {
       panelId: panel.panel_id,
       panelLabel: panel.panel_label,
@@ -448,10 +527,16 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
       width: tileW,
       height: tileH,
       group,
-      imageNode: placeholder, // will be replaced if thumbnail loads
+      imageNode: placeholder,
       labelNode,
+      labelBg,
       badgeNode,
+      badgeBg,
       borderRect,
+      integrationNode,
+      integrationBg,
+      deltaNode,
+      deltaBg,
     };
 
     group.add(placeholder);
@@ -478,6 +563,12 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
         borderRect.height(scaledH + 6);
         labelNode.y(scaledH - 22);
         labelBg.y(scaledH - 22);
+        integrationNode.x(scaledW - integrationNode.width() - 4);
+        integrationNode.y(scaledH - 22);
+        integrationBg.x(integrationNode.x());
+        integrationBg.y(scaledH - 22);
+        deltaNode.x(scaledW - deltaNode.width() - 4);
+        deltaBg.x(deltaNode.x());
 
         const konvaImg = new Konva.Image({
           image: img,
@@ -485,14 +576,16 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
           height: scaledH,
           cornerRadius: 4,
         });
-        // Replace placeholder with loaded image
         placeholder.destroy();
         group.add(konvaImg);
-        // Move label/badge to top
         badgeBg.moveToTop();
         badgeNode.moveToTop();
+        deltaBg.moveToTop();
+        deltaNode.moveToTop();
         labelBg.moveToTop();
         labelNode.moveToTop();
+        integrationBg.moveToTop();
+        integrationNode.moveToTop();
         borderRect.moveToTop();
 
         tile.imageNode = konvaImg;
@@ -507,7 +600,7 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
       img.src = api.thumbnailUrl(panel.thumbnail_url);
     }
 
-    group.add(badgeBg, badgeNode, labelBg, labelNode);
+    group.add(badgeBg, badgeNode, deltaBg, deltaNode, labelBg, labelNode, integrationBg, integrationNode);
     borderRect.moveToTop();
 
     // Apply initial transform
@@ -648,6 +741,7 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
     tiles.clear();
 
     const isLegacy = !props.pixelCoords;
+    const maxIntegration = Math.max(0, ...panels.map((p) => p.total_integration_seconds));
 
     // Count panels with null coordinates so we can auto-arrange them in a grid
     const nullCount = panels.filter(
@@ -679,7 +773,7 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
       const tileW = TILE_SIZE;
       const tileH = TILE_SIZE;
 
-      const tile = createTileGroup(panel, px, py, tileW, tileH);
+      const tile = createTileGroup(panel, px, py, tileW, tileH, maxIntegration);
       tiles.set(panel.panel_id, tile);
       mosaicGroup.add(tile.group);
     }
@@ -790,9 +884,14 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
         tile.group.add(noDataText);
         noDataNodes.set(panelId, noDataText);
 
-        // Keep label/badge on top
+        tile.badgeBg.moveToTop();
         tile.badgeNode.moveToTop();
+        tile.deltaBg.moveToTop();
+        tile.deltaNode.moveToTop();
+        tile.labelBg.moveToTop();
         tile.labelNode.moveToTop();
+        tile.integrationBg.moveToTop();
+        tile.integrationNode.moveToTop();
         tile.borderRect.moveToTop();
         updateTileTransform(tile);
       } else {
@@ -812,8 +911,14 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
           tile.borderRect.width(scaledW + 6);
           tile.borderRect.height(scaledH + 6);
           tile.labelNode.y(scaledH - 22);
+          tile.labelBg.y(scaledH - 22);
+          tile.integrationNode.x(scaledW - tile.integrationNode.width() - 4);
+          tile.integrationNode.y(scaledH - 22);
+          tile.integrationBg.x(tile.integrationNode.x());
+          tile.integrationBg.y(scaledH - 22);
+          tile.deltaNode.x(scaledW - tile.deltaNode.width() - 4);
+          tile.deltaBg.x(tile.deltaNode.x());
 
-          // Remove current image node (could be placeholder set above while loading)
           if (tile.imageNode) {
             tile.imageNode.destroy();
           }
@@ -827,8 +932,14 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
           tile.group.add(konvaImg);
           tile.imageNode = konvaImg;
 
+          tile.badgeBg.moveToTop();
           tile.badgeNode.moveToTop();
+          tile.deltaBg.moveToTop();
+          tile.deltaNode.moveToTop();
+          tile.labelBg.moveToTop();
           tile.labelNode.moveToTop();
+          tile.integrationBg.moveToTop();
+          tile.integrationNode.moveToTop();
           tile.borderRect.moveToTop();
           updateTileTransform(tile);
           tileLayer?.batchDraw();
@@ -854,6 +965,24 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
     setGlobalRotation(0);
     scheduleSave();
   };
+
+  // ── Toggle overlay visibility across all tiles ────────────────────
+  createEffect(() => {
+    const visible = showOverlays();
+    for (const tile of tiles.values()) {
+      tile.labelNode.visible(visible);
+      tile.labelBg.visible(visible);
+      const bt = badgeText(tile.rotation, tile.flipH);
+      tile.badgeNode.visible(visible && bt.length > 0);
+      tile.badgeBg.visible(visible && bt.length > 0);
+      tile.integrationNode.visible(visible);
+      tile.integrationBg.visible(visible);
+      const hasDelta = tile.deltaNode.text().length > 0;
+      tile.deltaNode.visible(visible && hasDelta);
+      tile.deltaBg.visible(visible && hasDelta);
+    }
+    tileLayer?.batchDraw();
+  });
 
   return (
     <div class="space-y-3">
@@ -937,6 +1066,16 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
           title="Reset all tile rotations, flips, and global rotation to defaults"
         >
           Reset All
+        </button>
+
+        <div class="w-px h-5 bg-theme-border" />
+
+        <button
+          class={`px-2 py-1 rounded transition-colors text-xs ${showOverlays() ? "bg-blue-600/30 text-blue-300" : "bg-theme-surface hover:bg-theme-hover"}`}
+          onClick={() => setShowOverlays(!showOverlays())}
+          title="Toggle panel labels, integration times, and delta overlays"
+        >
+          Labels
         </button>
 
         {/* Spacer to push filter to right */}

@@ -1,4 +1,4 @@
-import { Component, For, Show, createSignal, onMount } from "solid-js";
+import { Component, For, Show, createEffect, createSignal, onMount } from "solid-js";
 import { api } from "../../api/client";
 import { showToast, dismissToast } from "../Toast";
 import { useAuth } from "../AuthProvider";
@@ -70,10 +70,17 @@ export const MosaicsTab: Component = () => {
   // Delete confirmation
   const [confirmDeleteId, setConfirmDeleteId] = createSignal<string | null>(null);
 
-  // Collapse state
-  const [keywordsCollapsed, setKeywordsCollapsed] = createSignal(false);
-  const [suggestionsCollapsed, setSuggestionsCollapsed] = createSignal(false);
+  // Collapse state — keywords and suggestions default collapsed, persisted in localStorage
+  const [keywordsCollapsed, setKeywordsCollapsed] = createSignal(
+    localStorage.getItem("mosaics-keywords-collapsed") !== "false"
+  );
+  const [suggestionsCollapsed, setSuggestionsCollapsed] = createSignal(
+    localStorage.getItem("mosaics-suggestions-collapsed") !== "false"
+  );
   const [mosaicsCollapsed, setMosaicsCollapsed] = createSignal(false);
+
+  createEffect(() => localStorage.setItem("mosaics-keywords-collapsed", String(keywordsCollapsed())));
+  createEffect(() => localStorage.setItem("mosaics-suggestions-collapsed", String(suggestionsCollapsed())));
 
   // Custom column support for mosaics
   const mosaicCustomColumns = () =>
@@ -532,7 +539,7 @@ export const MosaicsTab: Component = () => {
 
   return (
     <div class="space-y-4">
-      <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 items-stretch">
 
       {/* Detection Keywords */}
       <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-4 space-y-3">
