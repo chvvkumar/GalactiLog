@@ -2,6 +2,15 @@ services:
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
+    command: >
+      postgres
+      -c shared_buffers=256MB
+      -c work_mem=8MB
+      -c effective_cache_size=1GB
+      -c maintenance_work_mem=64MB
+      -c checkpoint_completion_target=0.9
+      -c wal_buffers=16MB
+      -c random_page_cost=1.1
     environment:
       POSTGRES_USER: ${GALACTILOG_POSTGRES_USER:-galactilog}
       POSTGRES_PASSWORD: ${GALACTILOG_POSTGRES_PASSWORD:-galactilog}

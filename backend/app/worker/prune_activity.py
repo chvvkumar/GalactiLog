@@ -13,7 +13,7 @@ from app.worker.celery_app import celery_app
 logger = logging.getLogger(__name__)
 
 _sync_url = settings.database_url.replace("+asyncpg", "+psycopg2")
-_sync_engine = create_engine(_sync_url, pool_pre_ping=True)
+_sync_engine = create_engine(_sync_url, pool_pre_ping=True, pool_size=2, max_overflow=2, pool_recycle=1800)
 
 _DEFAULT_RETENTION_DAYS = 90
 

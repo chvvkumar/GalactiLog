@@ -186,9 +186,14 @@ const DashboardFilterProvider: Component<{ children: JSX.Element }> = (props) =>
   const currentPageSize = () => stablePageSize();
 
   // Resource key combines filters + pagination + sort so changes to any trigger a refetch
+  const hasCustomColumns = createMemo(() => {
+    const cols = settingsCtx.customColumns();
+    return Array.isArray(cols) && cols.length > 0;
+  });
+
   const fetchKey = createMemo(() => ({
     filters: filters(), page: currentPage(), pageSize: currentPageSize(),
-    sortBy: apiSortBy(), sortDir: sortDir(),
+    sortBy: apiSortBy(), sortDir: sortDir(), includeCustom: hasCustomColumns(),
   }));
 
   let abortController: AbortController | undefined;
@@ -199,7 +204,7 @@ const DashboardFilterProvider: Component<{ children: JSX.Element }> = (props) =>
     abortController = new AbortController();
     const signal = abortController.signal;
     try {
-      const result = await api.getTargets(k.filters, k.page, k.pageSize, k.sortBy, k.sortDir, signal);
+      const result = await api.getTargets(k.filters, k.page, k.pageSize, k.sortBy, k.sortDir, signal, k.includeCustom);
       setFetchError(null);
       return result;
     } catch (e) {
@@ -222,6 +227,7 @@ const DashboardFilterProvider: Component<{ children: JSX.Element }> = (props) =>
   };
 
   const setPageSize = (size: number) => {
+    setStablePageSize(size);
     const current = settingsCtx.settings()?.general;
     if (current) {
       settingsCtx.saveGeneral({ ...current, default_page_size: size });

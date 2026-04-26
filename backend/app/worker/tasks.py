@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 # Celery uses sync - create a sync engine for the worker
 # Replace asyncpg with psycopg2 for sync operations
 _sync_url = settings.database_url.replace("+asyncpg", "+psycopg2")
-_sync_engine = create_engine(_sync_url, pool_pre_ping=True)
+_sync_engine = create_engine(_sync_url, pool_pre_ping=True, pool_size=2, max_overflow=2, pool_recycle=1800)
 
 from app.config import get_sync_redis
 from app.services.scan_state import (

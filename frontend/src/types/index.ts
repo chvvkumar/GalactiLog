@@ -915,6 +915,7 @@ export interface MosaicDetailResponse {
   available_filters: string[];
   default_filter: string | null;
   needs_review?: boolean;
+  custom_values?: Record<string, string> | null;
 }
 
 export interface PanelThumbnailResponse {
