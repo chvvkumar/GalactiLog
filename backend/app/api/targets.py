@@ -605,12 +605,31 @@ async def get_target_detail(
     user: User = Depends(get_current_user),
 ):
     """Return target identity with cumulative stats and session overviews."""
+    # Column projection: only fetch the fields used for aggregation and
+    # response construction.  Excludes heavy columns like file_path,
+    # file_size, and the many weather/ADU/focuser columns not needed here.
+    _detail_cols = (
+        Image.session_date,
+        Image.capture_date,
+        Image.exposure_time,
+        Image.median_hfr,
+        Image.eccentricity,
+        Image.fwhm,
+        Image.guiding_rms_arcsec,
+        Image.detected_stars,
+        Image.camera,
+        Image.telescope,
+        Image.filter_used,
+        Image.raw_headers,
+        Image.rotator_position,
+    )
+
     if target_id == "obj:__uncategorized__":
         target_name = "Uncategorized"
         target_obj = None
         # Images with no resolved target AND no OBJECT header
         query = (
-            select(Image)
+            select(*_detail_cols)
             .where(
                 Image.resolved_target_id.is_(None),
                 or_(
@@ -626,7 +645,7 @@ async def get_target_detail(
         target_name = object_name
         target_obj = None
         query = (
-            select(Image)
+            select(*_detail_cols)
             .where(
                 Image.raw_headers["OBJECT"].astext == object_name,
                 Image.image_type == "LIGHT",
@@ -645,7 +664,7 @@ async def get_target_detail(
             raise HTTPException(404, "Target has been merged")
         target_name = target_obj.primary_name
         query = (
-            select(Image)
+            select(*_detail_cols)
             .where(
                 Image.resolved_target_id == tid,
                 Image.image_type == "LIGHT",
@@ -654,7 +673,7 @@ async def get_target_detail(
         )
 
     result = await session.execute(query)
-    images = result.scalars().all()
+    images = result.all()
 
     if not images:
         raise HTTPException(status_code=404, detail="No images found for this target")

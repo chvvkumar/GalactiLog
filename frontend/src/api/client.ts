@@ -179,7 +179,7 @@ export async function fetchJson<T>(path: string, init?: RequestInit, signal?: Ab
   return resp.json();
 }
 
-function buildTargetQuery(filters: ActiveFilters, page?: number, pageSize?: number, sortBy?: string, sortDir?: string): string {
+function buildTargetQuery(filters: ActiveFilters, page?: number, pageSize?: number, sortBy?: string, sortDir?: string, includeCustom?: boolean): string {
   const params = new URLSearchParams();
   if (page != null) params.set("page", String(page));
   if (pageSize != null) params.set("page_size", String(pageSize));
@@ -216,7 +216,7 @@ function buildTargetQuery(filters: ActiveFilters, page?: number, pageSize?: numb
     params.set("custom_filters", JSON.stringify(filters.customColumnFilters));
   }
   if (filters.catalog) params.set("catalog", filters.catalog);
-  params.set("include_custom", "true");
+  if (includeCustom) params.set("include_custom", "true");
   return params.toString();
 }
 
@@ -252,8 +252,8 @@ export const api = {
   deleteUser: (id: string) =>
     fetchJson<void>(`/auth/users/${id}`, { method: "DELETE" }),
 
-  getTargets: (filters: ActiveFilters, page?: number, pageSize?: number, sortBy?: string, sortDir?: string, signal?: AbortSignal) =>
-    fetchJson<TargetAggregationResponse>(`/targets?${buildTargetQuery(filters, page, pageSize, sortBy, sortDir)}`, undefined, signal),
+  getTargets: (filters: ActiveFilters, page?: number, pageSize?: number, sortBy?: string, sortDir?: string, signal?: AbortSignal, includeCustom?: boolean) =>
+    fetchJson<TargetAggregationResponse>(`/targets?${buildTargetQuery(filters, page, pageSize, sortBy, sortDir, includeCustom)}`, undefined, signal),
 
   getSessionDetail: (targetId: string, date: string) =>
     fetchJson<SessionDetail>(`/targets/${encodeURIComponent(decodeURIComponent(targetId))}/sessions/${date}`),

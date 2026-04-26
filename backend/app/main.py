@@ -147,7 +147,13 @@ def create_app() -> FastAPI:
 
     application.add_middleware(PrometheusMiddleware)
 
-    # Serve generated thumbnails as static files
+    # Thumbnail endpoint with X-Accel-Redirect for nginx (must be
+    # registered before the StaticFiles mount so it takes priority).
+    from app.api.thumbnails import router as thumbnails_router
+    application.include_router(thumbnails_router)
+
+    # Serve generated thumbnails as static files (fallback for local dev
+    # without nginx; the router above handles prod requests).
     thumbnails_dir = Path(settings.thumbnails_path)
     thumbnails_dir.mkdir(parents=True, exist_ok=True)
     application.mount(

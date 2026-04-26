@@ -1,3 +1,4 @@
+import asyncio
 import re
 import uuid
 from collections import defaultdict
@@ -250,9 +251,9 @@ async def _batch_panel_stats(
 ) -> dict[str, PanelStats]:
     """Compute stats for multiple simple panels (no object_pattern) in bulk queries.
 
-    Panels with session membership records are delegated to _panel_stats
-    one-by-one (each may have different included dates). Panels without
-    membership use the original 3-query bulk approach.
+    Panels with session membership records are handled in batch by fetching
+    all membership data at once, then applying per-panel date filters in Python.
+    Panels without membership use the original 3-query bulk approach.
 
     Returns a dict keyed by str(panel.id).
     """
@@ -272,11 +273,144 @@ async def _batch_panel_stats(
 
     result: dict[str, PanelStats] = {}
 
-    # Handle scoped panels individually (each has different included dates)
-    for p in scoped_panels:
-        result[str(p.id)] = await _panel_stats(p, session)
+    # --- Handle scoped panels in batch ---
+    if scoped_panels:
+        # 1. Batch-fetch all included dates for scoped panels
+        scoped_ids = [p.id for p in scoped_panels]
+        membership_q = (
+            select(
+                MosaicPanelSession.panel_id,
+                MosaicPanelSession.session_date,
+                MosaicPanelSession.status,
+            )
+            .where(MosaicPanelSession.panel_id.in_(scoped_ids))
+        )
+        membership_rows = (await session.execute(membership_q)).all()
 
-    # Handle unscoped panels in bulk
+        # Build per-panel membership info
+        panel_any_membership: set[str] = set()
+        panel_included_dates: dict[str, list] = defaultdict(list)
+        for pid, sdate, status in membership_rows:
+            pid_str = str(pid)
+            panel_any_membership.add(pid_str)
+            if status == "included":
+                panel_included_dates[pid_str].append(sdate)
+
+        # 2. Batch-fetch all image rows for scoped panels' targets (one query)
+        scoped_target_ids = list({p.target_id for p in scoped_panels})
+        scoped_img_q = (
+            select(
+                Image.resolved_target_id,
+                Image.exposure_time,
+                Image.filter_used,
+                Image.session_date,
+                Image.id,
+            )
+            .where(
+                Image.resolved_target_id.in_(scoped_target_ids),
+                Image.image_type == "LIGHT",
+            )
+        )
+        scoped_img_rows = (await session.execute(scoped_img_q)).all()
+
+        # Build per-panel aggregates in Python, filtering by included dates
+        # Map: target_id -> list of scoped panels (multiple panels may share a target)
+        panels_by_target: dict[str, list[MosaicPanel]] = defaultdict(list)
+        for p in scoped_panels:
+            panels_by_target[str(p.target_id)].append(p)
+
+        # Accumulators per panel
+        scoped_agg: dict[str, dict] = {
+            str(p.id): {"integration": 0, "frames": 0, "last_date": None, "filters": {}, "all_dates": set()}
+            for p in scoped_panels
+        }
+
+        for row in scoped_img_rows:
+            tid_str = str(row.resolved_target_id)
+            for p in panels_by_target.get(tid_str, []):
+                pid_str = str(p.id)
+                included = panel_included_dates.get(pid_str, [])
+                # If panel has membership but no included dates, skip all frames
+                if pid_str in panel_any_membership and not included:
+                    # Still count all_dates for available_session_count
+                    if row.session_date is not None:
+                        scoped_agg[pid_str]["all_dates"].add(row.session_date)
+                    continue
+                # If panel has membership, only count included sessions
+                if pid_str in panel_any_membership and row.session_date not in included:
+                    if row.session_date is not None:
+                        scoped_agg[pid_str]["all_dates"].add(row.session_date)
+                    continue
+                # Count this frame
+                exp = row.exposure_time or 0.0
+                acc = scoped_agg[pid_str]
+                acc["integration"] += exp
+                acc["frames"] += 1
+                if row.session_date is not None:
+                    acc["all_dates"].add(row.session_date)
+                    if acc["last_date"] is None or row.session_date > acc["last_date"]:
+                        acc["last_date"] = row.session_date
+                if row.filter_used:
+                    acc["filters"][row.filter_used] = acc["filters"].get(row.filter_used, 0) + exp
+
+        # 3. Batch-fetch thumbnails for scoped panels' targets
+        scoped_thumb_q = text(
+            "SELECT DISTINCT ON (resolved_target_id) "
+            "resolved_target_id, thumbnail_path, raw_headers->>'PIERSIDE' AS pier_side, id, file_path "
+            "FROM images "
+            "WHERE resolved_target_id = ANY(:target_ids) "
+            "AND image_type = 'LIGHT' "
+            "AND thumbnail_path IS NOT NULL "
+            "ORDER BY resolved_target_id, capture_date DESC"
+        )
+        scoped_thumb_rows = (await session.execute(scoped_thumb_q, {"target_ids": scoped_target_ids})).all()
+        scoped_thumb_map: dict[str, tuple[str | None, str | None, str | None, str | None]] = {}
+        for r in scoped_thumb_rows:
+            tid = str(r[0])
+            thumb_path = r[1]
+            thumb_url = None
+            if thumb_path:
+                filename = thumb_path.split("/")[-1].split("\\")[-1]
+                thumb_url = f"/thumbnails/{filename}"
+            scoped_thumb_map[tid] = (thumb_url, r[2], str(r[3]) if r[3] else None, r[4])
+
+        # Build PanelStats for each scoped panel
+        for p in scoped_panels:
+            target = p.target
+            tid = str(p.target_id)
+            pid_str = str(p.id)
+            acc = scoped_agg[pid_str]
+            included = panel_included_dates.get(pid_str, [])
+            total_sessions = len(acc["all_dates"])
+            available_count = max(total_sessions - len(included), 0)
+
+            thumb_url, thumb_pier_side, thumb_image_id, thumb_file_path = scoped_thumb_map.get(tid, (None, None, None, None))
+
+            result[pid_str] = PanelStats(
+                panel_id=pid_str,
+                target_id=tid,
+                target_name=target.primary_name,
+                panel_label=p.panel_label,
+                sort_order=p.sort_order,
+                ra=target.ra,
+                dec=target.dec,
+                total_integration_seconds=acc["integration"],
+                total_frames=acc["frames"],
+                filter_distribution=acc["filters"],
+                last_session_date=str(acc["last_date"]) if acc["last_date"] else None,
+                thumbnail_url=thumb_url,
+                thumbnail_pier_side=thumb_pier_side,
+                thumbnail_image_id=thumb_image_id,
+                thumbnail_file_path=thumb_file_path,
+                object_pattern=p.object_pattern,
+                grid_row=p.grid_row,
+                grid_col=p.grid_col,
+                rotation=p.rotation,
+                flip_h=p.flip_h,
+                available_session_count=available_count,
+            )
+
+    # --- Handle unscoped panels in bulk ---
     if not unscoped_panels:
         return result
 
@@ -1070,7 +1204,7 @@ async def get_panel_thumbnail_image(
         raise HTTPException(404, "FITS file not found")
 
     try:
-        img, _ = generate_panel_thumbnail(fits_path, max_width=800)
+        img, _ = await asyncio.to_thread(generate_panel_thumbnail, fits_path, 800)
     except Exception as e:
         raise HTTPException(422, f"Thumbnail generation failed: {e}")
 
@@ -1487,33 +1621,33 @@ async def update_panel_sessions(
     if not panel:
         raise HTTPException(404, "Panel not found")
 
-    for ds in body.include:
-        d = date_type.fromisoformat(ds)
-        existing = (await session.execute(
-            select(MosaicPanelSession).where(
-                MosaicPanelSession.panel_id == panel_id,
-                MosaicPanelSession.session_date == d,
-            )
-        )).scalar_one_or_none()
-        if existing:
-            existing.status = "included"
-        else:
-            session.add(MosaicPanelSession(
-                panel_id=panel_id,
-                session_date=d,
-                status="included",
-            ))
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-    for ds in body.exclude:
-        d = date_type.fromisoformat(ds)
-        existing = (await session.execute(
-            select(MosaicPanelSession).where(
+    # Bulk upsert included sessions
+    if body.include:
+        include_values = [
+            {"panel_id": panel_id, "session_date": date_type.fromisoformat(ds), "status": "included"}
+            for ds in body.include
+        ]
+        include_stmt = pg_insert(MosaicPanelSession).values(include_values)
+        include_stmt = include_stmt.on_conflict_do_update(
+            constraint="uq_mosaic_panel_sessions_panel_date",
+            set_={"status": "included"},
+        )
+        await session.execute(include_stmt)
+
+    # Bulk upsert excluded (available) sessions -- only update existing rows
+    if body.exclude:
+        from sqlalchemy import update
+        exclude_dates = [date_type.fromisoformat(ds) for ds in body.exclude]
+        await session.execute(
+            update(MosaicPanelSession)
+            .where(
                 MosaicPanelSession.panel_id == panel_id,
-                MosaicPanelSession.session_date == d,
+                MosaicPanelSession.session_date.in_(exclude_dates),
             )
-        )).scalar_one_or_none()
-        if existing:
-            existing.status = "available"
+            .values(status="available")
+        )
 
     mosaic = await session.get(Mosaic, mosaic_id)
     if mosaic and mosaic.needs_review:

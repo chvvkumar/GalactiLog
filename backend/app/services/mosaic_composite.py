@@ -214,12 +214,28 @@ async def select_best_frame_for_filter(
         else:
             base_filter.append(text("false"))
 
-    q = select(Image).where(*base_filter)
-    frames = list((await session.execute(q)).scalars().all())
+    # Project only scoring columns + fields needed by callers (id, file_path,
+    # raw_headers) to avoid loading the full ORM object (esp. the large
+    # raw_headers JSONB on every row when only the best frame needs it).
+    q = (
+        select(
+            Image.id,
+            Image.file_path,
+            Image.raw_headers,
+            Image.filter_used,
+            Image.detected_stars,
+            Image.median_hfr,
+            Image.eccentricity,
+            Image.guiding_rms_arcsec,
+            Image.fwhm,
+        )
+        .where(*base_filter)
+    )
+    frames = list((await session.execute(q)).all())
     if not frames:
         return None
     scored = score_frames(frames)
-    return scored[0]  # (frame, score)
+    return scored[0]  # (frame_row, score)
 
 
 async def find_default_filter(
@@ -238,11 +254,50 @@ async def find_default_filter(
     An empty list means all sessions excluded.
     """
     from sqlalchemy import func as sa_func
+    from collections import defaultdict
 
-    # Collect all available filters with total integration across panels
+    # ----------------------------------------------------------------
+    # Partition panels into "simple" (no object_pattern, no per-panel
+    # date restriction) and "complex" (need individual filtering).
+    # ----------------------------------------------------------------
+    simple_panels: list = []
+    complex_panels: list = []
+    for panel in panels:
+        has_pattern = bool(panel.object_pattern)
+        has_dates = False
+        if panel_included_dates is not None:
+            pid = str(panel.id)
+            if pid in panel_included_dates:
+                has_dates = True
+        if has_pattern or has_dates:
+            complex_panels.append(panel)
+        else:
+            simple_panels.append(panel)
+
     all_filters: dict[str, float] = {}
 
-    for panel in panels:
+    # --- Batch query for simple panels (single query) ---
+    if simple_panels:
+        simple_target_ids = list({p.target_id for p in simple_panels})
+        fq = (
+            select(
+                Image.resolved_target_id,
+                Image.filter_used,
+                sa_func.sum(Image.exposure_time),
+            )
+            .where(
+                Image.resolved_target_id.in_(simple_target_ids),
+                Image.image_type == "LIGHT",
+                Image.file_path.isnot(None),
+                Image.filter_used.is_not(None),
+            )
+            .group_by(Image.resolved_target_id, Image.filter_used)
+        )
+        for _tid, fname, total in (await session.execute(fq)).all():
+            all_filters[fname] = all_filters.get(fname, 0) + (total or 0)
+
+    # --- Individual queries for complex panels (object_pattern / date scoped) ---
+    for panel in complex_panels:
         base_filter = [
             Image.resolved_target_id == panel.target_id,
             Image.image_type == "LIGHT",
@@ -259,7 +314,6 @@ async def find_default_filter(
                 else:
                     base_filter.append(text("false"))
 
-        # Get filter integration totals
         fq = (
             select(Image.filter_used, sa_func.sum(Image.exposure_time))
             .where(*base_filter)
@@ -273,11 +327,51 @@ async def find_default_filter(
     if not available:
         return None, []
 
-    # Find the single best-scoring frame across all panels and filters
+    # ----------------------------------------------------------------
+    # Find the single best-scoring frame across all panels and filters.
+    # Same simple/complex split: batch the simple panels, loop the rest.
+    # ----------------------------------------------------------------
     best_score = -1.0
     best_filter = available[0]  # fallback to most-integrated filter
 
-    for panel in panels:
+    # --- Batch query for simple panels ---
+    if simple_panels:
+        simple_target_ids = list({p.target_id for p in simple_panels})
+        q = (
+            select(
+                Image.resolved_target_id,
+                Image.filter_used,
+                Image.detected_stars,
+                Image.median_hfr,
+                Image.eccentricity,
+                Image.guiding_rms_arcsec,
+                Image.fwhm,
+            )
+            .where(
+                Image.resolved_target_id.in_(simple_target_ids),
+                Image.image_type == "LIGHT",
+                Image.file_path.isnot(None),
+                Image.filter_used.in_(available),
+            )
+        )
+        rows = (await session.execute(q)).all()
+        # Partition rows by resolved_target_id for per-panel scoring
+        by_target: dict[Any, list] = defaultdict(list)
+        for row in rows:
+            by_target[row.resolved_target_id].append(row)
+
+        for panel in simple_panels:
+            panel_rows = by_target.get(panel.target_id, [])
+            if not panel_rows:
+                continue
+            scored = score_frames(panel_rows)
+            top_frame, top_score = scored[0]
+            if top_score > best_score:
+                best_score = top_score
+                best_filter = top_frame.filter_used
+
+    # --- Individual queries for complex panels ---
+    for panel in complex_panels:
         base_filter = [
             Image.resolved_target_id == panel.target_id,
             Image.image_type == "LIGHT",
@@ -295,8 +389,18 @@ async def find_default_filter(
                 else:
                     base_filter.append(text("false"))
 
-        q = select(Image).where(*base_filter)
-        frames = list((await session.execute(q)).scalars().all())
+        q = (
+            select(
+                Image.filter_used,
+                Image.detected_stars,
+                Image.median_hfr,
+                Image.eccentricity,
+                Image.guiding_rms_arcsec,
+                Image.fwhm,
+            )
+            .where(*base_filter)
+        )
+        frames = list((await session.execute(q)).all())
         if not frames:
             continue
         scored = score_frames(frames)

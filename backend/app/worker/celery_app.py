@@ -26,6 +26,9 @@ celery_app.conf.update(
         },
     },
     result_expires=3600,
+    broker_transport_options={"socket_timeout": 5, "socket_connect_timeout": 5},
+    result_backend_transport_options={"socket_timeout": 5},
+    broker_connection_retry_on_startup=True,
     beat_schedule={
         "auto-scan-tick": {
             "task": "app.worker.tasks.auto_scan_tick",
