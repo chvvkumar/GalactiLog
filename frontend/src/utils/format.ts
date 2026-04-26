@@ -6,12 +6,9 @@ export function formatIntegration(seconds: number): string {
 
 const WIDTH_CLASSES: Record<string, string> = {
   "full": "",
-  "extra-wide": "max-w-[1792px] mx-auto",
-  "ultra-wide": "max-w-screen-2xl mx-auto",
-  "wide": "max-w-7xl mx-auto",
-  "standard": "max-w-6xl mx-auto",
-  "compact": "max-w-5xl mx-auto",
-  "narrow": "max-w-5xl mx-auto",
+  "wide": "max-w-[1792px] mx-auto",
+  "standard": "max-w-screen-2xl mx-auto",
+  "compact": "max-w-7xl mx-auto",
 };
 
 export function contentWidthClass(width: string): string {

@@ -227,6 +227,7 @@ const DashboardFilterProvider: Component<{ children: JSX.Element }> = (props) =>
   };
 
   const setPageSize = (size: number) => {
+    setStablePageSize(size);
     const current = settingsCtx.settings()?.general;
     if (current) {
       settingsCtx.saveGeneral({ ...current, default_page_size: size });
