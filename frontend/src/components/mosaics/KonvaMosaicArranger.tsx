@@ -88,6 +88,7 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
   const [zoom, setZoom] = createSignal(1.0);
   const [saving, setSaving] = createSignal(false);
   const [showOverlays, setShowOverlays] = createSignal(true);
+  const [containerHeight, setContainerHeight] = createSignal(600);
 
   let saveTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -259,6 +260,27 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
   const zoomOut = () => {
     if (!stage) return;
     setZoomAt(zoom() - ZOOM_STEP, stage.width() / 2, stage.height() / 2);
+  };
+
+  const onResizeHandleDown = (e: MouseEvent) => {
+    e.preventDefault();
+    const startY = e.clientY;
+    const startHeight = containerHeight();
+    const onMove = (ev: MouseEvent) => {
+      const newHeight = Math.max(200, startHeight + ev.clientY - startY);
+      setContainerHeight(newHeight);
+      if (stage) {
+        stage.height(newHeight);
+        drawGrid();
+      }
+    };
+    const onUp = () => {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+      fitToView();
+    };
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
   };
 
   // ── Check bounding box overlap between two tiles ───────────────────
@@ -661,12 +683,11 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
   // ── Initialize stage and build tiles ───────────────────────────────
   onMount(() => {
     const containerWidth = containerRef.clientWidth || 800;
-    const containerHeight = 600;
 
     stage = new Konva.Stage({
       container: containerRef,
       width: containerWidth,
-      height: containerHeight,
+      height: containerHeight(),
     });
 
     bgLayer = new Konva.Layer({ listening: false });
@@ -1107,11 +1128,24 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
       </div>
 
       {/* Canvas container */}
-      <div
-        ref={containerRef!}
-        class="w-full rounded border border-theme-border bg-theme-surface"
-        style={{ height: "600px", cursor: "grab" }}
-      />
+      <div class="relative">
+        <div
+          ref={containerRef!}
+          class="w-full rounded border border-theme-border bg-theme-surface"
+          style={{ height: `${containerHeight()}px`, cursor: "grab" }}
+        />
+        <div
+          class="absolute bottom-0 right-0 w-5 h-5 cursor-nwse-resize opacity-40 hover:opacity-80 transition-opacity"
+          style={{ "z-index": "10" }}
+          onMouseDown={onResizeHandleDown}
+        >
+          <svg viewBox="0 0 20 20" class="w-full h-full text-theme-text-secondary">
+            <line x1="18" y1="4" x2="4" y2="18" stroke="currentColor" stroke-width="1.5" />
+            <line x1="18" y1="9" x2="9" y2="18" stroke="currentColor" stroke-width="1.5" />
+            <line x1="18" y1="14" x2="14" y2="18" stroke="currentColor" stroke-width="1.5" />
+          </svg>
+        </div>
+      </div>
     </div>
   );
 };
