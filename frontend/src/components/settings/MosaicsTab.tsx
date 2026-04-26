@@ -1,4 +1,4 @@
-import { Component, For, Show, createEffect, createSignal, onMount } from "solid-js";
+import { Component, For, Show, createEffect, createMemo, createSignal, onMount } from "solid-js";
 import { api } from "../../api/client";
 import { showToast, dismissToast } from "../Toast";
 import { useAuth } from "../AuthProvider";
@@ -78,6 +78,31 @@ export const MosaicsTab: Component = () => {
     localStorage.getItem("mosaics-suggestions-collapsed") !== "false"
   );
   const [mosaicsCollapsed, setMosaicsCollapsed] = createSignal(false);
+
+  type MosaicSortKey = "name" | "panels" | "integration" | "frames" | "date_range";
+  const [mosaicSortKey, setMosaicSortKey] = createSignal<MosaicSortKey>("name");
+  const [mosaicSortAsc, setMosaicSortAsc] = createSignal(true);
+  const toggleMosaicSort = (key: MosaicSortKey) => {
+    if (mosaicSortKey() === key) setMosaicSortAsc(!mosaicSortAsc());
+    else { setMosaicSortKey(key); setMosaicSortAsc(true); }
+  };
+  const sortedMosaics = createMemo(() => {
+    const key = mosaicSortKey();
+    const asc = mosaicSortAsc();
+    return [...mosaics()].sort((a, b) => {
+      let cmp = 0;
+      switch (key) {
+        case "name": cmp = a.name.localeCompare(b.name); break;
+        case "panels": cmp = a.panel_count - b.panel_count; break;
+        case "integration": cmp = a.total_integration_seconds - b.total_integration_seconds; break;
+        case "frames": cmp = a.total_frames - b.total_frames; break;
+        case "date_range": cmp = (a.first_session ?? "").localeCompare(b.first_session ?? ""); break;
+      }
+      return asc ? cmp : -cmp;
+    });
+  });
+  const mosaicSortIcon = (key: MosaicSortKey) =>
+    mosaicSortKey() === key ? (mosaicSortAsc() ? " ▴" : " ▾") : "";
 
   createEffect(() => localStorage.setItem("mosaics-keywords-collapsed", String(keywordsCollapsed())));
   createEffect(() => localStorage.setItem("mosaics-suggestions-collapsed", String(suggestionsCollapsed())));
@@ -988,18 +1013,18 @@ export const MosaicsTab: Component = () => {
           <table class="w-full text-sm border-collapse">
             <thead>
               <tr class="sticky top-0 bg-theme-surface border-b border-theme-border-em z-10">
-                <th class="text-left py-2 px-3 text-label font-medium uppercase tracking-wider text-theme-text-tertiary whitespace-nowrap">Name</th>
+                <th class="text-left py-2 px-3 text-label font-medium uppercase tracking-wider text-theme-text-tertiary whitespace-nowrap cursor-pointer select-none hover:text-theme-text-secondary transition-colors" onClick={() => toggleMosaicSort("name")}>Name{mosaicSortIcon("name")}</th>
                 <Show when={isColumnVisible(vis(), "mosaic_table", "builtin", "panels")}>
-                  <th class="text-right py-2 px-3 text-label font-medium uppercase tracking-wider text-theme-text-tertiary whitespace-nowrap">Panels</th>
+                  <th class="text-right py-2 px-3 text-label font-medium uppercase tracking-wider text-theme-text-tertiary whitespace-nowrap cursor-pointer select-none hover:text-theme-text-secondary transition-colors" onClick={() => toggleMosaicSort("panels")}>Panels{mosaicSortIcon("panels")}</th>
                 </Show>
                 <Show when={isColumnVisible(vis(), "mosaic_table", "builtin", "integration")}>
-                  <th class="text-right py-2 px-3 text-label font-medium uppercase tracking-wider text-theme-text-tertiary whitespace-nowrap">Integration</th>
+                  <th class="text-right py-2 px-3 text-label font-medium uppercase tracking-wider text-theme-text-tertiary whitespace-nowrap cursor-pointer select-none hover:text-theme-text-secondary transition-colors" onClick={() => toggleMosaicSort("integration")}>Integration{mosaicSortIcon("integration")}</th>
                 </Show>
                 <Show when={isColumnVisible(vis(), "mosaic_table", "builtin", "frames")}>
-                  <th class="text-right py-2 px-3 text-label font-medium uppercase tracking-wider text-theme-text-tertiary whitespace-nowrap">Frames</th>
+                  <th class="text-right py-2 px-3 text-label font-medium uppercase tracking-wider text-theme-text-tertiary whitespace-nowrap cursor-pointer select-none hover:text-theme-text-secondary transition-colors" onClick={() => toggleMosaicSort("frames")}>Frames{mosaicSortIcon("frames")}</th>
                 </Show>
                 <Show when={isColumnVisible(vis(), "mosaic_table", "builtin", "date_range")}>
-                  <th class="text-right py-2 px-3 text-label font-medium uppercase tracking-wider text-theme-text-tertiary whitespace-nowrap">Date Range</th>
+                  <th class="text-right py-2 px-3 text-label font-medium uppercase tracking-wider text-theme-text-tertiary whitespace-nowrap cursor-pointer select-none hover:text-theme-text-secondary transition-colors" onClick={() => toggleMosaicSort("date_range")}>Date Range{mosaicSortIcon("date_range")}</th>
                 </Show>
                 <For each={mosaicCustomColumns()}>
                   {(col) => (
@@ -1026,7 +1051,7 @@ export const MosaicsTab: Component = () => {
               </tr>
             </thead>
             <tbody>
-              <For each={mosaics()}>
+              <For each={sortedMosaics()}>
                 {(m) => (
                   <>
                     <tr class="border-b border-theme-border hover:bg-theme-base/30 cursor-pointer" onClick={() => toggleExpand(m.id)}>
