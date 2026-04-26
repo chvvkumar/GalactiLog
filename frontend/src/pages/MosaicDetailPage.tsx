@@ -231,10 +231,13 @@ const MosaicDetailPage: Component = () => {
                       Visual arrangement of the mosaic's constituent panels. Drag to reposition, use the rotate and flip controls to orient each panel, and drop panels onto a grid.
                     </p>
                     <p class="text-sm text-theme-text-secondary">
-                      Auto-arrangement based on WCS headers is often unreliable, so manual layout is expected.
+                      Each tile shows total integration time (bottom-right) and, for panels below the maximum, a color-coded deficit (top-right) indicating how much more time is needed to match the leading panel. Green means within 20% of the max, amber within 60%, and red below that.
                     </p>
                     <p class="text-sm text-theme-text-secondary">
-                      Example: arrange a four-panel M31 mosaic into a 2 by 2 grid with the bottom-left panel rotated 90 degrees.
+                      Use the <strong class="text-theme-text-primary">Labels</strong> button to toggle all text overlays on or off.
+                    </p>
+                    <p class="text-sm text-theme-text-secondary">
+                      Auto-arrangement based on WCS headers is often unreliable, so manual layout is expected.
                     </p>
                   </HelpPopover>
                 </div>
