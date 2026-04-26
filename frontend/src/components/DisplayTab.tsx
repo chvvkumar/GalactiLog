@@ -257,7 +257,7 @@ export default function DisplayTab() {
               <p>Example: pick a dark theme for night-time sessions at the scope and a light theme for planning during the day.</p>
             </HelpPopover>
           </div>
-          <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-3">
             <For each={THEMES_SORTED}>
               {(theme: ThemeMeta) => (
                 <button
