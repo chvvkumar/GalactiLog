@@ -137,6 +137,23 @@ export default function DisplayTab() {
     }
   };
 
+  const [defaultChartSessions, setDefaultChartSessions] = createSignal<number>(1);
+
+  createEffect(() => {
+    const v = ctx.graphSettings().default_chart_sessions;
+    if (v !== undefined) setDefaultChartSessions(v);
+  });
+
+  const handleDefaultChartSessionsChange = async (value: number) => {
+    const prev = defaultChartSessions();
+    setDefaultChartSessions(value);
+    try {
+      await ctx.saveGraphSettings({ default_chart_sessions: value });
+    } catch {
+      setDefaultChartSessions(prev);
+    }
+  };
+
   const [selectedContentWidth, setSelectedContentWidth] = createSignal<string>("full");
 
   createEffect(() => {
@@ -411,6 +428,29 @@ export default function DisplayTab() {
           >
             <span class={`pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow transition-transform ${useImagingNight() ? "translate-x-4" : "translate-x-0"}`} />
           </button>
+        </div>
+      </div>
+
+      <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
+        <div class="flex items-center gap-2">
+          <h2 class="text-sm font-semibold text-theme-text-primary">Target Chart</h2>
+          <HelpPopover title="Target Chart">
+            <p>Controls the default number of sessions pre-selected in the metrics chart when opening a target detail page. You can always select or deselect individual sessions manually.</p>
+          </HelpPopover>
+        </div>
+        <div class="flex items-center justify-between">
+          <span class="text-sm text-theme-text-secondary">Default sessions</span>
+          <select
+            value={defaultChartSessions()}
+            onChange={(e) => handleDefaultChartSessionsChange(Number(e.currentTarget.value))}
+            class="px-3 py-1.5 bg-theme-input border border-theme-border rounded-[var(--radius-sm)] text-sm text-theme-text-primary focus:ring-1 focus:ring-theme-accent focus:border-theme-accent outline-none"
+          >
+            <option value={1}>Latest session</option>
+            <option value={3}>Latest 3 sessions</option>
+            <option value={5}>Latest 5 sessions</option>
+            <option value={10}>Latest 10 sessions</option>
+            <option value={0}>All sessions</option>
+          </select>
         </div>
       </div>
 
