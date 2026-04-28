@@ -49,6 +49,7 @@ resources/
 # Superpowers plans and specs (committed docs go in guides/ root files only)
 guides/plans/
 guides/specs/
+guides/superpowers/
 
 # Log files
 *.log

@@ -75,6 +75,7 @@ class GraphSettings(BaseModel):
     enabled_filters: list[str] = Field(default_factory=lambda: ["overall"])
     session_chart_expanded: bool = False
     target_chart_expanded: bool = False
+    default_chart_sessions: int = 1
 
 
 def default_graph_settings() -> GraphSettings:

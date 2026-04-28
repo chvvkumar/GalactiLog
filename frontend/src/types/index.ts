@@ -646,6 +646,7 @@ export interface GraphSettings {
   enabled_filters: string[];
   session_chart_expanded: boolean;
   target_chart_expanded: boolean;
+  default_chart_sessions: number;
 }
 
 export interface SettingsResponse {

@@ -8,6 +8,7 @@ const DEFAULT_GRAPH_SETTINGS: GraphSettings = {
   enabled_filters: ["overall"],
   session_chart_expanded: false,
   target_chart_expanded: false,
+  default_chart_sessions: 1,
 };
 
 const [graphSettings, setGraphSettings] = createSignal<GraphSettings>(DEFAULT_GRAPH_SETTINGS);

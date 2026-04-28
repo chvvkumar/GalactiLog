@@ -287,7 +287,9 @@ const TargetDetailPage: Component = () => {
   createEffect(
     on(targetDetail, (detail, prev) => {
       if (detail && !prev) {
-        setSelectedChartDates(detail.sessions.slice(0, 1).map((s) => s.session_date));
+        const n = graphSettings().default_chart_sessions ?? 1;
+        const selected = n === 0 ? detail.sessions : detail.sessions.slice(0, n);
+        setSelectedChartDates(selected.map((s) => s.session_date));
       }
     })
   );
