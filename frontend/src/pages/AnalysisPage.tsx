@@ -104,10 +104,10 @@ const AnalysisPage: Component = () => {
         : "text-theme-text-secondary hover:text-theme-text-primary"
     }`;
   const tabClass = (active: boolean) =>
-    `px-3 sm:px-4 py-2 text-sm transition-colors duration-150 ${
+    `px-3 sm:px-4 py-1.5 text-sm rounded-[var(--radius-sm)] border transition-colors duration-150 ${
       active
-        ? "bg-theme-elevated text-theme-text-primary rounded-[var(--radius-sm)] font-medium"
-        : "text-theme-text-secondary hover:text-theme-text-primary hover:bg-theme-hover rounded-[var(--radius-sm)]"
+        ? "bg-theme-elevated text-theme-text-primary font-medium border-theme-border-em shadow-sm"
+        : "text-theme-text-secondary hover:text-theme-text-primary hover:bg-theme-hover border-transparent"
     }`;
 
   return (
@@ -208,7 +208,7 @@ const AnalysisPage: Component = () => {
             </div>
           </div>
 
-          <div class="flex flex-wrap gap-1">
+          <div class="flex flex-wrap gap-1 rounded-[var(--radius-md)] bg-theme-surface border border-theme-border p-1.5">
             <For each={TABS}>
               {(tab) => (
                 <button class={tabClass(activeTab() === tab.id)} onClick={() => switchTab(tab.id)}>

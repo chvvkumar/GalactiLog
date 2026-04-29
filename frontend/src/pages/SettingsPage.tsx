@@ -68,15 +68,15 @@ export const SettingsPage: Component = () => {
       <h1 class="text-xl font-semibold tracking-tight text-theme-text-primary">Settings</h1>
 
       {/* Tab bar */}
-      <div class="flex flex-wrap items-center gap-1">
+      <div class="flex flex-wrap items-center gap-2 rounded-[var(--radius-md)] bg-theme-surface border border-theme-border p-1.5">
         <div class="flex flex-wrap gap-1 flex-1">
           {tabs().map((tab) => (
             <button
               onClick={() => setSearchParams({ tab: tab.id, sub: undefined })}
-              class={`px-3 sm:px-4 py-2 text-sm transition-colors duration-150 ${
+              class={`px-3 sm:px-4 py-1.5 text-sm rounded-[var(--radius-sm)] border transition-colors duration-150 ${
                 activeTab() === tab.id
-                  ? "bg-theme-elevated text-theme-text-primary rounded-[var(--radius-sm)] font-medium"
-                  : "text-theme-text-secondary hover:text-theme-text-primary hover:bg-theme-hover rounded-[var(--radius-sm)]"
+                  ? "bg-theme-elevated text-theme-text-primary font-medium border-theme-border-em shadow-sm"
+                  : "text-theme-text-secondary hover:text-theme-text-primary hover:bg-theme-hover border-transparent"
               }`}
             >
               {tab.label}
