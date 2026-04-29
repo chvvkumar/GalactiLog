@@ -87,7 +87,7 @@ const TargetFeed: Component = () => {
       </Show>
 
       <Show when={targetData.loading || displayData()}>
-        <div class="space-y-3">
+        <div class="rounded-[var(--radius-md)] bg-theme-surface border border-theme-border p-4 space-y-4">
           {/* Skeleton: shown on initial load (no data yet) */}
           <Show when={targetData.loading && !displayData()}>
             <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-3">
