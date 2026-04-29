@@ -1,4 +1,5 @@
 import { Component, For, Show, createEffect, createMemo, createSignal, onMount } from "solid-js";
+import { useNavigate } from "@solidjs/router";
 import { api } from "../../api/client";
 import { showToast, dismissToast } from "../Toast";
 import { useAuth } from "../AuthProvider";
@@ -23,6 +24,7 @@ import { isColumnVisible } from "../../utils/displaySettings";
 
 export const MosaicsTab: Component = () => {
   const { isAdmin } = useAuth();
+  const navigate = useNavigate();
   const settingsCtx = useSettingsContext();
 
   // Keywords state
@@ -1054,7 +1056,7 @@ export const MosaicsTab: Component = () => {
               <For each={sortedMosaics()}>
                 {(m) => (
                   <>
-                    <tr class="border-b border-theme-border hover:bg-theme-base/30 cursor-pointer" onClick={() => toggleExpand(m.id)}>
+                    <tr class="border-b border-theme-border hover:bg-theme-base/30 cursor-pointer" onClick={() => navigate(`/mosaics/${m.id}`)}>
                       {/* Name cell */}
                       <td class="py-2.5 px-3 text-theme-text-primary text-sm">
                         <div class="flex items-center gap-2">
@@ -1151,15 +1153,12 @@ export const MosaicsTab: Component = () => {
                               </div>
                             </Show>
                           </Show>
-                          <a
-                            href={`/mosaics/${m.id}`}
-                            class="px-4 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded text-sm font-medium hover:bg-theme-accent/25 transition-colors"
+                          <button
+                            onClick={() => toggleExpand(m.id)}
+                            class="px-2.5 py-1 border border-theme-border-em rounded text-label text-theme-text-secondary hover:text-theme-text-primary hover:border-theme-accent transition-colors"
                           >
-                            Detail
-                          </a>
-                          <span class="text-theme-text-secondary text-xs ml-1">
-                            {expandedId() === m.id ? "▲" : "▼"}
-                          </span>
+                            {expandedId() === m.id ? "Collapse" : "Expand"}
+                          </button>
                         </div>
                       </td>
                     </tr>
