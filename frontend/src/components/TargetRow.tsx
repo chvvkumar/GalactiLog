@@ -36,7 +36,7 @@ const TargetRow: Component<{
       {/* Desktop table row -- hidden below md */}
       <tr
         class="border-b border-theme-border cursor-pointer hover:bg-theme-hover transition-colors duration-150 hidden md:table-row"
-        onClick={() => navigate(`/targets/${encodeURIComponent(props.target.target_id)}?view=sessions`)}
+        onClick={() => toggleExpanded(props.target.target_id)}
       >
         <td class={`py-2.5 px-3 hover:text-theme-accent transition-colors ${
           props.target.target_id === "obj:__uncategorized__"
@@ -96,13 +96,14 @@ const TargetRow: Component<{
             </Show>
           )}
         </For>
-        <td class="py-2.5 px-3">
+        <td class="py-2.5 px-3 flex items-center gap-1.5">
           <button
             class="px-2.5 py-1 border border-theme-border-em rounded text-label text-theme-text-secondary hover:text-theme-text-primary hover:border-theme-accent transition-colors"
-            onClick={(e) => { e.stopPropagation(); toggleExpanded(props.target.target_id); }}
+            onClick={(e) => { e.stopPropagation(); navigate(`/targets/${encodeURIComponent(props.target.target_id)}?view=sessions`); }}
           >
-            {isOpen() ? "Collapse" : "Expand"}
+            Detail
           </button>
+          <span class="text-theme-text-tertiary text-xs select-none">{isOpen() ? "▲" : "▼"}</span>
         </td>
         <Show when={props.target.matched_sessions != null}>
           <td class="py-2.5 px-3 text-xs text-theme-warning">
@@ -114,7 +115,7 @@ const TargetRow: Component<{
       {/* Mobile card -- shown below md */}
       <tr
         class="md:hidden border-b border-theme-border cursor-pointer hover:bg-theme-hover transition-colors duration-150"
-        onClick={() => navigate(`/targets/${encodeURIComponent(props.target.target_id)}?view=sessions`)}
+        onClick={() => toggleExpanded(props.target.target_id)}
       >
         <td colspan="99" class="p-3">
           <div class="space-y-1.5">
@@ -134,12 +135,15 @@ const TargetRow: Component<{
                   </A>
                 )}
               </span>
-              <button
-                class="px-2 py-0.5 border border-theme-border-em rounded text-label text-theme-text-secondary hover:text-theme-text-primary hover:border-theme-accent transition-colors flex-shrink-0"
-                onClick={(e) => { e.stopPropagation(); toggleExpanded(props.target.target_id); }}
-              >
-                {isOpen() ? "Collapse" : "Expand"}
-              </button>
+              <div class="flex items-center gap-1.5 flex-shrink-0">
+                <button
+                  class="px-2 py-0.5 border border-theme-border-em rounded text-label text-theme-text-secondary hover:text-theme-text-primary hover:border-theme-accent transition-colors"
+                  onClick={(e) => { e.stopPropagation(); navigate(`/targets/${encodeURIComponent(props.target.target_id)}?view=sessions`); }}
+                >
+                  Detail
+                </button>
+                <span class="text-theme-text-tertiary text-xs select-none">{isOpen() ? "▲" : "▼"}</span>
+              </div>
             </div>
             <Show when={props.target.target_id !== "obj:__uncategorized__"}>
               <div class="font-mono text-theme-text-secondary text-xs">{props.target.primary_name}</div>
