@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 # Current data version - bump this and add a migration function when
 # code changes affect how stored target data is derived.
-DATA_VERSION = 9
+DATA_VERSION = 10
 
 
 def _migrate_v1_fix_catalog_designations(session: Session) -> str:
@@ -400,6 +400,29 @@ def _migrate_v9_stellarium_names(session: Session) -> str:
     return f"Cleared {cleared} stale SIMBAD cache entries for Stellarium name corrections"
 
 
+def _migrate_v10_openngc_messier_common_names(session: Session) -> str:
+    """Re-enrich targets from OpenNGC after fixing Messier zero-padding lookup."""
+    from app.models import Target
+
+    load_openngc_csv(session)
+
+    targets = session.execute(
+        select(Target).where(
+            Target.merged_into_id.is_(None),
+            Target.common_name.is_(None),
+        )
+    ).scalars().all()
+
+    total = len(targets)
+    enriched = 0
+    for target in targets:
+        if enrich_target_from_openngc(session, target):
+            enriched += 1
+
+    session.flush()
+    return f"Re-enriched {enriched}/{total} targets with OpenNGC data (Messier fix)"
+
+
 # Registry: version number -> (description, migration function)
 # Version numbers must be sequential starting from 1.
 MIGRATIONS: dict[int, tuple[str, Callable[[Session], str]]] = {
@@ -412,6 +435,7 @@ MIGRATIONS: dict[int, tuple[str, Callable[[Session], str]]] = {
     7: ("Load Tier 1 catalogs, match memberships, enrich from Gaia/SAC", _migrate_v8_tier1_and_catalogs),
     8: ("Fix Question Mark Galaxy mapping from NGC 4258 to NGC 5194 (M51)", _migrate_v8_fix_question_mark_galaxy),
     9: ("Stellarium common name cache refresh", _migrate_v9_stellarium_names),
+    10: ("Re-enrich targets from OpenNGC (Messier lookup fix)", _migrate_v10_openngc_messier_common_names),
 }
 
 
