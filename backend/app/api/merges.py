@@ -711,7 +711,9 @@ async def update_target_identity(
         from sqlalchemy.orm import Session as SyncSession
         from app.database import sync_engine
 
-        lookup_name = target.catalog_id or target.primary_name
+        lookup_name = target.catalog_id or target.primary_name or (
+            target.aliases[0] if target.aliases else None
+        )
 
         # Delete negative cache entries for all of this target's aliases
         all_names = [lookup_name] + list(target.aliases or [])
@@ -755,6 +757,22 @@ async def update_target_identity(
                     new_aliases.append(alias)
                     existing_norm.add(alias.upper())
             target.aliases = new_aliases
+
+        if not target.common_name and target.catalog_id:
+            from app.services.openngc import lookup_openngc, extract_openngc_common_name
+            from app.services.simbad import build_primary_name
+
+            def _enrich_openngc():
+                with SyncSession(sync_engine) as sync_db:
+                    entry = lookup_openngc(sync_db, target.catalog_id)
+                    if entry and entry.common_names:
+                        return extract_openngc_common_name(entry.common_names)
+                    return None
+
+            ngc_common = await asyncio.to_thread(_enrich_openngc)
+            if ngc_common:
+                target.common_name = ngc_common
+                target.primary_name = build_primary_name(target.catalog_id, ngc_common)
 
         target.name_locked = False
 
