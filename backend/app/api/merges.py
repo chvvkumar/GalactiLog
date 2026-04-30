@@ -707,7 +707,7 @@ async def update_target_identity(
 
     if body.re_resolve:
         import asyncio
-        from app.services.simbad import resolve_target_name_cached, curate_simbad_result, normalize_object_name
+        from app.services.simbad import resolve_target_name_cached, normalize_object_name
         from sqlalchemy.orm import Session as SyncSession
         from app.database import sync_engine
 
@@ -743,15 +743,14 @@ async def update_target_identity(
         result = await asyncio.to_thread(_resolve_sync)
 
         if result:
-            curated = curate_simbad_result(result, fits_names=target.aliases or [])
-            target.primary_name = curated.get("primary_name", target.primary_name)
-            target.catalog_id = curated.get("catalog_id")
-            target.common_name = curated.get("common_name")
-            if curated.get("object_type"):
-                target.object_type = curated["object_type"]
+            target.primary_name = result.get("primary_name") or target.primary_name
+            target.catalog_id = result.get("catalog_id")
+            target.common_name = result.get("common_name")
+            if result.get("object_type"):
+                target.object_type = result["object_type"]
             existing_norm = {a.upper() for a in (target.aliases or [])}
             new_aliases = list(target.aliases or [])
-            for alias in curated.get("aliases", []):
+            for alias in result.get("aliases", []):
                 if alias.upper() not in existing_norm:
                     new_aliases.append(alias)
                     existing_norm.add(alias.upper())
