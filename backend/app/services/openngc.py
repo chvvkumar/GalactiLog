@@ -150,7 +150,7 @@ def lookup_openngc(session: Session, catalog_id: str | None) -> OpenNGCEntry | N
 
     messier_match = re.match(r"^M\s*(\d+)$", catalog_id.strip(), re.IGNORECASE)
     if messier_match:
-        m_name = f"M {messier_match.group(1)}"
+        m_name = f"M {messier_match.group(1).zfill(3)}"
         entry = session.execute(
             select(OpenNGCEntry).where(OpenNGCEntry.messier == m_name)
         ).scalar_one_or_none()
