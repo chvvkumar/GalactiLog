@@ -591,6 +591,71 @@ def reingest_changed_file(self, fits_path: str, include_calibration: bool = True
         raise self.retry(exc=exc)
 
 
+@celery_app.task(name="regenerate_missing_thumbnails")
+def regenerate_missing_thumbnails() -> dict:
+    """Check every image's thumbnail_path and regenerate only those whose
+    files are missing from disk.  Much faster than a full regeneration when
+    only a handful of files were lost.
+    """
+    with Session(_sync_engine) as session:
+        rows = session.execute(
+            select(Image.id, Image.file_path, Image.thumbnail_path)
+            .where(Image.thumbnail_path.isnot(None))
+        ).all()
+
+    if not rows:
+        set_idle_sync(_redis)
+        with _activity_session() as _db:
+            _emit_activity_sync(
+                _db, redis=_redis, category="thumbnail", severity="info",
+                event_type="thumb_missing_complete",
+                message="Regenerate missing thumbnails: no images with thumbnail paths",
+                details={"checked": 0, "missing": 0}, actor="system",
+            )
+        return {"status": "complete", "checked": 0, "missing": 0}
+
+    from concurrent.futures import ThreadPoolExecutor
+
+    def _check_missing(thumb_path: str) -> bool:
+        return not Path(thumb_path).is_file()
+
+    with ThreadPoolExecutor(max_workers=32) as pool:
+        results = list(pool.map(_check_missing, [tp for _, _, tp in rows]))
+
+    missing = [
+        (str(image_id), file_path, thumb_path)
+        for (image_id, file_path, thumb_path), is_missing in zip(rows, results)
+        if is_missing and file_path
+    ]
+
+    if not missing:
+        set_idle_sync(_redis)
+        with _activity_session() as _db:
+            _emit_activity_sync(
+                _db, redis=_redis, category="thumbnail", severity="info",
+                event_type="thumb_missing_complete",
+                message=f"All {len(rows)} thumbnails present on disk, nothing to regenerate",
+                details={"checked": len(rows), "missing": 0}, actor="system",
+            )
+        return {"status": "complete", "checked": len(rows), "missing": 0}
+
+    set_ingesting_sync(_redis, total=len(missing))
+
+    with _activity_session() as _db:
+        _emit_activity_sync(
+            _db, redis=_redis, category="thumbnail", severity="info",
+            event_type="thumb_missing_start",
+            message=f"Found {len(missing)} missing thumbnail{'s' if len(missing) != 1 else ''} "
+                    f"out of {len(rows)} checked, queueing regeneration...",
+            details={"checked": len(rows), "missing": len(missing)}, actor="system",
+        )
+
+    for image_id, file_path, thumb_path in missing:
+        regenerate_thumbnail.delay(image_id, file_path, thumb_path)
+
+    return {"status": "ingesting", "checked": len(rows), "missing": len(missing)}
+
+
 @celery_app.task(name="purge_and_regenerate_thumbnails")
 def purge_and_regenerate_thumbnails() -> dict:
     """Delete every thumbnail file on disk, then queue regeneration for all images.

@@ -16,6 +16,7 @@ FileResponse (the header is simply ignored by non-nginx clients).
 
 import logging
 from pathlib import Path, PurePosixPath
+from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
@@ -57,7 +58,7 @@ async def serve_thumbnail(file_path: str) -> FileResponse:
 
     # Build the internal redirect path preserving sub-directories
     # (e.g. "reference/abc.jpg" -> "/_thumbnails_internal/reference/abc.jpg")
-    internal_path = f"/_thumbnails_internal/{file_path}"
+    internal_path = f"/_thumbnails_internal/{quote(file_path)}"
 
     return FileResponse(
         path=full_path,
