@@ -1,12 +1,15 @@
-import { Component, Show, createSignal } from "solid-js";
+import { Component, Show, createSignal, createMemo } from "solid-js";
 import { Portal } from "solid-js/web";
 import { api } from "../api/client";
 
 const ReferenceThumbnail: Component<{ url: string | null; fill?: boolean }> = (props) => {
   const [open, setOpen] = createSignal(false);
+  const [failed, setFailed] = createSignal(false);
+
+  const effectiveUrl = createMemo(() => failed() ? null : props.url);
 
   return (
-    <Show when={props.url} fallback={
+    <Show when={effectiveUrl()} fallback={
       <div class={`bg-theme-base rounded flex items-center justify-center text-theme-text-secondary text-sm ${props.fill ? "h-full w-24" : "w-full h-48"}`}>
         No thumbnail
       </div>
@@ -21,6 +24,7 @@ const ReferenceThumbnail: Component<{ url: string | null; fill?: boolean }> = (p
             width={800}
             height={800}
             onClick={(e) => { e.stopPropagation(); setOpen(true); }}
+            onError={() => setFailed(true)}
           />
           <Show when={open()}>
             <Portal>

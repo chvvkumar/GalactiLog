@@ -27,13 +27,13 @@ const MaintenanceActions: Component = () => {
     timeout: 600_000,
   }));
 
-  const regenThumbs = (purge: boolean) => run(() => emitWithToast({
-    action: () => api.regenerateThumbnails({ purge }) as Promise<{ task_id: string }>,
-    pendingLabel: purge ? "Deleting and regenerating thumbnails..." : "Regenerating thumbnails...",
+  const regenThumbs = (opts: { purge?: boolean; missingOnly?: boolean }) => run(() => emitWithToast({
+    action: () => api.regenerateThumbnails(opts) as Promise<{ task_id: string }>,
+    pendingLabel: opts.missingOnly ? "Checking for missing thumbnails..." : opts.purge ? "Deleting and regenerating thumbnails..." : "Regenerating thumbnails...",
     successLabel: "Thumbnail regeneration complete",
     errorLabel: "Thumbnail regeneration failed",
     category: "thumbnail",
-    taskLabel: purge ? "Regen Thumbnails (purge)" : "Regen Thumbnails",
+    taskLabel: opts.missingOnly ? "Regen Thumbnails (missing)" : opts.purge ? "Regen Thumbnails (purge)" : "Regen Thumbnails",
     timeout: 1_800_000,
   }));
 
@@ -94,14 +94,20 @@ const MaintenanceActions: Component = () => {
         <div class="bg-theme-surface border border-theme-border-em rounded-[var(--radius-md)] p-3 space-y-2">
           <p class="text-sm text-theme-text-primary font-medium">Regenerate Thumbnails</p>
           <p class="text-xs text-theme-text-secondary">
-            Regenerate in place (overwrite existing files), or delete all thumbnails first then regenerate?
+            Regenerate only missing files (fast), overwrite all existing files, or delete all then regenerate?
           </p>
           <div class="flex gap-2 pt-1">
             <button
-              onClick={() => regenThumbs(false)}
+              onClick={() => regenThumbs({ missingOnly: true })}
               class="px-3 py-1.5 border border-theme-accent text-theme-accent rounded text-xs font-medium hover:bg-theme-accent/20 transition-colors"
             >
-              Regenerate in place
+              Missing only
+            </button>
+            <button
+              onClick={() => regenThumbs({})}
+              class="px-3 py-1.5 border border-theme-border-em text-theme-text-secondary rounded text-xs hover:border-theme-accent hover:text-theme-text-primary transition-colors"
+            >
+              Regenerate all
             </button>
             <button
               onClick={() => setConfirmPurgeRegen(true)}
@@ -129,7 +135,7 @@ const MaintenanceActions: Component = () => {
           </p>
           <div class="flex gap-2 pt-1">
             <button
-              onClick={() => regenThumbs(true)}
+              onClick={() => regenThumbs({ purge: true })}
               class="px-3 py-1.5 bg-theme-error text-theme-text-primary rounded text-xs font-medium hover:opacity-90 transition-colors"
             >
               Yes, delete and regenerate
