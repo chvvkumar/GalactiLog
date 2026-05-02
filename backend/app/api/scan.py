@@ -24,7 +24,7 @@ from app.services.scan_state import (
     get_scan_state, get_failed_files, start_scanning, set_ingesting, set_idle, reset_scan,
     get_rebuild_state, request_cancel,
 )
-from app.worker.tasks import regenerate_thumbnail, run_scan, rebuild_targets, smart_rebuild_targets, retry_unresolved, backfill_csv_metrics, generate_reference_thumbnails, purge_and_regenerate_thumbnails
+from app.worker.tasks import regenerate_thumbnail, run_scan, rebuild_targets, smart_rebuild_targets, retry_unresolved, backfill_csv_metrics, generate_reference_thumbnails, purge_and_regenerate_thumbnails, regenerate_missing_thumbnails
 
 logger = logging.getLogger(__name__)
 
@@ -75,13 +75,16 @@ async def trigger_scan(
 @router.post("/regenerate-thumbnails")
 async def regenerate_thumbnails(
     purge: bool = False,
+    missing_only: bool = False,
     session: AsyncSession = Depends(get_session),
     user: User = Depends(require_admin),
 ):
-    """Queue all existing images for thumbnail regeneration.
+    """Queue images for thumbnail regeneration.
 
-    When purge=True, delete all existing thumbnail files first, logging
-    progress to the activity log, before queueing regeneration.
+    When missing_only=True, only regenerate thumbnails whose files are
+    missing from disk (fast: checks file existence then queues the gaps).
+    When purge=True, delete all existing thumbnail files first, then
+    regenerate everything.  Default: regenerate all without deleting first.
     """
     async with async_redis() as r:
         state = await get_scan_state(r)
@@ -90,9 +93,15 @@ async def regenerate_thumbnails(
 
         await start_scanning(r)
 
+        if missing_only:
+            task = regenerate_missing_thumbnails.delay()
+            return {
+                "status": "accepted",
+                "message": "Queued: checking for missing thumbnails",
+                "task_id": task.id,
+            }
+
         if purge:
-            # Defer DB work and file deletions to Celery so the HTTP call
-            # returns immediately and progress is reported via activity log.
             task = purge_and_regenerate_thumbnails.delay()
             return {
                 "status": "accepted",

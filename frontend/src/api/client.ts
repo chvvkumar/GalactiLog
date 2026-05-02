@@ -297,8 +297,11 @@ export const api = {
   getScanStatus: () =>
     fetchJson<ScanStatus>("/scan/status"),
 
-  regenerateThumbnails: (opts: { purge?: boolean } = {}) => {
-    const qs = opts.purge ? "?purge=true" : "";
+  regenerateThumbnails: (opts: { purge?: boolean; missingOnly?: boolean } = {}) => {
+    const params = new URLSearchParams();
+    if (opts.purge) params.set("purge", "true");
+    if (opts.missingOnly) params.set("missing_only", "true");
+    const qs = params.toString() ? `?${params}` : "";
     return fetchJson<ScanResult & { task_id?: string }>(`/scan/regenerate-thumbnails${qs}`, { method: "POST" });
   },
 
