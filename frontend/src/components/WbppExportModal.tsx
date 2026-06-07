@@ -204,9 +204,14 @@ const WbppExportModal: Component<Props> = (props) => {
   const runCommand = (): string => {
     const g = generated();
     if (!g) return "";
-    return g.target_os === "windows"
-      ? `powershell -ExecutionPolicy Bypass -File .\\${g.filename}`
-      : `chmod +x ${g.filename} && ./${g.filename}`;
+    if (g.target_os !== "windows") {
+      return `chmod +x ${g.filename} && ./${g.filename}`;
+    }
+    // Browser-downloaded scripts carry the Mark of the Web and are blocked even with
+    // -ExecutionPolicy Bypass when policy is set by Group Policy. Unblock-File first,
+    // then run. Double apostrophes for the single-quoted PowerShell literal.
+    const name = `.\\${g.filename}`.replace(/'/g, "''");
+    return `powershell -ExecutionPolicy Bypass -Command "Unblock-File -LiteralPath '${name}'; & '${name}'"`;
   };
 
   const loadPreview = async () => {

@@ -18,6 +18,7 @@ from app.schemas.wbpp import (
 from app.services.wbpp_export import (
     detect_os, compute_session_levels, pick_default_level,
     disambiguate_staging_names, generate_powershell_script, generate_shell_script,
+    sanitize_script_name,
 )
 
 router = APIRouter(prefix="/wbpp", tags=["wbpp"])
@@ -121,7 +122,7 @@ async def wbpp_generate(
     sources = [lv.path for _, lv in chosen]
     names = disambiguate_staging_names(sources, used_dates)
     copy_ops = list(zip(sources, names))
-    safe = payload.target_name.replace(" ", "_")
+    safe = sanitize_script_name(payload.target_name)
 
     staging_base = staging_root.rstrip("/\\")
 
