@@ -4,6 +4,10 @@ from app.services.wbpp_export import (
     compute_ancestor_chain, longest_common_ancestor,
     compute_session_levels, pick_default_level, FolderLevel,
 )
+from app.services.wbpp_export import (
+    disambiguate_staging_names, generate_powershell_script,
+    generate_shell_script, DEFAULT_EXCLUSIONS,
+)
 
 
 def test_detect_os_windows_drive():
@@ -81,3 +85,40 @@ def test_pick_default_falls_back_when_all_contaminated():
         FolderLevel("/mnt/a/M31/2024-01-01", "/fits/M31/2024-01-01", 2, 10, other_dates=["x"], is_contaminated=True),
     ]
     assert pick_default_level(levels) == 1
+
+
+def test_disambiguate_no_collision():
+    assert disambiguate_staging_names(
+        ["/mnt/a/2024-01-01", "/mnt/a/2024-01-02"], ["2024-01-01", "2024-01-02"],
+    ) == ["2024-01-01", "2024-01-02"]
+
+def test_disambiguate_collision():
+    assert disambiguate_staging_names(
+        ["/mnt/a/2024-01-01/M31", "/mnt/a/2024-01-02/M31"], ["2024-01-01", "2024-01-02"],
+    ) == ["2024-01-01_M31", "2024-01-02_M31"]
+
+def test_powershell_script_contains_copy_operations():
+    s = generate_powershell_script(
+        [("Z:\\Astro\\M31\\2024-01-01", "2024-01-01")], "Z:\\WBPP_Staging\\M31",
+        "M31", ["WBPP", "PixInsight"], ["2024-01-01"],
+    )
+    assert "Z:\\Astro\\M31\\2024-01-01" in s
+    assert "Z:\\WBPP_Staging\\M31" in s
+    assert "Copy-Item" in s
+
+def test_powershell_script_excludes_known_folders():
+    s = generate_powershell_script(
+        [("Z:\\Astro\\M31\\2024-01-01", "2024-01-01")], "Z:\\Staging",
+        "M31", DEFAULT_EXCLUSIONS, ["2024-01-01"],
+    )
+    assert "WBPP" in s and "PixInsight" in s and "CALIBRATED" in s
+
+def test_shell_script_uses_rsync():
+    s = generate_shell_script(
+        [("/mnt/astro/M31/2024-01-01", "2024-01-01")], "/tmp/wbpp_staging/M31",
+        "M31", ["WBPP", "PixInsight"], ["2024-01-01"],
+    )
+    assert "rsync" in s and "/mnt/astro/M31/2024-01-01" in s and "--exclude" in s
+
+def test_shell_script_valid_shebang():
+    assert generate_shell_script([], "/tmp/s", "T", [], []).startswith("#!/usr/bin/env bash")

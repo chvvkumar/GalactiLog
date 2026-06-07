@@ -129,3 +129,91 @@ def pick_default_level(levels: list[FolderLevel]) -> int:
         if levels[i].frame_count == max_frames:
             return i
     return len(levels) - 1
+
+
+DEFAULT_EXCLUSIONS = [
+    "WBPP", "PixInsight", "finals", "WORK_AREA",
+    "masters", "Masters", "MASTERS", "*CALIBRATED", "CALIBRATED",
+]
+
+
+def disambiguate_staging_names(selected_paths: list[str], session_dates: list[str]) -> list[str]:
+    """Return staging entry names; prefix with the session date when basenames collide."""
+    basenames = [p.rstrip("/\\").rsplit("/", 1)[-1].rsplit("\\", 1)[-1] for p in selected_paths]
+    counts = Counter(basenames)
+    return [
+        f"{date}_{base}" if counts[base] > 1 else base
+        for base, date in zip(basenames, session_dates)
+    ]
+
+
+def generate_powershell_script(copy_ops, staging_root, target_name, exclusions, session_dates):
+    """Generate a PowerShell .ps1 copy script (copy only, recursive, with exclusions)."""
+    excl_patterns = "|".join(re.escape(e).replace(r"\*", ".*") for e in exclusions)
+    win = "\\" in staging_root
+    lines = [
+        "# WBPP Session Export",
+        f"# Target: {target_name}",
+        f"# Sessions: {', '.join(session_dates)}",
+        "# Run on the machine where PixInsight is installed, then open WBPP and",
+        f"# use 'Add Directory' on the staging root: {staging_root}",
+        "",
+        f'$StagingRoot = "{staging_root}"',
+        "$ErrorActionPreference = 'Stop'",
+        "if (-not (Test-Path $StagingRoot)) { New-Item -ItemType Directory -Force -Path $StagingRoot | Out-Null }",
+        "",
+    ]
+    for src, entry_name in copy_ops:
+        dest = f'"{staging_root}\\{entry_name}"' if win else f'"{staging_root}/{entry_name}"'
+        lines += [
+            f"# Session folder: {src}",
+            f'$Src = "{src}"',
+            f"$Dst = {dest}",
+            "Get-ChildItem -Path $Src -Recurse -File | Where-Object {",
+        ]
+        if exclusions:
+            lines.append(f'    $_.FullName -notmatch "({excl_patterns})"')
+        else:
+            lines.append("    $true")
+        lines += [
+            "} | ForEach-Object {",
+            "    $RelPath = $_.FullName.Substring($Src.Length).TrimStart('\\', '/')",
+            "    $Target = Join-Path $Dst $RelPath",
+            "    $TargetDir = Split-Path $Target -Parent",
+            "    if (-not (Test-Path $TargetDir)) { New-Item -ItemType Directory -Force -Path $TargetDir | Out-Null }",
+            "    Copy-Item -Path $_.FullName -Destination $Target -Force",
+            "}",
+            "",
+        ]
+    lines.append("Write-Host 'Copy complete. Open WBPP and use Add Directory on:' $StagingRoot")
+    return "\n".join(lines)
+
+
+def generate_shell_script(copy_ops, staging_root, target_name, exclusions, session_dates):
+    """Generate a POSIX shell .sh copy script using rsync (copy only)."""
+    excl_args = " ".join(f'--exclude="{e}"' for e in exclusions)
+    lines = [
+        "#!/usr/bin/env bash",
+        "# WBPP Session Export",
+        f"# Target: {target_name}",
+        f"# Sessions: {', '.join(session_dates)}",
+        "# Run on the machine where PixInsight is installed, then open WBPP and",
+        f"# use 'Add Directory' on the staging root: {staging_root}",
+        "",
+        "set -euo pipefail",
+        f'STAGING_ROOT="{staging_root}"',
+        'mkdir -p "$STAGING_ROOT"',
+        "",
+    ]
+    for src, entry_name in copy_ops:
+        dest = f'"$STAGING_ROOT/{entry_name}"'
+        lines += [
+            f"# Session folder: {src}",
+            f"mkdir -p {dest}",
+            f'rsync -av --copy-links {excl_args} \\'.rstrip(),
+            f'    "{src}/" \\',
+            f"    {dest}/",
+            "",
+        ]
+    lines.append('echo "Copy complete. Open WBPP and use Add Directory on: $STAGING_ROOT"')
+    return "\n".join(lines)
