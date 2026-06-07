@@ -2,6 +2,7 @@ import { Component, For, Show, createSignal } from "solid-js";
 import { api } from "../api/client";
 import { showToast } from "./Toast";
 import { useSettingsContext } from "./SettingsProvider";
+import { isFsAccessSupported, runBrowserCopy, CopyCancelledError } from "../lib/wbppBrowserCopy";
 import type { WbppSessionPreview, WbppFolderLevel, WbppGenerateResponse } from "../types";
 
 interface Props {
@@ -53,6 +54,14 @@ const WbppExportModal: Component<Props> = (props) => {
   const [showOverrides, setShowOverrides] = createSignal(!(general()?.wbpp_library_root ?? "").trim());
   const [savedDefaults, setSavedDefaults] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
+
+  // Browser-native copy (File System Access API) state.
+  const canBrowserCopy = isFsAccessSupported();
+  const [copying, setCopying] = createSignal(false);
+  const [copyDone, setCopyDone] = createSignal(0);
+  const [copyTotal, setCopyTotal] = createSignal(0);
+  const [copyLabel, setCopyLabel] = createSignal("");
+  const [copyFinished, setCopyFinished] = createSignal<number | null>(null);
 
   const runCommand = (): string => {
     const g = generated();
@@ -118,6 +127,7 @@ const WbppExportModal: Component<Props> = (props) => {
     setError(null);
     setGenerating(true);
     setShowScript(false);
+    setCopyFinished(null);
     try {
       const resp = await api.wbppGenerate({
         target_id: props.targetId,
@@ -181,6 +191,38 @@ const WbppExportModal: Component<Props> = (props) => {
       setTimeout(() => setCopied(false), 1500);
     } catch {
       setError("Could not copy to clipboard.");
+    }
+  };
+
+  const startBrowserCopy = async () => {
+    const g = generated();
+    if (!g) return;
+    setError(null);
+    setCopyFinished(null);
+    setCopyDone(0);
+    setCopyTotal(0);
+    setCopyLabel("");
+    setCopying(true);
+    try {
+      const result = await runBrowserCopy({
+        operations: g.operations,
+        exclusions: g.exclusions,
+        onProgress: (done, total, label) => {
+          setCopyDone(done);
+          setCopyTotal(total);
+          setCopyLabel(label);
+        },
+      });
+      setCopyFinished(result.copied);
+      showToast(`Copied ${result.copied} file${result.copied !== 1 ? "s" : ""} to ${result.destinationName}`);
+    } catch (e: any) {
+      if (e instanceof CopyCancelledError) {
+        // User cancelled a picker or aborted; no error to show.
+      } else {
+        setError(e?.message ?? "Browser copy failed.");
+      }
+    } finally {
+      setCopying(false);
     }
   };
 
@@ -420,21 +462,78 @@ const WbppExportModal: Component<Props> = (props) => {
           <Show when={generated()}>
             {(g) => (
               <div class="space-y-3 border-t border-theme-border pt-4">
-                {/* Primary actions */}
-                <div class="flex items-center gap-2">
-                  <button
-                    class="text-xs px-3 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded font-medium hover:bg-theme-accent/25 transition-colors"
-                    onClick={downloadScript}
-                  >
-                    Download {g().filename}
-                  </button>
-                  <button
-                    class="text-xs px-3 py-1.5 bg-theme-elevated border border-theme-border rounded hover:bg-theme-surface transition-colors text-theme-text-primary"
-                    onClick={copyScript}
-                  >
-                    {copied() ? "Copied!" : "Copy script"}
-                  </button>
-                </div>
+                {/* Primary action: browser copy when supported, else script */}
+                <Show
+                  when={canBrowserCopy}
+                  fallback={
+                    <div class="flex items-center gap-2">
+                      <button
+                        class="text-xs px-3 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded font-medium hover:bg-theme-accent/25 transition-colors"
+                        onClick={downloadScript}
+                      >
+                        Download {g().filename}
+                      </button>
+                      <button
+                        class="text-xs px-3 py-1.5 bg-theme-elevated border border-theme-border rounded hover:bg-theme-surface transition-colors text-theme-text-primary"
+                        onClick={copyScript}
+                      >
+                        {copied() ? "Copied!" : "Copy script"}
+                      </button>
+                    </div>
+                  }
+                >
+                  <div class="space-y-2">
+                    <div class="flex items-center gap-2">
+                      <button
+                        class="text-xs px-3 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded font-medium hover:bg-theme-accent/25 transition-colors disabled:opacity-50"
+                        onClick={startBrowserCopy}
+                        disabled={copying()}
+                      >
+                        {copying() ? "Copying..." : "Copy files now"}
+                      </button>
+                      <span class="text-tiny text-theme-text-tertiary">
+                        Picks your library folder and a destination, then copies in the browser - no script needed.
+                      </span>
+                    </div>
+
+                    {/* Progress */}
+                    <Show when={copying() || copyFinished() !== null}>
+                      <div class="space-y-1">
+                        <div class="h-1.5 bg-theme-elevated rounded overflow-hidden">
+                          <div
+                            class="h-full bg-theme-accent transition-all"
+                            style={{
+                              width: `${copyTotal() > 0 ? Math.round((copyDone() / copyTotal()) * 100) : (copyFinished() !== null ? 100 : 0)}%`,
+                            }}
+                          />
+                        </div>
+                        <Show
+                          when={copyFinished() === null}
+                          fallback={
+                            <p class="text-tiny text-theme-text-tertiary">
+                              Done. Copied {copyFinished()} file{copyFinished() !== 1 ? "s" : ""}. Open WBPP and use Add Directory on the destination.
+                            </p>
+                          }
+                        >
+                          <p class="text-tiny text-theme-text-tertiary truncate">
+                            {copyTotal() > 0 ? `${copyDone()} / ${copyTotal()} - ` : "Scanning... "}
+                            <span class="font-mono">{copyLabel()}</span>
+                          </p>
+                        </Show>
+                      </div>
+                    </Show>
+
+                    {/* Script fallback link */}
+                    <div class="flex items-center gap-3">
+                      <button class="text-tiny text-theme-text-tertiary hover:text-theme-text-primary" onClick={downloadScript}>
+                        Download {g().filename} instead
+                      </button>
+                      <button class="text-tiny text-theme-text-tertiary hover:text-theme-text-primary" onClick={copyScript}>
+                        {copied() ? "Copied!" : "Copy script"}
+                      </button>
+                    </div>
+                  </div>
+                </Show>
 
                 {/* Compact copy plan: one line per session */}
                 <div class="text-tiny text-theme-text-tertiary">

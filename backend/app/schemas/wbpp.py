@@ -52,6 +52,11 @@ class WbppCopyOperation(BaseModel):
     session_date: str
     source: str
     destination: str
+    # Path of the source folder relative to the library/FITS root, for the
+    # browser File System Access API to navigate the user-granted root handle.
+    source_relative: str
+    # Folder name to create under the destination handle (staging entry).
+    dest_entry: str
 
 
 class WbppGenerateResponse(BaseModel):
@@ -60,3 +65,4 @@ class WbppGenerateResponse(BaseModel):
     staging_root: str
     script: str
     operations: list[WbppCopyOperation]
+    exclusions: list[str]

@@ -104,8 +104,7 @@ async def wbpp_generate(
         lib = payload.library_root.rstrip("/\\")
         staging_root = lib + sep + "_WBPP_staging" + sep + payload.target_name.replace(" ", "_")
 
-    sources = []
-    used_dates = []
+    chosen = []  # (session_date, FolderLevel)
     for d in payload.session_dates:
         fps = session_paths.get(d, [])
         levels = compute_session_levels(d, fps, all_paths, fits_root, payload.library_root, target_os)
@@ -113,24 +112,32 @@ async def wbpp_generate(
             continue
         idx = payload.chosen_levels.get(d, pick_default_level(levels))
         idx = max(0, min(idx, len(levels) - 1))
-        sources.append(levels[idx].path)
-        used_dates.append(d)
+        chosen.append((d, levels[idx]))
 
-    if not sources:
+    if not chosen:
         raise HTTPException(status_code=422, detail="No valid source folders for selected sessions")
 
+    used_dates = [d for d, _ in chosen]
+    sources = [lv.path for _, lv in chosen]
     names = disambiguate_staging_names(sources, used_dates)
     copy_ops = list(zip(sources, names))
     safe = payload.target_name.replace(" ", "_")
 
     staging_base = staging_root.rstrip("/\\")
+    fits_base = fits_root.rstrip("/")
+
+    def _relative_to_root(container_path: str) -> str:
+        return container_path[len(fits_base):].lstrip("/")
+
     operations = [
         WbppCopyOperation(
             session_date=d,
-            source=src,
-            destination=staging_base + sep + entry_name,
+            source=lv.path,
+            destination=staging_base + sep + name,
+            source_relative=_relative_to_root(lv.container_path),
+            dest_entry=name,
         )
-        for d, (src, entry_name) in zip(used_dates, copy_ops)
+        for (d, lv), name in zip(chosen, names)
     ]
 
     if target_os == "windows":
@@ -146,4 +153,5 @@ async def wbpp_generate(
         staging_root=staging_root,
         script=script,
         operations=operations,
+        exclusions=payload.exclusions,
     )

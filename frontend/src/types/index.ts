@@ -1045,6 +1045,8 @@ export interface WbppCopyOperation {
   session_date: string;
   source: string;
   destination: string;
+  source_relative: string;
+  dest_entry: string;
 }
 export interface WbppGenerateResponse {
   filename: string;
@@ -1052,4 +1054,5 @@ export interface WbppGenerateResponse {
   staging_root: string;
   script: string;
   operations: WbppCopyOperation[];
+  exclusions: string[];
 }

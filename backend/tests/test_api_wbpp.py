@@ -77,5 +77,11 @@ async def test_wbpp_generate_returns_script_and_operations_for_windows_root():
         assert op["session_date"] == "2024-01-01"
         assert op["source"].startswith("Z:\\Astro")
         assert op["destination"].startswith("Z:\\Astro")
+        # Relative path (for browser File System Access API) is root-relative, no drive/sep prefix.
+        # Single light frame -> deepest level (the Light folder) is the default.
+        assert op["source_relative"] == "M31/2024-01-01/Light"
+        assert "\\" not in op["source_relative"]
+        assert op["dest_entry"] == "Light"
+        assert isinstance(data["exclusions"], list)
     finally:
         app.dependency_overrides.clear()
