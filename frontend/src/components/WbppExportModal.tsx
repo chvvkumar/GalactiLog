@@ -48,6 +48,10 @@ const WbppExportModal: Component<Props> = (props) => {
   const [generated, setGenerated] = createSignal<WbppGenerateResponse | null>(null);
   const [copied, setCopied] = createSignal(false);
   const [showScript, setShowScript] = createSignal(false);
+  // Defaults come from Settings; overrides are per-export. Auto-expand when no
+  // default library root is configured, since one is required.
+  const [showOverrides, setShowOverrides] = createSignal(!(general()?.wbpp_library_root ?? "").trim());
+  const [savedDefaults, setSavedDefaults] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
 
   const runCommand = (): string => {
@@ -126,25 +130,29 @@ const WbppExportModal: Component<Props> = (props) => {
         exclusions: parsedExclusions(),
       });
       setGenerated(resp);
-      // Remember these export preferences so they prefill next time.
-      const current = general();
-      if (current) {
-        try {
-          await ctx.saveGeneral({
-            ...current,
-            wbpp_library_root: libraryRoot().trim() || null,
-            wbpp_default_os: osChoice() === "auto" ? null : osChoice(),
-            wbpp_staging_path: stagingPath().trim() || null,
-            wbpp_exclusions: parsedExclusions(),
-          });
-        } catch {
-          // Persisting preferences is best-effort; ignore failures.
-        }
-      }
     } catch (e: any) {
       setError(e?.message ?? "Failed to generate script");
     } finally {
       setGenerating(false);
+    }
+  };
+
+  const saveAsDefaults = async () => {
+    const current = general();
+    if (!current) return;
+    try {
+      await ctx.saveGeneral({
+        ...current,
+        wbpp_library_root: libraryRoot().trim() || null,
+        wbpp_default_os: osChoice() === "auto" ? null : osChoice(),
+        wbpp_staging_path: stagingPath().trim() || null,
+        wbpp_exclusions: parsedExclusions(),
+      });
+      setSavedDefaults(true);
+      showToast("Saved as defaults");
+      setTimeout(() => setSavedDefaults(false), 1500);
+    } catch {
+      setError("Could not save defaults.");
     }
   };
 
@@ -205,70 +213,106 @@ const WbppExportModal: Component<Props> = (props) => {
             point PixInsight WBPP "Add Directory" at the staging root on your machine.
           </p>
 
-          {/* Library root */}
-          <div>
-            <label class="text-xs font-medium text-theme-text-secondary uppercase tracking-wide block mb-1">
-              Library root (on your machine)
-            </label>
-            <input
-              type="text"
-              class="w-full text-xs px-2 py-1.5 bg-theme-elevated border border-theme-border rounded text-theme-text-primary focus:outline-none focus:border-theme-accent"
-              placeholder="e.g. Z:\Astro or /mnt/astro"
-              value={libraryRoot()}
-              onInput={(e) => setLibraryRoot(e.currentTarget.value)}
-            />
-            <p class="text-tiny text-theme-text-tertiary mt-1">
-              The folder on your machine that mirrors the server's FITS data root.
-            </p>
-          </div>
-
-          {/* OS selector */}
-          <div>
-            <label class="text-xs font-medium text-theme-text-secondary uppercase tracking-wide block mb-1">
-              Script type
-            </label>
-            <select
-              class="text-xs px-2 py-1.5 bg-theme-elevated border border-theme-border rounded text-theme-text-primary focus:outline-none focus:border-theme-accent"
-              value={osChoice()}
-              onChange={(e) => setOsChoice(e.currentTarget.value as OsChoice)}
+          {/* Defaults summary + override toggle */}
+          <div class="flex items-center justify-between gap-2">
+            <div class="text-tiny text-theme-text-tertiary truncate">
+              <Show
+                when={libraryRoot().trim()}
+                fallback={<span class="text-theme-error">No library root set - set defaults in Settings or override below.</span>}
+              >
+                <span class="font-mono text-theme-text-secondary">{libraryRoot()}</span>
+                {" · "}
+                {effectiveOs() === "windows" ? "Windows" : "Linux / macOS"}
+                {stagingPath().trim() ? " · custom staging" : " · default staging"}
+              </Show>
+            </div>
+            <button
+              class="text-tiny text-theme-text-tertiary hover:text-theme-text-primary shrink-0"
+              onClick={() => setShowOverrides(!showOverrides())}
             >
-              <option value="auto">Auto-detect</option>
-              <option value="windows">Windows (PowerShell .ps1)</option>
-              <option value="posix">Linux / macOS (shell .sh)</option>
-            </select>
-            <Show when={osChoice() === "auto" && libraryRoot().trim()}>
-              <span class="text-tiny text-theme-text-tertiary ml-2">
-                Detected: {effectiveOs() === "windows" ? "Windows" : "Linux / macOS"}
-              </span>
-            </Show>
+              {showOverrides() ? "▾ Hide settings" : "▸ Override settings"}
+            </button>
           </div>
 
-          {/* Staging path */}
-          <div>
-            <label class="text-xs font-medium text-theme-text-secondary uppercase tracking-wide block mb-1">
-              Staging path (optional)
-            </label>
-            <input
-              type="text"
-              class="w-full text-xs px-2 py-1.5 bg-theme-elevated border border-theme-border rounded text-theme-text-primary focus:outline-none focus:border-theme-accent"
-              placeholder="Default: <library root>/_WBPP_staging/<target>"
-              value={stagingPath()}
-              onInput={(e) => setStagingPath(e.currentTarget.value)}
-            />
-          </div>
+          {/* Override settings (defaults live in Settings > AstroBin & NINA) */}
+          <Show when={showOverrides()}>
+            <div class="space-y-4 bg-theme-elevated/40 border border-theme-border rounded p-3">
+              <p class="text-tiny text-theme-text-tertiary">
+                These default to your Settings &gt; AstroBin &amp; NINA &gt; PixInsight Export values.
+                Changes here apply to this export only unless you save them as defaults.
+              </p>
 
-          {/* Exclusions */}
-          <div>
-            <label class="text-xs font-medium text-theme-text-secondary uppercase tracking-wide block mb-1">
-              Excluded folder patterns (one per line)
-            </label>
-            <textarea
-              class="w-full text-xs px-2 py-1.5 bg-theme-elevated border border-theme-border rounded text-theme-text-primary font-mono focus:outline-none focus:border-theme-accent"
-              rows={4}
-              value={exclusionsText()}
-              onInput={(e) => setExclusionsText(e.currentTarget.value)}
-            />
-          </div>
+              {/* Library root */}
+              <div>
+                <label class="text-xs font-medium text-theme-text-secondary uppercase tracking-wide block mb-1">
+                  Library root (on your machine)
+                </label>
+                <input
+                  type="text"
+                  class="w-full text-xs px-2 py-1.5 bg-theme-elevated border border-theme-border rounded text-theme-text-primary focus:outline-none focus:border-theme-accent"
+                  placeholder="e.g. Z:\Astro or /mnt/astro"
+                  value={libraryRoot()}
+                  onInput={(e) => setLibraryRoot(e.currentTarget.value)}
+                />
+              </div>
+
+              {/* OS selector */}
+              <div>
+                <label class="text-xs font-medium text-theme-text-secondary uppercase tracking-wide block mb-1">
+                  Script type
+                </label>
+                <select
+                  class="text-xs px-2 py-1.5 bg-theme-elevated border border-theme-border rounded text-theme-text-primary focus:outline-none focus:border-theme-accent"
+                  value={osChoice()}
+                  onChange={(e) => setOsChoice(e.currentTarget.value as OsChoice)}
+                >
+                  <option value="auto">Auto-detect</option>
+                  <option value="windows">Windows (PowerShell .ps1)</option>
+                  <option value="posix">Linux / macOS (shell .sh)</option>
+                </select>
+                <Show when={osChoice() === "auto" && libraryRoot().trim()}>
+                  <span class="text-tiny text-theme-text-tertiary ml-2">
+                    Detected: {effectiveOs() === "windows" ? "Windows" : "Linux / macOS"}
+                  </span>
+                </Show>
+              </div>
+
+              {/* Staging path */}
+              <div>
+                <label class="text-xs font-medium text-theme-text-secondary uppercase tracking-wide block mb-1">
+                  Staging path (optional)
+                </label>
+                <input
+                  type="text"
+                  class="w-full text-xs px-2 py-1.5 bg-theme-elevated border border-theme-border rounded text-theme-text-primary focus:outline-none focus:border-theme-accent"
+                  placeholder="Default: <library root>/_WBPP_staging/<target>"
+                  value={stagingPath()}
+                  onInput={(e) => setStagingPath(e.currentTarget.value)}
+                />
+              </div>
+
+              {/* Exclusions */}
+              <div>
+                <label class="text-xs font-medium text-theme-text-secondary uppercase tracking-wide block mb-1">
+                  Excluded folder patterns (one per line)
+                </label>
+                <textarea
+                  class="w-full text-xs px-2 py-1.5 bg-theme-elevated border border-theme-border rounded text-theme-text-primary font-mono focus:outline-none focus:border-theme-accent"
+                  rows={4}
+                  value={exclusionsText()}
+                  onInput={(e) => setExclusionsText(e.currentTarget.value)}
+                />
+              </div>
+
+              <button
+                class="text-tiny text-theme-accent hover:text-theme-accent-hover transition-colors disabled:opacity-50"
+                onClick={saveAsDefaults}
+                disabled={!libraryRoot().trim()}
+              >
+                {savedDefaults() ? "Saved!" : "Save as defaults"}
+              </button>
+            </div>
+          </Show>
 
           {/* Preview button */}
           <div>

@@ -9,6 +9,96 @@ interface Instance {
   enabled: boolean;
 }
 
+const WBPP_DEFAULT_EXCLUSIONS = [
+  "WBPP", "PixInsight", "finals", "WORK_AREA",
+  "masters", "Masters", "MASTERS", "*CALIBRATED", "CALIBRATED",
+];
+
+function PixInsightExportSection() {
+  const ctx = useSettingsContext();
+  const general = () => ctx.settings()?.general;
+
+  const save = (patch: Record<string, unknown>) => {
+    const current = general();
+    if (!current) return;
+    ctx.saveGeneral({ ...current, ...patch });
+  };
+
+  const exclusionsValue = () =>
+    (general()?.wbpp_exclusions ?? WBPP_DEFAULT_EXCLUSIONS).join("\n");
+
+  return (
+    <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-4 space-y-3">
+      <div class="flex items-center gap-2">
+        <h3 class="text-theme-text-primary font-medium">PixInsight Export</h3>
+        <HelpPopover title="PixInsight Export">
+          <p>Default settings for the "Export to WBPP" action on a target's session list. These are the defaults; you can override any of them per export in the modal.</p>
+          <p>Library root: the folder on the machine running PixInsight that mirrors the server's FITS data root. Stored container paths are rewritten relative to this root.</p>
+          <p>Staging path: where session folders are copied to. Leave blank to use &lt;library root&gt;/_WBPP_staging/&lt;target&gt;.</p>
+          <p>Excluded folder patterns skip processing-output folders so they are not re-ingested by WBPP.</p>
+        </HelpPopover>
+      </div>
+
+      <div class="space-y-3">
+        <div>
+          <label class="text-xs text-theme-text-secondary block mb-1">Library root (on the PixInsight machine)</label>
+          <input
+            type="text"
+            class="w-full text-xs bg-theme-elevated border border-theme-border rounded px-2 py-1 text-theme-text-primary"
+            placeholder="e.g. Z:\Astro or /mnt/astro"
+            value={general()?.wbpp_library_root ?? ""}
+            onChange={(e) => save({ wbpp_library_root: e.currentTarget.value.trim() || null })}
+          />
+        </div>
+
+        <div>
+          <label class="text-xs text-theme-text-secondary block mb-1">Script type</label>
+          <select
+            class="text-xs bg-theme-elevated border border-theme-border rounded px-2 py-1 text-theme-text-primary"
+            value={general()?.wbpp_default_os ?? "auto"}
+            onChange={(e) => {
+              const v = e.currentTarget.value;
+              save({ wbpp_default_os: v === "auto" ? null : v });
+            }}
+          >
+            <option value="auto">Auto-detect from library root</option>
+            <option value="windows">Windows (PowerShell .ps1)</option>
+            <option value="posix">Linux / macOS (shell .sh)</option>
+          </select>
+        </div>
+
+        <div>
+          <label class="text-xs text-theme-text-secondary block mb-1">Staging path (optional)</label>
+          <input
+            type="text"
+            class="w-full text-xs bg-theme-elevated border border-theme-border rounded px-2 py-1 text-theme-text-primary"
+            placeholder="Default: <library root>/_WBPP_staging/<target>"
+            value={general()?.wbpp_staging_path ?? ""}
+            onChange={(e) => save({ wbpp_staging_path: e.currentTarget.value.trim() || null })}
+          />
+        </div>
+
+        <div>
+          <label class="text-xs text-theme-text-secondary block mb-1">Excluded folder patterns (one per line)</label>
+          <textarea
+            class="w-full text-xs bg-theme-elevated border border-theme-border rounded px-2 py-1 text-theme-text-primary font-mono"
+            rows={5}
+            value={exclusionsValue()}
+            onChange={(e) =>
+              save({
+                wbpp_exclusions: e.currentTarget.value
+                  .split("\n")
+                  .map((s) => s.trim())
+                  .filter((s) => s.length > 0),
+              })
+            }
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function InstanceList(props: {
   label: string;
   helpText: string;
@@ -201,6 +291,7 @@ export default function AstroBinTab() {
           instances={ctx.settings()?.general.stellarium_instances ?? []}
           onChange={(instances) => saveInstances("stellarium_instances", instances)}
         />
+        <PixInsightExportSection />
       </div>
     </div>
   );
