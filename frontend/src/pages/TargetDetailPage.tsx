@@ -7,6 +7,7 @@ import { showToast } from "../components/Toast";
 import FilterBadges from "../components/FilterBadges";
 import TargetMetricsChart from "../components/TargetMetricsChart";
 import ExportModal from "../components/ExportModal";
+import WbppExportModal from "../components/WbppExportModal";
 import AladinViewer from "../components/AladinViewer";
 import { useSettingsContext } from "../components/SettingsProvider";
 import { isFieldVisible } from "../utils/displaySettings";
@@ -164,6 +165,7 @@ const TargetDetailPage: Component = () => {
 
   const [showExport, setShowExport] = createSignal(false);
   const [showMerge, setShowMerge] = createSignal(false);
+  const [showWbppExport, setShowWbppExport] = createSignal(false);
   const [expandedSessions, setExpandedSessions] = createSignal<Set<string>>(new Set());
   const [sessionCache, setSessionCache] = createSignal<Record<string, SessionDetail>>({});
   const [targetChartExpanded, setTargetChartExpanded] = createSignal(graphSettings().target_chart_expanded);
@@ -520,6 +522,15 @@ const TargetDetailPage: Component = () => {
             setShowMerge(false);
             await Promise.all([refetchDetail(), refetchMergeHistory()]);
           }}
+        />
+      </Show>
+
+      <Show when={showWbppExport() && targetDetail()}>
+        <WbppExportModal
+          targetId={params.targetId}
+          targetName={targetDetail()!.primary_name}
+          selectedDates={selectedChartDates()}
+          onClose={() => setShowWbppExport(false)}
         />
       </Show>
 
@@ -990,6 +1001,12 @@ const TargetDetailPage: Component = () => {
                       : csvLoading()
                         ? "Loading..."
                         : `AstroBin CSV (${selectedChartDates().length})`}
+                  </button>
+                  <button
+                    class="text-tiny px-2 py-0.5 border border-theme-border rounded text-theme-text-tertiary hover:text-theme-text-primary hover:border-theme-accent transition-colors cursor-pointer"
+                    onClick={() => setShowWbppExport(true)}
+                  >
+                    {`Export to WBPP (${selectedChartDates().length})`}
                   </button>
                 </Show>
               </div>

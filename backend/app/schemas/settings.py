@@ -26,6 +26,16 @@ class GeneralSettings(BaseModel):
     activity_retention_days: int = Field(default=90, ge=1, le=3650)
     nina_instances: list[dict] = Field(default_factory=list)
     stellarium_instances: list[dict] = Field(default_factory=list)
+    # WBPP export preferences
+    wbpp_library_root: str | None = None
+    wbpp_default_os: str | None = None          # "windows" | "posix" | None (auto-detect)
+    wbpp_staging_path: str | None = None
+    wbpp_exclusions: list[str] = Field(
+        default_factory=lambda: [
+            "WBPP", "PixInsight", "finals", "WORK_AREA",
+            "masters", "Masters", "MASTERS", "*CALIBRATED", "CALIBRATED",
+        ]
+    )
 
 
 class FilterConfig(BaseModel):
