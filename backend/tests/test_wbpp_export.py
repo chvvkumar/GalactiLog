@@ -122,3 +122,54 @@ def test_shell_script_uses_rsync():
 
 def test_shell_script_valid_shebang():
     assert generate_shell_script([], "/tmp/s", "T", [], []).startswith("#!/usr/bin/env bash")
+
+
+def test_shell_script_quotes_paths_safely():
+    """User-derived paths containing $(...) must be single-quoted, not double-quoted."""
+    s = generate_shell_script(
+        [("/mnt/astro/$(id)/M31", "2024-01-01")], "/tmp/$(id)/staging",
+        "M31", ["WBPP"], ["2024-01-01"],
+    )
+    # staging root is single-quoted (literal, no command substitution)
+    assert "'/tmp/$(id)/staging'" in s
+    # the dangerous value must NOT sit inside a double-quoted assignment
+    assert 'STAGING_ROOT="/tmp/$(id)/staging"' not in s
+    assert 'STAGING_ROOT="' not in s
+    # rsync source is single-quoted as well
+    assert "'/mnt/astro/$(id)/M31/'" in s
+    assert '"/mnt/astro/$(id)/M31/"' not in s
+
+def test_shell_script_escapes_single_quote():
+    """A path containing a single quote round-trips with the '\\'' idiom."""
+    s = generate_shell_script(
+        [("/mnt/astro/o'brien/M31", "2024-01-01")], "/tmp/o'brien/staging",
+        "M31", [], ["2024-01-01"],
+    )
+    assert "STAGING_ROOT='/tmp/o'\\''brien/staging'" in s
+    assert "'/mnt/astro/o'\\''brien/M31/'" in s
+
+def test_powershell_script_quotes_paths_safely():
+    """A staging_root containing a single quote is doubled inside the literal."""
+    s = generate_powershell_script(
+        [("Z:\\Astro\\o'brien\\M31", "2024-01-01")], "Z:\\o'brien\\Staging",
+        "M31", ["WBPP"], ["2024-01-01"],
+    )
+    assert "$StagingRoot = 'Z:\\o''brien\\Staging'" in s
+    assert "$Src = 'Z:\\Astro\\o''brien\\M31'" in s
+    # no double-quoted user path assignment remains
+    assert '$StagingRoot = "' not in s
+    assert '$Src = "' not in s
+
+def test_powershell_exclusion_matches_component_not_substring():
+    """'finals' excludes a 'finals' folder but NOT a 'semifinals' folder."""
+    s = generate_powershell_script(
+        [("Z:\\Astro\\M31\\2024-01-01", "2024-01-01")], "Z:\\Staging",
+        "M31", ["finals"], ["2024-01-01"],
+    )
+    # the filter must split FullName into path components and test each, not a bare
+    # substring -notmatch against the whole FullName
+    assert ".Split(" in s
+    # the exclusion regex must be anchored to a full component (^...$), so that a
+    # component named 'semifinals' is not matched by 'finals'
+    assert "^(" in s and ")$" in s
+    assert '$_.FullName -notmatch' not in s

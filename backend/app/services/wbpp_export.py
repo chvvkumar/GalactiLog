@@ -10,6 +10,26 @@ from collections import Counter
 from dataclasses import dataclass, field
 
 
+def _sh_quote(value: str) -> str:
+    """Quote a value as a single bash literal.
+
+    Wraps in single quotes and escapes embedded single quotes via the '\\'' idiom,
+    so command substitution ($(...), backticks) and other metacharacters in
+    user-derived paths cannot execute when the script is run.
+    """
+    return "'" + value.replace("'", "'\\''") + "'"
+
+
+def _ps_quote(value: str) -> str:
+    """Quote a value as a single PowerShell literal.
+
+    PowerShell single-quoted strings are literal; embedded single quotes are
+    escaped by doubling them. This prevents subexpression evaluation and parse
+    errors from user-derived paths.
+    """
+    return "'" + value.replace("'", "''") + "'"
+
+
 def detect_os(library_root: str) -> str:
     """Return 'windows' if root has a drive letter or backslash, else 'posix'."""
     if re.match(r"^[A-Za-z]:\\", library_root) or "\\" in library_root:
@@ -150,7 +170,6 @@ def disambiguate_staging_names(selected_paths: list[str], session_dates: list[st
 def generate_powershell_script(copy_ops, staging_root, target_name, exclusions, session_dates):
     """Generate a PowerShell .ps1 copy script (copy only, recursive, with exclusions)."""
     excl_patterns = "|".join(re.escape(e).replace(r"\*", ".*") for e in exclusions)
-    win = "\\" in staging_root
     lines = [
         "# WBPP Session Export",
         f"# Target: {target_name}",
@@ -158,21 +177,25 @@ def generate_powershell_script(copy_ops, staging_root, target_name, exclusions, 
         "# Run on the machine where PixInsight is installed, then open WBPP and",
         f"# use 'Add Directory' on the staging root: {staging_root}",
         "",
-        f'$StagingRoot = "{staging_root}"',
+        f"$StagingRoot = {_ps_quote(staging_root)}",
         "$ErrorActionPreference = 'Stop'",
         "if (-not (Test-Path $StagingRoot)) { New-Item -ItemType Directory -Force -Path $StagingRoot | Out-Null }",
         "",
     ]
     for src, entry_name in copy_ops:
-        dest = f'"{staging_root}\\{entry_name}"' if win else f'"{staging_root}/{entry_name}"'
         lines += [
             f"# Session folder: {src}",
-            f'$Src = "{src}"',
-            f"$Dst = {dest}",
+            f"$Src = {_ps_quote(src)}",
+            f"$Dst = Join-Path $StagingRoot {_ps_quote(entry_name)}",
             "Get-ChildItem -Path $Src -Recurse -File | Where-Object {",
         ]
         if exclusions:
-            lines.append(f'    $_.FullName -notmatch "({excl_patterns})"')
+            # Match a full path COMPONENT (anchored ^...$) rather than an arbitrary
+            # substring, so "finals" does not exclude "semifinals".
+            lines.append(
+                f'    -not ($_.FullName.Split([char[]]@(\'\\\', \'/\')) '
+                f'| Where-Object {{ $_ -match "^({excl_patterns})$" }})'
+            )
         else:
             lines.append("    $true")
         lines += [
@@ -201,7 +224,7 @@ def generate_shell_script(copy_ops, staging_root, target_name, exclusions, sessi
         f"# use 'Add Directory' on the staging root: {staging_root}",
         "",
         "set -euo pipefail",
-        f'STAGING_ROOT="{staging_root}"',
+        f"STAGING_ROOT={_sh_quote(staging_root)}",
         'mkdir -p "$STAGING_ROOT"',
         "",
     ]
@@ -211,7 +234,7 @@ def generate_shell_script(copy_ops, staging_root, target_name, exclusions, sessi
             f"# Session folder: {src}",
             f"mkdir -p {dest}",
             f'rsync -av --copy-links {excl_args} \\'.rstrip(),
-            f'    "{src}/" \\',
+            f'    {_sh_quote(src + "/")} \\',
             f"    {dest}/",
             "",
         ]
