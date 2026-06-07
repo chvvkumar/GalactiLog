@@ -885,4 +885,33 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ url, ra, dec, target_name: targetName }),
     }),
+
+  // WBPP Export
+  wbppPreview: (req: import("../types").WbppPreviewRequest) =>
+    fetchJson<import("../types").WbppPreviewResponse>("/wbpp/preview", {
+      method: "POST",
+      body: JSON.stringify(req),
+    }),
+
+  wbppGenerate: async (req: import("../types").WbppGenerateRequest): Promise<void> => {
+    const resp = await fetchWithRefresh("/wbpp/generate", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(req),
+    });
+    if (!resp.ok) throw await extractApiError(resp, "Failed to generate WBPP script");
+    const blob = await resp.blob();
+    const cd = resp.headers.get("content-disposition") ?? "";
+    const m = cd.match(/filename="([^"]+)"/);
+    const filename = m ? m[1] : "wbpp_export.txt";
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  },
 };
