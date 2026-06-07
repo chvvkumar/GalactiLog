@@ -189,6 +189,24 @@ option {
   background-color: var(--color-bg-elevated);
 }
 
+/* Modal dialog panels: fully opaque so busy page content (tables, charts)
+   never bleeds through, in both glass and solid themes. Glass surface tokens
+   carry alpha and bg-base is transparent, so use the opaque gradient base.
+   A small brightness bump opposite the theme lifts the panel off the dimmed
+   page: lighter on dark themes, darker on light themes. */
+.modal-surface {
+  background-color: var(--color-bg-surface);
+}
+[data-theme-mode="dark"] .modal-surface {
+  background-color: color-mix(in srgb, var(--color-bg-surface), white 6%);
+}
+[data-theme-mode="light"] .modal-surface {
+  background-color: color-mix(in srgb, var(--color-bg-surface), black 7%);
+}
+[data-theme-style="glass"] .modal-surface {
+  background-color: color-mix(in srgb, var(--glass-gradient-from, #0f0f12), white 9%);
+}
+
 [data-theme-style="glass"] .bg-theme-input {
   backdrop-filter: blur(calc(var(--glass-blur) * 0.75)) saturate(var(--glass-saturate));
   -webkit-backdrop-filter: blur(calc(var(--glass-blur) * 0.75)) saturate(var(--glass-saturate));

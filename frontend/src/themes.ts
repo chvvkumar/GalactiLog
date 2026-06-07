@@ -745,12 +745,26 @@ function applyGlassOrbs(orbs: GlassOrb[] | undefined): void {
   }
 }
 
+/** Rough perceived luminance (0-1) of a #rgb / #rrggbb color, for a light/dark split. */
+function hexLuminance(hex: string): number {
+  const h = hex.replace("#", "").trim();
+  const full = h.length === 3 ? h.split("").map((c) => c + c).join("") : h;
+  const r = parseInt(full.slice(0, 2), 16) / 255;
+  const g = parseInt(full.slice(2, 4), 16) / 255;
+  const b = parseInt(full.slice(4, 6), 16) / 255;
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
 export function applyTheme(themeId: string): void {
   const theme = getThemeById(themeId);
   const root = document.documentElement;
   for (const [token, value] of Object.entries(theme.tokens)) {
     root.style.setProperty(`--color-${token}`, value);
   }
+  // Light vs dark drives the modal contrast bump (lighter panel on dark themes,
+  // darker on light). For glass themes the page base is the opaque gradient.
+  const pageBase = theme.glass ? theme.glass.gradientFrom : theme.tokens["bg-base"];
+  root.setAttribute("data-theme-mode", hexLuminance(pageBase) > 0.5 ? "light" : "dark");
   if (theme.glass) {
     root.style.setProperty("--glass-blur", theme.glass.blur);
     root.style.setProperty("--glass-saturate", theme.glass.saturate);

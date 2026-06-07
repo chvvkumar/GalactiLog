@@ -30,6 +30,19 @@ def _ps_quote(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
 
 
+def sanitize_script_name(target_name: str, fallback: str = "target") -> str:
+    """Make a target name safe to use as a download filename component.
+
+    Replaces any character that is not alphanumeric, dash, underscore, or dot
+    (this covers spaces and the Windows-illegal set < > : " / \\ | ? * as well
+    as apostrophes that complicate shell quoting), collapses runs of separators
+    into a single underscore, and trims leading/trailing junk. Falls back to a
+    placeholder if nothing usable remains.
+    """
+    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", target_name).strip("._")
+    return cleaned or fallback
+
+
 def detect_os(library_root: str) -> str:
     """Return 'windows' if root has a drive letter or backslash, else 'posix'."""
     if re.match(r"^[A-Za-z]:\\", library_root) or "\\" in library_root:
@@ -178,14 +191,18 @@ def generate_powershell_script(copy_ops, staging_root, target_name, exclusions, 
     """
     excl_patterns = "|".join(re.escape(e).replace(r"\*", ".*") for e in exclusions)
     script_name = filename or "this script"
+    # Single-quoted PowerShell literal: double any embedded apostrophes (e.g. "Bode's").
+    quoted_name = script_name.replace("'", "''")
     lines = [
         "# WBPP Session Export",
         f"# Target: {target_name}",
         f"# Sessions: {', '.join(session_dates)}",
         "#",
         "# To run this script:",
-        "#   Open PowerShell in this folder and run:",
-        f"#     powershell -ExecutionPolicy Bypass -File .\\{script_name}",
+        "#   Open PowerShell in this folder. Files downloaded via a browser are blocked",
+        "#   by Windows (Mark of the Web); this unblocks and runs the script in one step:",
+        f"#     powershell -ExecutionPolicy Bypass -Command "
+        f"\"Unblock-File -LiteralPath '.\\{quoted_name}'; & '.\\{quoted_name}'\"",
         "#",
         "# When it finishes, open PixInsight WBPP and use 'Add Directory' on the",
         f"# staging root: {staging_root}",

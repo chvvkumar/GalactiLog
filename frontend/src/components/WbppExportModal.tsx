@@ -204,9 +204,14 @@ const WbppExportModal: Component<Props> = (props) => {
   const runCommand = (): string => {
     const g = generated();
     if (!g) return "";
-    return g.target_os === "windows"
-      ? `powershell -ExecutionPolicy Bypass -File .\\${g.filename}`
-      : `chmod +x ${g.filename} && ./${g.filename}`;
+    if (g.target_os !== "windows") {
+      return `chmod +x ${g.filename} && ./${g.filename}`;
+    }
+    // Browser-downloaded scripts carry the Mark of the Web and are blocked even with
+    // -ExecutionPolicy Bypass when policy is set by Group Policy. Unblock-File first,
+    // then run. Double apostrophes for the single-quoted PowerShell literal.
+    const name = `.\\${g.filename}`.replace(/'/g, "''");
+    return `powershell -ExecutionPolicy Bypass -Command "Unblock-File -LiteralPath '${name}'; & '${name}'"`;
   };
 
   const loadPreview = async () => {
@@ -408,7 +413,7 @@ const WbppExportModal: Component<Props> = (props) => {
       onClick={props.onClose}
     >
       <div
-        class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-lg)] max-w-4xl w-full mx-4 max-h-[85vh] overflow-y-auto"
+        class="modal-surface border border-theme-border-em rounded-[var(--radius-md)] shadow-[0_24px_64px_rgba(0,0,0,0.7)] ring-1 ring-white/10 max-w-4xl w-full mx-4 max-h-[85vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
         <div class="p-4 border-b border-theme-border flex items-center justify-between">
@@ -425,7 +430,7 @@ const WbppExportModal: Component<Props> = (props) => {
           </button>
         </div>
 
-        <div class="p-4 space-y-4 bg-theme-base">
+        <div class="p-4 space-y-4">
           <p class="text-xs text-theme-text-secondary">
             Stages the selected session folders for PixInsight WBPP. Copy directly in your
             browser, or download a script to run on the machine where PixInsight is installed.

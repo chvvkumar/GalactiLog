@@ -6,7 +6,7 @@ from app.services.wbpp_export import (
 )
 from app.services.wbpp_export import (
     disambiguate_staging_names, generate_powershell_script,
-    generate_shell_script, DEFAULT_EXCLUSIONS,
+    generate_shell_script, DEFAULT_EXCLUSIONS, sanitize_script_name,
 )
 
 
@@ -177,6 +177,17 @@ def test_shell_script_shows_progress():
         "M31", ["WBPP"], ["2024-01-01"],
     )
     assert "--info=progress2" in s
+
+
+def test_sanitize_script_name_strips_illegal_chars():
+    # Windows-illegal characters and apostrophes are replaced; runs collapse.
+    assert sanitize_script_name("NGC 7000: North America Nebula") == "NGC_7000_North_America_Nebula"
+    assert sanitize_script_name("M 81 - Bode's Galaxy") == "M_81_-_Bode_s_Galaxy"
+    assert sanitize_script_name('M27 / "Dumbbell" *test*?') == "M27_Dumbbell_test"
+    # Dashes, underscores, and dots survive; leading/trailing junk is trimmed.
+    assert sanitize_script_name("  ...Sh2-155...  ") == "Sh2-155"
+    # Nothing usable falls back to the placeholder.
+    assert sanitize_script_name("::: ???") == "target"
 
 
 def test_powershell_script_includes_run_instruction():
