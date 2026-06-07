@@ -413,7 +413,7 @@ const WbppExportModal: Component<Props> = (props) => {
       onClick={props.onClose}
     >
       <div
-        class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-lg)] max-w-4xl w-full mx-4 max-h-[85vh] overflow-y-auto"
+        class="modal-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-lg)] max-w-4xl w-full mx-4 max-h-[85vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
         <div class="p-4 border-b border-theme-border flex items-center justify-between">
@@ -430,7 +430,7 @@ const WbppExportModal: Component<Props> = (props) => {
           </button>
         </div>
 
-        <div class="p-4 space-y-4 bg-theme-base">
+        <div class="p-4 space-y-4">
           <p class="text-xs text-theme-text-secondary">
             Stages the selected session folders for PixInsight WBPP. Copy directly in your
             browser, or download a script to run on the machine where PixInsight is installed.
