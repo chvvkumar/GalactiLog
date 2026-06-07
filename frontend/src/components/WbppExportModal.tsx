@@ -361,6 +361,10 @@ const WbppExportModal: Component<Props> = (props) => {
 
   const copyReady = () => !!srcHandle() && !!destHandle() && srcPerm() !== "denied" && destPerm() !== "denied";
 
+  // Raised section card, matching the target page.
+  const cardClass =
+    "bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-4";
+
   return (
     <div
       class="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
@@ -384,42 +388,44 @@ const WbppExportModal: Component<Props> = (props) => {
           </button>
         </div>
 
-        <div class="p-4 space-y-4">
+        <div class="p-4 space-y-4 bg-theme-base">
           <p class="text-xs text-theme-text-secondary">
             Stages the selected session folders for PixInsight WBPP. Copy directly in your
             browser, or download a script to run on the machine where PixInsight is installed.
           </p>
 
-          {/* Defaults summary + override toggle */}
-          <div class="flex items-center justify-between gap-2">
-            <div class="text-tiny text-theme-text-tertiary truncate">
-              <Show
-                when={libraryRoot().trim()}
-                fallback={<span class="text-theme-error">No library root set - set defaults in Settings or override below.</span>}
+          {/* Settings card */}
+          <div class={`${cardClass} space-y-3`}>
+            {/* Defaults summary + override toggle */}
+            <div class="flex items-center justify-between gap-2">
+              <div class="text-tiny text-theme-text-tertiary truncate">
+                <Show
+                  when={libraryRoot().trim()}
+                  fallback={<span class="text-theme-error">No library root set - set defaults in Settings or override below.</span>}
+                >
+                  <span class="font-mono text-theme-text-secondary">{libraryRoot()}</span>
+                  {" · "}
+                  {effectiveOs() === "windows" ? "Windows" : "Linux / macOS"}
+                  {stagingPath().trim() ? " · custom staging" : " · default staging"}
+                </Show>
+              </div>
+              <button
+                class="text-tiny text-theme-text-tertiary hover:text-theme-text-primary shrink-0"
+                onClick={() => setShowOverrides(!showOverrides())}
               >
-                <span class="font-mono text-theme-text-secondary">{libraryRoot()}</span>
-                {" · "}
-                {effectiveOs() === "windows" ? "Windows" : "Linux / macOS"}
-                {stagingPath().trim() ? " · custom staging" : " · default staging"}
-              </Show>
+                {showOverrides() ? "▾ Hide settings" : "▸ Override settings"}
+              </button>
             </div>
-            <button
-              class="text-tiny text-theme-text-tertiary hover:text-theme-text-primary shrink-0"
-              onClick={() => setShowOverrides(!showOverrides())}
-            >
-              {showOverrides() ? "▾ Hide settings" : "▸ Override settings"}
-            </button>
-          </div>
 
-          {/* Override settings (defaults live in Settings > AstroBin & NINA) */}
-          <Show when={showOverrides()}>
-            <div class="space-y-4 bg-theme-elevated/40 border border-theme-border rounded p-3">
-              <p class="text-tiny text-theme-text-tertiary">
-                These default to your Settings &gt; AstroBin &amp; NINA &gt; PixInsight Export values.
-                Changes here apply to this export only unless you save them as defaults.
-              </p>
+            {/* Override settings (defaults live in Settings > AstroBin & NINA) */}
+            <Show when={showOverrides()}>
+              <div class="space-y-4 border-t border-theme-border pt-3">
+                <p class="text-tiny text-theme-text-tertiary">
+                  These default to your Settings &gt; AstroBin &amp; NINA &gt; PixInsight Export values.
+                  Changes here apply to this export only unless you save them as defaults.
+                </p>
 
-              <div>
+                <div>
                 <label class="text-xs font-medium text-theme-text-secondary uppercase tracking-wide block mb-1">
                   Library root (on your machine)
                 </label>
@@ -477,25 +483,15 @@ const WbppExportModal: Component<Props> = (props) => {
                 />
               </div>
 
-              <button
-                class="text-tiny text-theme-accent hover:text-theme-accent-hover transition-colors disabled:opacity-50"
-                onClick={saveAsDefaults}
-                disabled={!libraryRoot().trim()}
-              >
-                {savedDefaults() ? "Saved!" : "Save as defaults"}
-              </button>
-            </div>
-          </Show>
-
-          {/* Preview button */}
-          <div>
-            <button
-              class="text-xs px-3 py-1.5 bg-theme-elevated border border-theme-border rounded hover:bg-theme-surface transition-colors text-theme-text-primary disabled:opacity-50"
-              onClick={loadPreview}
-              disabled={previewing() || !libraryRoot().trim()}
-            >
-              {previewing() ? "Loading..." : sessions().length ? "Refresh folder levels" : "Preview folder levels"}
-            </button>
+                <button
+                  class="text-tiny text-theme-accent hover:text-theme-accent-hover transition-colors disabled:opacity-50"
+                  onClick={saveAsDefaults}
+                  disabled={!libraryRoot().trim()}
+                >
+                  {savedDefaults() ? "Saved!" : "Save as defaults"}
+                </button>
+              </div>
+            </Show>
           </div>
 
           {/* Error */}
@@ -505,9 +501,20 @@ const WbppExportModal: Component<Props> = (props) => {
             </div>
           </Show>
 
-          {/* Per-session level pickers (collapsible) */}
-          <Show when={sessions().length > 0}>
-            <div class="space-y-3">
+          {/* Folder levels card */}
+          <div class={`${cardClass} space-y-3`}>
+            <div>
+              <button
+                class="text-xs px-3 py-1.5 bg-theme-elevated border border-theme-border rounded hover:bg-theme-surface transition-colors text-theme-text-primary disabled:opacity-50"
+                onClick={loadPreview}
+                disabled={previewing() || !libraryRoot().trim()}
+              >
+                {previewing() ? "Loading..." : sessions().length ? "Refresh folder levels" : "Preview folder levels"}
+              </button>
+            </div>
+
+            {/* Per-session level pickers (collapsible) */}
+            <Show when={sessions().length > 0}>
               <button
                 class="flex items-center gap-1 text-xs font-medium text-theme-text-secondary uppercase tracking-wide hover:text-theme-text-primary"
                 onClick={() => setShowLevels(!showLevels())}
@@ -586,12 +593,12 @@ const WbppExportModal: Component<Props> = (props) => {
                   )}
                 </For>
               </Show>
-            </div>
-          </Show>
+            </Show>
+          </div>
 
-          {/* Copy plan + copy controls (always available once previewed) */}
+          {/* Copy plan + copy controls card (available once previewed) */}
           <Show when={plan().length > 0}>
-            <div class="space-y-3 border-t border-theme-border pt-4">
+            <div class={`${cardClass} space-y-3`}>
               <div class="text-tiny text-theme-text-tertiary">
                 {plan().length} folder{plan().length !== 1 ? "s" : ""} →{" "}
                 <span class="font-mono text-theme-text-secondary break-all">{stagingRoot()}</span>
@@ -619,7 +626,7 @@ const WbppExportModal: Component<Props> = (props) => {
                   </p>
                 }
               >
-                <div class="space-y-2 bg-theme-elevated/40 border border-theme-border rounded p-3">
+                <div class="space-y-2 bg-theme-base border border-theme-border rounded p-3">
                   <div class="text-xs font-medium text-theme-text-secondary uppercase tracking-wide">
                     Copy in browser
                   </div>
