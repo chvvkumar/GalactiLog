@@ -3,7 +3,6 @@ import uuid
 from datetime import date as date_type
 
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,7 +13,7 @@ from app.models import Image, Target
 from app.models.user import User
 from app.schemas.wbpp import (
     WbppPreviewRequest, WbppPreviewResponse, WbppSessionPreview,
-    WbppGenerateRequest, WbppFolderLevel,
+    WbppGenerateRequest, WbppGenerateResponse, WbppCopyOperation, WbppFolderLevel,
 )
 from app.services.wbpp_export import (
     detect_os, compute_session_levels, pick_default_level,
@@ -83,7 +82,7 @@ async def wbpp_preview(
     return WbppPreviewResponse(sessions=previews, target_os=target_os)
 
 
-@router.post("/generate")
+@router.post("/generate", response_model=WbppGenerateResponse)
 async def wbpp_generate(
     payload: WbppGenerateRequest,
     db: AsyncSession = Depends(get_session),
@@ -95,13 +94,13 @@ async def wbpp_generate(
         raise HTTPException(status_code=400, detail="Invalid target_id")
 
     target_os = payload.target_os or detect_os(payload.library_root)
+    sep = "\\" if target_os == "windows" else "/"
     fits_root = settings.fits_data_path
     session_paths = await _fetch_session_paths(target_id, payload.session_dates, db)
     all_paths = await _fetch_all_paths_for_contamination(db)
 
     staging_root = payload.staging_path
     if not staging_root:
-        sep = "\\" if target_os == "windows" else "/"
         lib = payload.library_root.rstrip("/\\")
         staging_root = lib + sep + "_WBPP_staging" + sep + payload.target_name.replace(" ", "_")
 
@@ -124,6 +123,16 @@ async def wbpp_generate(
     copy_ops = list(zip(sources, names))
     safe = payload.target_name.replace(" ", "_")
 
+    staging_base = staging_root.rstrip("/\\")
+    operations = [
+        WbppCopyOperation(
+            session_date=d,
+            source=src,
+            destination=staging_base + sep + entry_name,
+        )
+        for d, (src, entry_name) in zip(used_dates, copy_ops)
+    ]
+
     if target_os == "windows":
         script = generate_powershell_script(copy_ops, staging_root, payload.target_name, payload.exclusions, used_dates)
         filename = f"wbpp_{safe}.ps1"
@@ -131,7 +140,10 @@ async def wbpp_generate(
         script = generate_shell_script(copy_ops, staging_root, payload.target_name, payload.exclusions, used_dates)
         filename = f"wbpp_{safe}.sh"
 
-    return Response(
-        content=script, media_type="text/plain",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    return WbppGenerateResponse(
+        filename=filename,
+        target_os=target_os,
+        staging_root=staging_root,
+        script=script,
+        operations=operations,
     )

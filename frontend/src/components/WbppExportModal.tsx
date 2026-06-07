@@ -2,7 +2,7 @@ import { Component, For, Show, createSignal } from "solid-js";
 import { api } from "../api/client";
 import { showToast } from "./Toast";
 import { useSettingsContext } from "./SettingsProvider";
-import type { WbppSessionPreview, WbppFolderLevel } from "../types";
+import type { WbppSessionPreview, WbppFolderLevel, WbppGenerateResponse } from "../types";
 
 interface Props {
   targetId: string;
@@ -45,6 +45,8 @@ const WbppExportModal: Component<Props> = (props) => {
   const [previewOs, setPreviewOs] = createSignal<string>("");
   const [previewing, setPreviewing] = createSignal(false);
   const [generating, setGenerating] = createSignal(false);
+  const [generated, setGenerated] = createSignal<WbppGenerateResponse | null>(null);
+  const [copied, setCopied] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
 
   const effectiveOs = (): "windows" | "posix" =>
@@ -75,6 +77,7 @@ const WbppExportModal: Component<Props> = (props) => {
       });
       setSessions(resp.sessions);
       setPreviewOs(resp.target_os);
+      setGenerated(null);
       // Initialize chosen levels to each session's default.
       const init: Record<string, number> = {};
       for (const s of resp.sessions) {
@@ -90,9 +93,11 @@ const WbppExportModal: Component<Props> = (props) => {
 
   const selectLevel = (sessionDate: string, index: number) => {
     setChosenLevels({ ...chosenLevels(), [sessionDate]: index });
+    // The previously generated script is now stale.
+    setGenerated(null);
   };
 
-  const download = async () => {
+  const generate = async () => {
     if (!libraryRoot().trim()) {
       setError("Enter your astrophotography library root path first.");
       return;
@@ -100,7 +105,7 @@ const WbppExportModal: Component<Props> = (props) => {
     setError(null);
     setGenerating(true);
     try {
-      await api.wbppGenerate({
+      const resp = await api.wbppGenerate({
         target_id: props.targetId,
         target_name: props.targetName,
         session_dates: props.selectedDates,
@@ -110,6 +115,7 @@ const WbppExportModal: Component<Props> = (props) => {
         staging_path: stagingPath().trim() || null,
         exclusions: parsedExclusions(),
       });
+      setGenerated(resp);
       // Remember these export preferences so they prefill next time.
       const current = general();
       if (current) {
@@ -125,12 +131,38 @@ const WbppExportModal: Component<Props> = (props) => {
           // Persisting preferences is best-effort; ignore failures.
         }
       }
-      showToast("WBPP script downloaded");
-      props.onClose();
     } catch (e: any) {
       setError(e?.message ?? "Failed to generate script");
     } finally {
       setGenerating(false);
+    }
+  };
+
+  const downloadScript = () => {
+    const g = generated();
+    if (!g) return;
+    const blob = new Blob([g.script], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = g.filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    showToast("WBPP script downloaded");
+  };
+
+  const copyScript = async () => {
+    const g = generated();
+    if (!g) return;
+    try {
+      await navigator.clipboard.writeText(g.script);
+      setCopied(true);
+      showToast("Script copied to clipboard");
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      setError("Could not copy to clipboard.");
     }
   };
 
@@ -140,7 +172,7 @@ const WbppExportModal: Component<Props> = (props) => {
       onClick={props.onClose}
     >
       <div
-        class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-lg)] max-w-2xl w-full mx-4 max-h-[85vh] overflow-y-auto"
+        class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-lg)] max-w-4xl w-full mx-4 max-h-[85vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
         <div class="p-4 border-b border-theme-border flex items-center justify-between">
@@ -329,6 +361,63 @@ const WbppExportModal: Component<Props> = (props) => {
               </Show>
             </div>
           </Show>
+
+          {/* Generated output: source -> destination preview + script preview */}
+          <Show when={generated()}>
+            {(g) => (
+              <div class="space-y-3 border-t border-theme-border pt-4">
+                {/* Path preview */}
+                <div>
+                  <div class="text-xs font-medium text-theme-text-secondary uppercase tracking-wide mb-1">
+                    Copy plan ({g().operations.length})
+                  </div>
+                  <p class="text-tiny text-theme-text-tertiary mb-2">
+                    Each selected source folder is copied to the staging area at:
+                    <span class="font-mono text-theme-text-secondary break-all"> {g().staging_root}</span>
+                  </p>
+                  <div class="space-y-2">
+                    <For each={g().operations}>
+                      {(op) => (
+                        <div class="bg-theme-elevated rounded p-2 text-tiny">
+                          <div class="text-theme-text-tertiary mb-1">{op.session_date}</div>
+                          <div class="font-mono text-theme-text-secondary break-all">
+                            <span class="text-theme-text-tertiary">src </span>{op.source}
+                          </div>
+                          <div class="font-mono text-theme-text-primary break-all">
+                            <span class="text-theme-text-tertiary">dst </span>{op.destination}
+                          </div>
+                        </div>
+                      )}
+                    </For>
+                  </div>
+                </div>
+
+                {/* Script preview */}
+                <div>
+                  <div class="flex items-center justify-between mb-1">
+                    <div class="text-xs font-medium text-theme-text-secondary uppercase tracking-wide">
+                      Script preview - {g().filename}
+                    </div>
+                    <div class="flex gap-2">
+                      <button
+                        class="text-tiny px-2 py-1 bg-theme-elevated border border-theme-border rounded hover:bg-theme-surface transition-colors text-theme-text-primary"
+                        onClick={copyScript}
+                      >
+                        {copied() ? "Copied!" : "Copy script"}
+                      </button>
+                      <button
+                        class="text-tiny px-2 py-1 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded font-medium hover:bg-theme-accent/25 transition-colors"
+                        onClick={downloadScript}
+                      >
+                        Download {g().filename.endsWith(".ps1") ? ".ps1" : ".sh"}
+                      </button>
+                    </div>
+                  </div>
+                  <pre class="text-tiny font-mono bg-theme-base border border-theme-border rounded p-2 max-h-72 overflow-auto text-theme-text-secondary whitespace-pre">{g().script}</pre>
+                </div>
+              </div>
+            )}
+          </Show>
         </div>
 
         <div class="p-4 border-t border-theme-border flex gap-2 justify-end">
@@ -336,14 +425,14 @@ const WbppExportModal: Component<Props> = (props) => {
             class="text-xs px-3 py-1.5 bg-theme-elevated border border-theme-border rounded hover:bg-theme-surface transition-colors text-theme-text-primary"
             onClick={props.onClose}
           >
-            Cancel
+            Close
           </button>
           <button
             class="text-xs px-3 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded font-medium hover:bg-theme-accent/25 transition-colors disabled:opacity-50"
-            onClick={download}
+            onClick={generate}
             disabled={generating() || !libraryRoot().trim()}
           >
-            {generating() ? "Generating..." : "Download Script"}
+            {generating() ? "Generating..." : generated() ? "Regenerate script" : "Generate script"}
           </button>
         </div>
       </div>

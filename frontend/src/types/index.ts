@@ -1041,3 +1041,15 @@ export interface WbppGenerateRequest {
   staging_path?: string | null;
   exclusions?: string[];
 }
+export interface WbppCopyOperation {
+  session_date: string;
+  source: string;
+  destination: string;
+}
+export interface WbppGenerateResponse {
+  filename: string;
+  target_os: string;
+  staging_root: string;
+  script: string;
+  operations: WbppCopyOperation[];
+}

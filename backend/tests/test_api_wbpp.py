@@ -45,7 +45,7 @@ async def test_wbpp_preview_empty_sessions():
 
 
 @pytest.mark.asyncio
-async def test_wbpp_generate_returns_ps1_for_windows_root():
+async def test_wbpp_generate_returns_script_and_operations_for_windows_root():
     mock_session = AsyncMock()
     mock_result = MagicMock()
     mock_result.all.return_value = [
@@ -67,8 +67,15 @@ async def test_wbpp_generate_returns_ps1_for_windows_root():
                 "library_root": "Z:\\Astro",
             })
         assert resp.status_code == 200
-        cd = resp.headers.get("content-disposition", "")
-        assert "attachment" in cd and ".ps1" in cd
-        assert "Copy-Item" in resp.text
+        data = resp.json()
+        assert data["filename"].endswith(".ps1")
+        assert data["target_os"] == "windows"
+        assert "Copy-Item" in data["script"]
+        assert "Write-Progress" in data["script"]
+        assert len(data["operations"]) == 1
+        op = data["operations"][0]
+        assert op["session_date"] == "2024-01-01"
+        assert op["source"].startswith("Z:\\Astro")
+        assert op["destination"].startswith("Z:\\Astro")
     finally:
         app.dependency_overrides.clear()

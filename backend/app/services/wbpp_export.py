@@ -168,7 +168,12 @@ def disambiguate_staging_names(selected_paths: list[str], session_dates: list[st
 
 
 def generate_powershell_script(copy_ops, staging_root, target_name, exclusions, session_dates):
-    """Generate a PowerShell .ps1 copy script (copy only, recursive, with exclusions)."""
+    """Generate a PowerShell .ps1 copy script with a progress bar.
+
+    Copies recursively (copy only), applies component-level exclusions, gathers
+    the full file list first so it can show Write-Progress with an accurate
+    overall percentage as files are copied.
+    """
     excl_patterns = "|".join(re.escape(e).replace(r"\*", ".*") for e in exclusions)
     lines = [
         "# WBPP Session Export",
@@ -181,40 +186,60 @@ def generate_powershell_script(copy_ops, staging_root, target_name, exclusions, 
         "$ErrorActionPreference = 'Stop'",
         "if (-not (Test-Path $StagingRoot)) { New-Item -ItemType Directory -Force -Path $StagingRoot | Out-Null }",
         "",
+        "$Jobs = @(",
     ]
     for src, entry_name in copy_ops:
-        lines += [
-            f"# Session folder: {src}",
-            f"$Src = {_ps_quote(src)}",
-            f"$Dst = Join-Path $StagingRoot {_ps_quote(entry_name)}",
-            "Get-ChildItem -Path $Src -Recurse -File | Where-Object {",
-        ]
-        if exclusions:
-            # Match a full path COMPONENT (anchored ^...$) rather than an arbitrary
-            # substring, so "finals" does not exclude "semifinals".
-            lines.append(
-                f'    -not ($_.FullName.Split([char[]]@(\'\\\', \'/\')) '
-                f'| Where-Object {{ $_ -match "^({excl_patterns})$" }})'
-            )
-        else:
-            lines.append("    $true")
-        lines += [
-            "} | ForEach-Object {",
-            "    $RelPath = $_.FullName.Substring($Src.Length).TrimStart('\\', '/')",
-            "    $Target = Join-Path $Dst $RelPath",
-            "    $TargetDir = Split-Path $Target -Parent",
-            "    if (-not (Test-Path $TargetDir)) { New-Item -ItemType Directory -Force -Path $TargetDir | Out-Null }",
-            "    Copy-Item -Path $_.FullName -Destination $Target -Force",
-            "}",
-            "",
-        ]
-    lines.append("Write-Host 'Copy complete. Open WBPP and use Add Directory on:' $StagingRoot")
+        lines.append(
+            f"    @{{ Src = {_ps_quote(src)}; "
+            f"Dst = (Join-Path $StagingRoot {_ps_quote(entry_name)}) }}"
+        )
+    lines += [
+        ")",
+        "",
+        "# Pass 1: gather the full file list (so progress can show an accurate total).",
+        "Write-Host 'Scanning source folders...'",
+        "$Files = @()",
+        "foreach ($Job in $Jobs) {",
+        "    Get-ChildItem -Path $Job.Src -Recurse -File | Where-Object {",
+    ]
+    if exclusions:
+        # Match a full path COMPONENT (anchored ^...$) rather than an arbitrary
+        # substring, so "finals" does not exclude "semifinals".
+        lines.append(
+            f"        -not ($_.FullName.Split([char[]]@('\\', '/')) "
+            f'| Where-Object {{ $_ -match "^({excl_patterns})$" }})'
+        )
+    else:
+        lines.append("        $true")
+    lines += [
+        "    } | ForEach-Object {",
+        "        $RelPath = $_.FullName.Substring($Job.Src.Length).TrimStart('\\', '/')",
+        "        $Files += [pscustomobject]@{ Source = $_.FullName; Target = (Join-Path $Job.Dst $RelPath) }",
+        "    }",
+        "}",
+        "",
+        "# Pass 2: copy with a progress bar.",
+        "$Total = $Files.Count",
+        'Write-Host "Copying $Total file(s) to $StagingRoot"',
+        "$i = 0",
+        "foreach ($f in $Files) {",
+        "    $i++",
+        "    Write-Progress -Activity 'Copying frames to WBPP staging' "
+        '-Status "$i of $Total" -PercentComplete (($i / [Math]::Max($Total, 1)) * 100)',
+        "    $TargetDir = Split-Path $f.Target -Parent",
+        "    if (-not (Test-Path $TargetDir)) { New-Item -ItemType Directory -Force -Path $TargetDir | Out-Null }",
+        "    Copy-Item -Path $f.Source -Destination $f.Target -Force",
+        "}",
+        "Write-Progress -Activity 'Copying frames to WBPP staging' -Completed",
+        'Write-Host "Done. Copied $Total file(s). Open WBPP and use Add Directory on:" $StagingRoot',
+    ]
     return "\n".join(lines)
 
 
 def generate_shell_script(copy_ops, staging_root, target_name, exclusions, session_dates):
-    """Generate a POSIX shell .sh copy script using rsync (copy only)."""
-    excl_args = " ".join(f'--exclude="{e}"' for e in exclusions)
+    """Generate a POSIX shell .sh copy script using rsync with a progress meter."""
+    excl_args = [f'--exclude="{e}"' for e in exclusions]
+    total = len(copy_ops)
     lines = [
         "#!/usr/bin/env bash",
         "# WBPP Session Export",
@@ -228,12 +253,14 @@ def generate_shell_script(copy_ops, staging_root, target_name, exclusions, sessi
         'mkdir -p "$STAGING_ROOT"',
         "",
     ]
-    for src, entry_name in copy_ops:
+    for idx, (src, entry_name) in enumerate(copy_ops, start=1):
         dest = f'"$STAGING_ROOT/{entry_name}"'
+        rsync_parts = ["rsync", "-a", "--copy-links", "--info=progress2", *excl_args]
         lines += [
             f"# Session folder: {src}",
+            f'echo "[{idx}/{total}] Copying {entry_name} ..."',
             f"mkdir -p {dest}",
-            f'rsync -av --copy-links {excl_args} \\'.rstrip(),
+            " ".join(rsync_parts) + " \\",
             f'    {_sh_quote(src + "/")} \\',
             f"    {dest}/",
             "",

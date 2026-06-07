@@ -46,3 +46,17 @@ class WbppGenerateRequest(BaseModel):
             "masters", "Masters", "MASTERS", "*CALIBRATED", "CALIBRATED",
         ]
     )
+
+
+class WbppCopyOperation(BaseModel):
+    session_date: str
+    source: str
+    destination: str
+
+
+class WbppGenerateResponse(BaseModel):
+    filename: str
+    target_os: str
+    staging_root: str
+    script: str
+    operations: list[WbppCopyOperation]

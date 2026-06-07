@@ -155,10 +155,26 @@ def test_powershell_script_quotes_paths_safely():
         "M31", ["WBPP"], ["2024-01-01"],
     )
     assert "$StagingRoot = 'Z:\\o''brien\\Staging'" in s
-    assert "$Src = 'Z:\\Astro\\o''brien\\M31'" in s
-    # no double-quoted user path assignment remains
+    assert "Src = 'Z:\\Astro\\o''brien\\M31'" in s
+    # no double-quoted user path literal remains
     assert '$StagingRoot = "' not in s
-    assert '$Src = "' not in s
+    assert 'Src = "' not in s
+
+
+def test_powershell_script_shows_progress():
+    s = generate_powershell_script(
+        [("Z:\\Astro\\M31\\2024-01-01", "2024-01-01")], "Z:\\Staging",
+        "M31", ["WBPP"], ["2024-01-01"],
+    )
+    assert "Write-Progress" in s
+
+
+def test_shell_script_shows_progress():
+    s = generate_shell_script(
+        [("/mnt/astro/M31/2024-01-01", "2024-01-01")], "/tmp/staging",
+        "M31", ["WBPP"], ["2024-01-01"],
+    )
+    assert "--info=progress2" in s
 
 def test_powershell_exclusion_matches_component_not_substring():
     """'finals' excludes a 'finals' folder but NOT a 'semifinals' folder."""
