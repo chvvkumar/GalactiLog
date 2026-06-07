@@ -110,6 +110,21 @@ const WbppExportModal: Component<Props> = (props) => {
         staging_path: stagingPath().trim() || null,
         exclusions: parsedExclusions(),
       });
+      // Remember these export preferences so they prefill next time.
+      const current = general();
+      if (current) {
+        try {
+          await ctx.saveGeneral({
+            ...current,
+            wbpp_library_root: libraryRoot().trim() || null,
+            wbpp_default_os: osChoice() === "auto" ? null : osChoice(),
+            wbpp_staging_path: stagingPath().trim() || null,
+            wbpp_exclusions: parsedExclusions(),
+          });
+        } catch {
+          // Persisting preferences is best-effort; ignore failures.
+        }
+      }
       showToast("WBPP script downloaded");
       props.onClose();
     } catch (e: any) {
