@@ -627,14 +627,17 @@ const WbppExportModal: Component<Props> = (props) => {
                 {plan().length} folder{plan().length !== 1 ? "s" : ""} →{" "}
                 <span class="font-mono text-theme-text-secondary break-all">{stagingRoot()}</span>
               </div>
-              <div class="space-y-0.5">
+              <div class="space-y-2">
                 <For each={plan()}>
                   {(op) => (
-                    <div
-                      class="text-tiny font-mono text-theme-text-secondary truncate"
-                      title={`${op.source}  →  ${op.destination}`}
-                    >
-                      {op.session_date}: {op.dest_entry}
+                    <div class="text-tiny">
+                      <div class="text-theme-text-tertiary">{op.session_date}</div>
+                      <div class="font-mono text-theme-text-secondary break-all">
+                        <span class="text-theme-text-tertiary">src </span>{op.source}
+                      </div>
+                      <div class="font-mono text-theme-text-primary break-all">
+                        <span class="text-theme-text-tertiary">dst </span>{op.destination}
+                      </div>
                     </div>
                   )}
                 </For>
