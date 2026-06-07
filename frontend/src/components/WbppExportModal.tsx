@@ -1,4 +1,4 @@
-import { Component, For, Show, createSignal, createMemo, onMount } from "solid-js";
+import { Component, For, Show, JSX, createSignal, createMemo, onMount } from "solid-js";
 import { api } from "../api/client";
 import { showToast } from "./Toast";
 import { useSettingsContext } from "./SettingsProvider";
@@ -31,6 +31,10 @@ const DEFAULT_EXCLUSIONS = [
   "masters", "Masters", "MASTERS", "*CALIBRATED", "CALIBRATED",
 ];
 
+// Raised section card, matching the target detail page.
+const CARD_CLASS =
+  "bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-4";
+
 function detectOs(root: string): "windows" | "posix" {
   return /^[A-Za-z]:\\|\\/.test(root) ? "windows" : "posix";
 }
@@ -59,6 +63,37 @@ function permClass(p: PermOrNone): string {
   }
 }
 
+// Collapsible raised section, matching the target detail page header pattern
+// (title with accent rule + rotating chevron, content gated by `open`).
+const SectionCard: Component<{
+  title: string;
+  subtitle?: string;
+  open: boolean;
+  onToggle: () => void;
+  children: JSX.Element;
+}> = (p) => (
+  <div class={CARD_CLASS}>
+    <button class="flex items-center gap-2 w-full cursor-pointer group" onClick={p.onToggle}>
+      <h3 class="text-xs font-semibold uppercase tracking-wider text-theme-text-secondary border-l-2 border-theme-accent pl-2 group-hover:text-theme-text-primary transition-colors">
+        {p.title}
+        <Show when={p.subtitle}>
+          <span class="text-theme-text-tertiary font-normal normal-case tracking-normal ml-2">{p.subtitle}</span>
+        </Show>
+      </h3>
+      <svg
+        class={`w-3.5 h-3.5 transition-transform duration-200 text-theme-text-tertiary ${p.open ? "rotate-180" : ""}`}
+        viewBox="0 0 20 20"
+        fill="currentColor"
+      >
+        <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
+      </svg>
+    </button>
+    <Show when={p.open}>
+      <div class="mt-3 space-y-3">{p.children}</div>
+    </Show>
+  </div>
+);
+
 const WbppExportModal: Component<Props> = (props) => {
   const ctx = useSettingsContext();
   const general = () => ctx.settings()?.general;
@@ -74,7 +109,6 @@ const WbppExportModal: Component<Props> = (props) => {
 
   const [sessions, setSessions] = createSignal<WbppSessionPreview[]>([]);
   const [chosenLevels, setChosenLevels] = createSignal<Record<string, number>>({});
-  const [showLevels, setShowLevels] = createSignal(true);
   const [previewing, setPreviewing] = createSignal(false);
 
   const [generating, setGenerating] = createSignal(false);
@@ -82,9 +116,10 @@ const WbppExportModal: Component<Props> = (props) => {
   const [copied, setCopied] = createSignal(false);
   const [showScript, setShowScript] = createSignal(false);
 
-  // Defaults come from Settings; overrides are per-export. Auto-expand when no
-  // default library root is configured, since one is required.
-  const [showOverrides, setShowOverrides] = createSignal(!(general()?.wbpp_library_root ?? "").trim());
+  // Section open/closed state (collapsible cards, like the target page).
+  const [settingsOpen, setSettingsOpen] = createSignal(!(general()?.wbpp_library_root ?? "").trim());
+  const [levelsOpen, setLevelsOpen] = createSignal(true);
+  const [copyOpen, setCopyOpen] = createSignal(true);
   const [savedDefaults, setSavedDefaults] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
 
@@ -133,6 +168,11 @@ const WbppExportModal: Component<Props> = (props) => {
     if (override) return override;
     const lib = libraryRoot().trim().replace(/[\\/]+$/, "");
     return `${lib}${sep()}_WBPP_staging${sep()}${props.targetName.replace(/ /g, "_")}`;
+  };
+
+  const settingsSummary = (): string => {
+    if (!libraryRoot().trim()) return "no library root set";
+    return `${libraryRoot()} · ${effectiveOs() === "windows" ? "Windows" : "Linux / macOS"}`;
   };
 
   // The copy plan is derived purely from the previewed sessions + chosen levels,
@@ -185,7 +225,7 @@ const WbppExportModal: Component<Props> = (props) => {
         target_os: targetOsParam(),
       });
       setSessions(resp.sessions);
-      setShowLevels(true);
+      setLevelsOpen(true);
       setGenerated(null);
       const init: Record<string, number> = {};
       for (const s of resp.sessions) {
@@ -213,6 +253,7 @@ const WbppExportModal: Component<Props> = (props) => {
     setError(null);
     setGenerating(true);
     setShowScript(false);
+    setCopyOpen(true);
     try {
       const resp = await api.wbppGenerate({
         target_id: props.targetId,
@@ -361,10 +402,6 @@ const WbppExportModal: Component<Props> = (props) => {
 
   const copyReady = () => !!srcHandle() && !!destHandle() && srcPerm() !== "denied" && destPerm() !== "denied";
 
-  // Raised section card, matching the target page.
-  const cardClass =
-    "bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-4";
-
   return (
     <div
       class="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
@@ -394,105 +431,84 @@ const WbppExportModal: Component<Props> = (props) => {
             browser, or download a script to run on the machine where PixInsight is installed.
           </p>
 
-          {/* Settings card */}
-          <div class={`${cardClass} space-y-3`}>
-            {/* Defaults summary + override toggle */}
-            <div class="flex items-center justify-between gap-2">
-              <div class="text-tiny text-theme-text-tertiary truncate">
-                <Show
-                  when={libraryRoot().trim()}
-                  fallback={<span class="text-theme-error">No library root set - set defaults in Settings or override below.</span>}
-                >
-                  <span class="font-mono text-theme-text-secondary">{libraryRoot()}</span>
-                  {" · "}
-                  {effectiveOs() === "windows" ? "Windows" : "Linux / macOS"}
-                  {stagingPath().trim() ? " · custom staging" : " · default staging"}
-                </Show>
-              </div>
-              <button
-                class="text-tiny text-theme-text-tertiary hover:text-theme-text-primary shrink-0"
-                onClick={() => setShowOverrides(!showOverrides())}
-              >
-                {showOverrides() ? "▾ Hide settings" : "▸ Override settings"}
-              </button>
+          {/* Settings */}
+          <SectionCard
+            title="Settings"
+            subtitle={settingsSummary()}
+            open={settingsOpen()}
+            onToggle={() => setSettingsOpen(!settingsOpen())}
+          >
+            <p class="text-tiny text-theme-text-tertiary">
+              These default to your Settings &gt; AstroBin &amp; NINA &gt; PixInsight Export values.
+              Changes here apply to this export only unless you save them as defaults.
+            </p>
+
+            <div>
+              <label class="text-xs font-medium text-theme-text-secondary uppercase tracking-wide block mb-1">
+                Library root (on your machine)
+              </label>
+              <input
+                type="text"
+                class="w-full text-xs px-2 py-1.5 bg-theme-elevated border border-theme-border rounded text-theme-text-primary focus:outline-none focus:border-theme-accent"
+                placeholder="e.g. Z:\Astro or /mnt/astro"
+                value={libraryRoot()}
+                onInput={(e) => setLibraryRoot(e.currentTarget.value)}
+              />
             </div>
 
-            {/* Override settings (defaults live in Settings > AstroBin & NINA) */}
-            <Show when={showOverrides()}>
-              <div class="space-y-4 border-t border-theme-border pt-3">
-                <p class="text-tiny text-theme-text-tertiary">
-                  These default to your Settings &gt; AstroBin &amp; NINA &gt; PixInsight Export values.
-                  Changes here apply to this export only unless you save them as defaults.
-                </p>
+            <div>
+              <label class="text-xs font-medium text-theme-text-secondary uppercase tracking-wide block mb-1">
+                Script type
+              </label>
+              <select
+                class="text-xs px-2 py-1.5 bg-theme-elevated border border-theme-border rounded text-theme-text-primary focus:outline-none focus:border-theme-accent"
+                value={osChoice()}
+                onChange={(e) => setOsChoice(e.currentTarget.value as OsChoice)}
+              >
+                <option value="auto">Auto-detect</option>
+                <option value="windows">Windows (PowerShell .ps1)</option>
+                <option value="posix">Linux / macOS (shell .sh)</option>
+              </select>
+              <Show when={osChoice() === "auto" && libraryRoot().trim()}>
+                <span class="text-tiny text-theme-text-tertiary ml-2">
+                  Detected: {effectiveOs() === "windows" ? "Windows" : "Linux / macOS"}
+                </span>
+              </Show>
+            </div>
 
-                <div>
-                <label class="text-xs font-medium text-theme-text-secondary uppercase tracking-wide block mb-1">
-                  Library root (on your machine)
-                </label>
-                <input
-                  type="text"
-                  class="w-full text-xs px-2 py-1.5 bg-theme-elevated border border-theme-border rounded text-theme-text-primary focus:outline-none focus:border-theme-accent"
-                  placeholder="e.g. Z:\Astro or /mnt/astro"
-                  value={libraryRoot()}
-                  onInput={(e) => setLibraryRoot(e.currentTarget.value)}
-                />
-              </div>
+            <div>
+              <label class="text-xs font-medium text-theme-text-secondary uppercase tracking-wide block mb-1">
+                Staging path (optional)
+              </label>
+              <input
+                type="text"
+                class="w-full text-xs px-2 py-1.5 bg-theme-elevated border border-theme-border rounded text-theme-text-primary focus:outline-none focus:border-theme-accent"
+                placeholder="Default: <library root>/_WBPP_staging/<target>"
+                value={stagingPath()}
+                onInput={(e) => setStagingPath(e.currentTarget.value)}
+              />
+            </div>
 
-              <div>
-                <label class="text-xs font-medium text-theme-text-secondary uppercase tracking-wide block mb-1">
-                  Script type
-                </label>
-                <select
-                  class="text-xs px-2 py-1.5 bg-theme-elevated border border-theme-border rounded text-theme-text-primary focus:outline-none focus:border-theme-accent"
-                  value={osChoice()}
-                  onChange={(e) => setOsChoice(e.currentTarget.value as OsChoice)}
-                >
-                  <option value="auto">Auto-detect</option>
-                  <option value="windows">Windows (PowerShell .ps1)</option>
-                  <option value="posix">Linux / macOS (shell .sh)</option>
-                </select>
-                <Show when={osChoice() === "auto" && libraryRoot().trim()}>
-                  <span class="text-tiny text-theme-text-tertiary ml-2">
-                    Detected: {effectiveOs() === "windows" ? "Windows" : "Linux / macOS"}
-                  </span>
-                </Show>
-              </div>
+            <div>
+              <label class="text-xs font-medium text-theme-text-secondary uppercase tracking-wide block mb-1">
+                Excluded folder patterns (one per line)
+              </label>
+              <textarea
+                class="w-full text-xs px-2 py-1.5 bg-theme-elevated border border-theme-border rounded text-theme-text-primary font-mono focus:outline-none focus:border-theme-accent"
+                rows={4}
+                value={exclusionsText()}
+                onInput={(e) => setExclusionsText(e.currentTarget.value)}
+              />
+            </div>
 
-              <div>
-                <label class="text-xs font-medium text-theme-text-secondary uppercase tracking-wide block mb-1">
-                  Staging path (optional)
-                </label>
-                <input
-                  type="text"
-                  class="w-full text-xs px-2 py-1.5 bg-theme-elevated border border-theme-border rounded text-theme-text-primary focus:outline-none focus:border-theme-accent"
-                  placeholder="Default: <library root>/_WBPP_staging/<target>"
-                  value={stagingPath()}
-                  onInput={(e) => setStagingPath(e.currentTarget.value)}
-                />
-              </div>
-
-              <div>
-                <label class="text-xs font-medium text-theme-text-secondary uppercase tracking-wide block mb-1">
-                  Excluded folder patterns (one per line)
-                </label>
-                <textarea
-                  class="w-full text-xs px-2 py-1.5 bg-theme-elevated border border-theme-border rounded text-theme-text-primary font-mono focus:outline-none focus:border-theme-accent"
-                  rows={4}
-                  value={exclusionsText()}
-                  onInput={(e) => setExclusionsText(e.currentTarget.value)}
-                />
-              </div>
-
-                <button
-                  class="text-tiny text-theme-accent hover:text-theme-accent-hover transition-colors disabled:opacity-50"
-                  onClick={saveAsDefaults}
-                  disabled={!libraryRoot().trim()}
-                >
-                  {savedDefaults() ? "Saved!" : "Save as defaults"}
-                </button>
-              </div>
-            </Show>
-          </div>
+            <button
+              class="text-tiny text-theme-accent hover:text-theme-accent-hover transition-colors disabled:opacity-50"
+              onClick={saveAsDefaults}
+              disabled={!libraryRoot().trim()}
+            >
+              {savedDefaults() ? "Saved!" : "Save as defaults"}
+            </button>
+          </SectionCard>
 
           {/* Error */}
           <Show when={error()}>
@@ -501,8 +517,13 @@ const WbppExportModal: Component<Props> = (props) => {
             </div>
           </Show>
 
-          {/* Folder levels card */}
-          <div class={`${cardClass} space-y-3`}>
+          {/* Folder levels */}
+          <SectionCard
+            title="Folder levels"
+            subtitle={sessions().length ? `${sessions().length} session${sessions().length !== 1 ? "s" : ""}` : undefined}
+            open={levelsOpen()}
+            onToggle={() => setLevelsOpen(!levelsOpen())}
+          >
             <div>
               <button
                 class="text-xs px-3 py-1.5 bg-theme-elevated border border-theme-border rounded hover:bg-theme-surface transition-colors text-theme-text-primary disabled:opacity-50"
@@ -513,92 +534,95 @@ const WbppExportModal: Component<Props> = (props) => {
               </button>
             </div>
 
-            {/* Per-session level pickers (collapsible) */}
-            <Show when={sessions().length > 0}>
-              <button
-                class="flex items-center gap-1 text-xs font-medium text-theme-text-secondary uppercase tracking-wide hover:text-theme-text-primary"
-                onClick={() => setShowLevels(!showLevels())}
-              >
-                <span>{showLevels() ? "▾" : "▸"}</span> Per-session folder level
-              </button>
-              <Show when={showLevels()}>
+            <Show
+              when={sessions().length > 0}
+              fallback={
                 <p class="text-tiny text-theme-text-tertiary">
-                  Pick which folder to copy for each session, from shallowest (closest to the
-                  library root) to deepest. A marked level (!) also contains other targets or
-                  dates and would be copied along with this session.
+                  Click "Preview folder levels" to choose which folder to copy for each session.
                 </p>
-                <For each={sessions()}>
-                  {(session) => (
-                    <div class="bg-theme-elevated rounded p-3">
-                      <div class="flex items-center justify-between mb-2">
-                        <span class="text-xs font-medium text-theme-text-primary">
-                          {session.session_date}
-                        </span>
-                        <span class="text-tiny text-theme-text-tertiary">
-                          {session.total_frame_count} frames
-                        </span>
-                      </div>
-                      <Show
-                        when={session.levels.length > 0}
-                        fallback={
-                          <span class="text-tiny text-theme-text-tertiary">
-                            No frames found for this session.
-                          </span>
-                        }
-                      >
-                        <div class="flex flex-wrap items-center gap-1">
-                          <For each={session.levels}>
-                            {(level: WbppFolderLevel, i) => (
-                              <>
-                                <Show when={i() > 0}>
-                                  <span class="text-theme-text-tertiary text-xs">/</span>
-                                </Show>
-                                <button
-                                  class={`text-tiny px-2 py-0.5 rounded border transition-colors ${
-                                    chosenLevels()[session.session_date] === i()
-                                      ? "bg-theme-accent/15 text-theme-accent border-theme-accent/30"
-                                      : "bg-theme-surface text-theme-text-secondary border-theme-border hover:text-theme-text-primary"
-                                  }`}
-                                  title={
-                                    level.is_contaminated
-                                      ? `Also contains${
-                                          level.other_targets.length
-                                            ? ` other targets: ${level.other_targets.join(", ")}`
-                                            : ""
-                                        }${
-                                          level.other_dates.length
-                                            ? ` other dates: ${level.other_dates.join(", ")}`
-                                            : ""
-                                        }`
-                                      : level.path
-                                  }
-                                  onClick={() => selectLevel(session.session_date, i())}
-                                >
-                                  {lastSegment(level.path)}
-                                  <Show when={level.is_contaminated}>
-                                    <span class="text-theme-error ml-1">!</span>
-                                  </Show>
-                                </button>
-                              </>
-                            )}
-                          </For>
-                        </div>
-                        <Show when={chosenLevels()[session.session_date] != null}>
-                          <p class="text-tiny text-theme-text-tertiary mt-1 font-mono break-all">
-                            {session.levels[chosenLevels()[session.session_date]]?.path}
-                          </p>
-                        </Show>
-                      </Show>
+              }
+            >
+              <p class="text-tiny text-theme-text-tertiary">
+                Pick which folder to copy for each session, from shallowest (closest to the
+                library root) to deepest. A marked level (!) also contains other targets or
+                dates and would be copied along with this session.
+              </p>
+              <For each={sessions()}>
+                {(session) => (
+                  <div class="bg-theme-elevated rounded p-3">
+                    <div class="flex items-center justify-between mb-2">
+                      <span class="text-xs font-medium text-theme-text-primary">
+                        {session.session_date}
+                      </span>
+                      <span class="text-tiny text-theme-text-tertiary">
+                        {session.total_frame_count} frames
+                      </span>
                     </div>
-                  )}
-                </For>
-              </Show>
+                    <Show
+                      when={session.levels.length > 0}
+                      fallback={
+                        <span class="text-tiny text-theme-text-tertiary">
+                          No frames found for this session.
+                        </span>
+                      }
+                    >
+                      <div class="flex flex-wrap items-center gap-1">
+                        <For each={session.levels}>
+                          {(level: WbppFolderLevel, i) => (
+                            <>
+                              <Show when={i() > 0}>
+                                <span class="text-theme-text-tertiary text-xs">/</span>
+                              </Show>
+                              <button
+                                class={`text-tiny px-2 py-0.5 rounded border transition-colors ${
+                                  chosenLevels()[session.session_date] === i()
+                                    ? "bg-theme-accent/15 text-theme-accent border-theme-accent/30"
+                                    : "bg-theme-surface text-theme-text-secondary border-theme-border hover:text-theme-text-primary"
+                                }`}
+                                title={
+                                  level.is_contaminated
+                                    ? `Also contains${
+                                        level.other_targets.length
+                                          ? ` other targets: ${level.other_targets.join(", ")}`
+                                          : ""
+                                      }${
+                                        level.other_dates.length
+                                          ? ` other dates: ${level.other_dates.join(", ")}`
+                                          : ""
+                                      }`
+                                    : level.path
+                                }
+                                onClick={() => selectLevel(session.session_date, i())}
+                              >
+                                {lastSegment(level.path)}
+                                <Show when={level.is_contaminated}>
+                                  <span class="text-theme-error ml-1">!</span>
+                                </Show>
+                              </button>
+                            </>
+                          )}
+                        </For>
+                      </div>
+                      <Show when={chosenLevels()[session.session_date] != null}>
+                        <p class="text-tiny text-theme-text-tertiary mt-1 font-mono break-all">
+                          {session.levels[chosenLevels()[session.session_date]]?.path}
+                        </p>
+                      </Show>
+                    </Show>
+                  </div>
+                )}
+              </For>
             </Show>
-          </div>
+          </SectionCard>
 
-          {/* Copy plan + copy controls card (available once previewed) */}
+          {/* Copy plan + copy controls */}
           <Show when={plan().length > 0}>
-            <div class={`${cardClass} space-y-3`}>
+            <SectionCard
+              title="Copy"
+              subtitle={`${plan().length} folder${plan().length !== 1 ? "s" : ""}`}
+              open={copyOpen()}
+              onToggle={() => setCopyOpen(!copyOpen())}
+            >
               <div class="text-tiny text-theme-text-tertiary">
                 {plan().length} folder{plan().length !== 1 ? "s" : ""} →{" "}
                 <span class="font-mono text-theme-text-secondary break-all">{stagingRoot()}</span>
@@ -631,7 +655,6 @@ const WbppExportModal: Component<Props> = (props) => {
                     Copy in browser
                   </div>
 
-                  {/* Source folder row */}
                   <div class="flex items-center gap-2 flex-wrap">
                     <span class="text-tiny text-theme-text-tertiary w-24">Library folder</span>
                     <button
@@ -649,7 +672,6 @@ const WbppExportModal: Component<Props> = (props) => {
                     </Show>
                   </div>
 
-                  {/* Destination folder row */}
                   <div class="flex items-center gap-2 flex-wrap">
                     <span class="text-tiny text-theme-text-tertiary w-24">Destination</span>
                     <button
@@ -671,7 +693,6 @@ const WbppExportModal: Component<Props> = (props) => {
                     Folders are remembered for next time.
                   </p>
 
-                  {/* Copy / Stop */}
                   <div class="flex items-center gap-2">
                     <button
                       class="text-xs px-3 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded font-medium hover:bg-theme-accent/25 transition-colors disabled:opacity-50"
@@ -690,7 +711,6 @@ const WbppExportModal: Component<Props> = (props) => {
                     </Show>
                   </div>
 
-                  {/* Progress */}
                   <Show when={copying() || copyFinished() !== null}>
                     <div class="space-y-1">
                       <div class="h-1.5 bg-theme-elevated rounded overflow-hidden">
@@ -719,19 +739,22 @@ const WbppExportModal: Component<Props> = (props) => {
                 </div>
               </Show>
 
-              {/* Script output (only after Generate script) */}
+              {/* Script output (after Generate script) */}
               <Show when={generated()}>
                 {(g) => (
-                  <div class="space-y-2">
+                  <div class="space-y-2 bg-theme-base border border-theme-border rounded p-3">
+                    <div class="text-xs font-medium text-theme-text-secondary uppercase tracking-wide">
+                      Script
+                    </div>
                     <div class="flex items-center gap-2 flex-wrap">
                       <button
-                        class="text-xs px-3 py-1.5 bg-theme-elevated border border-theme-border rounded hover:bg-theme-surface transition-colors text-theme-text-primary"
+                        class="text-xs px-3 py-1.5 bg-theme-surface border border-theme-border rounded hover:text-theme-text-primary transition-colors text-theme-text-secondary"
                         onClick={downloadScript}
                       >
                         Download {g().filename}
                       </button>
                       <button
-                        class="text-xs px-3 py-1.5 bg-theme-elevated border border-theme-border rounded hover:bg-theme-surface transition-colors text-theme-text-primary"
+                        class="text-xs px-3 py-1.5 bg-theme-surface border border-theme-border rounded hover:text-theme-text-primary transition-colors text-theme-text-secondary"
                         onClick={copyScript}
                       >
                         {copied() ? "Copied!" : "Copy script"}
@@ -743,19 +766,19 @@ const WbppExportModal: Component<Props> = (props) => {
                     </div>
                     <div>
                       <button
-                        class="text-tiny text-theme-text-tertiary hover:text-theme-text-primary"
+                        class="text-tiny text-theme-accent hover:text-theme-accent-hover transition-colors"
                         onClick={() => setShowScript(!showScript())}
                       >
-                        {showScript() ? "▾ Hide script" : "▸ Show script"}
+                        {showScript() ? "Hide script" : "Show script"}
                       </button>
                       <Show when={showScript()}>
-                        <pre class="mt-1 text-tiny font-mono bg-theme-base border border-theme-border rounded p-2 max-h-72 overflow-auto text-theme-text-secondary whitespace-pre">{g().script}</pre>
+                        <pre class="mt-1 text-tiny font-mono bg-theme-surface border border-theme-border rounded p-2 max-h-72 overflow-auto text-theme-text-secondary whitespace-pre">{g().script}</pre>
                       </Show>
                     </div>
                   </div>
                 )}
               </Show>
-            </div>
+            </SectionCard>
           </Show>
         </div>
 
