@@ -439,7 +439,7 @@ const WbppExportModal: Component<Props> = (props) => {
             onToggle={() => setSettingsOpen(!settingsOpen())}
           >
             <p class="text-tiny text-theme-text-tertiary">
-              These default to your Settings &gt; AstroBin &amp; NINA &gt; PixInsight Export values.
+              These default to your Settings &gt; External Tools &gt; PixInsight Export values.
               Changes here apply to this export only unless you save them as defaults.
             </p>
 
