@@ -1,10 +1,21 @@
+import uuid
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 from httpx import ASGITransport, AsyncClient
 
 from app.main import app
 from app.database import get_session
+from app.api.deps import get_current_user, require_admin
+from app.models.user import User, UserRole
 from app.models.user_settings import SETTINGS_ROW_ID
+
+
+def _admin_user():
+    u = MagicMock(spec=User)
+    u.id = uuid.uuid4()
+    u.role = UserRole.admin
+    u.is_active = True
+    return u
 
 
 def _make_settings_row(
@@ -718,6 +729,92 @@ async def test_discovered_invalid_section_returns_422():
             resp = await client.get("/api/settings/discovered/invalid")
 
         assert resp.status_code == 422
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_wbpp_settings_defaults():
+    from app.schemas.settings import GeneralSettings
+    g = GeneralSettings()
+    assert g.wbpp_library_root is None
+    assert g.wbpp_default_os is None
+    assert g.wbpp_staging_path is None
+    assert g.wbpp_exclusions == [
+        "WBPP", "PixInsight", "finals", "WORK_AREA",
+        "masters", "Masters", "MASTERS", "*CALIBRATED", "CALIBRATED",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_get_settings_includes_wbpp_defaults():
+    """GET /api/settings exposes the WBPP fields with defaults for an empty row."""
+    row = _make_settings_row()
+
+    mock_result = MagicMock()
+    mock_result.scalar_one_or_none.return_value = row
+
+    mock_session = AsyncMock()
+    mock_session.execute = AsyncMock(return_value=mock_result)
+
+    async def override():
+        yield mock_session
+
+    app.dependency_overrides[get_session] = override
+    app.dependency_overrides[get_current_user] = lambda: _admin_user()
+    try:
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.get("/api/settings")
+
+        assert resp.status_code == 200
+        general = resp.json()["general"]
+        assert general["wbpp_library_root"] is None
+        assert general["wbpp_default_os"] is None
+        assert general["wbpp_staging_path"] is None
+        assert "CALIBRATED" in general["wbpp_exclusions"]
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_put_general_persists_wbpp_fields():
+    """PUT /api/settings/general accepts and round-trips the WBPP fields."""
+    row = _make_settings_row(general={})
+
+    mock_result = MagicMock()
+    mock_result.scalar_one_or_none.return_value = row
+
+    mock_session = AsyncMock()
+    mock_session.execute = AsyncMock(return_value=mock_result)
+    mock_session.commit = AsyncMock()
+    mock_session.refresh = AsyncMock()
+
+    async def override():
+        yield mock_session
+
+    app.dependency_overrides[get_session] = override
+    app.dependency_overrides[get_current_user] = lambda: _admin_user()
+    app.dependency_overrides[require_admin] = lambda: _admin_user()
+    try:
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.put(
+                "/api/settings/general",
+                json={
+                    "wbpp_library_root": "Z:\\Astro",
+                    "wbpp_default_os": "windows",
+                    "wbpp_staging_path": "Z:\\Staging",
+                    "wbpp_exclusions": ["WBPP", "masters"],
+                },
+            )
+
+        assert resp.status_code == 200
+        general = resp.json()["general"]
+        assert general["wbpp_library_root"] == "Z:\\Astro"
+        assert general["wbpp_default_os"] == "windows"
+        assert general["wbpp_staging_path"] == "Z:\\Staging"
+        assert general["wbpp_exclusions"] == ["WBPP", "masters"]
+        assert mock_session.commit.called
     finally:
         app.dependency_overrides.clear()
 
