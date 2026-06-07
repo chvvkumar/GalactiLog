@@ -134,11 +134,11 @@ async def wbpp_generate(
     ]
 
     if target_os == "windows":
-        script = generate_powershell_script(copy_ops, staging_root, payload.target_name, payload.exclusions, used_dates)
         filename = f"wbpp_{safe}.ps1"
+        script = generate_powershell_script(copy_ops, staging_root, payload.target_name, payload.exclusions, used_dates, filename)
     else:
-        script = generate_shell_script(copy_ops, staging_root, payload.target_name, payload.exclusions, used_dates)
         filename = f"wbpp_{safe}.sh"
+        script = generate_shell_script(copy_ops, staging_root, payload.target_name, payload.exclusions, used_dates, filename)
 
     return WbppGenerateResponse(
         filename=filename,

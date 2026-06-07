@@ -47,7 +47,16 @@ const WbppExportModal: Component<Props> = (props) => {
   const [generating, setGenerating] = createSignal(false);
   const [generated, setGenerated] = createSignal<WbppGenerateResponse | null>(null);
   const [copied, setCopied] = createSignal(false);
+  const [showScript, setShowScript] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
+
+  const runCommand = (): string => {
+    const g = generated();
+    if (!g) return "";
+    return g.target_os === "windows"
+      ? `powershell -ExecutionPolicy Bypass -File .\\${g.filename}`
+      : `chmod +x ${g.filename} && ./${g.filename}`;
+  };
 
   const effectiveOs = (): "windows" | "posix" =>
     osChoice() === "auto" ? detectOs(libraryRoot()) : (osChoice() as "windows" | "posix");
@@ -104,6 +113,7 @@ const WbppExportModal: Component<Props> = (props) => {
     }
     setError(null);
     setGenerating(true);
+    setShowScript(false);
     try {
       const resp = await api.wbppGenerate({
         target_id: props.targetId,
@@ -362,58 +372,61 @@ const WbppExportModal: Component<Props> = (props) => {
             </div>
           </Show>
 
-          {/* Generated output: source -> destination preview + script preview */}
+          {/* Generated output: compact summary + actions, script behind a toggle */}
           <Show when={generated()}>
             {(g) => (
               <div class="space-y-3 border-t border-theme-border pt-4">
-                {/* Path preview */}
-                <div>
-                  <div class="text-xs font-medium text-theme-text-secondary uppercase tracking-wide mb-1">
-                    Copy plan ({g().operations.length})
-                  </div>
-                  <p class="text-tiny text-theme-text-tertiary mb-2">
-                    Each selected source folder is copied to the staging area at:
-                    <span class="font-mono text-theme-text-secondary break-all"> {g().staging_root}</span>
-                  </p>
-                  <div class="space-y-2">
-                    <For each={g().operations}>
-                      {(op) => (
-                        <div class="bg-theme-elevated rounded p-2 text-tiny">
-                          <div class="text-theme-text-tertiary mb-1">{op.session_date}</div>
-                          <div class="font-mono text-theme-text-secondary break-all">
-                            <span class="text-theme-text-tertiary">src </span>{op.source}
-                          </div>
-                          <div class="font-mono text-theme-text-primary break-all">
-                            <span class="text-theme-text-tertiary">dst </span>{op.destination}
-                          </div>
-                        </div>
-                      )}
-                    </For>
-                  </div>
+                {/* Primary actions */}
+                <div class="flex items-center gap-2">
+                  <button
+                    class="text-xs px-3 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded font-medium hover:bg-theme-accent/25 transition-colors"
+                    onClick={downloadScript}
+                  >
+                    Download {g().filename}
+                  </button>
+                  <button
+                    class="text-xs px-3 py-1.5 bg-theme-elevated border border-theme-border rounded hover:bg-theme-surface transition-colors text-theme-text-primary"
+                    onClick={copyScript}
+                  >
+                    {copied() ? "Copied!" : "Copy script"}
+                  </button>
                 </div>
 
-                {/* Script preview */}
+                {/* Compact copy plan: one line per session */}
+                <div class="text-tiny text-theme-text-tertiary">
+                  {g().operations.length} folder{g().operations.length !== 1 ? "s" : ""} →{" "}
+                  <span class="font-mono text-theme-text-secondary break-all">{g().staging_root}</span>
+                </div>
+                <div class="space-y-0.5">
+                  <For each={g().operations}>
+                    {(op) => (
+                      <div
+                        class="text-tiny font-mono text-theme-text-secondary truncate"
+                        title={`${op.source}  →  ${op.destination}`}
+                      >
+                        {op.session_date}: {lastSegment(op.destination)}
+                      </div>
+                    )}
+                  </For>
+                </div>
+
+                {/* Run command */}
+                <div class="text-tiny">
+                  <span class="text-theme-text-tertiary">Then run: </span>
+                  <code class="font-mono text-theme-text-secondary break-all">{runCommand()}</code>
+                </div>
+
+                {/* Script preview behind a toggle */}
                 <div>
-                  <div class="flex items-center justify-between mb-1">
-                    <div class="text-xs font-medium text-theme-text-secondary uppercase tracking-wide">
-                      Script preview - {g().filename}
-                    </div>
-                    <div class="flex gap-2">
-                      <button
-                        class="text-tiny px-2 py-1 bg-theme-elevated border border-theme-border rounded hover:bg-theme-surface transition-colors text-theme-text-primary"
-                        onClick={copyScript}
-                      >
-                        {copied() ? "Copied!" : "Copy script"}
-                      </button>
-                      <button
-                        class="text-tiny px-2 py-1 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded font-medium hover:bg-theme-accent/25 transition-colors"
-                        onClick={downloadScript}
-                      >
-                        Download {g().filename.endsWith(".ps1") ? ".ps1" : ".sh"}
-                      </button>
-                    </div>
-                  </div>
-                  <pre class="text-tiny font-mono bg-theme-base border border-theme-border rounded p-2 max-h-72 overflow-auto text-theme-text-secondary whitespace-pre">{g().script}</pre>
+                  <button
+                    class="text-tiny text-theme-text-tertiary hover:text-theme-text-primary"
+                    onClick={() => setShowScript(!showScript())}
+                  >
+                    {showScript() ? "▾ Hide script" : "▸ Show script"}
+                  </button>
+                  <Show when={showScript()}>
+                    <pre class="mt-1 text-tiny font-mono bg-theme-base border border-theme-border rounded p-2 max-h-72 overflow-auto text-theme-text-secondary whitespace-pre">{g().script}</pre>
+                  </Show>
                 </div>
               </div>
             )}

@@ -176,6 +176,23 @@ def test_shell_script_shows_progress():
     )
     assert "--info=progress2" in s
 
+
+def test_powershell_script_includes_run_instruction():
+    s = generate_powershell_script(
+        [("Z:\\Astro\\M31\\2024-01-01", "2024-01-01")], "Z:\\Staging",
+        "M31", ["WBPP"], ["2024-01-01"], "wbpp_M31.ps1",
+    )
+    assert "ExecutionPolicy Bypass" in s
+    assert "wbpp_M31.ps1" in s
+
+
+def test_shell_script_includes_run_instruction():
+    s = generate_shell_script(
+        [("/mnt/astro/M31/2024-01-01", "2024-01-01")], "/tmp/staging",
+        "M31", ["WBPP"], ["2024-01-01"], "wbpp_M31.sh",
+    )
+    assert "chmod +x wbpp_M31.sh" in s
+
 def test_powershell_exclusion_matches_component_not_substring():
     """'finals' excludes a 'finals' folder but NOT a 'semifinals' folder."""
     s = generate_powershell_script(

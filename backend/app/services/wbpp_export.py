@@ -167,7 +167,7 @@ def disambiguate_staging_names(selected_paths: list[str], session_dates: list[st
     ]
 
 
-def generate_powershell_script(copy_ops, staging_root, target_name, exclusions, session_dates):
+def generate_powershell_script(copy_ops, staging_root, target_name, exclusions, session_dates, filename=None):
     """Generate a PowerShell .ps1 copy script with a progress bar.
 
     Copies recursively (copy only), applies component-level exclusions, gathers
@@ -175,12 +175,18 @@ def generate_powershell_script(copy_ops, staging_root, target_name, exclusions, 
     overall percentage as files are copied.
     """
     excl_patterns = "|".join(re.escape(e).replace(r"\*", ".*") for e in exclusions)
+    script_name = filename or "this script"
     lines = [
         "# WBPP Session Export",
         f"# Target: {target_name}",
         f"# Sessions: {', '.join(session_dates)}",
-        "# Run on the machine where PixInsight is installed, then open WBPP and",
-        f"# use 'Add Directory' on the staging root: {staging_root}",
+        "#",
+        "# To run this script:",
+        "#   Open PowerShell in this folder and run:",
+        f"#     powershell -ExecutionPolicy Bypass -File .\\{script_name}",
+        "#",
+        "# When it finishes, open PixInsight WBPP and use 'Add Directory' on the",
+        f"# staging root: {staging_root}",
         "",
         f"$StagingRoot = {_ps_quote(staging_root)}",
         "$ErrorActionPreference = 'Stop'",
@@ -236,17 +242,22 @@ def generate_powershell_script(copy_ops, staging_root, target_name, exclusions, 
     return "\n".join(lines)
 
 
-def generate_shell_script(copy_ops, staging_root, target_name, exclusions, session_dates):
+def generate_shell_script(copy_ops, staging_root, target_name, exclusions, session_dates, filename=None):
     """Generate a POSIX shell .sh copy script using rsync with a progress meter."""
     excl_args = [f'--exclude="{e}"' for e in exclusions]
     total = len(copy_ops)
+    script_name = filename or "wbpp_export.sh"
     lines = [
         "#!/usr/bin/env bash",
         "# WBPP Session Export",
         f"# Target: {target_name}",
         f"# Sessions: {', '.join(session_dates)}",
-        "# Run on the machine where PixInsight is installed, then open WBPP and",
-        f"# use 'Add Directory' on the staging root: {staging_root}",
+        "#",
+        "# To run this script:",
+        f"#   chmod +x {script_name} && ./{script_name}",
+        "#",
+        "# When it finishes, open PixInsight WBPP and use 'Add Directory' on the",
+        f"# staging root: {staging_root}",
         "",
         "set -euo pipefail",
         f"STAGING_ROOT={_sh_quote(staging_root)}",
