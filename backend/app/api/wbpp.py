@@ -124,17 +124,13 @@ async def wbpp_generate(
     safe = payload.target_name.replace(" ", "_")
 
     staging_base = staging_root.rstrip("/\\")
-    fits_base = fits_root.rstrip("/")
-
-    def _relative_to_root(container_path: str) -> str:
-        return container_path[len(fits_base):].lstrip("/")
 
     operations = [
         WbppCopyOperation(
             session_date=d,
             source=lv.path,
             destination=staging_base + sep + name,
-            source_relative=_relative_to_root(lv.container_path),
+            source_relative=lv.relative_path,
             dest_entry=name,
         )
         for (d, lv), name in zip(chosen, names)

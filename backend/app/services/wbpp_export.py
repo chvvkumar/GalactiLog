@@ -61,6 +61,7 @@ class FolderLevel:
     other_targets: list[str] = field(default_factory=list)
     other_dates: list[str] = field(default_factory=list)
     is_contaminated: bool = False
+    relative_path: str = ""  # path relative to the FITS/library root (POSIX, for browser copy)
 
 
 def compute_ancestor_chain(container_path: str, fits_root: str) -> list[str]:
@@ -130,6 +131,7 @@ def compute_session_levels(
             other_targets=other_t,
             other_dates=other_d,
             is_contaminated=bool(other_t or other_d),
+            relative_path=anc[len(fits_root):].lstrip("/"),
         ))
     return levels
 

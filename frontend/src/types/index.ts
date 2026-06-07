@@ -1013,6 +1013,7 @@ export interface WbppFolderLevel {
   other_targets: string[];
   other_dates: string[];
   is_contaminated: boolean;
+  relative_path: string;
 }
 export interface WbppSessionPreview {
   session_date: string;

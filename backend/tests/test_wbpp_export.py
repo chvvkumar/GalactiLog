@@ -67,6 +67,8 @@ def test_compute_session_levels_flags_contamination():
     )
     # shallowest-first: M31 (contaminated by 2024-01-02), date, Light
     assert levels[0].container_path == "/app/data/fits/M31"
+    assert levels[0].relative_path == "M31"
+    assert levels[1].relative_path == "M31/2024-01-01"
     assert levels[0].is_contaminated is True
     assert "2024-01-02" in levels[0].other_dates
     assert levels[1].is_contaminated is False  # the date folder

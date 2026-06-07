@@ -11,6 +11,13 @@ import type { WbppCopyOperation } from "../types";
 // TS versions, so we avoid coupling to specific FileSystem* interfaces.
 type DirHandle = any;
 
+export type PermState = "granted" | "prompt" | "denied" | "unsupported";
+
+export const HANDLE_KEYS = {
+  source: "wbpp:source",
+  dest: "wbpp:dest",
+} as const;
+
 export function isFsAccessSupported(): boolean {
   return (
     typeof window !== "undefined" &&
@@ -25,6 +32,78 @@ export class CopyCancelledError extends Error {
     this.name = "CopyCancelledError";
   }
 }
+
+// --- IndexedDB handle persistence (handles are structured-cloneable) ---
+
+const DB_NAME = "galactilog-wbpp";
+const STORE = "handles";
+
+function idbOpen(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, 1);
+    req.onupgradeneeded = () => req.result.createObjectStore(STORE);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+export async function storeHandle(key: string, handle: DirHandle): Promise<void> {
+  try {
+    const db = await idbOpen();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE, "readwrite");
+      tx.objectStore(STORE).put(handle, key);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch {
+    // Persistence is best-effort; ignore failures.
+  }
+}
+
+export async function loadStoredHandle(key: string): Promise<DirHandle | undefined> {
+  try {
+    const db = await idbOpen();
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE, "readonly");
+      const req = tx.objectStore(STORE).get(key);
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  } catch {
+    return undefined;
+  }
+}
+
+// --- Permissions + picking ---
+
+export async function queryHandlePermission(handle: DirHandle, mode: "read" | "readwrite"): Promise<PermState> {
+  if (!handle?.queryPermission) return "unsupported";
+  try {
+    return await handle.queryPermission({ mode });
+  } catch {
+    return "prompt";
+  }
+}
+
+export async function requestHandlePermission(handle: DirHandle, mode: "read" | "readwrite"): Promise<PermState> {
+  if (!handle?.requestPermission) return "unsupported";
+  return await handle.requestPermission({ mode });
+}
+
+// Must be called from within a user gesture. Throws CopyCancelledError if the
+// user dismisses the picker.
+export async function pickDirectory(mode: "read" | "readwrite", id: string): Promise<DirHandle> {
+  const picker = (window as any).showDirectoryPicker;
+  try {
+    return await picker({ mode, id });
+  } catch (e: any) {
+    if (e?.name === "AbortError") throw new CopyCancelledError();
+    throw e;
+  }
+}
+
+// --- Copy ---
 
 // Build a component-level matcher mirroring the backend: each pattern is anchored
 // to a full path component, and "*" becomes ".*". So "finals" excludes a "finals"
@@ -100,27 +179,20 @@ export interface BrowserCopyOptions {
   signal?: AbortSignal;
 }
 
-// Prompts for the library root and destination, then copies each operation's
-// source folder into a same-named entry under the destination. Throws
-// CopyCancelledError if the user cancels a picker or aborts mid-copy.
-export async function runBrowserCopy(opts: BrowserCopyOptions): Promise<BrowserCopyResult> {
-  const picker = (window as any).showDirectoryPicker;
-
-  let root: DirHandle;
-  let dest: DirHandle;
-  try {
-    root = await picker({ mode: "read", id: "wbpp-library" });
-    dest = await picker({ mode: "readwrite", id: "wbpp-staging" });
-  } catch (e: any) {
-    if (e?.name === "AbortError") throw new CopyCancelledError();
-    throw e;
+// Copies each operation's source folder (resolved relative to rootHandle) into a
+// same-named entry under destHandle. Both handles must already be chosen; this
+// ensures read/write permission (prompting if needed - call from a user gesture).
+// Throws CopyCancelledError if aborted via the signal.
+export async function runBrowserCopy(
+  rootHandle: DirHandle,
+  destHandle: DirHandle,
+  opts: BrowserCopyOptions,
+): Promise<BrowserCopyResult> {
+  if ((await requestHandlePermission(rootHandle, "read")) === "denied") {
+    throw new Error("Read permission for the library folder was denied.");
   }
-
-  if (dest.requestPermission) {
-    const perm = await dest.requestPermission({ mode: "readwrite" });
-    if (perm === "denied") {
-      throw new Error("Write permission to the destination folder was denied.");
-    }
+  if ((await requestHandlePermission(destHandle, "readwrite")) === "denied") {
+    throw new Error("Write permission for the destination folder was denied.");
   }
 
   const isExcluded = makeExcluder(opts.exclusions);
@@ -130,14 +202,14 @@ export async function runBrowserCopy(opts: BrowserCopyOptions): Promise<BrowserC
   for (const op of opts.operations) {
     let src: DirHandle;
     try {
-      src = await resolveDir(root, op.source_relative);
+      src = await resolveDir(rootHandle, op.source_relative);
     } catch {
       throw new Error(
-        `Could not find "${op.source_relative}" under the selected folder. ` +
+        `Could not find "${op.source_relative}" under the selected library folder. ` +
           `Make sure you picked your library root (the folder that mirrors the server's FITS data root).`,
       );
     }
-    const destDir = await dest.getDirectoryHandle(op.dest_entry, { create: true });
+    const destDir = await destHandle.getDirectoryHandle(op.dest_entry, { create: true });
     resolved.push({ src, destDir, label: op.session_date });
   }
 
@@ -158,5 +230,5 @@ export async function runBrowserCopy(opts: BrowserCopyOptions): Promise<BrowserC
     );
   }
 
-  return { copied: done, destinationName: dest.name };
+  return { copied: done, destinationName: destHandle.name };
 }

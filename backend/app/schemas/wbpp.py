@@ -10,6 +10,7 @@ class WbppFolderLevel(BaseModel):
     other_targets: list[str] = Field(default_factory=list)
     other_dates: list[str] = Field(default_factory=list)
     is_contaminated: bool
+    relative_path: str = ""
 
 
 class WbppSessionPreview(BaseModel):
