@@ -32,7 +32,8 @@ function PixInsightExportSection() {
       <div class="flex items-center gap-2">
         <h3 class="text-theme-text-primary font-medium">PixInsight Export</h3>
         <HelpPopover title="PixInsight Export">
-          <p>Default settings for the "Export to WBPP" action on a target's session list. These are the defaults; you can override any of them per export in the modal.</p>
+          <p>The "Export to WBPP" action produces a copy script (PowerShell .ps1 on Windows, or shell .sh on Linux/macOS) for a target. For each selected session it locates that session's source folder on disk, then the script copies those folders into a single staging folder on the PixInsight machine. Excluded folder patterns are skipped during the copy. After the script finishes, open PixInsight WeightedBatchPreprocessing (WBPP) and use "Add Directory" on the staging root to load the frames. The action stages files for manual import; it does not run WBPP or build a WBPP process.</p>
+          <p>The fields below are the defaults applied when you open the export modal. You can override any of them per export in the modal.</p>
           <p>Library root: the folder on the machine running PixInsight that mirrors the server's FITS data root. Stored container paths are rewritten relative to this root.</p>
           <p>Staging path: where session folders are copied to. Leave blank to use &lt;library root&gt;/_WBPP_staging/&lt;target&gt;.</p>
           <p>Excluded folder patterns skip processing-output folders so they are not re-ingested by WBPP.</p>
@@ -212,67 +213,64 @@ export default function AstroBinTab() {
     <div class="flex gap-6">
       {/* Left column: AstroBin config */}
       <div class="flex-1 space-y-4">
-        {/* Filter ID Mapping */}
+        {/* AstroBin */}
         <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-4 space-y-3">
           <div class="flex items-center gap-2">
-            <h3 class="text-theme-text-primary font-medium">Filter ID Mapping</h3>
-            <HelpPopover title="Filter ID Mapping">
-              <p>Maps each local filter name to the AstroBin equipment database ID used in AstroBin CSV imports. Without a mapping, the filter column in the export stays blank for that filter.</p>
-              <p>The AstroBin filter ID is the numeric path segment in the URL when viewing the filter on AstroBin.</p>
-              <p>Example: Chroma LRGB L lives at app.astrobin.com/equipment/explorer/filter/4649/... so its AstroBin ID is 4649.</p>
+            <h3 class="text-theme-text-primary font-medium">AstroBin</h3>
+            <HelpPopover title="AstroBin">
+              <p>Settings written into the AstroBin CSV export used to upload acquisition sessions to AstroBin.</p>
+              <p>Filter ID mapping: maps each local filter name to the AstroBin equipment database ID. Without a mapping, the filter column in the export stays blank for that filter. The AstroBin filter ID is the numeric path segment in the URL when viewing the filter on AstroBin. Example: Chroma LRGB L lives at app.astrobin.com/equipment/explorer/filter/4649/... so its AstroBin ID is 4649.</p>
+              <p>Bortle class: dark-sky scale value from 1 (excellent dark site) to 9 (inner-city sky). Written into every row of the export so uploaded acquisitions carry the site-brightness context. Example: set Bortle 4 for a rural-transition site, or Bortle 8 for typical city observing.</p>
             </HelpPopover>
           </div>
-          <div class="space-y-2">
-            <For each={allFilterNames()}>
-              {(filterName) => (
-                <div class="flex items-center gap-3">
-                  <span class="text-xs text-theme-text-primary w-24">{filterName}</span>
-                  <input
-                    type="number"
-                    class="text-xs bg-theme-elevated border border-theme-border rounded px-2 py-1 w-32 text-theme-text-primary"
-                    placeholder="AstroBin ID"
-                    value={ctx.settings()?.general.astrobin_filter_ids?.[filterName] ?? ""}
-                    onChange={(e) => {
-                      const val = e.currentTarget.value ? Number(e.currentTarget.value) : undefined;
-                      const current = ctx.settings()?.general;
-                      if (!current) return;
-                      const ids = { ...current.astrobin_filter_ids };
-                      if (val) ids[filterName] = val;
-                      else delete ids[filterName];
-                      ctx.saveGeneral({ ...current, astrobin_filter_ids: ids });
-                    }}
-                  />
-                </div>
-              )}
-            </For>
-          </div>
-        </div>
 
-        {/* Bortle Class */}
-        <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-4 space-y-3">
-          <div class="flex items-center gap-2">
-            <h3 class="text-theme-text-primary font-medium">Bortle Class</h3>
-            <HelpPopover title="Bortle Class">
-              <p>Bortle dark-sky scale value from 1 (excellent dark site) to 9 (inner-city sky). Written into every row of the AstroBin CSV export so uploaded acquisitions carry the site-brightness context.</p>
-              <p>Example: set Bortle 4 for a rural-transition site, or Bortle 8 for typical city observing.</p>
-            </HelpPopover>
+          <div>
+            <label class="text-xs text-theme-text-secondary block mb-2">Filter ID mapping</label>
+            <div class="space-y-2">
+              <For each={allFilterNames()}>
+                {(filterName) => (
+                  <div class="flex items-center gap-3">
+                    <span class="text-xs text-theme-text-primary w-24">{filterName}</span>
+                    <input
+                      type="number"
+                      class="text-xs bg-theme-elevated border border-theme-border rounded px-2 py-1 w-32 text-theme-text-primary"
+                      placeholder="AstroBin ID"
+                      value={ctx.settings()?.general.astrobin_filter_ids?.[filterName] ?? ""}
+                      onChange={(e) => {
+                        const val = e.currentTarget.value ? Number(e.currentTarget.value) : undefined;
+                        const current = ctx.settings()?.general;
+                        if (!current) return;
+                        const ids = { ...current.astrobin_filter_ids };
+                        if (val) ids[filterName] = val;
+                        else delete ids[filterName];
+                        ctx.saveGeneral({ ...current, astrobin_filter_ids: ids });
+                      }}
+                    />
+                  </div>
+                )}
+              </For>
+            </div>
           </div>
-          <div class="flex items-center gap-3">
-            <span class="text-xs text-theme-text-primary w-24">Bortle Class</span>
-            <input
-              type="number"
-              min="1"
-              max="9"
-              class="text-xs bg-theme-elevated border border-theme-border rounded px-2 py-1 w-20 text-theme-text-primary"
-              placeholder="1-9"
-              value={ctx.settings()?.general.astrobin_bortle ?? ""}
-              onChange={(e) => {
-                const val = e.currentTarget.value ? Number(e.currentTarget.value) : undefined;
-                const current = ctx.settings()?.general;
-                if (!current) return;
-                ctx.saveGeneral({ ...current, astrobin_bortle: val });
-              }}
-            />
+
+          <div class="pt-2 border-t border-theme-border">
+            <label class="text-xs text-theme-text-secondary block mb-2">Bortle class</label>
+            <div class="flex items-center gap-3">
+              <span class="text-xs text-theme-text-primary w-24">Bortle Class</span>
+              <input
+                type="number"
+                min="1"
+                max="9"
+                class="text-xs bg-theme-elevated border border-theme-border rounded px-2 py-1 w-20 text-theme-text-primary"
+                placeholder="1-9"
+                value={ctx.settings()?.general.astrobin_bortle ?? ""}
+                onChange={(e) => {
+                  const val = e.currentTarget.value ? Number(e.currentTarget.value) : undefined;
+                  const current = ctx.settings()?.general;
+                  if (!current) return;
+                  ctx.saveGeneral({ ...current, astrobin_bortle: val });
+                }}
+              />
+            </div>
           </div>
         </div>
       </div>
