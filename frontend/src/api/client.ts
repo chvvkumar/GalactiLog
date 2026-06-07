@@ -885,4 +885,17 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ url, ra, dec, target_name: targetName }),
     }),
+
+  // WBPP Export
+  wbppPreview: (req: import("../types").WbppPreviewRequest) =>
+    fetchJson<import("../types").WbppPreviewResponse>("/wbpp/preview", {
+      method: "POST",
+      body: JSON.stringify(req),
+    }),
+
+  wbppGenerate: (req: import("../types").WbppGenerateRequest) =>
+    fetchJson<import("../types").WbppGenerateResponse>("/wbpp/generate", {
+      method: "POST",
+      body: JSON.stringify(req),
+    }),
 };
