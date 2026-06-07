@@ -413,7 +413,7 @@ const WbppExportModal: Component<Props> = (props) => {
       onClick={props.onClose}
     >
       <div
-        class="modal-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-lg)] max-w-4xl w-full mx-4 max-h-[85vh] overflow-y-auto"
+        class="modal-surface border border-theme-border-em rounded-[var(--radius-md)] shadow-[0_24px_64px_rgba(0,0,0,0.7)] ring-1 ring-white/10 max-w-4xl w-full mx-4 max-h-[85vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
         <div class="p-4 border-b border-theme-border flex items-center justify-between">
