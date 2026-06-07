@@ -619,6 +619,10 @@ export interface GeneralSettings {
   preview_cache_mb?: number;
   nina_instances?: IntegrationInstance[];
   stellarium_instances?: IntegrationInstance[];
+  wbpp_library_root?: string | null;
+  wbpp_default_os?: string | null;
+  wbpp_staging_path?: string | null;
+  wbpp_exclusions?: string[];
 }
 
 export interface IntegrationInstance {
@@ -998,4 +1002,42 @@ export interface ColumnVisibility {
   session_table: TableColumnVisibility;
   session_detail: TableColumnVisibility;
   mosaic_table: TableColumnVisibility;
+}
+
+// === WBPP Export ===
+export interface WbppFolderLevel {
+  path: string;
+  container_path: string;
+  depth_from_root: number;
+  frame_count: number;
+  other_targets: string[];
+  other_dates: string[];
+  is_contaminated: boolean;
+}
+export interface WbppSessionPreview {
+  session_date: string;
+  levels: WbppFolderLevel[];
+  default_level_index: number;
+  total_frame_count: number;
+}
+export interface WbppPreviewResponse {
+  sessions: WbppSessionPreview[];
+  target_os: string;
+}
+export interface WbppPreviewRequest {
+  target_id: string;
+  session_dates: string[];
+  chosen_levels?: Record<string, number>;
+  library_root: string;
+  target_os?: string | null;
+}
+export interface WbppGenerateRequest {
+  target_id: string;
+  target_name: string;
+  session_dates: string[];
+  chosen_levels?: Record<string, number>;
+  library_root: string;
+  target_os?: string | null;
+  staging_path?: string | null;
+  exclusions?: string[];
 }
