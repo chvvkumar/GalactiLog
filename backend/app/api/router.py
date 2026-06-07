@@ -1,9 +1,7 @@
 import json
 import logging
 import os
-import re
 
-import httpx
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
@@ -30,6 +28,7 @@ from .integrations import router as integrations_router
 from .wbpp import router as wbpp_router
 from app.database import async_session
 from app.config import async_redis
+from app.services.version_check import IMAGE_REPO, fetch_remote_build, tag_for_version
 
 api_router = APIRouter(prefix="/api")
 api_router.include_router(targets_router)
@@ -60,78 +59,85 @@ async def version():
     }
 
 
-_SEMVER_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)(?:-rc\.(\d+))?$")
-_LATEST_CACHE_KEY = "galactilog:version:latest"
-_LATEST_CACHE_TTL = 3600  # 1 hour
-
-
-def _semver_key(v: str) -> tuple | None:
-    m = _SEMVER_RE.match(v)
-    if not m:
-        return None
-    major, minor, patch, rc = m.groups()
-    # Stable release sorts after any rc of the same (major, minor, patch).
-    # Use a large sentinel for stable so it wins over any rc number.
-    rc_rank = int(rc) if rc is not None else 10**9
-    return (int(major), int(minor), int(patch), rc_rank)
+_REMOTE_CACHE_TTL = 3600  # 1 hour
 
 
 @api_router.get("/version/latest")
 async def latest_version():
-    """Return the latest stable release from GitHub and whether the running
-    build is older than it. Cached in Redis for 1 hour.
+    """Report whether a newer build of the running channel is available.
+
+    Reads the git_sha baked into the published Docker image for the running
+    build's moving tag (snd / dev / latest) and compares it to the running
+    container's git_sha. The remote lookup is cached in Redis for 1 hour.
     """
     running = os.environ.get("GALACTILOG_VERSION", "dev")
+    running_sha = os.environ.get("GALACTILOG_GIT_SHA", "unknown")
 
-    # Try cache first
-    cached_payload = None
+    tag = tag_for_version(running)
+    if tag is None:
+        return {
+            "available": False,
+            "running": running,
+            "running_sha": running_sha,
+            "is_newer": False,
+            "source": "dockerhub",
+        }
+
     try:
-        async with async_redis() as r:
-            raw = await r.get(_LATEST_CACHE_KEY)
-        if raw:
-            cached_payload = json.loads(raw)
-    except Exception:
-        logger.debug("Redis cache read failed for latest version")
+        cache_key = f"galactilog:version:remote:{tag}"
+        result = None
 
-    if cached_payload is None:
+        # Try cache first.
         try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                resp = await client.get(
-                    "https://api.github.com/repos/chvvkumar/GalactiLog/releases/latest",
-                    headers={"Accept": "application/vnd.github+json"},
-                )
-            if resp.status_code != 200:
-                return {
-                    "available": False,
-                    "error": f"GitHub API returned {resp.status_code}",
-                    "running": running,
-                }
-            data = resp.json()
-            cached_payload = {
-                "tag": data.get("tag_name"),
-                "name": data.get("name"),
-                "url": data.get("html_url"),
-                "published_at": data.get("published_at"),
-                "body": data.get("body") or "",
-            }
-            try:
-                async with async_redis() as r:
-                    await r.setex(_LATEST_CACHE_KEY, _LATEST_CACHE_TTL, json.dumps(cached_payload))
-            except Exception:
-                logger.debug("Redis cache write failed for latest version")
-        except Exception as e:
-            return {"available": False, "error": str(e), "running": running}
+            async with async_redis() as r:
+                raw = await r.get(cache_key)
+            if raw:
+                result = json.loads(raw)
+        except Exception:
+            logger.debug("Redis cache read failed for remote version")
 
-    running_key = _semver_key(running)
-    latest_key = _semver_key(cached_payload.get("tag") or "")
-    is_newer = bool(running_key and latest_key and latest_key > running_key)
+        if result is None:
+            result = await fetch_remote_build(IMAGE_REPO, tag)
+            if result is not None:
+                try:
+                    async with async_redis() as r:
+                        await r.setex(cache_key, _REMOTE_CACHE_TTL, json.dumps(result))
+                except Exception:
+                    logger.debug("Redis cache write failed for remote version")
 
-    return {
-        "available": True,
-        "running": running,
-        "is_newer": is_newer,
-        **cached_payload,
-    }
+        remote_sha = result["git_sha"] if result else None
+        is_newer = bool(
+            remote_sha
+            and running_sha
+            and running_sha != "unknown"
+            and remote_sha != running_sha
+        )
+        compare_url = (
+            f"https://github.com/chvvkumar/GalactiLog/compare/{running_sha}...{remote_sha}"
+            if remote_sha and running_sha and running_sha != "unknown"
+            else None
+        )
+
+        return {
+            "available": bool(result),
+            "running": running,
+            "running_sha": running_sha,
+            "is_newer": is_newer,
+            "tag": tag,
+            "remote_sha": remote_sha,
+            "published_at": (result or {}).get("published_at"),
+            "compare_url": compare_url,
+            "source": "dockerhub",
+        }
+    except Exception as e:
+        return {
+            "available": False,
+            "running": running,
+            "running_sha": running_sha,
+            "is_newer": False,
+            "source": "dockerhub",
+            "error": str(e),
+        }
 
 
 @api_router.get("/health")

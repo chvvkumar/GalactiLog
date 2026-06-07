@@ -168,7 +168,11 @@ def test_powershell_script_shows_progress():
         [("Z:\\Astro\\M31\\2024-01-01", "2024-01-01")], "Z:\\Staging",
         "M31", ["WBPP"], ["2024-01-01"],
     )
-    assert "Write-Progress" in s
+    # The custom inline bar replaced Write-Progress: it draws a block-glyph bar
+    # via the Show-CopyProgress helper and tracks an accurate byte total.
+    assert "Show-CopyProgress" in s
+    assert "$TotalBytes" in s
+    assert "Write-Progress" not in s
 
 
 def test_shell_script_shows_progress():
@@ -177,6 +181,39 @@ def test_shell_script_shows_progress():
         "M31", ["WBPP"], ["2024-01-01"],
     )
     assert "--info=progress2" in s
+
+
+def test_shell_script_color_guard_and_helper():
+    """Tidied output: terminal-guarded colors, a copy_folder helper, and a
+    consistent header/footer."""
+    s = generate_shell_script(
+        [("/mnt/astro/M31/2024-01-01", "2024-01-01"),
+         ("/mnt/astro/M31/2024-01-02", "2024-01-02")],
+        "/tmp/staging", "M31", ["WBPP"], ["2024-01-01", "2024-01-02"],
+    )
+    # colors only on a tty
+    assert "if [ -t 1 ]; then" in s
+    assert "C_RESET" in s
+    # shared helper, invoked once per session folder
+    assert "copy_folder() {" in s
+    assert "copy_folder 1 " in s
+    assert "copy_folder 2 " in s
+    # header + footer wording
+    assert "WBPP staging copy" in s
+    assert "Done. Copied 2 folder(s)." in s
+
+
+def test_shell_script_target_name_not_command_substituted():
+    """A target name containing $(...) is passed as a quoted printf argument,
+    never interpolated into a double-quoted string where it could execute."""
+    s = generate_shell_script(
+        [("/mnt/astro/M31/2024-01-01", "2024-01-01")], "/tmp/staging",
+        "$(rm -rf ~)", ["WBPP"], ["2024-01-01"],
+    )
+    # the dangerous name is single-quoted (literal) for printf
+    assert "'$(rm -rf ~)'" in s
+    # and never sits inside a double-quoted printf operand
+    assert '"$(rm -rf ~)"' not in s
 
 
 def test_sanitize_script_name_strips_illegal_chars():
