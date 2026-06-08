@@ -45,8 +45,23 @@ function hexToRgba(hex: string, alpha: number): string {
 }
 
 
+// Cache CSS-var reads at module scope so each badge does not trigger a
+// getComputedStyle(document.documentElement) layout read per render.
+// Invalidated whenever the active theme changes (see invalidateThemeVarCache).
+const themeVarCache = new Map<string, string>();
+
+export function invalidateThemeVarCache(): void {
+  themeVarCache.clear();
+}
+
 function getThemeVar(name: string, fallback: string): string {
-  return getComputedStyle(document.documentElement).getPropertyValue(`--color-${name}`).trim() || fallback;
+  const cached = themeVarCache.get(name);
+  if (cached !== undefined) return cached || fallback;
+  const value = getComputedStyle(document.documentElement)
+    .getPropertyValue(`--color-${name}`)
+    .trim();
+  themeVarCache.set(name, value);
+  return value || fallback;
 }
 
 export function getFilterBadgeStyle(
@@ -71,12 +86,16 @@ export function getFilterBadgeStyle(
         },
       };
     case "frosted-glass":
+      // Frosted glass look WITHOUT backdrop-filter (was the dominant scroll-jank
+      // source: ~600 composite layers on the dashboard). A frosted pill over the
+      // dark page reads as a slightly lighter, tinted opaque surface, so layer a
+      // neutral translucent base under a faint color tint and keep the edge
+      // highlight + soft shadow. No per-element compositing required.
       return {
         style: {
-          "background-color": hexToRgba(hexColor, 0.12),
+          "background-image": `linear-gradient(${hexToRgba(hexColor, 0.18)}, ${hexToRgba(hexColor, 0.18)})`,
+          "background-color": "rgba(40, 44, 58, 0.85)",
           "border": `1px solid ${hexToRgba(hexColor, 0.25)}`,
-          "backdrop-filter": "blur(8px) saturate(1.4)",
-          "-webkit-backdrop-filter": "blur(8px) saturate(1.4)",
           "box-shadow": `inset 0 1px 0 0 rgba(255,255,255,0.06), 0 2px 8px ${hexToRgba(hexColor, 0.15)}`,
           color: hexColor,
         },

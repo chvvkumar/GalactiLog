@@ -13,7 +13,7 @@ from app.api.deps import get_current_user, require_admin
 from app.models.user import User
 from app.models.user_settings import UserSettings, SETTINGS_ROW_ID
 from app.models import Image
-from app.services.normalization import load_alias_maps, normalize_filter, normalize_equipment
+from app.services.normalization import load_alias_maps, normalize_filter, normalize_equipment, invalidate_alias_cache
 from app.schemas.settings import (
     GeneralSettings, FilterConfig, EquipmentConfig, EquipmentAliases,
     SettingsResponse, SuggestionsResponse, SuggestionGroup,
@@ -249,6 +249,7 @@ async def update_filters(
     row.filters = {name: cfg.model_dump() for name, cfg in payload.items()}
     await session.commit()
     await session.refresh(row)
+    invalidate_alias_cache()
     return _row_to_response(row)
 
 
@@ -263,6 +264,7 @@ async def update_equipment(
     row.equipment = payload.model_dump()
     await session.commit()
     await session.refresh(row)
+    invalidate_alias_cache()
     return _row_to_response(row)
 
 

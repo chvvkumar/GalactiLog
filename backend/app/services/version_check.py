@@ -14,6 +14,7 @@ import httpx
 logger = logging.getLogger(__name__)
 
 IMAGE_REPO = os.environ.get("GALACTILOG_IMAGE_REPO", "chvvkumar/galactilog")
+GITHUB_REPO = os.environ.get("GALACTILOG_GITHUB_REPO", "chvvkumar/GalactiLog")
 
 _SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+$")
 
@@ -158,4 +159,31 @@ async def fetch_remote_build(repo: str, tag: str) -> dict | None:
             return {"git_sha": git_sha, "published_at": published_at}
     except Exception:
         logger.debug("fetch_remote_build failed for %s:%s", repo, tag, exc_info=True)
+        return None
+
+
+async def fetch_latest_release(repo: str) -> dict | None:
+    """Fetch the latest GitHub release notes for ``repo`` (owner/name).
+
+    Hits the anonymous GitHub releases API (no auth needed). Returns a mapped
+    dict on success, or None on any non-200, exception, or missing payload.
+    This is isolated from the Docker-tag detection flow.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            resp = await client.get(
+                f"https://api.github.com/repos/{repo}/releases/latest"
+            )
+            if resp.status_code != 200:
+                return None
+            data = resp.json()
+            return {
+                "tag": data.get("tag_name"),
+                "name": data.get("name"),
+                "url": data.get("html_url"),
+                "body": data.get("body") or "",
+                "published_at": data.get("published_at"),
+            }
+    except Exception:
+        logger.debug("fetch_latest_release failed for %s", repo, exc_info=True)
         return None
