@@ -4,6 +4,8 @@
 // To add a new theme: add an entry to THEMES below. Done.
 // ============================================================
 
+import { invalidateThemeVarCache } from "./utils/filterStyles";
+
 export interface ThemeTokens {
   // Surfaces
   "bg-base": string;
@@ -727,16 +729,20 @@ function applyGlassOrbs(orbs: GlassOrb[] | undefined): void {
   });
   for (const orb of orbs) {
     const el = document.createElement("div");
+    // Soft glow via a radial-gradient alpha falloff instead of filter: blur(120px).
+    // The 120px blur forced a full-viewport composite layer that was re-rasterized
+    // on scroll; a gradient on a static element costs nothing per frame.
+    // Drop mix-blend-mode: "screen" reads near-identically against a gradient with
+    // a transparent edge but would otherwise re-blend the whole stack each frame.
     Object.assign(el.style, {
       position: "absolute",
       left: orb.x,
       top: orb.y,
       width: orb.size,
       height: orb.size,
-      background: orb.color,
+      background: `radial-gradient(circle, ${orb.color} 0%, transparent 70%)`,
       borderRadius: "50%",
-      filter: "blur(120px)",
-      mixBlendMode: "screen",
+      filter: "none",
     });
     container.appendChild(el);
   }
@@ -761,6 +767,8 @@ export function applyTheme(themeId: string): void {
   for (const [token, value] of Object.entries(theme.tokens)) {
     root.style.setProperty(`--color-${token}`, value);
   }
+  // Theme tokens just changed; drop any cached CSS-var reads used by badges.
+  invalidateThemeVarCache();
   // Light vs dark drives the modal contrast bump (lighter panel on dark themes,
   // darker on light). For glass themes the page base is the opaque gradient.
   const pageBase = theme.glass ? theme.glass.gradientFrom : theme.tokens["bg-base"];
