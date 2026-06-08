@@ -191,10 +191,29 @@ const DashboardFilterProvider: Component<{ children: JSX.Element }> = (props) =>
     return Array.isArray(cols) && cols.length > 0;
   });
 
-  const fetchKey = createMemo(() => ({
-    filters: filters(), page: currentPage(), pageSize: currentPageSize(),
-    sortBy: apiSortBy(), sortDir: sortDir(), includeCustom: hasCustomColumns(),
-  }));
+  // Gate the initial /api/targets fetch until the saved settings (page size) and the
+  // custom-columns flag have both resolved. Without this, the resource fires once at the
+  // default page size (25) before settings load, then settings/customColumns arrive and
+  // flip pageSize / includeCustom, cancelling (net::ERR_ABORTED) and re-issuing the request.
+  // createResource skips fetching while its source returns null/undefined/false, so by
+  // returning null here until both resources are ready we guarantee exactly one request
+  // for the default view, at the correct saved page size.
+  const settingsReady = createMemo(() => {
+    // settings() resolves to a value once loaded; initializedPageSize confirms the saved
+    // default_page_size has been applied to stablePageSize before the first fetch.
+    const settingsLoaded = settingsCtx.settings() !== undefined && initializedPageSize();
+    // customColumns() resolves to an array (possibly empty) once loaded; undefined = pending.
+    const customColumnsLoaded = settingsCtx.customColumns() !== undefined;
+    return settingsLoaded && customColumnsLoaded;
+  });
+
+  const fetchKey = createMemo(() => {
+    if (!settingsReady()) return null;
+    return {
+      filters: filters(), page: currentPage(), pageSize: currentPageSize(),
+      sortBy: apiSortBy(), sortDir: sortDir(), includeCustom: hasCustomColumns(),
+    };
+  });
 
   let abortController: AbortController | undefined;
   const [fetchError, setFetchError] = createSignal<Error | null>(null);

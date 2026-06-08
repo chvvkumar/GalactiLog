@@ -28,7 +28,13 @@ from .integrations import router as integrations_router
 from .wbpp import router as wbpp_router
 from app.database import async_session
 from app.config import async_redis
-from app.services.version_check import IMAGE_REPO, fetch_remote_build, tag_for_version
+from app.services.version_check import (
+    GITHUB_REPO,
+    IMAGE_REPO,
+    fetch_latest_release,
+    fetch_remote_build,
+    tag_for_version,
+)
 
 api_router = APIRouter(prefix="/api")
 api_router.include_router(targets_router)
@@ -60,6 +66,29 @@ async def version():
 
 
 _REMOTE_CACHE_TTL = 3600  # 1 hour
+_RELEASE_CACHE_KEY = "galactilog:version:release:latest"
+
+
+async def _latest_release():
+    """Return the latest GitHub release notes dict (or None), cached in Redis
+    for 1 hour. Redis and GitHub failures are swallowed; the worst case is
+    None, so the version endpoint never fails because of release notes."""
+    try:
+        async with async_redis() as r:
+            raw = await r.get(_RELEASE_CACHE_KEY)
+        if raw:
+            return json.loads(raw)
+    except Exception:
+        logger.debug("Redis cache read failed for latest release")
+
+    release = await fetch_latest_release(GITHUB_REPO)
+    if release is not None:
+        try:
+            async with async_redis() as r:
+                await r.setex(_RELEASE_CACHE_KEY, _REMOTE_CACHE_TTL, json.dumps(release))
+        except Exception:
+            logger.debug("Redis cache write failed for latest release")
+    return release
 
 
 @api_router.get("/version/latest")
@@ -73,6 +102,11 @@ async def latest_version():
     running = os.environ.get("GALACTILOG_VERSION", "dev")
     running_sha = os.environ.get("GALACTILOG_GIT_SHA", "unknown")
 
+    # Latest GitHub release notes, fetched and cached independently of the
+    # Docker-tag detection below. Never fails the endpoint: on any error the
+    # release is simply None.
+    release = await _latest_release()
+
     tag = tag_for_version(running)
     if tag is None:
         return {
@@ -81,6 +115,7 @@ async def latest_version():
             "running_sha": running_sha,
             "is_newer": False,
             "source": "dockerhub",
+            "release": release,
         }
 
     try:
@@ -128,6 +163,7 @@ async def latest_version():
             "published_at": (result or {}).get("published_at"),
             "compare_url": compare_url,
             "source": "dockerhub",
+            "release": release,
         }
     except Exception as e:
         return {
@@ -137,6 +173,7 @@ async def latest_version():
             "is_newer": False,
             "source": "dockerhub",
             "error": str(e),
+            "release": release,
         }
 
 

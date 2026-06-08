@@ -4,7 +4,11 @@ import httpx
 import pytest
 from unittest.mock import AsyncMock, patch
 
-from app.services.version_check import tag_for_version, fetch_remote_build
+from app.services.version_check import (
+    tag_for_version,
+    fetch_remote_build,
+    fetch_latest_release,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -240,6 +244,95 @@ class TestFetchRemoteBuild:
 
 
 # ---------------------------------------------------------------------------
+# fetch_latest_release (mocked GitHub releases API)
+# ---------------------------------------------------------------------------
+
+GITHUB_REPO = "chvvkumar/GalactiLog"
+RELEASES_URL = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+
+
+def _release_body():
+    return {
+        "tag_name": "v1.4.0",
+        "name": "GalactiLog 1.4.0",
+        "html_url": "https://github.com/chvvkumar/GalactiLog/releases/tag/v1.4.0",
+        "body": "## Changes\n- New thing\n- Fixed thing",
+        "published_at": "2026-06-05T10:00:00Z",
+    }
+
+
+class _SingleRouteClient:
+    """AsyncClient stub that returns one configured response for any GET,
+    or raises a configured exception."""
+
+    def __init__(self, response=None, exc=None, *args, **kwargs):
+        self._response = response
+        self._exc = exc
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    async def get(self, url, headers=None, params=None):
+        if self._exc is not None:
+            raise self._exc
+        return self._response
+
+
+def _release_client_factory(response=None, exc=None):
+    def factory(*args, **kwargs):
+        return _SingleRouteClient(response=response, exc=exc, *args, **kwargs)
+    return factory
+
+
+class TestFetchLatestRelease:
+    @pytest.mark.asyncio
+    async def test_happy_path_maps_fields(self, monkeypatch):
+        monkeypatch.setattr(
+            httpx,
+            "AsyncClient",
+            _release_client_factory(FakeResponse(200, _release_body())),
+        )
+        result = await fetch_latest_release(GITHUB_REPO)
+        assert result == {
+            "tag": "v1.4.0",
+            "name": "GalactiLog 1.4.0",
+            "url": "https://github.com/chvvkumar/GalactiLog/releases/tag/v1.4.0",
+            "body": "## Changes\n- New thing\n- Fixed thing",
+            "published_at": "2026-06-05T10:00:00Z",
+        }
+
+    @pytest.mark.asyncio
+    async def test_missing_body_becomes_empty_string(self, monkeypatch):
+        payload = _release_body()
+        payload["body"] = None
+        monkeypatch.setattr(
+            httpx, "AsyncClient", _release_client_factory(FakeResponse(200, payload))
+        )
+        result = await fetch_latest_release(GITHUB_REPO)
+        assert result is not None
+        assert result["body"] == ""
+
+    @pytest.mark.asyncio
+    async def test_non_200_returns_none(self, monkeypatch):
+        monkeypatch.setattr(
+            httpx, "AsyncClient", _release_client_factory(FakeResponse(404, {}))
+        )
+        assert await fetch_latest_release(GITHUB_REPO) is None
+
+    @pytest.mark.asyncio
+    async def test_exception_returns_none(self, monkeypatch):
+        monkeypatch.setattr(
+            httpx,
+            "AsyncClient",
+            _release_client_factory(exc=httpx.ConnectError("boom")),
+        )
+        assert await fetch_latest_release(GITHUB_REPO) is None
+
+
+# ---------------------------------------------------------------------------
 # GET /api/version/latest endpoint
 # ---------------------------------------------------------------------------
 
@@ -286,6 +379,9 @@ class TestVersionLatestEndpoint:
             "app.api.router.fetch_remote_build",
             AsyncMock(return_value={"git_sha": GIT_SHA, "published_at": "2026-06-07T13:47:37Z"}),
         )
+        monkeypatch.setattr(
+            "app.api.router.fetch_latest_release", AsyncMock(return_value=None)
+        )
         async with anon_client as c:
             resp = await c.get("/api/version/latest")
         assert resp.status_code == 200
@@ -306,6 +402,9 @@ class TestVersionLatestEndpoint:
             "app.api.router.fetch_remote_build",
             AsyncMock(return_value={"git_sha": GIT_SHA, "published_at": None}),
         )
+        monkeypatch.setattr(
+            "app.api.router.fetch_latest_release", AsyncMock(return_value=None)
+        )
         async with anon_client as c:
             resp = await c.get("/api/version/latest")
         data = resp.json()
@@ -319,6 +418,9 @@ class TestVersionLatestEndpoint:
         _patch_redis(monkeypatch, _FakeRedis())
         called = AsyncMock(return_value={"git_sha": GIT_SHA, "published_at": None})
         monkeypatch.setattr("app.api.router.fetch_remote_build", called)
+        monkeypatch.setattr(
+            "app.api.router.fetch_latest_release", AsyncMock(return_value=None)
+        )
         async with anon_client as c:
             resp = await c.get("/api/version/latest")
         data = resp.json()
@@ -334,6 +436,9 @@ class TestVersionLatestEndpoint:
         _patch_redis(monkeypatch, _FakeRedis())
         monkeypatch.setattr(
             "app.api.router.fetch_remote_build", AsyncMock(return_value=None)
+        )
+        monkeypatch.setattr(
+            "app.api.router.fetch_latest_release", AsyncMock(return_value=None)
         )
         async with anon_client as c:
             resp = await c.get("/api/version/latest")
@@ -351,7 +456,63 @@ class TestVersionLatestEndpoint:
             "app.api.router.fetch_remote_build",
             AsyncMock(return_value={"git_sha": GIT_SHA, "published_at": None}),
         )
+        monkeypatch.setattr(
+            "app.api.router.fetch_latest_release", AsyncMock(return_value=None)
+        )
         async with anon_client as c:
             resp = await c.get("/api/version/latest")
         data = resp.json()
         assert data["is_newer"] is False
+
+    @pytest.mark.asyncio
+    async def test_release_populated_when_github_succeeds(self, monkeypatch, anon_client):
+        monkeypatch.setenv("GALACTILOG_VERSION", "snd")
+        monkeypatch.setenv("GALACTILOG_GIT_SHA", "a5e0f4b6f1b173381cd4d86ab1bb024687a35596")
+        _patch_redis(monkeypatch, _FakeRedis())
+        monkeypatch.setattr(
+            "app.api.router.fetch_remote_build",
+            AsyncMock(return_value={"git_sha": GIT_SHA, "published_at": "2026-06-07T13:47:37Z"}),
+        )
+        release = {
+            "tag": "v1.4.0",
+            "name": "GalactiLog 1.4.0",
+            "url": "https://github.com/chvvkumar/GalactiLog/releases/tag/v1.4.0",
+            "body": "## Changes\n- New thing",
+            "published_at": "2026-06-05T10:00:00Z",
+        }
+        monkeypatch.setattr(
+            "app.api.router.fetch_latest_release", AsyncMock(return_value=release)
+        )
+        async with anon_client as c:
+            resp = await c.get("/api/version/latest")
+        assert resp.status_code == 200
+        data = resp.json()
+        # Docker detection fields unaffected.
+        assert data["is_newer"] is True
+        assert data["remote_sha"] == GIT_SHA
+        assert data["source"] == "dockerhub"
+        # Release notes added.
+        assert data["release"] == release
+
+    @pytest.mark.asyncio
+    async def test_release_null_when_github_fails(self, monkeypatch, anon_client):
+        monkeypatch.setenv("GALACTILOG_VERSION", "snd")
+        monkeypatch.setenv("GALACTILOG_GIT_SHA", GIT_SHA)
+        _patch_redis(monkeypatch, _FakeRedis())
+        monkeypatch.setattr(
+            "app.api.router.fetch_remote_build",
+            AsyncMock(return_value={"git_sha": GIT_SHA, "published_at": None}),
+        )
+        monkeypatch.setattr(
+            "app.api.router.fetch_latest_release", AsyncMock(return_value=None)
+        )
+        async with anon_client as c:
+            resp = await c.get("/api/version/latest")
+        assert resp.status_code == 200
+        data = resp.json()
+        # Docker fields still present and correct.
+        assert data["available"] is True
+        assert data["is_newer"] is False
+        assert data["remote_sha"] == GIT_SHA
+        # Release is null on GitHub failure.
+        assert data["release"] is None

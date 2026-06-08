@@ -56,7 +56,16 @@ const NavBar: Component = () => {
   };
 
   return (
-    <header class="sticky top-0 z-30 bg-theme-surface backdrop-blur-sm border-b border-theme-border px-4 lg:px-6 py-3 flex items-center gap-4 lg:gap-6">
+    <header
+      class="sticky top-0 z-30 border-b border-theme-border px-4 lg:px-6 py-3 flex items-center gap-4 lg:gap-6"
+      style={{
+        // Opaque header bar that does NOT use .bg-theme-surface, so the glass
+        // backdrop-filter rule never applies and scrolling content cannot show
+        // through and wash out the nav text. Glass themes use the fully opaque
+        // gradient base; solid themes fall back to the surface token.
+        "background-color": "var(--glass-gradient-from, var(--color-bg-surface))",
+      }}
+    >
       <A href="/" class="flex items-center gap-2 no-underline">
         <img src="/logo-transparent.png" alt="GalactiLog logo" class="h-7 w-7" />
         <h1 class="text-theme-text-primary font-bold tracking-tight text-lg whitespace-nowrap">GalactiLog</h1>

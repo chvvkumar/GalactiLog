@@ -2,8 +2,33 @@
 
 Does NOT mutate stored data - applied at query time only.
 """
+import time
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+
+# ---------------------------------------------------------------------------
+# Alias map cache
+#
+# load_alias_maps() is called several times per request (dashboard, stats,
+# analysis, etc.) and hit the user_settings table on every call. The settings
+# row changes rarely, so we cache the derived maps in-process with a short TTL.
+#
+# Single-process asyncio: a plain module-level variable is sufficient (no
+# cross-thread mutation). The cache is invalidated explicitly when settings
+# that affect aliases are written (see invalidate_alias_cache), so the TTL is
+# only a backstop for any write path that forgets to invalidate.
+# ---------------------------------------------------------------------------
+_ALIAS_CACHE_TTL_SECONDS = 30.0
+_alias_cache: tuple[dict[str, str], dict[str, str], dict[str, str]] | None = None
+_alias_cache_ts: float = 0.0
+
+
+def invalidate_alias_cache() -> None:
+    """Clear the cached alias maps. Call after writing alias-affecting settings."""
+    global _alias_cache, _alias_cache_ts
+    _alias_cache = None
+    _alias_cache_ts = 0.0
 
 
 def build_alias_maps(filters_config: dict) -> dict[str, str]:
@@ -73,7 +98,16 @@ async def load_alias_maps(session: AsyncSession) -> tuple[dict[str, str], dict[s
 
     Returns:
         (filter_alias_map, camera_alias_map, telescope_alias_map)
+
+    Results are cached in-process for a short TTL and explicitly invalidated
+    when alias-affecting settings are written (see invalidate_alias_cache).
     """
+    global _alias_cache, _alias_cache_ts
+
+    now = time.monotonic()
+    if _alias_cache is not None and (now - _alias_cache_ts) < _ALIAS_CACHE_TTL_SECONDS:
+        return _alias_cache
+
     from app.models.user_settings import UserSettings, SETTINGS_ROW_ID
 
     result = await session.execute(
@@ -81,8 +115,12 @@ async def load_alias_maps(session: AsyncSession) -> tuple[dict[str, str], dict[s
     )
     row = result.scalar_one_or_none()
     if row is None:
-        return {}, {}, {}
+        maps: tuple[dict[str, str], dict[str, str], dict[str, str]] = ({}, {}, {})
+    else:
+        filter_map = build_alias_maps(row.filters or {})
+        cam_map, tel_map = build_equipment_alias_maps(row.equipment or {})
+        maps = (filter_map, cam_map, tel_map)
 
-    filter_map = build_alias_maps(row.filters or {})
-    cam_map, tel_map = build_equipment_alias_maps(row.equipment or {})
-    return filter_map, cam_map, tel_map
+    _alias_cache = maps
+    _alias_cache_ts = now
+    return maps

@@ -73,7 +73,7 @@ export const SettingsPage: Component = () => {
           {tabs().map((tab) => (
             <button
               onClick={() => setSearchParams({ tab: tab.id, sub: undefined })}
-              class={`px-3 sm:px-4 py-1.5 text-sm rounded-[var(--radius-sm)] border transition-colors duration-150 ${
+              class={`cursor-pointer px-3 sm:px-4 py-1.5 text-sm rounded-[var(--radius-sm)] border transition-colors duration-150 ${
                 activeTab() === tab.id
                   ? "bg-theme-elevated text-theme-text-primary font-medium border-theme-border-em shadow-sm"
                   : "text-theme-text-secondary hover:text-theme-text-primary hover:bg-theme-hover border-transparent"

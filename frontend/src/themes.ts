@@ -4,6 +4,8 @@
 // To add a new theme: add an entry to THEMES below. Done.
 // ============================================================
 
+import { invalidateThemeVarCache } from "./utils/filterStyles";
+
 export interface ThemeTokens {
   // Surfaces
   "bg-base": string;
@@ -709,6 +711,18 @@ export function getThemeById(id: string): ThemeMeta {
 
 const GLASS_ORBS_ID = "gl-glass-orbs";
 
+// Multiply the alpha of an orb color (an "rgba(r, g, b, a)" string) by `factor`,
+// used to build intermediate stops for a smooth gradient falloff. Falls back to
+// wrapping the raw color in a color-mix if it is not in the expected rgba form.
+function scaleOrbAlpha(color: string, factor: number): string {
+  const m = color.match(/^rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*(?:,\s*([\d.]+)\s*)?\)$/i);
+  if (m) {
+    const a = m[4] !== undefined ? parseFloat(m[4]) : 1;
+    return `rgba(${m[1]}, ${m[2]}, ${m[3]}, ${(a * factor).toFixed(3)})`;
+  }
+  return `color-mix(in srgb, ${color} ${Math.round(factor * 100)}%, transparent)`;
+}
+
 function applyGlassOrbs(orbs: GlassOrb[] | undefined): void {
   const existing = document.getElementById(GLASS_ORBS_ID);
   if (!orbs || orbs.length === 0) {
@@ -727,16 +741,28 @@ function applyGlassOrbs(orbs: GlassOrb[] | undefined): void {
   });
   for (const orb of orbs) {
     const el = document.createElement("div");
+    // Soft glow via a multi-stop radial-gradient instead of filter: blur(120px).
+    // The 120px blur forced a full-viewport composite layer that was re-rasterized
+    // on scroll; a gradient on a static element costs nothing per frame.
+    // A single hard stop (color -> transparent 70%) reads blocky, so use a
+    // gaussian-like falloff: peak alpha reduced in the core, then several
+    // intermediate stops with decreasing alpha out to a fully transparent edge,
+    // leaving no discernible ring. The element is also enlarged ~1.6x and
+    // recentered (negative offset = half the growth) so the diffuse tail spreads
+    // further, approximating the original blur radius across all glass themes.
+    // mix-blend-mode "screen" is dropped: it reads near-identically against a
+    // gradient with a transparent edge but would re-blend the stack each frame.
+    const grow = 1.6;
+    const offset = `calc((${orb.size}) * ${-(grow - 1) / 2})`;
     Object.assign(el.style, {
       position: "absolute",
-      left: orb.x,
-      top: orb.y,
-      width: orb.size,
-      height: orb.size,
-      background: orb.color,
+      left: `calc(${orb.x} + ${offset})`,
+      top: `calc(${orb.y} + ${offset})`,
+      width: `calc(${orb.size} * ${grow})`,
+      height: `calc(${orb.size} * ${grow})`,
+      background: `radial-gradient(circle, ${scaleOrbAlpha(orb.color, 0.75)} 0%, ${scaleOrbAlpha(orb.color, 0.5)} 28%, ${scaleOrbAlpha(orb.color, 0.22)} 50%, ${scaleOrbAlpha(orb.color, 0.07)} 70%, transparent 88%)`,
       borderRadius: "50%",
-      filter: "blur(120px)",
-      mixBlendMode: "screen",
+      filter: "none",
     });
     container.appendChild(el);
   }
@@ -761,6 +787,8 @@ export function applyTheme(themeId: string): void {
   for (const [token, value] of Object.entries(theme.tokens)) {
     root.style.setProperty(`--color-${token}`, value);
   }
+  // Theme tokens just changed; drop any cached CSS-var reads used by badges.
+  invalidateThemeVarCache();
   // Light vs dark drives the modal contrast bump (lighter panel on dark themes,
   // darker on light). For glass themes the page base is the opaque gradient.
   const pageBase = theme.glass ? theme.glass.gradientFrom : theme.tokens["bg-base"];
