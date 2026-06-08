@@ -1159,15 +1159,19 @@ async def list_targets_aggregated(
     has_metric_filters = bool(having_parts)
     having_sql = f"HAVING {' AND '.join(having_parts)}" if having_parts else ""
 
-    gk = "coalesce(CAST(i.resolved_target_id AS VARCHAR), concat('obj:', coalesce(i.raw_headers->>'OBJECT', '__uncategorized__')))"
+    # An empty-string OBJECT header is treated the same as a missing one
+    # (nullif -> NULL -> __uncategorized__). This MUST match the detail-phase
+    # key derivation (detail_target_key below) so a frame lands in the same
+    # group in both phases.
+    gk = "coalesce(CAST(i.resolved_target_id AS VARCHAR), concat('obj:', coalesce(nullif(i.raw_headers->>'OBJECT', ''), '__uncategorized__')))"
 
     combined_sql = text(f"""
     WITH grouped AS (
         SELECT {gk} AS target_key,
-               coalesce(min(t.primary_name), min(i.raw_headers->>'OBJECT'), 'Uncategorized') AS primary_name,
+               coalesce(min(t.primary_name), min(nullif(i.raw_headers->>'OBJECT', '')), 'Uncategorized') AS primary_name,
                sum(coalesce(i.exposure_time, 0)) AS total_integration,
                count(i.id) AS total_frames,
-               count(distinct i.session_date) AS session_count,
+               count(distinct coalesce(CAST(i.session_date AS VARCHAR), 'unknown')) AS session_count,
                max(i.session_date) AS last_session_date,
                min(i.session_date) AS oldest_date,
                max(i.session_date) AS newest_date
@@ -1261,63 +1265,142 @@ async def list_targets_aggregated(
 
     key_filter = f"({' OR '.join(key_conds)})" if key_conds else "FALSE"
 
+    # SQL-side target key, mirroring the Python derivation that previously ran
+    # per frame: resolved UUID -> its text; otherwise obj:<OBJECT>, where an
+    # empty/missing OBJECT collapses to obj:__uncategorized__.
+    detail_target_key = (
+        "CASE WHEN i.resolved_target_id IS NOT NULL "
+        "THEN CAST(i.resolved_target_id AS VARCHAR) "
+        "ELSE concat('obj:', coalesce(nullif(i.raw_headers->>'OBJECT', ''), '__uncategorized__')) "
+        "END"
+    )
+    # Per-frame OBJECT header, NULL when empty/missing (mirrors `if row.fits_object`).
+    detail_fits_object = "nullif(i.raw_headers->>'OBJECT', '')"
+
+    # Two-level aggregation: collapse frames to one row per target_key, carrying
+    # raw (un-normalized) filter sums, distinct raw equipment, distinct OBJECT
+    # aliases, and a per-session breakdown as JSON. Alias normalization/merging
+    # is applied in Python below over these small per-target sets.
     detail_sql = text(f"""
-        SELECT CAST(i.resolved_target_id AS VARCHAR) AS target_uuid,
-               i.raw_headers->>'OBJECT' AS fits_object,
-               i.exposure_time, i.filter_used, i.camera, i.telescope, i.capture_date, i.session_date
-        FROM images i LEFT JOIN targets t ON i.resolved_target_id = t.id
-        WHERE {where_sql} AND {key_filter}
+        WITH frames AS (
+            SELECT {detail_target_key} AS target_key,
+                   {detail_fits_object} AS fits_object,
+                   coalesce(i.exposure_time, 0) AS exp,
+                   i.filter_used,
+                   i.camera,
+                   i.telescope,
+                   CASE WHEN i.session_date IS NULL THEN 'unknown'
+                        ELSE CAST(i.session_date AS VARCHAR) END AS session_key
+            FROM images i LEFT JOIN targets t ON i.resolved_target_id = t.id
+            WHERE {where_sql} AND {key_filter}
+        ),
+        per_filter AS (
+            SELECT target_key, filter_used, sum(exp) AS filter_exp
+            FROM frames
+            WHERE filter_used IS NOT NULL
+            GROUP BY target_key, filter_used
+        ),
+        per_session AS (
+            SELECT target_key, session_key,
+                   sum(exp) AS session_exp,
+                   count(*) AS frame_count,
+                   array_agg(DISTINCT filter_used) FILTER (WHERE filter_used IS NOT NULL) AS session_filters
+            FROM frames
+            GROUP BY target_key, session_key
+        ),
+        per_target AS (
+            SELECT target_key,
+                   array_agg(DISTINCT camera) FILTER (WHERE camera IS NOT NULL) AS cameras,
+                   array_agg(DISTINCT telescope) FILTER (WHERE telescope IS NOT NULL) AS telescopes,
+                   array_agg(DISTINCT fits_object) FILTER (WHERE fits_object IS NOT NULL) AS fits_objects
+            FROM frames
+            GROUP BY target_key
+        ),
+        -- Roll per_filter up to one row per target ONCE (set-based), then
+        -- LEFT JOIN onto per_target. Avoids a correlated scalar subquery that
+        -- would rescan the frames CTE once per target.
+        filter_agg AS (
+            SELECT target_key,
+                   jsonb_object_agg(filter_used, filter_exp) AS filter_raw_dist
+            FROM per_filter
+            GROUP BY target_key
+        ),
+        -- Roll per_session up to one row per target ONCE (set-based).
+        session_agg AS (
+            SELECT target_key,
+                   jsonb_agg(jsonb_build_object(
+                       'session_key', session_key,
+                       'session_exp', session_exp,
+                       'frame_count', frame_count,
+                       'filters', coalesce(session_filters, ARRAY[]::varchar[]))) AS sessions
+            FROM per_session
+            GROUP BY target_key
+        )
+        SELECT pt.target_key,
+               pt.cameras,
+               pt.telescopes,
+               pt.fits_objects,
+               fa.filter_raw_dist,
+               sa.sessions
+        FROM per_target pt
+        LEFT JOIN filter_agg fa USING (target_key)
+        LEFT JOIN session_agg sa USING (target_key)
     """)
     detail_result = await session.execute(detail_sql, params)
     detail_rows = detail_result.all()
 
-    # Build per-target detail maps
+    # Build per-target detail maps. One row per target_key now; alias
+    # normalization and merging happen here over the small per-target sets,
+    # preserving the exact semantics of the former per-frame loop.
     filter_dist: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
     equipment_map: dict[str, set] = defaultdict(set)
     sessions_detail: dict[str, dict[str, dict]] = defaultdict(dict)
     aliases_map: dict[str, set] = defaultdict(set)
 
     for row in detail_rows:
-        if row.target_uuid:
-            tk = row.target_uuid
-        else:
-            obj_name = row.fits_object
-            if not obj_name:
-                tk = "obj:__uncategorized__"
-            else:
-                tk = f"obj:{obj_name}"
-
+        tk = row.target_key
         if tk not in page_basics:
             continue
 
-        exp = row.exposure_time or 0
-        f = normalize_filter(row.filter_used, filter_map)
-        cam = normalize_equipment(row.camera, cam_map)
-        tel = normalize_equipment(row.telescope, tel_map)
+        # Filter distribution: normalize each raw filter and SUM exposures
+        # that collapse to the same canonical name.
+        for raw_filter, exp_sum in (row.filter_raw_dist or {}).items():
+            f = normalize_filter(raw_filter, filter_map)
+            if f:
+                filter_dist[tk][f] += float(exp_sum)
 
-        if f:
-            filter_dist[tk][f] += exp
-        if cam:
-            equipment_map[tk].add(cam)
-        if tel:
-            equipment_map[tk].add(tel)
+        # Equipment: normalize cameras + telescopes, dedupe into one set.
+        for raw_cam in (row.cameras or []):
+            cam = normalize_equipment(raw_cam, cam_map)
+            if cam:
+                equipment_map[tk].add(cam)
+        for raw_tel in (row.telescopes or []):
+            tel = normalize_equipment(raw_tel, tel_map)
+            if tel:
+                equipment_map[tk].add(tel)
 
-        if row.fits_object:
-            aliases_map[tk].add(row.fits_object)
+        # Aliases: distinct non-empty OBJECT headers.
+        for obj_name in (row.fits_objects or []):
+            if obj_name:
+                aliases_map[tk].add(obj_name)
 
-        date_key = str(row.session_date) if row.session_date else "unknown"
-        if date_key not in sessions_detail[tk]:
-            sessions_detail[tk][date_key] = {
-                "session_date": date_key,
-                "integration_seconds": 0,
-                "frame_count": 0,
-                "filters_set": set(),
-            }
-        s = sessions_detail[tk][date_key]
-        s["integration_seconds"] += exp
-        s["frame_count"] += 1
-        if f:
-            s["filters_set"].add(f)
+        # Sessions: normalize each session's filters, dedupe, cast numerics.
+        for sess in (row.sessions or []):
+            date_key = sess["session_key"]
+            if date_key not in sessions_detail[tk]:
+                sessions_detail[tk][date_key] = {
+                    "session_date": date_key,
+                    "integration_seconds": 0,
+                    "frame_count": 0,
+                    "filters_set": set(),
+                }
+            s = sessions_detail[tk][date_key]
+            s["integration_seconds"] += float(sess["session_exp"])
+            s["frame_count"] += int(sess["frame_count"])
+            for raw_filter in (sess.get("filters") or []):
+                f = normalize_filter(raw_filter, filter_map)
+                if f:
+                    s["filters_set"].add(f)
 
     # ---------------------------------------------------------------
     # Phase 4b: Mosaic membership lookup
