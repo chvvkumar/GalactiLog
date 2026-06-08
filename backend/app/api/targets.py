@@ -1315,20 +1315,36 @@ async def list_targets_aggregated(
                    array_agg(DISTINCT fits_object) FILTER (WHERE fits_object IS NOT NULL) AS fits_objects
             FROM frames
             GROUP BY target_key
+        ),
+        -- Roll per_filter up to one row per target ONCE (set-based), then
+        -- LEFT JOIN onto per_target. Avoids a correlated scalar subquery that
+        -- would rescan the frames CTE once per target.
+        filter_agg AS (
+            SELECT target_key,
+                   jsonb_object_agg(filter_used, filter_exp) AS filter_raw_dist
+            FROM per_filter
+            GROUP BY target_key
+        ),
+        -- Roll per_session up to one row per target ONCE (set-based).
+        session_agg AS (
+            SELECT target_key,
+                   jsonb_agg(jsonb_build_object(
+                       'session_key', session_key,
+                       'session_exp', session_exp,
+                       'frame_count', frame_count,
+                       'filters', coalesce(session_filters, ARRAY[]::varchar[]))) AS sessions
+            FROM per_session
+            GROUP BY target_key
         )
         SELECT pt.target_key,
                pt.cameras,
                pt.telescopes,
                pt.fits_objects,
-               (SELECT jsonb_object_agg(pf.filter_used, pf.filter_exp)
-                  FROM per_filter pf WHERE pf.target_key = pt.target_key) AS filter_raw_dist,
-               (SELECT jsonb_agg(jsonb_build_object(
-                          'session_key', ps.session_key,
-                          'session_exp', ps.session_exp,
-                          'frame_count', ps.frame_count,
-                          'filters', coalesce(ps.session_filters, ARRAY[]::varchar[])))
-                  FROM per_session ps WHERE ps.target_key = pt.target_key) AS sessions
+               fa.filter_raw_dist,
+               sa.sessions
         FROM per_target pt
+        LEFT JOIN filter_agg fa USING (target_key)
+        LEFT JOIN session_agg sa USING (target_key)
     """)
     detail_result = await session.execute(detail_sql, params)
     detail_rows = detail_result.all()
