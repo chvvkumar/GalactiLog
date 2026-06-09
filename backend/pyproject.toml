@@ -40,3 +40,13 @@ dev = [
 [build-system]
 requires = ["setuptools>=75.0"]
 build-backend = "setuptools.build_meta"
+
+# Restrict setuptools auto-discovery to the application package only.  The
+# backend directory also contains data/ and alembic/ top-level folders, which
+# would otherwise trigger setuptools' "Multiple top-level packages discovered
+# in a flat-layout" error.  The `find` form is used (rather than a hard
+# packages list) so that the Dockerfile's pyproject-only `pip install .` layer
+# does not fail when app/ is absent -- find simply resolves to no packages and
+# the dependencies from [project] still install.
+[tool.setuptools.packages.find]
+include = ["app*"]
