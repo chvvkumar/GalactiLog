@@ -36,6 +36,7 @@ router = APIRouter(prefix="/analysis", tags=["analysis"])
 logger = logging.getLogger(__name__)
 
 _MATRIX_CACHE_TTL = 300  # 5 minutes
+_ANALYSIS_CACHE_TTL = 300  # 5 minutes
 
 # ── Metric map ──────────────────────────────────────────────────────────
 
@@ -299,78 +300,89 @@ async def get_correlation(
     if y_metric not in METRIC_MAP:
         raise HTTPException(400, f"Unknown y_metric: {y_metric}")
 
-    x_col = METRIC_MAP[x_metric]
-    y_col = METRIC_MAP[y_metric]
-
-    q = (
-        select(
-            x_col.label("x_val"),
-            y_col.label("y_val"),
-            Image.session_date.label("night"),
-            Image.resolved_target_id,
-        )
-        .where(Image.image_type == "LIGHT")
-        .where(x_col.is_not(None))
-        .where(y_col.is_not(None))
-        .where(Image.capture_date.is_not(None))
+    cache_key = (
+        f"galactilog:analysis:correlation:"
+        f"{x_metric}:{y_metric}:{granularity}:"
+        f"{telescope or ''}:{camera or ''}:{filter_used or ''}:"
+        f"{date_from or ''}:{date_to or ''}"
     )
-    q = await _apply_filters(q, session, telescope, camera, filter_used, date_from, date_to)
-    rows = (await session.execute(q)).all()
 
-    if granularity == "frame":
-        target_ids = {r.resolved_target_id for r in rows if r.resolved_target_id}
-        target_names = await _resolve_target_names(session, target_ids)
-        raw_points = [
-            (float(r.x_val), float(r.y_val), str(r.night), r.resolved_target_id)
-            for r in rows
-        ]
-    else:
-        session_groups: dict[tuple, dict] = defaultdict(lambda: {"xs": [], "ys": [], "target_id": None})
-        for r in rows:
-            key = (str(r.night), r.resolved_target_id)
-            session_groups[key]["xs"].append(float(r.x_val))
-            session_groups[key]["ys"].append(float(r.y_val))
-            session_groups[key]["target_id"] = r.resolved_target_id
+    async def _compute():
+        x_col = METRIC_MAP[x_metric]
+        y_col = METRIC_MAP[y_metric]
 
-        target_ids = {g["target_id"] for g in session_groups.values() if g["target_id"]}
-        target_names = await _resolve_target_names(session, target_ids)
-        raw_points = [
-            (
-                statistics.median(g["xs"]),
-                statistics.median(g["ys"]),
-                night,
-                g["target_id"],
+        q = (
+            select(
+                x_col.label("x_val"),
+                y_col.label("y_val"),
+                Image.session_date.label("night"),
+                Image.resolved_target_id,
             )
-            for (night, _), g in session_groups.items()
+            .where(Image.image_type == "LIGHT")
+            .where(x_col.is_not(None))
+            .where(y_col.is_not(None))
+            .where(Image.capture_date.is_not(None))
+        )
+        q = await _apply_filters(q, session, telescope, camera, filter_used, date_from, date_to)
+        rows = (await session.execute(q)).all()
+
+        if granularity == "frame":
+            target_ids = {r.resolved_target_id for r in rows if r.resolved_target_id}
+            target_names = await _resolve_target_names(session, target_ids)
+            raw_points = [
+                (float(r.x_val), float(r.y_val), str(r.night), r.resolved_target_id)
+                for r in rows
+            ]
+        else:
+            session_groups: dict[tuple, dict] = defaultdict(lambda: {"xs": [], "ys": [], "target_id": None})
+            for r in rows:
+                key = (str(r.night), r.resolved_target_id)
+                session_groups[key]["xs"].append(float(r.x_val))
+                session_groups[key]["ys"].append(float(r.y_val))
+                session_groups[key]["target_id"] = r.resolved_target_id
+
+            target_ids = {g["target_id"] for g in session_groups.values() if g["target_id"]}
+            target_names = await _resolve_target_names(session, target_ids)
+            raw_points = [
+                (
+                    statistics.median(g["xs"]),
+                    statistics.median(g["ys"]),
+                    night,
+                    g["target_id"],
+                )
+                for (night, _), g in session_groups.items()
+            ]
+
+        # Outlier detection
+        all_xs = [p[0] for p in raw_points]
+        all_ys = [p[1] for p in raw_points]
+
+        points = [
+            CorrelationPoint(
+                x=x, y=y, date=d,
+                target_id=str(tid) if tid is not None else None,
+                outlier=_is_outlier_iqr(x, y, all_xs, all_ys) if len(raw_points) >= 4 else False,
+            )
+            for x, y, d, tid in raw_points
         ]
 
-    # Outlier detection
-    all_xs = [p[0] for p in raw_points]
-    all_ys = [p[1] for p in raw_points]
+        trend = _compute_trend(points)
+        x_stats = _compute_summary_stats(all_xs)
+        y_stats = _compute_summary_stats(all_ys)
 
-    points = [
-        CorrelationPoint(
-            x=x, y=y, date=d,
-            target_id=str(tid) if tid is not None else None,
-            outlier=_is_outlier_iqr(x, y, all_xs, all_ys) if len(raw_points) >= 4 else False,
-        )
-        for x, y, d, tid in raw_points
-    ]
+        return CorrelationResponse(
+            points=points,
+            trend=trend,
+            x_metric=x_metric,
+            y_metric=y_metric,
+            granularity=granularity,
+            x_stats=x_stats,
+            y_stats=y_stats,
+            target_names={str(tid): name for tid, name in target_names.items()},
+        ).model_dump()
 
-    trend = _compute_trend(points)
-    x_stats = _compute_summary_stats(all_xs)
-    y_stats = _compute_summary_stats(all_ys)
-
-    return CorrelationResponse(
-        points=points,
-        trend=trend,
-        x_metric=x_metric,
-        y_metric=y_metric,
-        granularity=granularity,
-        x_stats=x_stats,
-        y_stats=y_stats,
-        target_names={str(tid): name for tid, name in target_names.items()},
-    )
+    data = await cached_json(cache_key, _ANALYSIS_CACHE_TTL, _compute)
+    return CorrelationResponse(**data)
 
 
 @router.get("/distribution", response_model=DistributionResponse)
@@ -388,56 +400,69 @@ async def get_distribution(
     if metric not in METRIC_MAP:
         raise HTTPException(400, f"Unknown metric: {metric}")
 
-    col = METRIC_MAP[metric]
-    q = (
-        select(col.label("val"), Image.session_date.label("night"), Image.resolved_target_id)
-        .where(Image.image_type == "LIGHT")
-        .where(col.is_not(None))
-        .where(Image.capture_date.is_not(None))
+    cache_key = (
+        f"galactilog:analysis:distribution:"
+        f"{metric}:{granularity}:"
+        f"{telescope or ''}:{camera or ''}:{filter_used or ''}:"
+        f"{date_from or ''}:{date_to or ''}"
     )
-    q = await _apply_filters(q, session, telescope, camera, filter_used, date_from, date_to)
-    rows = (await session.execute(q)).all()
 
-    if granularity == "session":
-        groups: dict[tuple, list[float]] = defaultdict(list)
-        for r in rows:
-            groups[(str(r.night), r.resolved_target_id)].append(float(r.val))
-        values = [statistics.median(vs) for vs in groups.values()]
-    else:
-        values = [float(r.val) for r in rows]
+    async def _compute():
+        col = METRIC_MAP[metric]
+        q = (
+            select(col.label("val"), Image.session_date.label("night"), Image.resolved_target_id)
+            .where(Image.image_type == "LIGHT")
+            .where(col.is_not(None))
+            .where(Image.capture_date.is_not(None))
+        )
+        q = await _apply_filters(q, session, telescope, camera, filter_used, date_from, date_to)
+        rows = (await session.execute(q)).all()
 
-    if len(values) < 2:
+        if granularity == "session":
+            groups: dict[tuple, list[float]] = defaultdict(list)
+            for r in rows:
+                groups[(str(r.night), r.resolved_target_id)].append(float(r.val))
+            values = [statistics.median(vs) for vs in groups.values()]
+        else:
+            values = [float(r.val) for r in rows]
+
+        if len(values) < 2:
+            raise HTTPException(400, "Not enough data points for distribution")
+
+        stats = _compute_summary_stats(values)
+
+        # Sturges' rule for bin count
+        n_bins = max(1, int(math.ceil(math.log2(len(values)) + 1)))
+        v_min, v_max = min(values), max(values)
+        bin_width = (v_max - v_min) / n_bins if v_max > v_min else 1.0
+
+        bins = []
+        for i in range(n_bins):
+            b_start = v_min + i * bin_width
+            b_end = b_start + bin_width
+            count = sum(1 for v in values if (b_start <= v < b_end) or (i == n_bins - 1 and v == b_end))
+            bins.append(HistogramBin(bin_start=round(b_start, 6), bin_end=round(b_end, 6), count=count))
+
+        # Skewness (Fisher)
+        mean = stats.mean
+        std = stats.std_dev
+        n = len(values)
+        if std > 0 and n > 2:
+            skewness = (n / ((n - 1) * (n - 2))) * sum(((v - mean) / std) ** 3 for v in values)
+        else:
+            skewness = 0.0
+
+        return DistributionResponse(
+            bins=bins,
+            stats=stats,
+            metric=metric,
+            skewness=round(skewness, 4),
+        ).model_dump()
+
+    data = await cached_json(cache_key, _ANALYSIS_CACHE_TTL, _compute)
+    if data is None:
         raise HTTPException(400, "Not enough data points for distribution")
-
-    stats = _compute_summary_stats(values)
-
-    # Sturges' rule for bin count
-    n_bins = max(1, int(math.ceil(math.log2(len(values)) + 1)))
-    v_min, v_max = min(values), max(values)
-    bin_width = (v_max - v_min) / n_bins if v_max > v_min else 1.0
-
-    bins = []
-    for i in range(n_bins):
-        b_start = v_min + i * bin_width
-        b_end = b_start + bin_width
-        count = sum(1 for v in values if (b_start <= v < b_end) or (i == n_bins - 1 and v == b_end))
-        bins.append(HistogramBin(bin_start=round(b_start, 6), bin_end=round(b_end, 6), count=count))
-
-    # Skewness (Fisher)
-    mean = stats.mean
-    std = stats.std_dev
-    n = len(values)
-    if std > 0 and n > 2:
-        skewness = (n / ((n - 1) * (n - 2))) * sum(((v - mean) / std) ** 3 for v in values)
-    else:
-        skewness = 0.0
-
-    return DistributionResponse(
-        bins=bins,
-        stats=stats,
-        metric=metric,
-        skewness=round(skewness, 4),
-    )
+    return DistributionResponse(**data)
 
 
 @router.get("/boxplot", response_model=BoxPlotResponse)
@@ -455,71 +480,82 @@ async def get_boxplot(
     if metric not in METRIC_MAP:
         raise HTTPException(400, f"Unknown metric: {metric}")
 
-    col = METRIC_MAP[metric]
-
-    # For equipment and filter grouping, we need to normalize in Python
-    # so that grouped aliases are combined under their canonical names.
-    if group_by in ("equipment", "filter"):
-        extra_cols = [Image.telescope, Image.camera, Image.filter_used]
-    elif group_by == "month":
-        extra_cols = [func.to_char(Image.capture_date, "YYYY-MM").label("month_grp")]
-    else:  # target
-        extra_cols = [Image.resolved_target_id]
-
-    q = (
-        select(col.label("val"), Image.resolved_target_id, *extra_cols)
-        .where(Image.image_type == "LIGHT")
-        .where(col.is_not(None))
-        .where(Image.capture_date.is_not(None))
+    cache_key = (
+        f"galactilog:analysis:boxplot:"
+        f"{metric}:{group_by}:"
+        f"{telescope or ''}:{camera or ''}:{filter_used or ''}:"
+        f"{date_from or ''}:{date_to or ''}"
     )
-    q = await _apply_filters(q, session, telescope, camera, filter_used, date_from, date_to)
-    rows = (await session.execute(q)).all()
 
-    # Load alias maps for normalization
-    filter_map, cam_map, tel_map = await load_alias_maps(session)
+    async def _compute():
+        col = METRIC_MAP[metric]
 
-    grouped: dict[str, list[float]] = defaultdict(list)
-    target_id_map: dict[str, str | None] = {}
-    for r in rows:
-        if group_by == "equipment":
-            tel_norm = normalize_equipment(r.telescope, tel_map) or r.telescope
-            cam_norm = normalize_equipment(r.camera, cam_map) or r.camera
-            if not tel_norm or not cam_norm:
-                continue
-            key = f"{tel_norm} + {cam_norm}"
-        elif group_by == "filter":
-            f = normalize_filter(r.filter_used, filter_map) or r.filter_used
-            if not f:
-                continue
-            key = f
+        # For equipment and filter grouping, we need to normalize in Python
+        # so that grouped aliases are combined under their canonical names.
+        if group_by in ("equipment", "filter"):
+            extra_cols = [Image.telescope, Image.camera, Image.filter_used]
         elif group_by == "month":
-            if not r.month_grp:
-                continue
-            key = str(r.month_grp)
+            extra_cols = [func.to_char(Image.capture_date, "YYYY-MM").label("month_grp")]
         else:  # target
-            if not r.resolved_target_id:
-                continue
-            key = str(r.resolved_target_id)
-            target_id_map[key] = r.resolved_target_id
-        grouped[key].append(float(r.val))
+            extra_cols = [Image.resolved_target_id]
 
-    if group_by == "target":
-        tid_set = {v for v in target_id_map.values() if v}
-        tnames = await _resolve_target_names(session, tid_set)
-        resolved_groups: dict[str, list[float]] = {}
-        for key, vals in grouped.items():
-            tid = target_id_map.get(key)
-            name = tnames.get(tid, key) if tid else key
-            resolved_groups.setdefault(name, []).extend(vals)
-        grouped = resolved_groups
+        q = (
+            select(col.label("val"), Image.resolved_target_id, *extra_cols)
+            .where(Image.image_type == "LIGHT")
+            .where(col.is_not(None))
+            .where(Image.capture_date.is_not(None))
+        )
+        q = await _apply_filters(q, session, telescope, camera, filter_used, date_from, date_to)
+        rows = (await session.execute(q)).all()
 
-    groups = []
-    for name, vals in sorted(grouped.items()):
-        bp = _compute_box_plot(vals, name)
-        if bp:
-            groups.append(bp)
+        # Load alias maps for normalization
+        filter_map, cam_map, tel_map = await load_alias_maps(session)
 
-    return BoxPlotResponse(groups=groups, metric=metric, group_by=group_by)
+        grouped: dict[str, list[float]] = defaultdict(list)
+        target_id_map: dict[str, str | None] = {}
+        for r in rows:
+            if group_by == "equipment":
+                tel_norm = normalize_equipment(r.telescope, tel_map) or r.telescope
+                cam_norm = normalize_equipment(r.camera, cam_map) or r.camera
+                if not tel_norm or not cam_norm:
+                    continue
+                key = f"{tel_norm} + {cam_norm}"
+            elif group_by == "filter":
+                f = normalize_filter(r.filter_used, filter_map) or r.filter_used
+                if not f:
+                    continue
+                key = f
+            elif group_by == "month":
+                if not r.month_grp:
+                    continue
+                key = str(r.month_grp)
+            else:  # target
+                if not r.resolved_target_id:
+                    continue
+                key = str(r.resolved_target_id)
+                target_id_map[key] = r.resolved_target_id
+            grouped[key].append(float(r.val))
+
+        if group_by == "target":
+            tid_set = {v for v in target_id_map.values() if v}
+            tnames = await _resolve_target_names(session, tid_set)
+            resolved_groups: dict[str, list[float]] = {}
+            for key, vals in grouped.items():
+                tid = target_id_map.get(key)
+                name = tnames.get(tid, key) if tid else key
+                resolved_groups.setdefault(name, []).extend(vals)
+            grouped = resolved_groups
+
+        groups = []
+        for name, vals in sorted(grouped.items()):
+            bp = _compute_box_plot(vals, name)
+            if bp:
+                groups.append(bp)
+
+        return BoxPlotResponse(groups=groups, metric=metric, group_by=group_by).model_dump()
+
+    data = await cached_json(cache_key, _ANALYSIS_CACHE_TTL, _compute)
+    return BoxPlotResponse(**data)
 
 
 @router.get("/timeseries", response_model=TimeSeriesResponse)
@@ -536,77 +572,88 @@ async def get_timeseries(
     if metric not in METRIC_MAP:
         raise HTTPException(400, f"Unknown metric: {metric}")
 
-    col = METRIC_MAP[metric]
-    q = (
-        select(
-            col.label("val"),
-            Image.session_date.label("night"),
-            Image.resolved_target_id,
+    cache_key = (
+        f"galactilog:analysis:timeseries:"
+        f"{metric}:"
+        f"{telescope or ''}:{camera or ''}:{filter_used or ''}:"
+        f"{date_from or ''}:{date_to or ''}"
+    )
+
+    async def _compute():
+        col = METRIC_MAP[metric]
+        q = (
+            select(
+                col.label("val"),
+                Image.session_date.label("night"),
+                Image.resolved_target_id,
+            )
+            .where(Image.image_type == "LIGHT")
+            .where(col.is_not(None))
+            .where(Image.capture_date.is_not(None))
         )
-        .where(Image.image_type == "LIGHT")
-        .where(col.is_not(None))
-        .where(Image.capture_date.is_not(None))
-    )
-    q = await _apply_filters(q, session, telescope, camera, filter_used, date_from, date_to)
-    rows = (await session.execute(q)).all()
+        q = await _apply_filters(q, session, telescope, camera, filter_used, date_from, date_to)
+        rows = (await session.execute(q)).all()
 
-    nightly: dict[str, dict] = defaultdict(lambda: {"vals": [], "target_ids": set()})
-    for r in rows:
-        night = str(r.night)
-        nightly[night]["vals"].append(float(r.val))
-        if r.resolved_target_id:
-            nightly[night]["target_ids"].add(r.resolved_target_id)
+        nightly: dict[str, dict] = defaultdict(lambda: {"vals": [], "target_ids": set()})
+        for r in rows:
+            night = str(r.night)
+            nightly[night]["vals"].append(float(r.val))
+            if r.resolved_target_id:
+                nightly[night]["target_ids"].add(r.resolved_target_id)
 
-    all_tids = set()
-    for g in nightly.values():
-        all_tids.update(g["target_ids"])
-    tnames = await _resolve_target_names(session, all_tids)
+        all_tids = set()
+        for g in nightly.values():
+            all_tids.update(g["target_ids"])
+        tnames = await _resolve_target_names(session, all_tids)
 
-    sorted_nights = sorted(nightly.keys())
-    points = []
-    for night in sorted_nights:
-        g = nightly[night]
-        tid_list = list(g["target_ids"])
-        target_name = tnames.get(tid_list[0]) if tid_list else None
-        points.append(TimeSeriesPoint(
-            date=night,
-            value=round(statistics.median(g["vals"]), 6),
-            target_name=target_name,
-            frame_count=len(g["vals"]),
-        ))
+        sorted_nights = sorted(nightly.keys())
+        points = []
+        for night in sorted_nights:
+            g = nightly[night]
+            tid_list = list(g["target_ids"])
+            target_name = tnames.get(tid_list[0]) if tid_list else None
+            points.append(TimeSeriesPoint(
+                date=night,
+                value=round(statistics.median(g["vals"]), 6),
+                target_name=target_name,
+                frame_count=len(g["vals"]),
+            ))
 
-    raw_values = [p.value for p in points]
+        raw_values = [p.value for p in points]
 
-    def _moving_avg(vals, window):
-        result = []
-        for i in range(len(vals)):
-            start = max(0, i - window + 1)
-            chunk = vals[start : i + 1]
-            if len(chunk) >= window:
-                result.append(MovingAveragePoint(
-                    date=points[i].date,
-                    value=round(sum(chunk) / len(chunk), 6),
-                ))
-        return result
+        def _moving_avg(vals, window):
+            result = []
+            for i in range(len(vals)):
+                start = max(0, i - window + 1)
+                chunk = vals[start : i + 1]
+                if len(chunk) >= window:
+                    result.append(MovingAveragePoint(
+                        date=points[i].date,
+                        value=round(sum(chunk) / len(chunk), 6),
+                    ))
+            return result
 
-    ma_7 = _moving_avg(raw_values, 7)
-    ma_30 = _moving_avg(raw_values, 30)
+        ma_7 = _moving_avg(raw_values, 7)
+        ma_30 = _moving_avg(raw_values, 30)
 
-    months_seen = set()
-    month_boundaries = []
-    for night in sorted_nights:
-        ym = night[:7]
-        if ym not in months_seen:
-            months_seen.add(ym)
-            month_boundaries.append(night)
+        months_seen = set()
+        month_boundaries = []
+        for night in sorted_nights:
+            ym = night[:7]
+            if ym not in months_seen:
+                months_seen.add(ym)
+                month_boundaries.append(night)
 
-    return TimeSeriesResponse(
-        points=points,
-        ma_7=ma_7,
-        ma_30=ma_30,
-        metric=metric,
-        month_boundaries=month_boundaries,
-    )
+        return TimeSeriesResponse(
+            points=points,
+            ma_7=ma_7,
+            ma_30=ma_30,
+            metric=metric,
+            month_boundaries=month_boundaries,
+        ).model_dump()
+
+    data = await cached_json(cache_key, _ANALYSIS_CACHE_TTL, _compute)
+    return TimeSeriesResponse(**data)
 
 
 @router.get("/matrix", response_model=MatrixResponse)

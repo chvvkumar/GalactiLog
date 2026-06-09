@@ -103,18 +103,16 @@ async def panel_stats(panel: MosaicPanel, session: AsyncSession) -> PanelStats:
     if panel.object_pattern:
         base_filter.append(Image.raw_headers["OBJECT"].astext.ilike(panel.object_pattern))
 
-    # Check for ANY membership records (included or available)
-    any_membership_q = (
-        select(func.count(MosaicPanelSession.id))
+    # Fetch all membership rows in one query, then derive both the total count
+    # (any status) and the included-date list in Python. This replaces the two
+    # separate count + included-dates queries with a single round-trip.
+    membership_q = (
+        select(MosaicPanelSession.session_date, MosaicPanelSession.status)
         .where(MosaicPanelSession.panel_id == panel.id)
     )
-    any_membership_count = (await session.execute(any_membership_q)).scalar() or 0
-
-    included_dates_q = (
-        select(MosaicPanelSession.session_date)
-        .where(MosaicPanelSession.panel_id == panel.id, MosaicPanelSession.status == "included")
-    )
-    included_dates = [r[0] for r in (await session.execute(included_dates_q)).all()]
+    membership_rows = (await session.execute(membership_q)).all()
+    any_membership_count = len(membership_rows)
+    included_dates = [r[0] for r in membership_rows if r[1] == "included"]
 
     if any_membership_count > 0:
         # Panel has membership records - scope to included sessions only
@@ -562,20 +560,30 @@ async def list_mosaic_summaries(session: AsyncSession) -> list[MosaicSummary]:
         for r in membership_rows:
             panel_included_dates[str(r.panel_id)].add(r.session_date)
 
-        # Fetch all matching rows in one query; aggregate by (target_id, pattern) in Python
-        # since ILIKE patterns can't be used directly in GROUP BY.
-        raw_q = (
+        # Aggregate matching frames in SQL by (target_id, object_name, session_date).
+        # ILIKE patterns can't appear in GROUP BY, so we group on the raw OBJECT
+        # string and per-session date instead: this collapses the per-frame result
+        # set into one row per (target, object, session) while letting Python still
+        # apply per-panel pattern matching and included-date scoping. SUM/COUNT move
+        # into SQL; the Python-side regex/scoping work scales with distinct
+        # (object, session) tuples rather than total frame count.
+        object_name_col = Image.raw_headers["OBJECT"].astext.label("object_name")
+        grouped_q = (
             select(
                 Image.resolved_target_id,
-                Image.raw_headers["OBJECT"].astext.label("object_name"),
-                Image.exposure_time,
+                object_name_col,
                 Image.session_date,
+                # coalesce so a group where every frame has NULL exposure_time
+                # yields 0.0 (SQL SUM over all-NULL returns NULL), matching the
+                # prior per-frame `exposure_time or 0.0` aggregation.
+                func.sum(func.coalesce(Image.exposure_time, 0.0)).label("integration"),
+                func.count(Image.id).label("frames"),
             )
             .where(Image.image_type == "LIGHT", conditions)
+            .group_by(Image.resolved_target_id, object_name_col, Image.session_date)
         )
-        raw_rows = (await session.execute(raw_q)).all()
+        grouped_rows = (await session.execute(grouped_q)).all()
 
-        # Aggregate in Python: for each row, find which (target_id, pattern) it belongs to.
         # Build a lookup: target_id -> list of (compiled regex, pattern string) per target_id.
         pair_regexes = {(str(tid), pat): _ilike_to_regex(pat) for tid, pat in unique_pairs}
         # Group patterns by target_id for efficient lookup
@@ -587,30 +595,38 @@ async def list_mosaic_summaries(session: AsyncSession) -> list[MosaicSummary]:
         for p in pattern_panels:
             pair_to_panels[(str(p.target_id), p.object_pattern)].append(str(p.id))
 
-        panel_accum: dict[str, list[float]] = {str(p.id): [] for p in pattern_panels}
+        # Accumulate per panel: total integration, total frames, and the set of
+        # contributing session dates (for min/max). Sum/count come pre-aggregated
+        # from SQL; we add a session's totals to a panel when its pattern matches
+        # and (for scoped panels) the session is included.
+        panel_integration: dict[str, float] = {str(p.id): 0.0 for p in pattern_panels}
+        panel_frames: dict[str, int] = {str(p.id): 0 for p in pattern_panels}
         panel_accum_dates: dict[str, list[str]] = {str(p.id): [] for p in pattern_panels}
 
-        for row in raw_rows:
+        for row in grouped_rows:
             tid_str = str(row.resolved_target_id)
             obj_name = row.object_name or ""
-            exp = row.exposure_time or 0.0
+            integration = row.integration or 0.0
+            frames = row.frames or 0
             for pat, rx in patterns_by_target.get(tid_str, []):
                 if rx.match(obj_name):
                     for pid in pair_to_panels.get((tid_str, pat), []):
                         if pid not in panel_has_membership:
                             # No membership records - legacy unscoped
-                            panel_accum[pid].append(exp)
+                            panel_integration[pid] += integration
+                            panel_frames[pid] += frames
                             if row.session_date:
                                 panel_accum_dates[pid].append(str(row.session_date))
                         elif pid in panel_included_dates and row.session_date in panel_included_dates[pid]:
                             # Has membership with included dates - scoped
-                            panel_accum[pid].append(exp)
+                            panel_integration[pid] += integration
+                            panel_frames[pid] += frames
                             if row.session_date:
                                 panel_accum_dates[pid].append(str(row.session_date))
                         # else: has membership but session not included - skip
 
-        for pid, exposures in panel_accum.items():
-            panel_stats_map[pid] = (sum(exposures), len(exposures))
+        for pid in panel_integration:
+            panel_stats_map[pid] = (panel_integration[pid], panel_frames[pid])
         for pid, dates in panel_accum_dates.items():
             if dates:
                 sorted_d = sorted(dates)

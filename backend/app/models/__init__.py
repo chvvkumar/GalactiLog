@@ -10,6 +10,7 @@ from .app_metadata import AppMetadata
 from .openngc import OpenNGCEntry
 from .vizier_cache import VizierCache
 from .sesame_cache import SesameCache
+from .hyperleda_cache import HyperLEDACache
 from .site_dark_hours import SiteDarkHours
 from .session_note import SessionNote
 from .mosaic import Mosaic
@@ -27,4 +28,4 @@ from .abell_catalog import AbellEntry
 from .catalog_membership import TargetCatalogMembership
 from .activity_event import ActivityEvent
 
-__all__ = ["Base", "Target", "Image", "UserSettings", "SETTINGS_ROW_ID", "MergeCandidate", "SimbadCache", "SesameCache", "User", "UserRole", "RefreshToken", "AppMetadata", "OpenNGCEntry", "VizierCache", "SiteDarkHours", "SessionNote", "Mosaic", "MosaicPanel", "MosaicSuggestion", "MosaicPanelSession", "CustomColumn", "CustomColumnValue", "ColumnType", "AppliesTo", "FilenameCandidate", "GaiaCache", "SACEntry", "CaldwellEntry", "Herschel400Entry", "ArpEntry", "AbellEntry", "TargetCatalogMembership", "ActivityEvent"]
+__all__ = ["Base", "Target", "Image", "UserSettings", "SETTINGS_ROW_ID", "MergeCandidate", "SimbadCache", "SesameCache", "User", "UserRole", "RefreshToken", "AppMetadata", "OpenNGCEntry", "VizierCache", "HyperLEDACache", "SiteDarkHours", "SessionNote", "Mosaic", "MosaicPanel", "MosaicSuggestion", "MosaicPanelSession", "CustomColumn", "CustomColumnValue", "ColumnType", "AppliesTo", "FilenameCandidate", "GaiaCache", "SACEntry", "CaldwellEntry", "Herschel400Entry", "ArpEntry", "AbellEntry", "TargetCatalogMembership", "ActivityEvent"]

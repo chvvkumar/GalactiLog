@@ -1,6 +1,7 @@
 """Tests for analysis API endpoints (ARCH-4)."""
 import uuid
 import pytest
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 from httpx import AsyncClient, ASGITransport
 
@@ -43,6 +44,19 @@ def _override_session(session):
     async def _dep():
         yield session
     return _dep
+
+
+def _make_cache_miss_patch():
+    """Return a context manager that patches async_redis to always miss."""
+    mock_redis = AsyncMock()
+    mock_redis.get = AsyncMock(return_value=None)
+    mock_redis.setex = AsyncMock()
+
+    @asynccontextmanager
+    async def _ctx():
+        yield mock_redis
+
+    return patch("app.services.cache.async_redis", _ctx)
 
 
 # ---------------------------------------------------------------------------
@@ -103,9 +117,10 @@ async def test_get_correlation_empty_data():
     app.dependency_overrides[get_current_user] = _override_user(user)
     app.dependency_overrides[get_session] = _override_session(session)
 
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        resp = await client.get("/api/analysis/correlation?x_metric=humidity&y_metric=hfr")
+    with _make_cache_miss_patch():
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.get("/api/analysis/correlation?x_metric=humidity&y_metric=hfr")
 
     app.dependency_overrides.clear()
     assert resp.status_code == 200
@@ -151,9 +166,10 @@ async def test_get_distribution_insufficient_data():
     app.dependency_overrides[get_current_user] = _override_user(user)
     app.dependency_overrides[get_session] = _override_session(session)
 
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        resp = await client.get("/api/analysis/distribution?metric=hfr")
+    with _make_cache_miss_patch():
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.get("/api/analysis/distribution?metric=hfr")
 
     app.dependency_overrides.clear()
     assert resp.status_code == 400
@@ -179,9 +195,10 @@ async def test_get_distribution_returns_bins():
     app.dependency_overrides[get_current_user] = _override_user(user)
     app.dependency_overrides[get_session] = _override_session(session)
 
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        resp = await client.get("/api/analysis/distribution?metric=hfr")
+    with _make_cache_miss_patch():
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.get("/api/analysis/distribution?metric=hfr")
 
     app.dependency_overrides.clear()
     assert resp.status_code == 200
@@ -229,9 +246,10 @@ async def test_get_boxplot_empty_groups():
     app.dependency_overrides[get_current_user] = _override_user(user)
     app.dependency_overrides[get_session] = _override_session(session)
 
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        resp = await client.get("/api/analysis/boxplot?metric=hfr&group_by=filter")
+    with _make_cache_miss_patch():
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.get("/api/analysis/boxplot?metric=hfr&group_by=filter")
 
     app.dependency_overrides.clear()
     assert resp.status_code == 200
@@ -273,9 +291,10 @@ async def test_get_timeseries_empty_data():
     app.dependency_overrides[get_current_user] = _override_user(user)
     app.dependency_overrides[get_session] = _override_session(session)
 
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        resp = await client.get("/api/analysis/timeseries?metric=hfr")
+    with _make_cache_miss_patch():
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.get("/api/analysis/timeseries?metric=hfr")
 
     app.dependency_overrides.clear()
     assert resp.status_code == 200
@@ -339,6 +358,106 @@ async def test_get_matrix_returns_cells():
     assert "cells" in body
     assert "x_metrics" in body
     assert "y_metrics" in body
+
+
+# ---------------------------------------------------------------------------
+# Cache behaviour for /api/analysis/distribution
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_distribution_cache_miss_computes_and_stores():
+    """On a Redis miss the endpoint must compute the result and write it to Redis."""
+    user = _admin_user()
+
+    mock_redis = AsyncMock()
+    mock_redis.get = AsyncMock(return_value=None)  # cache miss
+    mock_redis.setex = AsyncMock()
+
+    @asynccontextmanager
+    async def _mock_async_redis():
+        yield mock_redis
+
+    rows = []
+    for v in [1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5]:
+        row = MagicMock()
+        row.val = v
+        row.night = "2024-01-01"
+        row.resolved_target_id = None
+        rows.append(row)
+
+    result = MagicMock()
+    result.all.return_value = rows
+    session = AsyncMock()
+    session.execute = AsyncMock(return_value=result)
+
+    app.dependency_overrides[get_current_user] = _override_user(user)
+    app.dependency_overrides[get_session] = _override_session(session)
+
+    with patch("app.services.cache.async_redis", _mock_async_redis):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.get("/api/analysis/distribution?metric=hfr")
+
+    app.dependency_overrides.clear()
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["metric"] == "hfr"
+    assert len(body["bins"]) > 0
+    # Redis get was called (miss) and setex was called to store the result.
+    mock_redis.get.assert_called_once()
+    mock_redis.setex.assert_called_once()
+    stored_key = mock_redis.setex.call_args[0][0]
+    assert "distribution" in stored_key
+    assert "hfr" in stored_key
+
+
+@pytest.mark.asyncio
+async def test_distribution_cache_hit_skips_compute():
+    """On a Redis hit the endpoint must return the cached value without hitting the DB."""
+    import json as _json
+    user = _admin_user()
+
+    # Pre-build a valid cached payload.
+    cached_payload = {
+        "bins": [{"bin_start": 1.0, "bin_end": 2.0, "count": 4}],
+        "stats": {
+            "count": 8,
+            "min": 1.0,
+            "max": 4.5,
+            "mean": 2.75,
+            "median": 2.75,
+            "std_dev": 1.224745,
+        },
+        "metric": "hfr",
+        "skewness": 0.0,
+    }
+
+    mock_redis = AsyncMock()
+    mock_redis.get = AsyncMock(return_value=_json.dumps(cached_payload).encode())
+    mock_redis.setex = AsyncMock()
+
+    @asynccontextmanager
+    async def _mock_async_redis():
+        yield mock_redis
+
+    session = AsyncMock()
+
+    app.dependency_overrides[get_current_user] = _override_user(user)
+    app.dependency_overrides[get_session] = _override_session(session)
+
+    with patch("app.services.cache.async_redis", _mock_async_redis):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.get("/api/analysis/distribution?metric=hfr")
+
+    app.dependency_overrides.clear()
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["metric"] == "hfr"
+    # DB was never queried because the cache provided the result.
+    session.execute.assert_not_called()
+    # Redis setex must NOT have been called (no re-store on a hit).
+    mock_redis.setex.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

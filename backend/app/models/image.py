@@ -89,6 +89,7 @@ class Image(Base):
         Index("ix_images_filter_used", "filter_used"),
         Index("ix_images_resolved_target_id", "resolved_target_id"),
         Index("ix_images_image_type", "image_type"),
+        Index("ix_images_type_session_date", "image_type", "session_date"),
         Index("ix_images_raw_headers", "raw_headers", postgresql_using="gin"),
         Index("ix_images_telescope", "telescope"),
         Index("ix_images_camera", "camera"),
