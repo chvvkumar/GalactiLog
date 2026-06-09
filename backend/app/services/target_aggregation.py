@@ -860,6 +860,11 @@ async def get_target_detail(target_id: str, session: AsyncSession) -> TargetDeta
         primary_name=target_name,
         aliases=target_obj.aliases if target_obj else [],
         object_type=target_obj.object_type if target_obj else None,
+        object_category=(
+            categorize_object_type(target_obj.object_type)
+            if target_obj and target_obj.object_type
+            else None
+        ),
         ra=target_obj.ra if target_obj else fallback_ra,
         dec=target_obj.dec if target_obj else fallback_dec,
         position_angle=effective_pa if effective_pa is not None else fallback_pa,

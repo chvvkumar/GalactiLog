@@ -71,6 +71,70 @@ describe("handleRename validation (UX-6)", () => {
   });
 });
 
+// Object-type inline editor (regression: saved type appeared to "reset")
+//
+// The editor displays detail.object_category and binds the <select> value to it.
+// handleObjectTypeChange saves via updateTargetIdentity({ object_type }), then
+// refetches the detail. If the refetched detail omits object_category, the UI
+// keeps showing "Unknown type" and the select resets to "", so the selection
+// looks lost. These tests assert the save path calls the API and that the
+// display/select source is object_category (which the backend must populate).
+function makeHandleObjectTypeChange(
+  updateIdentity: (id: string, body: { object_type: string }) => Promise<void>,
+  refetchDetail: () => Promise<{ object_category: string | null }>,
+  setEditing: (v: boolean) => void,
+) {
+  return async (targetId: string, value: string) => {
+    await updateIdentity(targetId, { object_type: value });
+    setEditing(false);
+    return await refetchDetail();
+  };
+}
+
+// Mirrors the JSX bindings: display text and select value both come from object_category.
+function displayObjectType(detail: { object_category: string | null }): string {
+  return detail.object_category ?? "Unknown type";
+}
+function selectValue(detail: { object_category: string | null }): string {
+  return detail.object_category ?? "";
+}
+
+describe("object-type inline editor save", () => {
+  it("calls updateTargetIdentity with object_type and does not navigate", async () => {
+    const updateIdentity = vi.fn().mockResolvedValue(undefined);
+    const setEditing = vi.fn();
+    const refetchDetail = vi.fn().mockResolvedValue({ object_category: "Galaxy" });
+    const handle = makeHandleObjectTypeChange(updateIdentity, refetchDetail, setEditing);
+
+    await handle("abc-123", "Galaxy");
+
+    expect(updateIdentity).toHaveBeenCalledWith("abc-123", { object_type: "Galaxy" });
+    expect(setEditing).toHaveBeenCalledWith(false);
+    expect(refetchDetail).toHaveBeenCalled();
+  });
+
+  it("shows the saved category after refetch returns object_category", async () => {
+    const refetchDetail = vi.fn().mockResolvedValue({ object_category: "Galaxy" });
+    const handle = makeHandleObjectTypeChange(
+      vi.fn().mockResolvedValue(undefined),
+      refetchDetail,
+      vi.fn(),
+    );
+
+    const detail = await handle("abc-123", "Galaxy");
+
+    // Regression guard: the editor reads object_category, so a populated value
+    // must surface in both the display label and the select binding.
+    expect(displayObjectType(detail)).toBe("Galaxy");
+    expect(selectValue(detail)).toBe("Galaxy");
+  });
+
+  it("falls back to 'Unknown type' when object_category is null", () => {
+    expect(displayObjectType({ object_category: null })).toBe("Unknown type");
+    expect(selectValue({ object_category: null })).toBe("");
+  });
+});
+
 // Simulate the clipboard failure handling from copyMultiSessionAstrobinCsv (UX-12)
 describe("clipboard failure toast (UX-12)", () => {
   let showToast: ReturnType<typeof vi.fn>;
