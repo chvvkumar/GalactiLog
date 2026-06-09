@@ -181,7 +181,7 @@ const ReleaseNotesModal: Component<{
       onClose={props.onClose}
     >
       <div
-        class="modal-surface relative max-h-[85vh] w-full max-w-md overflow-y-auto rounded-[var(--radius-md)] border border-theme-border shadow-[var(--shadow-lg)]"
+        class="modal-surface relative max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-[var(--radius-md)] border border-theme-border shadow-[var(--shadow-lg)]"
         onClick={(e) => e.stopPropagation()}
       >
           <div class="modal-surface sticky top-0 border-b border-theme-border px-5 py-3 flex items-start justify-between gap-4">
