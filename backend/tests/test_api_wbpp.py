@@ -46,10 +46,15 @@ async def test_wbpp_preview_empty_sessions():
 
 @pytest.mark.asyncio
 async def test_wbpp_generate_returns_script_and_operations_for_windows_root():
+    from unittest.mock import patch as _patch
+    from app.api import wbpp as wbpp_module
+
+    fits_root = "/app/data/fits"
+
     mock_session = AsyncMock()
     mock_result = MagicMock()
     mock_result.all.return_value = [
-        ("/app/data/fits/M31/2024-01-01/Light/frame.fits", date(2024, 1, 1), "M 31"),
+        (f"{fits_root}/M31/2024-01-01/Light/frame.fits", date(2024, 1, 1), "M 31"),
     ]
     mock_session.execute = AsyncMock(return_value=mock_result)
 
@@ -59,19 +64,21 @@ async def test_wbpp_generate_returns_script_and_operations_for_windows_root():
     app.dependency_overrides[get_session] = override
     app.dependency_overrides[get_current_user] = lambda: _admin()
     try:
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-            resp = await client.post("/api/wbpp/generate", json={
-                "target_id": str(uuid.uuid4()),
-                "target_name": "M 31",
-                "session_dates": ["2024-01-01"],
-                "library_root": "Z:\\Astro",
-            })
+        # Patch fits_data_path so the service sees paths matching the mock data
+        with _patch.object(wbpp_module.settings, "fits_data_path", fits_root):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+                resp = await client.post("/api/wbpp/generate", json={
+                    "target_id": str(uuid.uuid4()),
+                    "target_name": "M 31",
+                    "session_dates": ["2024-01-01"],
+                    "library_root": "Z:\\Astro",
+                })
         assert resp.status_code == 200
         data = resp.json()
         assert data["filename"].endswith(".ps1")
         assert data["target_os"] == "windows"
         assert "Copy-Item" in data["script"]
-        assert "Write-Progress" in data["script"]
+        assert "Write-Host" in data["script"]
         assert len(data["operations"]) == 1
         op = data["operations"][0]
         assert op["session_date"] == "2024-01-01"

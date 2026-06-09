@@ -1,5 +1,6 @@
 import pytest
 import numpy as np
+import fitsio
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 from pathlib import Path
@@ -80,18 +81,10 @@ def test_generate_panel_thumbnail(tmp_path: Path):
     data = rng.normal(loc=1000, scale=50, size=(256, 256)).astype(np.float32)
     data[128, 128] = 50000
 
-    fake_path = tmp_path / "panel.fits"
-    mock_info = {"dims": [256, 256]}
-    mock_hdu = MagicMock()
-    mock_hdu.get_info.return_value = mock_info
-    mock_fits = MagicMock()
-    mock_fits.__enter__ = MagicMock(return_value=mock_fits)
-    mock_fits.__exit__ = MagicMock(return_value=False)
-    mock_fits.__getitem__ = MagicMock(return_value=mock_hdu)
+    fits_path = tmp_path / "panel.fits"
+    fitsio.write(str(fits_path), data, clobber=True)
 
-    with patch("app.services.mosaic_composite._read_binned", return_value=data), \
-         patch("app.services.mosaic_composite.fitsio.FITS", return_value=mock_fits):
-        img, native_width = generate_panel_thumbnail(fake_path, max_width=400)
+    img, native_width = generate_panel_thumbnail(fits_path, max_width=400)
     assert isinstance(img, PILImage.Image)
     assert img.width <= 400
     assert img.height > 0

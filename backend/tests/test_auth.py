@@ -72,8 +72,13 @@ async def test_health_no_auth():
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         resp = await client.get("/api/health")
-    assert resp.status_code == 200
-    assert resp.json() == {"status": "ok"}
+    # Health endpoint returns 200 when all services are up, 503 when any are unavailable.
+    # Either way it must be reachable without auth and return the expected structure.
+    assert resp.status_code in (200, 503)
+    data = resp.json()
+    assert "status" in data
+    assert "postgres" in data
+    assert "redis" in data
 
 
 @pytest.mark.asyncio

@@ -6,13 +6,20 @@ os.environ.setdefault("GALACTILOG_DATABASE_URL", "postgresql+asyncpg://test:test
 os.environ.setdefault("GALACTILOG_REDIS_URL", "redis://localhost:6379/1")
 os.environ.setdefault("GALACTILOG_FITS_DATA_PATH", "/tmp/test_fits")
 os.environ.setdefault("GALACTILOG_THUMBNAILS_PATH", "/tmp/test_thumbnails")
+# Previews path must be writable: create_app() calls previews_dir.mkdir() at
+# import time, and its default (/app/data/thumbnails/previews) is not writable
+# on a non-root runner. Place it under the test thumbnails path above.
+os.environ.setdefault("GALACTILOG_PREVIEWS_PATH", "/tmp/test_thumbnails/previews")
 os.environ.setdefault("GALACTILOG_JWT_SECRET", "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2")
 os.environ.setdefault("GALACTILOG_HTTPS", "false")
 
-# Stub out native modules that may not be available in the test environment
-for _mod in ("fitsio",):
-    if _mod not in sys.modules:
-        sys.modules[_mod] = MagicMock()
+# Stub out native modules that may not be available in the test environment.
+# Use the real library when it is importable (CI with compiled extensions);
+# fall back to MagicMock only when it is absent (Windows dev without fitsio).
+try:
+    import fitsio as _fitsio_real  # noqa: F401
+except ImportError:
+    sys.modules.setdefault("fitsio", MagicMock())
 
 # Stub out worker.tasks to avoid sync DB connection at import time
 _tasks_mock = MagicMock()

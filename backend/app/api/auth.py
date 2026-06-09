@@ -31,6 +31,7 @@ from app.services.auth import (
     verify_password_timing_safe,
 )
 from app.api.deps import get_current_user, require_admin
+from app.schemas.common import StatusResponse
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -154,7 +155,7 @@ async def login(
     return LoginResponse(username=user.username, role=user.role.value)
 
 
-@router.post("/refresh")
+@router.post("/refresh", response_model=StatusResponse)
 @limiter.limit("10/minute")
 async def refresh(
     request: Request,
@@ -197,7 +198,7 @@ async def refresh(
     return {"status": "ok"}
 
 
-@router.post("/logout")
+@router.post("/logout", response_model=StatusResponse)
 async def logout(
     request: Request,
     response: Response,
@@ -230,7 +231,7 @@ async def me(user: User = Depends(get_current_user)):
     return MeResponse(id=user.id, username=user.username, role=user.role.value)
 
 
-@router.put("/password")
+@router.put("/password", response_model=StatusResponse)
 async def change_password(
     body: PasswordChangeRequest,
     request: Request,

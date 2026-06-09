@@ -3,7 +3,7 @@ import { registerCeleryJob, unregisterCeleryJob } from "./activeJobs";
 import type { ActiveJob } from "../types";
 
 interface PollOptions {
-  onSuccess?: (result: any) => void;
+  onSuccess?: (result: unknown) => void;
   onFailure?: (error: string) => void;
   /**
    * Called when the client-side poller times out. The backend task may still
@@ -64,7 +64,7 @@ interface TrackOptions {
   subLabel?: string;
   cancelable?: boolean;
   timeout?: number;
-  onSuccess?: (result: any) => void;
+  onSuccess?: (result: unknown) => void;
   onFailure?: (error: string) => void;
   /**
    * Called when the client poller stops watching due to timeout. The backend

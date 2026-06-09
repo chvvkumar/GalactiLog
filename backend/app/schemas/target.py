@@ -389,3 +389,20 @@ class TargetIdentityResponse(BaseModel):
     common_name: str | None
     object_type: str | None
     name_locked: bool
+
+
+class StatusResponse(BaseModel):
+    status: str
+
+
+class MergeCandidateCountResponse(BaseModel):
+    count: int
+
+
+class DuplicateDetectionResponse(BaseModel):
+    status: str
+    task_id: str
+
+
+class OrphanCreateResponse(BaseModel):
+    target_id: str

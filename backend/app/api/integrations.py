@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from app.api.deps import get_current_user
 from app.models.user import User
+from app.schemas.integration import IntegrationResponse
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -131,7 +132,7 @@ class StellariumRequest(BaseModel):
     target_name: str | None = None
 
 
-@router.post("/nina/send-coordinates")
+@router.post("/nina/send-coordinates", response_model=IntegrationResponse, response_model_exclude_none=True)
 async def send_to_nina(req: NinaRequest, current_user: User = Depends(get_current_user)):
     import asyncio
 
@@ -159,7 +160,7 @@ async def send_to_nina(req: NinaRequest, current_user: User = Depends(get_curren
         return {"ok": False, "error": str(e)}
 
 
-@router.post("/stellarium/send-coordinates")
+@router.post("/stellarium/send-coordinates", response_model=IntegrationResponse, response_model_exclude_none=True)
 async def send_to_stellarium(req: StellariumRequest, current_user: User = Depends(get_current_user)):
     _validate_integration_url(req.url)
     base = req.url.rstrip("/")
@@ -177,8 +178,8 @@ async def send_to_stellarium(req: StellariumRequest, current_user: User = Depend
                         focused = await _stellarium_focus(client, base, name)
                         if focused:
                             break
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug("Stellarium focus attempt for %r failed: %s", name, e)
                 if not focused:
                     logger.debug("Stellarium focus by name failed for %r, falling back to RA/Dec", req.target_name)
 

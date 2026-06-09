@@ -257,7 +257,7 @@ def check_complete_sync(r: sync_redis.Redis) -> None:
                                 "reason": entry.get("error", ""),
                             })
                         except Exception:
-                            pass
+                            logger.debug("scan_state: failed to parse failed-file entry: %r", item, exc_info=True)
                     from app.config import settings as _cfg2
                     thumb_root = _cfg2.thumbnails_path
                     thumb_failures = [f for f in failed_files if f["path"].startswith(thumb_root)]
@@ -287,7 +287,7 @@ def check_complete_sync(r: sync_redis.Redis) -> None:
         try:
             r.delete("galactilog:stats:cache", "galactilog:fits_keys")
         except Exception:
-            pass
+            logger.debug("scan_state: Redis stats cache invalidation failed", exc_info=True)
         # Chain post-scan maintenance tasks
         from app.worker.tasks import (
             smart_rebuild_targets, detect_mosaic_panels_task,

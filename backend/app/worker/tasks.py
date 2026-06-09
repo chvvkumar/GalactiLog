@@ -58,7 +58,7 @@ def _invalidate_stats_cache():
     try:
         _redis.delete("galactilog:stats:cache", "galactilog:fits_keys")
     except Exception:
-        pass
+        logger.debug("_invalidate_stats_cache: Redis delete failed", exc_info=True)
 
 
 @celery_app.task(bind=True)
@@ -504,7 +504,10 @@ def _do_ingest(fits_path: str, include_calibration: bool = True) -> dict:
                         details={"path": str(path)}, actor="system",
                     )
             except Exception:
-                pass
+                logger.debug(
+                    "Failed to emit filename_candidate_failed activity for %s",
+                    path.name, exc_info=True,
+                )
 
     logger.info("Ingested: %s (target=%s)", path.name, target_id)
     increment_completed_sync(_redis)
