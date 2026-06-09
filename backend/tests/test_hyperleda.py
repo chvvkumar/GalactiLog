@@ -267,3 +267,77 @@ class TestEnrichTargetFromHyperleda:
 
         assert result is True
         mock_save.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# enrich_target_from_hyperleda against a REAL Target ORM instance
+#
+# These assert the actual ORM columns hubble_t_type / inclination exist and
+# get populated. The network (query_hyperleda) is always mocked.
+# ---------------------------------------------------------------------------
+
+class TestEnrichRealTargetInstance:
+    def _make_target(self):
+        # Import lazily so the module-level MagicMock stub of
+        # app.models.hyperleda_cache (set at the top of this file) does not
+        # interfere with importing the real Target model.
+        from app.models.target import Target
+
+        return Target(
+            primary_name="M 31",
+            catalog_id="NGC 224",
+            object_type="G",
+        )
+
+    def test_sets_columns_from_cache(self):
+        session = MagicMock()
+        target = self._make_target()
+
+        mock_cache = MagicMock()
+        mock_cache.t_type = 3.0
+        mock_cache.inclination = 67.3
+
+        with patch(
+            "app.services.hyperleda.get_cached_hyperleda",
+            return_value=mock_cache,
+        ):
+            result = enrich_target_from_hyperleda(session, target)
+
+        assert result is True
+        assert target.hubble_t_type == pytest.approx(3.0)
+        assert target.inclination == pytest.approx(67.3)
+
+    def test_sets_columns_from_network(self):
+        session = MagicMock()
+        target = self._make_target()
+
+        data = {"t_type": 4.0, "inclination": 72.0}
+
+        with patch(
+            "app.services.hyperleda.get_cached_hyperleda", return_value=None
+        ), patch(
+            "app.services.hyperleda.query_hyperleda", return_value=data
+        ), patch(
+            "app.services.hyperleda.save_hyperleda_cache"
+        ):
+            result = enrich_target_from_hyperleda(session, target)
+
+        assert result is True
+        assert target.hubble_t_type == pytest.approx(4.0)
+        assert target.inclination == pytest.approx(72.0)
+
+    def test_real_non_galaxy_target_skipped(self):
+        from app.models.target import Target
+
+        session = MagicMock()
+        target = Target(
+            primary_name="M 45",
+            catalog_id="M 45",
+            object_type="OpC",
+        )
+
+        result = enrich_target_from_hyperleda(session, target)
+
+        assert result is False
+        assert target.hubble_t_type is None
+        assert target.inclination is None
