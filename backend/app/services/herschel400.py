@@ -1,18 +1,13 @@
 """Herschel 400 catalog service - load CSV and match to targets."""
 from __future__ import annotations
 
-import csv
 import logging
 from pathlib import Path
 
-from sqlalchemy import select
 from sqlalchemy.orm import Session
-from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.models.herschel400_catalog import Herschel400Entry
-from app.models.target import Target
-from app.services.openngc import normalize_ngc_name
-from app.services.catalog_membership import upsert_membership
+from app.services.catalog_base import load_catalog_csv, match_ngc_catalog, parse_float
 
 logger = logging.getLogger(__name__)
 
@@ -24,43 +19,24 @@ def load_herschel400_csv(session: Session) -> int:
 
     Returns the number of rows loaded.
     """
-    if not CSV_PATH.exists():
-        logger.error("Herschel 400 CSV not found at %s", CSV_PATH)
-        return 0
+    def build_entry(row: dict) -> dict:
+        return {
+            "ngc_id": row.get("ngc_id", "").strip(),
+            "object_type": row.get("object_type", "").strip() or None,
+            "constellation": row.get("constellation", "").strip() or None,
+            "magnitude": parse_float(row.get("magnitude")),
+        }
 
-    count = 0
-    with open(CSV_PATH, "r", encoding="utf-8") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            ngc_id = row.get("ngc_id", "").strip()
-            if not ngc_id:
-                continue
-
-            def _parse_float(val: str | None) -> float | None:
-                if not val or not val.strip():
-                    return None
-                try:
-                    return float(val.strip())
-                except ValueError:
-                    return None
-
-            entry = {
-                "ngc_id": ngc_id,
-                "object_type": row.get("object_type", "").strip() or None,
-                "constellation": row.get("constellation", "").strip() or None,
-                "magnitude": _parse_float(row.get("magnitude")),
-            }
-
-            stmt = pg_insert(Herschel400Entry).values(**entry).on_conflict_do_update(
-                index_elements=["ngc_id"],
-                set_=entry,
-            )
-            session.execute(stmt)
-            count += 1
-
-    session.flush()
-    logger.info("Loaded %d Herschel 400 entries", count)
-    return count
+    return load_catalog_csv(
+        session,
+        csv_path=CSV_PATH,
+        model=Herschel400Entry,
+        key_field="ngc_id",
+        conflict_index="ngc_id",
+        build_entry=build_entry,
+        label="Herschel 400",
+        logger=logger,
+    )
 
 
 def match_herschel400_targets(session: Session) -> int:
@@ -68,42 +44,18 @@ def match_herschel400_targets(session: Session) -> int:
 
     Returns the number of matches created.
     """
-    entries = session.execute(select(Herschel400Entry)).scalars().all()
-    matched = 0
-
-    for entry in entries:
-        normalized = normalize_ngc_name(entry.ngc_id)
-
-        # Find target by catalog_id or aliases
-        target = session.execute(
-            select(Target).where(
-                Target.merged_into_id.is_(None),
-                Target.catalog_id == normalized,
-            )
-        ).scalar_one_or_none()
-
-        if not target:
-            target = session.execute(
-                select(Target).where(
-                    Target.merged_into_id.is_(None),
-                    Target.aliases.any(normalized),
-                )
-            ).scalars().first()
-
-        if target:
-            upsert_membership(
-                session,
-                target_id=target.id,
-                catalog_name="herschel400",
-                catalog_number="H400",
-                metadata={
-                    "constellation": entry.constellation,
-                    "type": entry.object_type,
-                    "magnitude": entry.magnitude,
-                },
-            )
-            matched += 1
-
-    session.flush()
-    logger.info("Matched %d Herschel 400 targets", matched)
-    return matched
+    return match_ngc_catalog(
+        session,
+        model=Herschel400Entry,
+        catalog_name="herschel400",
+        ngc_field="ngc_id",
+        get_catalog_number=lambda entry: "H400",
+        build_metadata=lambda entry: {
+            "constellation": entry.constellation,
+            "type": entry.object_type,
+            "magnitude": entry.magnitude,
+        },
+        label="Herschel 400",
+        logger=logger,
+        require_ngc=False,
+    )

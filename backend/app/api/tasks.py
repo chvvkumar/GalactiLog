@@ -3,11 +3,12 @@ from fastapi import APIRouter, Depends
 from app.api.deps import require_admin
 from app.models.user import User
 from app.worker.celery_app import celery_app
+from app.schemas.tasks import TaskStatusResponse
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
 
-@router.get("/{task_id}/status")
+@router.get("/{task_id}/status", response_model=TaskStatusResponse)
 async def get_task_status(task_id: str, user: User = Depends(require_admin)):
     result = celery_app.AsyncResult(task_id)
     response = {"task_id": task_id, "state": result.state, "result": None}

@@ -15,6 +15,7 @@ from app.database import async_session
 from app.api.router import api_router
 from app.api.metrics_endpoint import router as metrics_router
 from app.metrics import PrometheusMiddleware, start_queue_depth_probe, register_celery_collector
+from app.schemas.error import ErrorEnvelope
 
 logger = logging.getLogger(__name__)
 
@@ -177,6 +178,18 @@ def create_app() -> FastAPI:
     @application.exception_handler(RateLimitExceeded)
     async def rate_limit_handler(request, exc):
         return JSONResponse(status_code=429, content={"detail": "Rate limit exceeded"})
+
+    @application.exception_handler(Exception)
+    async def unhandled_exception_handler(request, exc):
+        logger.exception(
+            "Unhandled exception on %s %s",
+            request.method,
+            request.url.path,
+        )
+        return JSONResponse(
+            status_code=500,
+            content=ErrorEnvelope(detail="Internal server error").model_dump(),
+        )
 
     # CORS for dev mode
     cors_origins, cors_allow_credentials = _resolve_cors_config(

@@ -1,4 +1,3 @@
-import json
 import logging
 import math
 import statistics
@@ -9,8 +8,8 @@ from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy import select, func, cast, Date, distinct
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import async_redis
 from app.database import get_session
+from app.services.cache import cached_json
 from app.models import Image, Target, User
 from app.schemas.analysis import (
     BoxPlotGroup,
@@ -627,62 +626,50 @@ async def get_matrix(
         f"{telescope or ''}:{camera or ''}:{filter_used or ''}:"
         f"{date_from or ''}:{date_to or ''}"
     )
-    try:
-        async with async_redis() as r:
-            cached = await r.get(cache_key)
-        if cached:
-            data = json.loads(cached)
-            return MatrixResponse(**data)
-    except Exception:
-        logger.debug("Redis cache read failed for matrix, computing fresh")
 
-    # Build one SELECT with a corr() and a pair-count expression for every
-    # (x_metric, y_metric) combination.  PostgreSQL's corr(Y, X) aggregate
-    # automatically excludes rows where either argument is NULL, which matches
-    # the original Python-side paired-filtering behaviour exactly.
-    corr_exprs = []
-    count_exprs = []
-    pairs: list[tuple[str, str]] = []
+    async def _compute():
+        # Build one SELECT with a corr() and a pair-count expression for every
+        # (x_metric, y_metric) combination.  PostgreSQL's corr(Y, X) aggregate
+        # automatically excludes rows where either argument is NULL, which matches
+        # the original Python-side paired-filtering behaviour exactly.
+        corr_exprs = []
+        count_exprs = []
+        pairs: list[tuple[str, str]] = []
 
-    for xm in X_METRICS:
-        for ym in Y_METRICS:
-            xcol = METRIC_MAP[xm]
-            ycol = METRIC_MAP[ym]
-            label_r = f"r_{xm}__{ym}"
-            label_n = f"n_{xm}__{ym}"
-            corr_exprs.append(func.corr(ycol, xcol).label(label_r))
-            # count rows where both columns are non-NULL
-            count_exprs.append(
-                func.count(xcol).filter(ycol.is_not(None)).label(label_n)
-            )
-            pairs.append((xm, ym))
+        for xm in X_METRICS:
+            for ym in Y_METRICS:
+                xcol = METRIC_MAP[xm]
+                ycol = METRIC_MAP[ym]
+                label_r = f"r_{xm}__{ym}"
+                label_n = f"n_{xm}__{ym}"
+                corr_exprs.append(func.corr(ycol, xcol).label(label_r))
+                # count rows where both columns are non-NULL
+                count_exprs.append(
+                    func.count(xcol).filter(ycol.is_not(None)).label(label_n)
+                )
+                pairs.append((xm, ym))
 
-    q = (
-        select(*corr_exprs, *count_exprs)
-        .where(Image.image_type == "LIGHT")
-        .where(Image.capture_date.is_not(None))
-    )
-    q = await _apply_filters(q, session, telescope, camera, filter_used, date_from, date_to)
-    row = (await session.execute(q)).one()
+        q = (
+            select(*corr_exprs, *count_exprs)
+            .where(Image.image_type == "LIGHT")
+            .where(Image.capture_date.is_not(None))
+        )
+        q = await _apply_filters(q, session, telescope, camera, filter_used, date_from, date_to)
+        row = (await session.execute(q)).one()
 
-    cells = []
-    for xm, ym in pairs:
-        r_val = getattr(row, f"r_{xm}__{ym}", None)
-        n_points = getattr(row, f"n_{xm}__{ym}", 0) or 0
-        if n_points >= 10 and r_val is not None:
-            cells.append(MatrixCell(x_metric=xm, y_metric=ym, pearson_r=round(float(r_val), 4), n_points=n_points))
-        else:
-            cells.append(MatrixCell(x_metric=xm, y_metric=ym, pearson_r=None, n_points=n_points))
+        cells = []
+        for xm, ym in pairs:
+            r_val = getattr(row, f"r_{xm}__{ym}", None)
+            n_points = getattr(row, f"n_{xm}__{ym}", 0) or 0
+            if n_points >= 10 and r_val is not None:
+                cells.append(MatrixCell(x_metric=xm, y_metric=ym, pearson_r=round(float(r_val), 4), n_points=n_points))
+            else:
+                cells.append(MatrixCell(x_metric=xm, y_metric=ym, pearson_r=None, n_points=n_points))
 
-    response = MatrixResponse(cells=cells, x_metrics=X_METRICS, y_metrics=Y_METRICS)
+        return MatrixResponse(cells=cells, x_metrics=X_METRICS, y_metrics=Y_METRICS).model_dump()
 
-    try:
-        async with async_redis() as r:
-            await r.setex(cache_key, _MATRIX_CACHE_TTL, response.model_dump_json())
-    except Exception:
-        logger.debug("Redis cache write failed for matrix")
-
-    return response
+    data = await cached_json(cache_key, _MATRIX_CACHE_TTL, _compute)
+    return MatrixResponse(**data)
 
 
 @router.get("/compare", response_model=CompareResponse)

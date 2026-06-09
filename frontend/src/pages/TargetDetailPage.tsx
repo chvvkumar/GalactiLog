@@ -18,6 +18,7 @@ import MergePreviewModal from "../components/MergePreviewModal";
 import { useAuth } from "../components/AuthProvider";
 
 import { formatIntegration } from "../utils/format";
+import { getErrorMessage } from "../utils/errors";
 
 function formatCoord(val: number | null, label: string): string {
   if (val === null) return "";
@@ -213,8 +214,8 @@ const TargetDetailPage: Component = () => {
       await api.updateTargetIdentity(detail.target_id, { object_type: value });
       setEditingObjectType(false);
       await refetchDetail();
-    } catch (e: any) {
-      showToast(e?.message ?? "Failed to update object type", "error");
+    } catch (e: unknown) {
+      showToast(getErrorMessage(e, "Failed to update object type"), "error");
     } finally {
       setSavingObjectType(false);
     }
@@ -233,8 +234,8 @@ const TargetDetailPage: Component = () => {
       await api.updateTargetIdentity(detail.target_id, { primary_name: name });
       setEditing(false);
       await refetchDetail();
-    } catch (e: any) {
-      showToast(e?.message ?? "Rename failed", "error");
+    } catch (e: unknown) {
+      showToast(getErrorMessage(e, "Rename failed"), "error");
     } finally {
       setSavingIdentity(false);
     }
@@ -248,8 +249,8 @@ const TargetDetailPage: Component = () => {
       await api.updateTargetIdentity(detail.target_id, { re_resolve: true });
       await refetchDetail();
       showToast("Re-resolve queued");
-    } catch (e: any) {
-      showToast(e?.message ?? "Re-resolve failed", "error");
+    } catch (e: unknown) {
+      showToast(getErrorMessage(e, "Re-resolve failed"), "error");
     } finally {
       setSavingIdentity(false);
     }
@@ -261,8 +262,8 @@ const TargetDetailPage: Component = () => {
       await api.unmergeTarget(merged.id);
       showToast(`Unmerged "${merged.primary_name}"`);
       await Promise.all([refetchMergeHistory(), refetchDetail()]);
-    } catch (e: any) {
-      showToast(e?.message ?? "Undo merge failed", "error");
+    } catch (e: unknown) {
+      showToast(getErrorMessage(e, "Undo merge failed"), "error");
     } finally {
       setUndoingMerge(null);
     }
@@ -336,8 +337,8 @@ const TargetDetailPage: Component = () => {
           newCache[d] = results[i];
         });
         setSessionCache(newCache);
-      } catch (e: any) {
-        showToast(e?.message ?? "Failed to load session details", "error");
+      } catch (e: unknown) {
+        showToast(getErrorMessage(e, "Failed to load session details"), "error");
         setCsvLoading(false);
         return;
       }
@@ -426,8 +427,8 @@ const TargetDetailPage: Component = () => {
         .then((detail) => {
           setSessionCache((prev) => ({ ...prev, [date]: detail }));
         })
-        .catch((e: any) => {
-          showToast(e?.message ?? `Failed to load session ${date}`, "error");
+        .catch((e: unknown) => {
+          showToast(getErrorMessage(e, `Failed to load session ${date}`), "error");
           setExpandedSessions((prev) => {
             const next = new Set(prev);
             next.delete(date);

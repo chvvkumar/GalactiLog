@@ -38,6 +38,16 @@ async def test_planning_night_authenticated_proceeds(viewer_user):
             return False
 
     try:
+        mock_ephemeris = {
+            "date": "2026-06-09",
+            "astro_dusk": None,
+            "astro_dawn": None,
+            "moon_phase": None,
+            "moon_illumination": None,
+            "moon_rise": None,
+            "moon_set": None,
+            "source_available": False,
+        }
         with patch(
             "app.api.planning.async_session",
             return_value=_FakeSessionCtx(),
@@ -46,12 +56,13 @@ async def test_planning_night_authenticated_proceeds(viewer_user):
             new=AsyncMock(return_value=_Coords()),
         ), patch(
             "app.api.planning.get_night_ephemeris",
-            return_value={"twilight": "ok"},
+            return_value=mock_ephemeris,
         ):
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as client:
                 resp = await client.get("/api/planning/night?date=2026-06-09")
         assert resp.status_code == 200
-        assert resp.json() == {"twilight": "ok"}
+        assert resp.json()["date"] == "2026-06-09"
+        assert resp.json()["source_available"] is False
     finally:
         app.dependency_overrides.pop(get_current_user, None)

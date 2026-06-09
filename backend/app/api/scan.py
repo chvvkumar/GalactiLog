@@ -18,6 +18,18 @@ from app.schemas.scan_filters import (
     ScanFiltersIn, ScanFiltersOut, TestPathIn, TestPathOut, BrowseEntry, ApplyNowOut,
     ValidateRegexIn, ValidateRegexOut,
 )
+from app.schemas.scan import (
+    ScanQueueResponse,
+    RegenerateThumbnailsResponse,
+    ScanStateResponse,
+    ScanStopResponse,
+    ScanResetResponse,
+    ScanAcceptResponse,
+    RebuildStatusResponse,
+    DbSummaryResponse,
+    AutoscanResponse,
+    BackfillCsvResponse,
+)
 from app.services.scan_filters import ScanFilterConfig
 from app.services.activity import emit as _emit_activity
 from app.services.scan_state import (
@@ -31,7 +43,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/scan", tags=["scan"])
 
 
-@router.post("")
+@router.post("", response_model=ScanQueueResponse)
 async def trigger_scan(
     include_calibration: bool = Query(False, description="Include calibration frames (BIAS, DARK, FLAT)"),
     session: AsyncSession = Depends(get_session),
@@ -72,7 +84,7 @@ async def trigger_scan(
             await r.delete("scan:lock")
 
 
-@router.post("/regenerate-thumbnails")
+@router.post("/regenerate-thumbnails", response_model=RegenerateThumbnailsResponse)
 async def regenerate_thumbnails(
     purge: bool = False,
     missing_only: bool = False,
@@ -142,7 +154,7 @@ async def get_scan_summary(_user=Depends(get_current_user)):
     return None
 
 
-@router.get("/status")
+@router.get("/status", response_model=ScanStateResponse)
 async def scan_status(user: User = Depends(get_current_user)):
     """Return current scan state from Redis."""
     async with async_redis() as r:
@@ -153,7 +165,7 @@ async def scan_status(user: User = Depends(get_current_user)):
         return result
 
 
-@router.post("/stop")
+@router.post("/stop", response_model=ScanStopResponse)
 async def stop_scan(user: User = Depends(require_admin)):
     """Request cancellation of the current scan or rebuild-family task."""
     async with async_redis() as r:
@@ -167,7 +179,7 @@ async def stop_scan(user: User = Depends(require_admin)):
         return {"status": "stopping", "message": "Cancel requested - task will stop shortly"}
 
 
-@router.post("/reset")
+@router.post("/reset", response_model=ScanResetResponse)
 async def reset_scan_state(user: User = Depends(require_admin)):
     """Force-clear a stalled scan back to idle."""
     async with async_redis() as r:
@@ -182,7 +194,7 @@ async def reset_scan_state(user: User = Depends(require_admin)):
         }
 
 
-@router.post("/rebuild-targets")
+@router.post("/rebuild-targets", response_model=ScanAcceptResponse)
 async def trigger_rebuild_targets(user: User = Depends(require_admin)):
     """Delete all targets and re-resolve from FITS headers via SIMBAD.
 
@@ -202,7 +214,7 @@ async def trigger_rebuild_targets(user: User = Depends(require_admin)):
         return {"status": "accepted", "message": "Target rebuild queued as background task", "task_id": task.id}
 
 
-@router.post("/smart-rebuild-targets")
+@router.post("/smart-rebuild-targets", response_model=ScanAcceptResponse)
 async def trigger_smart_rebuild(user: User = Depends(require_admin)):
     """Quick fix: repair target data using local DB + SIMBAD cache only.
 
@@ -221,7 +233,7 @@ async def trigger_smart_rebuild(user: User = Depends(require_admin)):
         return {"status": "accepted", "message": "Smart rebuild queued as background task", "task_id": task.id}
 
 
-@router.post("/retry-unresolved")
+@router.post("/retry-unresolved", response_model=ScanAcceptResponse)
 async def trigger_retry_unresolved(user: User = Depends(require_admin)):
     """Clear SIMBAD negative cache and SESAME cache, then re-resolve unresolved targets."""
     async with async_redis() as r:
@@ -236,7 +248,7 @@ async def trigger_retry_unresolved(user: User = Depends(require_admin)):
         return {"status": "accepted", "message": "Retry unresolved queued as background task", "task_id": task.id}
 
 
-@router.post("/generate-reference-thumbnails")
+@router.post("/generate-reference-thumbnails", response_model=ScanAcceptResponse)
 async def trigger_reference_thumbnails(force: bool = False, user: User = Depends(require_admin)):
     """Fetch DSS reference thumbnails from SkyView for all targets with coordinates."""
     async with async_redis() as r:
@@ -251,7 +263,7 @@ async def trigger_reference_thumbnails(force: bool = False, user: User = Depends
         return {"status": "accepted", "message": "Reference thumbnail generation queued as background task", "task_id": task.id}
 
 
-@router.post("/backfill-csv")
+@router.post("/backfill-csv", response_model=BackfillCsvResponse)
 async def backfill_csv_metrics_endpoint(user: User = Depends(require_admin)):
     """Backfill Image rows with metrics from N.I.N.A. CSV files."""
     async with async_redis() as r:
@@ -262,7 +274,7 @@ async def backfill_csv_metrics_endpoint(user: User = Depends(require_admin)):
         return {"status": "accepted"}
 
 
-@router.get("/rebuild-status")
+@router.get("/rebuild-status", response_model=RebuildStatusResponse)
 async def rebuild_status(user: User = Depends(get_current_user)):
     """Return current rebuild task state from Redis."""
     async with async_redis() as r:
@@ -270,7 +282,7 @@ async def rebuild_status(user: User = Depends(get_current_user)):
         return state.to_dict()
 
 
-@router.get("/db-summary")
+@router.get("/db-summary", response_model=DbSummaryResponse)
 async def db_summary(session: AsyncSession = Depends(get_session), user: User = Depends(get_current_user)):
     """Lightweight database summary for the Scan & Ingest page."""
     result = await session.execute(text("""
@@ -311,7 +323,7 @@ async def db_summary(session: AsyncSession = Depends(get_session), user: User = 
 VALID_INTERVALS = {60, 120, 240, 480, 720, 1440}
 
 
-@router.get("/autoscan")
+@router.get("/autoscan", response_model=AutoscanResponse)
 async def get_autoscan(session: AsyncSession = Depends(get_session), user: User = Depends(get_current_user)):
     """Return current auto-scan settings (deprecated - use /settings/general)."""
     from app.models.user_settings import UserSettings, SETTINGS_ROW_ID
@@ -326,7 +338,7 @@ async def get_autoscan(session: AsyncSession = Depends(get_session), user: User 
     }
 
 
-@router.put("/autoscan")
+@router.put("/autoscan", response_model=AutoscanResponse)
 async def set_autoscan(
     enabled: bool = Query(...),
     interval_minutes: int = Query(...),

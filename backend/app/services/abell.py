@@ -1,18 +1,17 @@
 """Abell catalog service - load CSV and match to targets."""
 from __future__ import annotations
 
-import csv
 import logging
 import math
 from pathlib import Path
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.models.abell_catalog import AbellEntry
 from app.models.target import Target
 from app.services.catalog_membership import upsert_membership
+from app.services.catalog_base import load_catalog_csv, parse_float, parse_int
 
 logger = logging.getLogger(__name__)
 
@@ -25,61 +24,32 @@ _CLUSTER_TYPES = {"ClG", "GrG", "CGG", "GClstr", "C*G"}
 _COORD_MATCH_DEG = 0.025
 
 
-def _parse_float(val: str | None) -> float | None:
-    if not val or not val.strip():
-        return None
-    try:
-        return float(val.strip())
-    except ValueError:
-        return None
-
-
-def _parse_int(val: str | None) -> int | None:
-    if not val or not val.strip():
-        return None
-    try:
-        return int(val.strip())
-    except ValueError:
-        return None
-
-
 def load_abell_csv(session: Session) -> int:
     """Load the bundled Abell CSV into the abell_catalog table.
 
     Returns the number of rows loaded.
     """
-    if not CSV_PATH.exists():
-        logger.error("Abell CSV not found at %s", CSV_PATH)
-        return 0
+    def build_entry(row: dict) -> dict:
+        return {
+            "abell_id": row.get("abell_id", "").strip(),
+            "ra": parse_float(row.get("ra")),
+            "dec": parse_float(row.get("dec")),
+            "richness_class": parse_int(row.get("richness_class")),
+            "distance_class": parse_int(row.get("distance_class")),
+            "bm_type": row.get("bm_type", "").strip() or None,
+            "redshift": parse_float(row.get("redshift")),
+        }
 
-    count = 0
-    with open(CSV_PATH, "r", encoding="utf-8") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            abell_id = row.get("abell_id", "").strip()
-            if not abell_id:
-                continue
-
-            entry = {
-                "abell_id": abell_id,
-                "ra": _parse_float(row.get("ra")),
-                "dec": _parse_float(row.get("dec")),
-                "richness_class": _parse_int(row.get("richness_class")),
-                "distance_class": _parse_int(row.get("distance_class")),
-                "bm_type": row.get("bm_type", "").strip() or None,
-                "redshift": _parse_float(row.get("redshift")),
-            }
-
-            stmt = pg_insert(AbellEntry).values(**entry).on_conflict_do_update(
-                index_elements=["abell_id"],
-                set_=entry,
-            )
-            session.execute(stmt)
-            count += 1
-
-    session.flush()
-    logger.info("Loaded %d Abell entries", count)
-    return count
+    return load_catalog_csv(
+        session,
+        csv_path=CSV_PATH,
+        model=AbellEntry,
+        key_field="abell_id",
+        conflict_index="abell_id",
+        build_entry=build_entry,
+        label="Abell",
+        logger=logger,
+    )
 
 
 def _build_abell_metadata(entry: AbellEntry) -> dict:

@@ -26,6 +26,8 @@ logger = logging.getLogger(__name__)
 
 
 @router.get("/{image_id}")
+# No response_model: this endpoint returns a raw JPEG FileResponse (binary stream),
+# not a JSON body. Pydantic response_model is not applicable to file/stream responses.
 async def get_preview(
     image_id: UUID,
     resolution: int = Query(..., ge=0, le=20000),

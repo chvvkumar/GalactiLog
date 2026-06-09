@@ -171,21 +171,21 @@ const RowDetails: Component<{ event: ActivityEvent }> = (props) => {
 
   if (
     props.event.category === "scan" &&
-    Array.isArray((d as any).failed_files)
+    Array.isArray((d as Record<string, unknown>).failed_files)
   ) {
     return (
       <FailedFilesList
-        files={(d as any).failed_files}
-        truncated={(d as any).truncated ?? false}
+        files={(d as Record<string, unknown>).failed_files as { path: string; reason: string }[]}
+        truncated={Boolean((d as Record<string, unknown>).truncated)}
       />
     );
   }
 
   if (
     props.event.category === "enrichment" &&
-    Array.isArray((d as any).failed_targets)
+    Array.isArray((d as Record<string, unknown>).failed_targets)
   ) {
-    return <EnrichmentFailureList targets={(d as any).failed_targets} />;
+    return <EnrichmentFailureList targets={(d as Record<string, unknown>).failed_targets as { name: string; reason?: string }[]} />;
   }
 
   if (isShallowPrimitiveObject(d as Record<string, unknown>)) {

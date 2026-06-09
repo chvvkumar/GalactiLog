@@ -1,18 +1,16 @@
 """Arp catalog service - load CSV and match to targets."""
 from __future__ import annotations
 
-import csv
 import logging
 from pathlib import Path
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.models.arp_catalog import ArpEntry
-from app.models.target import Target
 from app.services.openngc import normalize_ngc_name
 from app.services.catalog_membership import upsert_membership
+from app.services.catalog_base import load_catalog_csv, find_target_by_ngc
 
 logger = logging.getLogger(__name__)
 
@@ -24,35 +22,24 @@ def load_arp_csv(session: Session) -> int:
 
     Returns the number of rows loaded.
     """
-    if not CSV_PATH.exists():
-        logger.error("Arp CSV not found at %s", CSV_PATH)
-        return 0
+    def build_entry(row: dict) -> dict:
+        return {
+            "arp_id": row.get("arp_id", "").strip(),
+            "ngc_ic_ids": row.get("ngc_ic_ids", "").strip() or None,
+            "peculiarity_class": row.get("peculiarity_class", "").strip() or None,
+            "peculiarity_description": row.get("peculiarity_description", "").strip() or None,
+        }
 
-    count = 0
-    with open(CSV_PATH, "r", encoding="utf-8") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            arp_id = row.get("arp_id", "").strip()
-            if not arp_id:
-                continue
-
-            entry = {
-                "arp_id": arp_id,
-                "ngc_ic_ids": row.get("ngc_ic_ids", "").strip() or None,
-                "peculiarity_class": row.get("peculiarity_class", "").strip() or None,
-                "peculiarity_description": row.get("peculiarity_description", "").strip() or None,
-            }
-
-            stmt = pg_insert(ArpEntry).values(**entry).on_conflict_do_update(
-                index_elements=["arp_id"],
-                set_=entry,
-            )
-            session.execute(stmt)
-            count += 1
-
-    session.flush()
-    logger.info("Loaded %d Arp entries", count)
-    return count
+    return load_catalog_csv(
+        session,
+        csv_path=CSV_PATH,
+        model=ArpEntry,
+        key_field="arp_id",
+        conflict_index="arp_id",
+        build_entry=build_entry,
+        label="Arp",
+        logger=logger,
+    )
 
 
 def match_arp_targets(session: Session) -> int:
@@ -82,22 +69,7 @@ def match_arp_targets(session: Session) -> int:
 
         for ngc_ic_id in ids:
             normalized = normalize_ngc_name(ngc_ic_id)
-
-            # Find target by catalog_id or aliases
-            target = session.execute(
-                select(Target).where(
-                    Target.merged_into_id.is_(None),
-                    Target.catalog_id == normalized,
-                )
-            ).scalar_one_or_none()
-
-            if not target:
-                target = session.execute(
-                    select(Target).where(
-                        Target.merged_into_id.is_(None),
-                        Target.aliases.any(normalized),
-                    )
-                ).scalars().first()
+            target = find_target_by_ngc(session, normalized)
 
             if target:
                 metadata = {"peculiarity_class": entry.peculiarity_class}

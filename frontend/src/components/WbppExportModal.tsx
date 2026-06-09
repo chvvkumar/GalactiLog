@@ -1,6 +1,7 @@
 import { Component, For, Show, JSX, createSignal, createMemo, onMount } from "solid-js";
 import { api } from "../api/client";
 import { showToast } from "./Toast";
+import { getErrorMessage } from "../utils/errors";
 import { useSettingsContext } from "./SettingsProvider";
 import {
   isFsAccessSupported,
@@ -237,8 +238,8 @@ const WbppExportModal: Component<Props> = (props) => {
         init[s.session_date] = chosenLevels()[s.session_date] ?? s.default_level_index;
       }
       setChosenLevels(init);
-    } catch (e: any) {
-      setError(e?.message ?? "Failed to load preview");
+    } catch (e: unknown) {
+      setError(getErrorMessage(e, "Failed to load preview"));
     } finally {
       setPreviewing(false);
     }
@@ -272,8 +273,8 @@ const WbppExportModal: Component<Props> = (props) => {
       });
       setGenerated(resp);
       setShowScript(true);
-    } catch (e: any) {
-      setError(e?.message ?? "Failed to generate script");
+    } catch (e: unknown) {
+      setError(getErrorMessage(e, "Failed to generate script"));
     } finally {
       setGenerating(false);
     }
@@ -335,8 +336,8 @@ const WbppExportModal: Component<Props> = (props) => {
       setSrcHandle(h);
       await storeHandle(HANDLE_KEYS.source, h);
       setSrcPerm(await queryHandlePermission(h, "read"));
-    } catch (e: any) {
-      if (!(e instanceof CopyCancelledError)) setError(e?.message ?? "Could not open the folder picker.");
+    } catch (e: unknown) {
+      if (!(e instanceof CopyCancelledError)) setError(getErrorMessage(e, "Could not open the folder picker."));
     }
   };
 
@@ -347,8 +348,8 @@ const WbppExportModal: Component<Props> = (props) => {
       setDestHandle(h);
       await storeHandle(HANDLE_KEYS.dest, h);
       setDestPerm(await queryHandlePermission(h, "readwrite"));
-    } catch (e: any) {
-      if (!(e instanceof CopyCancelledError)) setError(e?.message ?? "Could not open the folder picker.");
+    } catch (e: unknown) {
+      if (!(e instanceof CopyCancelledError)) setError(getErrorMessage(e, "Could not open the folder picker."));
     }
   };
 
@@ -395,8 +396,8 @@ const WbppExportModal: Component<Props> = (props) => {
       setSrcPerm("granted");
       setDestPerm("granted");
       showToast(`Copied ${result.copied} file${result.copied !== 1 ? "s" : ""} to ${result.destinationName}`);
-    } catch (e: any) {
-      if (!(e instanceof CopyCancelledError)) setError(e?.message ?? "Browser copy failed.");
+    } catch (e: unknown) {
+      if (!(e instanceof CopyCancelledError)) setError(getErrorMessage(e, "Browser copy failed."));
     } finally {
       setCopying(false);
       abortController = null;

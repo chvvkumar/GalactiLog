@@ -116,9 +116,9 @@ async def test_validate_rejects_invalid_json(mock_session, admin_user):
                 data={"mode": "merge"},
             )
 
-        assert resp.status_code == 200
+        assert resp.status_code == 400
         body = resp.json()
-        assert body["valid"] is False
+        assert "json" in body["detail"].lower()
     finally:
         app.dependency_overrides.clear()
 
@@ -208,10 +208,9 @@ async def test_restore_rolls_back_on_exception(mock_session, admin_user):
                     data={"mode": "merge"},
                 )
 
-        assert resp.status_code == 200
+        assert resp.status_code == 500
         body = resp.json()
-        assert body["success"] is False
-        assert "failed" in body["error"].lower()
+        assert "failed" in body["detail"].lower()
         mock_session.rollback.assert_awaited_once()
         mock_session.commit.assert_not_called()
     finally:
@@ -251,10 +250,9 @@ async def test_restore_rejects_invalid_backup(mock_session, admin_user):
                 data={"mode": "merge"},
             )
 
-        assert resp.status_code == 200
+        assert resp.status_code == 400
         body = resp.json()
-        assert body["success"] is False
-        assert body["error"] is not None
+        assert body["detail"] is not None
         mock_session.commit.assert_not_called()
     finally:
         app.dependency_overrides.clear()

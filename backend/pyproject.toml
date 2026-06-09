@@ -1,36 +1,40 @@
+# Dependency bounds policy: each package is pinned with a >= floor (last known
+# good version) and a <NEXT_MAJOR upper bound to prevent unvetted major-version
+# upgrades from silently landing in CI or production builds.  When upgrading a
+# floor, also verify the upper bound is still appropriate.
 [project]
 name = "galactilog"
 version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
-    "fastapi>=0.115.0",
-    "uvicorn[standard]>=0.34.0",
-    "sqlalchemy[asyncio]>=2.0.36",
-    "asyncpg>=0.30.0",
-    "alembic>=1.14.0",
-    "pydantic-settings>=2.7.0",
-    "celery[redis]>=5.4.0",
-    "redis>=5.2.0",
-    "fitsio>=1.2.0",
-    "xisf>=0.9.5",
-    "Pillow>=11.0.0",
-    "httpx>=0.28.0",
-    "psycopg2-binary>=2.9.0",
-    "watchdog>=6.0.0",
-    "pwdlib[argon2]>=0.2.0",
-    "PyJWT>=2.9.0",
-    "slowapi>=0.1.9",
-    "prometheus-client>=0.21.0",
-    "python-multipart>=0.0.9",
-    "astropy>=6.0.0",
+    "fastapi>=0.115.0,<1.0.0",
+    "uvicorn[standard]>=0.34.0,<1.0.0",
+    "sqlalchemy[asyncio]>=2.0.36,<3.0.0",
+    "asyncpg>=0.30.0,<1.0.0",
+    "alembic>=1.14.0,<2.0.0",
+    "pydantic-settings>=2.7.0,<3.0.0",
+    "celery[redis]>=5.4.0,<6.0.0",
+    "redis>=5.2.0,<6.0.0",
+    "fitsio>=1.2.0,<2.0.0",
+    "xisf>=0.9.5,<1.0.0",
+    "Pillow>=11.0.0,<12.0.0",
+    "httpx>=0.28.0,<1.0.0",
+    "psycopg2-binary>=2.9.0,<3.0.0",
+    "watchdog>=6.0.0,<7.0.0",
+    "pwdlib[argon2]>=0.2.0,<1.0.0",
+    "PyJWT>=2.9.0,<3.0.0",
+    "slowapi>=0.1.9,<1.0.0",
+    "prometheus-client>=0.21.0,<1.0.0",
+    "python-multipart>=0.0.9,<1.0.0",
+    "astropy>=6.0.0,<8.0.0",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=8.3.0",
-    "pytest-asyncio>=0.25.0",
-    "pytest-cov>=6.0.0",
-    "httpx>=0.28.0",
+    "pytest>=8.3.0,<9.0.0",
+    "pytest-asyncio>=0.25.0,<1.0.0",
+    "pytest-cov>=6.0.0,<7.0.0",
+    "httpx>=0.28.0,<1.0.0",
 ]
 
 [build-system]

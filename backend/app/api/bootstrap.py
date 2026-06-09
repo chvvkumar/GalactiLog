@@ -1,5 +1,4 @@
 import asyncio
-import json
 import logging
 from collections import defaultdict
 
@@ -9,11 +8,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
 from app.api.deps import get_current_user
-from app.config import async_redis
 from app.models.user import User
 from app.models import Target, Image
 from app.models.custom_column import CustomColumn
 from app.services.normalization import load_alias_maps, normalize_equipment
+from app.services.cache import cached_json
+from app.schemas.bootstrap import BootstrapResponse
 
 logger = logging.getLogger(__name__)
 
@@ -56,26 +56,13 @@ async def _fetch_equipment(session: AsyncSession) -> dict:
 
 
 async def _fetch_fits_keys(session: AsyncSession) -> list[str]:
-    try:
-        async with async_redis() as r:
-            cached = await r.get(_FITS_KEYS_CACHE_KEY)
-        if cached:
-            return json.loads(cached)
-    except Exception:
-        logger.debug("Redis cache read failed for fits-keys in bootstrap, computing fresh")
+    async def _compute():
+        result = await session.execute(
+            text("SELECT DISTINCT key FROM images, jsonb_object_keys(raw_headers) AS key ORDER BY key")
+        )
+        return [row[0] for row in result.all()]
 
-    result = await session.execute(
-        text("SELECT DISTINCT key FROM images, jsonb_object_keys(raw_headers) AS key ORDER BY key")
-    )
-    keys = [row[0] for row in result.all()]
-
-    try:
-        async with async_redis() as r:
-            await r.setex(_FITS_KEYS_CACHE_KEY, _FITS_KEYS_CACHE_TTL, json.dumps(keys))
-    except Exception:
-        logger.debug("Redis cache write failed for fits-keys in bootstrap")
-
-    return keys
+    return await cached_json(_FITS_KEYS_CACHE_KEY, _FITS_KEYS_CACHE_TTL, _compute)
 
 
 async def _fetch_object_types(session: AsyncSession) -> list[dict]:
@@ -121,7 +108,7 @@ async def _fetch_custom_columns(session: AsyncSession) -> list[dict]:
     ]
 
 
-@router.get("")
+@router.get("", response_model=BootstrapResponse)
 async def get_bootstrap(
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user),

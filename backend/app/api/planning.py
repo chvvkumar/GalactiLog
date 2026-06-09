@@ -11,11 +11,12 @@ from app.api.deps import get_current_user
 from app.api.stats import _extract_site_coords
 from app.models.user import User
 from app.services.usno import get_night_ephemeris
+from app.schemas.planning import NightEphemerisResponse
 
 router = APIRouter(prefix="/planning", tags=["planning"])
 
 
-@router.get("/night")
+@router.get("/night", response_model=NightEphemerisResponse)
 async def get_night(
     date: str = Query(..., description="Date in YYYY-MM-DD format"),
     user: User = Depends(get_current_user),

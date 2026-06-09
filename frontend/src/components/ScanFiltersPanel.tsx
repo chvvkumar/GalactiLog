@@ -13,6 +13,7 @@ import type {
 import FolderBrowserModal from "./FolderBrowserModal";
 import SettingsHelpSection from "./settings/SettingsHelpSection";
 import { showToast } from "./Toast";
+import { getErrorMessage } from "../utils/errors";
 
 const EMPTY: ScanFilters = { include_paths: [], exclude_paths: [], name_rules: [] };
 
@@ -114,8 +115,8 @@ const ScanFiltersPanel: Component<Props> = (props) => {
   const load = async () => {
     try {
       applyResponse(await scanFilters.get());
-    } catch (e: any) {
-      showToast(e?.message ?? "Failed to load scan filters", "error");
+    } catch (e: unknown) {
+      showToast(getErrorMessage(e, "Failed to load scan filters"), "error");
     }
   };
 
@@ -153,8 +154,8 @@ const ScanFiltersPanel: Component<Props> = (props) => {
       showToast("Scan filters saved");
       props.onConfigured?.();
       window.dispatchEvent(new CustomEvent("scan-filters-configured"));
-    } catch (e: any) {
-      showToast(e?.message ?? "Failed to save filters", "error");
+    } catch (e: unknown) {
+      showToast(getErrorMessage(e, "Failed to save filters"), "error");
     } finally {
       setSaving(false);
     }
@@ -172,8 +173,8 @@ const ScanFiltersPanel: Component<Props> = (props) => {
     try {
       const r = await scanFilters.test(testPath().trim(), testKind());
       setTestResult({ verdict: r.verdict, matched: r.matched_rule_ids });
-    } catch (e: any) {
-      showToast(e?.message ?? "Test failed", "error");
+    } catch (e: unknown) {
+      showToast(getErrorMessage(e, "Test failed"), "error");
     } finally {
       setTesting(false);
     }
@@ -212,8 +213,8 @@ const ScanFiltersPanel: Component<Props> = (props) => {
       if (!ok) return;
       const res = await scanFilters.applyNow(false);
       showToast(`Removed ${res.matched} image row(s) from the catalog`);
-    } catch (e: any) {
-      showToast(e?.message ?? "Apply now failed", "error");
+    } catch (e: unknown) {
+      showToast(getErrorMessage(e, "Apply now failed"), "error");
     } finally {
       setApplying(false);
     }
