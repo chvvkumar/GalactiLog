@@ -1,10 +1,21 @@
+import uuid
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 from httpx import ASGITransport, AsyncClient
 
 from app.main import app
 from app.database import get_session
+from app.api.deps import get_current_user, require_admin
+from app.models.user import User, UserRole
 from app.models.user_settings import SETTINGS_ROW_ID
+
+
+def _admin_user():
+    u = MagicMock(spec=User)
+    u.id = uuid.uuid4()
+    u.role = UserRole.admin
+    u.is_active = True
+    return u
 
 
 def _make_settings_row(general=None, filters=None, equipment=None, dismissed_suggestions=None, display=None, graph=None):
@@ -30,7 +41,9 @@ async def test_get_settings_includes_graph_defaults():
     async def override():
         yield mock_session
 
+    admin = _admin_user()
     app.dependency_overrides[get_session] = override
+    app.dependency_overrides[get_current_user] = lambda: admin
     try:
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -59,7 +72,10 @@ async def test_put_graph_settings():
     async def override():
         yield mock_session
 
+    admin = _admin_user()
     app.dependency_overrides[get_session] = override
+    app.dependency_overrides[get_current_user] = lambda: admin
+    app.dependency_overrides[require_admin] = lambda: admin
     try:
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -71,6 +87,11 @@ async def test_put_graph_settings():
             }
             resp = await client.put("/api/settings/graph", json=payload)
         assert resp.status_code == 200
-        assert row.graph == payload
+        # Verify the fields from the payload were persisted; row.graph may
+        # include additional fields with defaults (e.g. default_chart_sessions).
+        assert row.graph["enabled_metrics"] == payload["enabled_metrics"]
+        assert row.graph["enabled_filters"] == payload["enabled_filters"]
+        assert row.graph["session_chart_expanded"] == payload["session_chart_expanded"]
+        assert row.graph["target_chart_expanded"] == payload["target_chart_expanded"]
     finally:
         app.dependency_overrides.clear()

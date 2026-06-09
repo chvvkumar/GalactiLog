@@ -5,7 +5,17 @@ from httpx import AsyncClient, ASGITransport
 
 from app.main import app
 from app.database import get_session
+from app.api.deps import get_current_user
 from app.models import Target
+from app.models.user import User, UserRole
+
+
+def _admin_user():
+    u = MagicMock(spec=User)
+    u.id = uuid.uuid4()
+    u.role = UserRole.admin
+    u.is_active = True
+    return u
 
 
 @pytest.mark.asyncio
@@ -25,6 +35,7 @@ async def test_search_targets():
         yield mock_session
 
     app.dependency_overrides[get_session] = override
+    app.dependency_overrides[get_current_user] = lambda: _admin_user()
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:

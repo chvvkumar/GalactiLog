@@ -1,5 +1,6 @@
 import { createMemo, createEffect, createSignal, onCleanup, Show, untrack } from "solid-js";
 import { Chart } from "chart.js";
+import type { ChartDataset, ScriptableLineSegmentContext, CartesianScaleOptions, GridLineOptions } from "chart.js";
 import "../utils/chartRegistry";
 import type { SessionDetail, FrameRecord } from "../types";
 import { useSettingsContext } from "./SettingsProvider";
@@ -164,7 +165,7 @@ export default function TargetMetricsChart(props: Props) {
         ctx.setLineDash([]);
 
         const dateLabel = currentSortedDates[bi] ?? "";
-        const tickFont = (xScale.options as any).ticks?.font as { size?: number } | undefined;
+        const tickFont = (xScale.options as CartesianScaleOptions).ticks?.font as { size?: number } | undefined;
         const fontSize = tickFont?.size ?? chartFontSize.tick();
         ctx.fillStyle = "rgba(255,255,255,0.5)";
         ctx.font = `${fontSize}px sans-serif`;
@@ -179,7 +180,7 @@ export default function TargetMetricsChart(props: Props) {
     const enabledMetrics = graphSettings().enabled_metrics;
     const enabledFilters = graphSettings().enabled_filters;
     const { labels, framesByIndex, sessionBoundaries } = chartFrameData();
-    const datasets: any[] = [];
+    const datasets: ChartDataset<"line">[] = [];
 
     const multiRig = isMultiRig();
     const activeRigs = multiRig
@@ -199,7 +200,7 @@ export default function TargetMetricsChart(props: Props) {
       return false;
     };
     const segmentBreak = {
-      borderColor: (ctx: any) =>
+      borderColor: (ctx: ScriptableLineSegmentContext) =>
         crossesBoundary(ctx.p0DataIndex, ctx.p1DataIndex)
           ? "rgba(0,0,0,0)"
           : undefined,
@@ -288,12 +289,12 @@ export default function TargetMetricsChart(props: Props) {
     if (chartInstance) {
       chartInstance.data.labels = labels;
       chartInstance.data.datasets = datasets;
-      const xScale = chartInstance.options.scales!["x"] as any;
+      const xScale = chartInstance.options.scales!["x"] as CartesianScaleOptions & { grid: Partial<GridLineOptions> };
       xScale.ticks.callback = (_: unknown, index: number) => {
         const label = labels[index];
         return label === SESSION_GAP ? "" : label;
       };
-      xScale.grid.color = (ctx: any) => gridColors[ctx.index] ?? "rgba(255,255,255,0.03)";
+      xScale.grid.color = (ctx: { index: number }) => gridColors[ctx.index] ?? "rgba(255,255,255,0.03)";
       chartInstance.update("none");
       return;
     }

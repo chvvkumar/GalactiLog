@@ -164,6 +164,8 @@ const SessionAccordionCard: Component<{
     navigator.clipboard.writeText(csv).then(() => {
       setCsvCopiedRig(key);
       setTimeout(() => setCsvCopiedRig(null), 2000);
+    }).catch(() => {
+      showToast("Failed to copy to clipboard", "error");
     });
   };
 

@@ -1,4 +1,4 @@
-import { Component, createSignal, createResource, createEffect, For, Show, Suspense, onMount, onCleanup } from "solid-js";
+import { Component, createSignal, createResource, createEffect, createMemo, For, Show, Suspense, onMount, onCleanup } from "solid-js";
 import { api } from "../api/client";
 import { useSettingsContext } from "../components/SettingsProvider";
 import { contentWidthClass } from "../utils/format";
@@ -45,6 +45,15 @@ const AnalysisPage: Component = () => {
   const [dateFrom, setDateFrom] = createSignal<string | undefined>(undefined);
   const [dateTo, setDateTo] = createSignal<string | undefined>(undefined);
 
+  const dateRangeError = createMemo(() => {
+    const from = dateFrom();
+    const to = dateTo();
+    if (from && to && from > to) {
+      return "From date must be on or before To date.";
+    }
+    return null;
+  });
+
   // Navigation from matrix cell click
   const [navX, setNavX] = createSignal<string | undefined>(undefined);
   const [navY, setNavY] = createSignal<string | undefined>(undefined);
@@ -68,8 +77,9 @@ const AnalysisPage: Component = () => {
     camera: camera(),
     filterUsed: filterUsed(),
     granularity: granularity(),
-    dateFrom: dateFrom(),
-    dateTo: dateTo(),
+    // When the range is invalid, pass undefined so tabs do not fire an empty query.
+    dateFrom: dateRangeError() ? undefined : dateFrom(),
+    dateTo: dateRangeError() ? undefined : dateTo(),
   });
 
   const combos = () => {
@@ -190,21 +200,26 @@ const AnalysisPage: Component = () => {
               </button>
             </div>
 
-            <div class="flex items-center gap-1.5 text-sm text-theme-text-secondary">
-              <span>From</span>
-              <input
-                type="date"
-                class={selectClass}
-                value={dateFrom() || ""}
-                onChange={(e) => setDateFrom(e.currentTarget.value || undefined)}
-              />
-              <span>To</span>
-              <input
-                type="date"
-                class={selectClass}
-                value={dateTo() || ""}
-                onChange={(e) => setDateTo(e.currentTarget.value || undefined)}
-              />
+            <div class="flex flex-col gap-1">
+              <div class="flex items-center gap-1.5 text-sm text-theme-text-secondary">
+                <span>From</span>
+                <input
+                  type="date"
+                  class={`${selectClass}${dateRangeError() ? " border-red-500" : ""}`}
+                  value={dateFrom() || ""}
+                  onChange={(e) => setDateFrom(e.currentTarget.value || undefined)}
+                />
+                <span>To</span>
+                <input
+                  type="date"
+                  class={`${selectClass}${dateRangeError() ? " border-red-500" : ""}`}
+                  value={dateTo() || ""}
+                  onChange={(e) => setDateTo(e.currentTarget.value || undefined)}
+                />
+              </div>
+              <Show when={dateRangeError()}>
+                <p class="text-xs text-red-500">{dateRangeError()}</p>
+              </Show>
             </div>
           </div>
 

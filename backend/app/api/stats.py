@@ -38,37 +38,57 @@ _STATS_CACHE_TTL = 300  # 5 minutes
 # --- Storage size cache (expensive to compute, updated in background) ---
 _storage_cache: dict[str, int] = {"fits": 0, "thumbnails": 0}
 _storage_last_update: float = 0
-_storage_lock = asyncio.Lock()
+# No asyncio.Lock here: a module-level Lock binds to the first event loop that
+# uses it and raises RuntimeError on any later loop (test isolation, multi-worker).
+# Concurrent du refreshes are idempotent — the last writer wins, which is fine.
 _STORAGE_TTL = 300  # refresh every 5 minutes
 
 
-def _compute_dir_size(path: str) -> int:
-    """Compute directory size using du (fast) with Python fallback."""
+_DU_TIMEOUT = 12  # seconds; du on a large dataset can be slow but 12s is generous
+
+
+def _compute_dir_size(path: str, fallback: int = 0) -> int:
+    """Compute directory size using du (fast).
+
+    On timeout or any error, returns `fallback` (the last-known cached value)
+    so callers never display a bogus 0 after a transient failure.
+    """
     p = Path(path)
     if not p.exists():
         return 0
     try:
         result = subprocess.run(
-            ["du", "-sb", str(p)], capture_output=True, text=True, timeout=120
+            ["du", "-sb", str(p)], capture_output=True, text=True, timeout=_DU_TIMEOUT
         )
         if result.returncode == 0:
             return int(result.stdout.split()[0])
+    except subprocess.TimeoutExpired:
+        logger.warning("du timed out for %s after %ss; using cached size", path, _DU_TIMEOUT)
     except Exception:
-        pass
-    return 0
+        logger.debug("du failed for %s; using cached size", path)
+    return fallback
 
 
 async def _refresh_storage_cache() -> None:
-    """Refresh storage sizes in a background thread."""
+    """Refresh storage sizes in a background thread.
+
+    On timeout or error, the existing cached values are preserved rather than
+    being overwritten with 0.  Concurrent refreshes within the same TTL window
+    are harmless: the TTL guard short-circuits the second call and any races
+    produce an idempotent last-write-wins outcome.
+    """
     global _storage_last_update
-    async with _storage_lock:
-        if time.time() - _storage_last_update < _STORAGE_TTL:
-            return  # another task already refreshed
-        fits = await asyncio.to_thread(_compute_dir_size, settings.fits_data_path)
-        thumbs = await asyncio.to_thread(_compute_dir_size, settings.thumbnails_path)
-        _storage_cache["fits"] = fits
-        _storage_cache["thumbnails"] = thumbs
-        _storage_last_update = time.time()
+    if time.time() - _storage_last_update < _STORAGE_TTL:
+        return  # still fresh; skip
+    fits = await asyncio.to_thread(
+        _compute_dir_size, settings.fits_data_path, _storage_cache["fits"]
+    )
+    thumbs = await asyncio.to_thread(
+        _compute_dir_size, settings.thumbnails_path, _storage_cache["thumbnails"]
+    )
+    _storage_cache["fits"] = fits
+    _storage_cache["thumbnails"] = thumbs
+    _storage_last_update = time.time()
 
 
 _site_coords_cache: SiteCoords | None = None

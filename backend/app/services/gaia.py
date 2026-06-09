@@ -25,12 +25,21 @@ _CLUSTER_CODES: frozenset[str] = frozenset({
 
 
 def _is_cluster_type(object_type: str | None) -> bool:
-    """Return True if object_type contains a cluster-related SIMBAD code."""
+    """Return True if object_type contains a cluster-related SIMBAD code.
+
+    Checks single-word codes (e.g. OpC, GlC) by tokenising on delimiters,
+    and multi-word descriptors (e.g. "Open Cluster") by substring search.
+    """
     if not object_type:
         return False
     import re
     tokens = re.split(r"[,\s|]+", object_type)
-    return any(t in _CLUSTER_CODES for t in tokens)
+    _single_codes = {c for c in _CLUSTER_CODES if " " not in c}
+    _multi_codes = {c for c in _CLUSTER_CODES if " " in c}
+    if any(t in _single_codes for t in tokens):
+        return True
+    normalized = object_type.lower()
+    return any(c.lower() in normalized for c in _multi_codes)
 
 
 def _compute_cone_radius(target: Target) -> float:

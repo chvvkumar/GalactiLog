@@ -11,8 +11,10 @@ import type {
   Verdict,
 } from "../api/scanFilters";
 import FolderBrowserModal from "./FolderBrowserModal";
+import ConfirmDialog from "./ConfirmDialog";
 import SettingsHelpSection from "./settings/SettingsHelpSection";
 import { showToast } from "./Toast";
+import { getErrorMessage } from "../utils/errors";
 
 const EMPTY: ScanFilters = { include_paths: [], exclude_paths: [], name_rules: [] };
 
@@ -45,6 +47,10 @@ const ScanFiltersPanel: Component<Props> = (props) => {
   const [browsing, setBrowsing] = createSignal<null | "include" | "exclude">(null);
   const [saving, setSaving] = createSignal(false);
   const [applying, setApplying] = createSignal(false);
+  // applyNow confirmation dialog state
+  const [applyNowConfirm, setApplyNowConfirm] = createSignal<{
+    message: string;
+  } | null>(null);
   const [testPath, setTestPath] = createSignal("");
   const [testKind, setTestKind] = createSignal<"auto" | "file" | "folder">("auto");
   const [testResult, setTestResult] = createSignal<
@@ -114,8 +120,8 @@ const ScanFiltersPanel: Component<Props> = (props) => {
   const load = async () => {
     try {
       applyResponse(await scanFilters.get());
-    } catch (e: any) {
-      showToast(e?.message ?? "Failed to load scan filters", "error");
+    } catch (e: unknown) {
+      showToast(getErrorMessage(e, "Failed to load scan filters"), "error");
     }
   };
 
@@ -153,8 +159,8 @@ const ScanFiltersPanel: Component<Props> = (props) => {
       showToast("Scan filters saved");
       props.onConfigured?.();
       window.dispatchEvent(new CustomEvent("scan-filters-configured"));
-    } catch (e: any) {
-      showToast(e?.message ?? "Failed to save filters", "error");
+    } catch (e: unknown) {
+      showToast(getErrorMessage(e, "Failed to save filters"), "error");
     } finally {
       setSaving(false);
     }
@@ -172,8 +178,8 @@ const ScanFiltersPanel: Component<Props> = (props) => {
     try {
       const r = await scanFilters.test(testPath().trim(), testKind());
       setTestResult({ verdict: r.verdict, matched: r.matched_rule_ids });
-    } catch (e: any) {
-      showToast(e?.message ?? "Test failed", "error");
+    } catch (e: unknown) {
+      showToast(getErrorMessage(e, "Test failed"), "error");
     } finally {
       setTesting(false);
     }
@@ -200,20 +206,31 @@ const ScanFiltersPanel: Component<Props> = (props) => {
       }
       const sample = (dry.sample_paths ?? []).slice(0, 10);
       const preview = sample.length > 0
-        ? "\n\nExamples:\n" + sample.join("\n") +
-          (dry.matched > sample.length ? `\n... and ${dry.matched - sample.length} more` : "")
+        ? " Examples: " + sample.join(", ") +
+          (dry.matched > sample.length ? ` ... and ${dry.matched - sample.length} more.` : ".")
         : "";
-      const ok = window.confirm(
-        `This will permanently remove ${dry.matched} image row(s) from the ` +
-        `catalog because they are excluded by the saved filters. The files ` +
-        `on disk are not touched, and rows will return on the next scan if ` +
-        `the filters are relaxed.${preview}\n\nContinue?`
-      );
-      if (!ok) return;
+      setApplyNowConfirm({
+        message:
+          `This will permanently remove ${dry.matched} image row(s) from the ` +
+          `catalog because they are excluded by the saved filters. The files ` +
+          `on disk are not touched, and rows will return on the next scan if ` +
+          `the filters are relaxed.${preview}`,
+      });
+    } catch (e: unknown) {
+      showToast(getErrorMessage(e, "Apply now failed"), "error");
+    } finally {
+      setApplying(false);
+    }
+  };
+
+  const handleApplyNowConfirmed = async () => {
+    setApplyNowConfirm(null);
+    setApplying(true);
+    try {
       const res = await scanFilters.applyNow(false);
       showToast(`Removed ${res.matched} image row(s) from the catalog`);
-    } catch (e: any) {
-      showToast(e?.message ?? "Apply now failed", "error");
+    } catch (e: unknown) {
+      showToast(getErrorMessage(e, "Apply now failed"), "error");
     } finally {
       setApplying(false);
     }
@@ -680,6 +697,15 @@ include rule   ^M\\d+$          (regex, folder)`}
           updateFilters({ [key]: merged } as Partial<ScanFilters>);
           setBrowsing(null);
         }}
+      />
+
+      <ConfirmDialog
+        open={applyNowConfirm() !== null}
+        title="Apply filters now"
+        message={applyNowConfirm()?.message ?? ""}
+        confirmLabel="Continue"
+        onConfirm={handleApplyNowConfirmed}
+        onCancel={() => setApplyNowConfirm(null)}
       />
     </details>
   );

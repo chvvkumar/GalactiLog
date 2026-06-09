@@ -2,6 +2,7 @@ import logging
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
+from urllib.parse import urlparse
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -14,15 +15,23 @@ from app.database import async_session
 from app.api.router import api_router
 from app.api.metrics_endpoint import router as metrics_router
 from app.metrics import PrometheusMiddleware, start_queue_depth_probe, register_celery_collector
+from app.schemas.error import ErrorEnvelope
 
 logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Warn if JWT secret was auto-generated (won't survive restarts)
+    # Warn if JWT secret was auto-generated. It is now persisted to the secret
+    # file (settings.jwt_secret_file), so sessions survive single-host restarts;
+    # set GALACTILOG_JWT_SECRET explicitly for multi-host/multi-instance setups.
     if not os.environ.get("GALACTILOG_JWT_SECRET"):
-        logger.warning("GALACTILOG_JWT_SECRET is not set - using auto-generated secret. Sessions will not survive restarts. Set GALACTILOG_JWT_SECRET in .env for persistence.")
+        logger.warning(
+            "GALACTILOG_JWT_SECRET is not set - using an auto-generated secret "
+            "persisted to %s. Sessions survive restarts on this host. Set "
+            "GALACTILOG_JWT_SECRET explicitly for multi-host/multi-instance deployments.",
+            settings.jwt_secret_file,
+        )
 
     # Ensure required PostgreSQL extensions exist (idempotent)
     from sqlalchemy import text
@@ -115,6 +124,46 @@ async def lifespan(app: FastAPI):
     yield
 
 
+def _resolve_cors_config(raw_origins: str | None, allow_credentials: bool = True):
+    """Validate operator-supplied CORS origins.
+
+    Returns ``(origins, allow_credentials)``.
+
+    - Each origin must be well-formed (scheme http/https + host); malformed
+      entries are dropped with a warning.
+    - A wildcard ("*") combined with credentials is unsafe (and rejected by
+      browsers anyway). If "*" is present we disable credentials so the
+      server-side intent is explicit and safe.
+    """
+    if not raw_origins:
+        return [], allow_credentials
+
+    valid: list[str] = []
+    has_wildcard = False
+    for entry in raw_origins.split(","):
+        origin = entry.strip()
+        if not origin:
+            continue
+        if origin == "*":
+            has_wildcard = True
+            valid.append(origin)
+            continue
+        parsed = urlparse(origin)
+        if parsed.scheme in ("http", "https") and parsed.netloc:
+            valid.append(origin)
+        else:
+            logger.warning("Ignoring malformed CORS origin: %r", origin)
+
+    if has_wildcard and allow_credentials:
+        logger.warning(
+            "CORS wildcard '*' is configured with credentials enabled; "
+            "disabling allow_credentials (browsers reject '*' with credentials)."
+        )
+        allow_credentials = False
+
+    return valid, allow_credentials
+
+
 def create_app() -> FastAPI:
     application = FastAPI(
         title="GalactiLog",
@@ -130,13 +179,27 @@ def create_app() -> FastAPI:
     async def rate_limit_handler(request, exc):
         return JSONResponse(status_code=429, content={"detail": "Rate limit exceeded"})
 
+    @application.exception_handler(Exception)
+    async def unhandled_exception_handler(request, exc):
+        logger.exception(
+            "Unhandled exception on %s %s",
+            request.method,
+            request.url.path,
+        )
+        return JSONResponse(
+            status_code=500,
+            content=ErrorEnvelope(detail="Internal server error").model_dump(),
+        )
+
     # CORS for dev mode
-    cors_origins = os.environ.get("GALACTILOG_CORS_ORIGINS")
+    cors_origins, cors_allow_credentials = _resolve_cors_config(
+        os.environ.get("GALACTILOG_CORS_ORIGINS"), allow_credentials=True
+    )
     if cors_origins:
         application.add_middleware(
             CORSMiddleware,
-            allow_origins=[o.strip() for o in cors_origins.split(",")],
-            allow_credentials=True,
+            allow_origins=cors_origins,
+            allow_credentials=cors_allow_credentials,
             allow_methods=["*"],
             allow_headers=["*"],
         )

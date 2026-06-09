@@ -3,9 +3,9 @@
  * Returns a function that delays invoking `fn` until after `delay` ms
  * have elapsed since the last invocation.
  */
-export function debounce<T extends (...args: any[]) => void>(fn: T, delay: number): T {
+export function debounce<T extends (...args: Parameters<T>) => void>(fn: T, delay: number): T {
   let timer: ReturnType<typeof setTimeout>;
-  return ((...args: any[]) => {
+  return ((...args: Parameters<T>) => {
     clearTimeout(timer);
     timer = setTimeout(() => fn(...args), delay);
   }) as T;

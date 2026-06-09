@@ -55,6 +55,7 @@ const HelpPopover: Component<HelpPopoverProps> = (props) => {
       <Show when={open()}>
         <div
           role="dialog"
+          aria-modal="true"
           onClick={(e) => e.stopPropagation()}
           class={`glass-popover absolute top-full mt-2 z-50 w-[min(28rem,90vw)] ${
             props.align === "right" ? "right-0" : "left-0"

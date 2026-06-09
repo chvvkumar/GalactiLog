@@ -14,11 +14,13 @@ from app.models.target import Target
 from app.models.image import Image
 from app.models.filename_candidate import FilenameCandidate
 from app.schemas.filename_candidate import FilenameCandidateResponse, AcceptRequest
+from app.schemas.common import StatusResponse
+from app.schemas.filename_resolution import CandidateCountResponse, DetectResponse
 
 router = APIRouter(prefix="/filename-resolution", tags=["filename-resolution"])
 
 
-@router.get("/candidates/count")
+@router.get("/candidates/count", response_model=CandidateCountResponse)
 async def get_candidate_count(
     session: AsyncSession = Depends(get_session),
     user: User = Depends(get_current_user),
@@ -74,7 +76,7 @@ async def list_candidates(
     ]
 
 
-@router.post("/candidates/{candidate_id}/accept")
+@router.post("/candidates/{candidate_id}/accept", response_model=StatusResponse)
 async def accept_candidate(
     candidate_id: uuid.UUID,
     body: AcceptRequest,
@@ -139,7 +141,7 @@ async def accept_candidate(
     return {"status": "ok"}
 
 
-@router.post("/candidates/{candidate_id}/dismiss")
+@router.post("/candidates/{candidate_id}/dismiss", response_model=StatusResponse)
 async def dismiss_candidate(
     candidate_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
@@ -160,7 +162,7 @@ async def dismiss_candidate(
     return {"status": "ok"}
 
 
-@router.post("/candidates/{candidate_id}/revert")
+@router.post("/candidates/{candidate_id}/revert", response_model=StatusResponse)
 async def revert_candidate(
     candidate_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
@@ -193,7 +195,7 @@ async def revert_candidate(
     return {"status": "ok"}
 
 
-@router.post("/detect")
+@router.post("/detect", response_model=DetectResponse)
 async def trigger_detection(user: User = Depends(require_admin)):
     """Trigger filename-based target detection via Celery."""
     from app.worker.tasks import detect_filename_targets

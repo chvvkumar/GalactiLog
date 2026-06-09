@@ -77,4 +77,4 @@ def prune_activity_events() -> dict:
         try:
             redis.close()
         except Exception:
-            pass
+            logger.debug("prune_activity_events: failed to close Redis connection", exc_info=True)

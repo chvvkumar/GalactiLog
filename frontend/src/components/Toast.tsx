@@ -70,31 +70,65 @@ export function toastCount(): number {
   return toasts().length;
 }
 
+const toastItemClass = (type: ToastSeverity): string =>
+  `animate-toast-down pointer-events-auto px-5 py-2.5 rounded-[var(--radius-md)] text-sm font-medium backdrop-blur-xl shadow-lg border flex items-center gap-3 ${
+    type === "success"
+      ? "bg-theme-success/20 text-theme-success border-theme-success/30"
+      : type === "info"
+      ? "bg-theme-accent/20 text-theme-accent border-theme-accent/30"
+      : "bg-theme-error/20 text-theme-error border-theme-error/30"
+  }`;
+
 export const Toast: Component = () => {
+  const polite = () => toasts().filter((t) => t.type !== "error");
+  const assertive = () => toasts().filter((t) => t.type === "error");
+
   return (
-    <div class="fixed top-6 inset-x-0 flex flex-col items-center gap-2 z-50 pointer-events-none">
-      <For each={toasts()}>
-        {(t) => (
-          <div
-            class={`animate-toast-down pointer-events-auto px-5 py-2.5 rounded-[var(--radius-md)] text-sm font-medium backdrop-blur-xl shadow-lg border flex items-center gap-3 ${
-              t.type === "success"
-                ? "bg-theme-success/20 text-theme-success border-theme-success/30"
-                : t.type === "info"
-                ? "bg-theme-accent/20 text-theme-accent border-theme-accent/30"
-                : "bg-theme-error/20 text-theme-error border-theme-error/30"
-            }`}
-          >
-            <span>{t.message}</span>
-            <button
-              onClick={() => dismissToast(t.id)}
-              class="opacity-60 hover:opacity-100 transition-opacity ml-1"
-              aria-label="Dismiss"
-            >
-              ✕
-            </button>
-          </div>
-        )}
-      </For>
-    </div>
+    <>
+      {/* Polite region: success + info toasts announced after current speech finishes */}
+      <div
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        class="fixed top-6 inset-x-0 flex flex-col items-center gap-2 z-50 pointer-events-none"
+      >
+        <For each={polite()}>
+          {(t) => (
+            <div class={toastItemClass(t.type)}>
+              <span>{t.message}</span>
+              <button
+                onClick={() => dismissToast(t.id)}
+                class="opacity-60 hover:opacity-100 transition-opacity ml-1"
+                aria-label="Dismiss"
+              >
+                ✕
+              </button>
+            </div>
+          )}
+        </For>
+      </div>
+      {/* Assertive region: error toasts announced immediately, interrupting current speech */}
+      <div
+        role="alert"
+        aria-live="assertive"
+        aria-atomic="true"
+        class="fixed top-6 inset-x-0 flex flex-col items-center gap-2 z-50 pointer-events-none"
+      >
+        <For each={assertive()}>
+          {(t) => (
+            <div class={toastItemClass(t.type)}>
+              <span>{t.message}</span>
+              <button
+                onClick={() => dismissToast(t.id)}
+                class="opacity-60 hover:opacity-100 transition-opacity ml-1"
+                aria-label="Dismiss"
+              >
+                ✕
+              </button>
+            </div>
+          )}
+        </For>
+      </div>
+    </>
   );
 };

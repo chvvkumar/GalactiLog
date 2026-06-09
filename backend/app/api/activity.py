@@ -14,6 +14,7 @@ from app.database import get_session
 from app.models.activity_event import ActivityEvent
 from app.models.user import User
 from app.schemas.activity import ActivityItem, PaginatedActivityResponse
+from app.schemas.common import StatusResponse
 
 logger = logging.getLogger(__name__)
 
@@ -128,7 +129,7 @@ async def list_activity(
     )
 
 
-@router.delete("")
+@router.delete("", response_model=StatusResponse)
 async def clear_activity(
     session: AsyncSession = Depends(get_session),
     user: User = Depends(require_admin),

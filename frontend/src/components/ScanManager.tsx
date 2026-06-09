@@ -1,4 +1,4 @@
-import { Component, createSignal, createEffect, onCleanup, Show } from "solid-js";
+import { Component, createSignal, createEffect, onCleanup, onMount, Show } from "solid-js";
 import { useScan } from "../store/scan";
 import { useSettingsContext } from "./SettingsProvider";
 import { useAuth } from "./AuthProvider";
@@ -44,6 +44,8 @@ const ScanManager: Component = () => {
   const [observerName, setObserverName] = createSignal<string | null>(null);
   const [observerLatitude, setObserverLatitude] = createSignal<number | null>(null);
   const [observerLongitude, setObserverLongitude] = createSignal<number | null>(null);
+  const [latError, setLatError] = createSignal<string | null>(null);
+  const [lngError, setLngError] = createSignal<string | null>(null);
   const [scanFiltersData, setScanFiltersData] = createSignal<ScanFiltersResponse | null>(null);
   let rebuildPollTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -56,7 +58,7 @@ const ScanManager: Component = () => {
   loadScanFilters();
 
   const onScanFiltersConfigured = () => loadScanFilters();
-  window.addEventListener("scan-filters-configured", onScanFiltersConfigured);
+  onMount(() => window.addEventListener("scan-filters-configured", onScanFiltersConfigured));
   onCleanup(() => window.removeEventListener("scan-filters-configured", onScanFiltersConfigured));
 
   // --- DB Summary ---
@@ -83,7 +85,7 @@ const ScanManager: Component = () => {
 
   // Refresh when merges change (dismiss/merge/revert on targets tab)
   const onMergesChanged = () => refreshDbSummary();
-  window.addEventListener("merges-changed", onMergesChanged);
+  onMount(() => window.addEventListener("merges-changed", onMergesChanged));
   onCleanup(() => window.removeEventListener("merges-changed", onMergesChanged));
 
   // --- Frame filter sync ---
@@ -96,6 +98,9 @@ const ScanManager: Component = () => {
       setObserverName(s.general.observer_name ?? null);
       setObserverLatitude(s.general.observer_latitude ?? null);
       setObserverLongitude(s.general.observer_longitude ?? null);
+      // Clear validation errors when settings are refreshed from the server
+      setLatError(null);
+      setLngError(null);
     }
   });
 
@@ -282,10 +287,23 @@ const ScanManager: Component = () => {
                   <input
                     type="number"
                     step="0.0001"
-                    class="w-full px-3 py-1.5 bg-theme-input border border-theme-border rounded-[var(--radius-sm)] text-sm text-theme-text-primary tabular-nums focus:ring-1 focus:ring-theme-accent focus:border-theme-accent outline-none"
+                    min="-90"
+                    max="90"
+                    class={`w-full px-3 py-1.5 bg-theme-input border rounded-[var(--radius-sm)] text-sm text-theme-text-primary tabular-nums focus:ring-1 outline-none ${
+                      latError()
+                        ? "border-red-500 focus:ring-red-500 focus:border-red-500"
+                        : "border-theme-border focus:ring-theme-accent focus:border-theme-accent"
+                    }`}
                     value={observerLatitude() ?? ""}
-                    onInput={(e) => setObserverLatitude(e.currentTarget.value ? parseFloat(e.currentTarget.value) : null)}
+                    onInput={(e) => {
+                      const raw = e.currentTarget.value;
+                      if (!raw) { setObserverLatitude(null); setLatError(null); return; }
+                      const v = parseFloat(raw);
+                      setObserverLatitude(v);
+                      setLatError(v < -90 || v > 90 ? "Must be between -90 and 90" : null);
+                    }}
                     onBlur={async () => {
+                      if (latError()) return;
                       const current = settings()?.general;
                       if (current) {
                         try {
@@ -296,16 +314,32 @@ const ScanManager: Component = () => {
                       }
                     }}
                   />
+                  <Show when={latError()}>
+                    <p class="text-xs text-red-500">{latError()}</p>
+                  </Show>
                 </div>
                 <div class="space-y-1">
                   <label class="text-xs text-theme-text-secondary">Longitude</label>
                   <input
                     type="number"
                     step="0.0001"
-                    class="w-full px-3 py-1.5 bg-theme-input border border-theme-border rounded-[var(--radius-sm)] text-sm text-theme-text-primary tabular-nums focus:ring-1 focus:ring-theme-accent focus:border-theme-accent outline-none"
+                    min="-180"
+                    max="180"
+                    class={`w-full px-3 py-1.5 bg-theme-input border rounded-[var(--radius-sm)] text-sm text-theme-text-primary tabular-nums focus:ring-1 outline-none ${
+                      lngError()
+                        ? "border-red-500 focus:ring-red-500 focus:border-red-500"
+                        : "border-theme-border focus:ring-theme-accent focus:border-theme-accent"
+                    }`}
                     value={observerLongitude() ?? ""}
-                    onInput={(e) => setObserverLongitude(e.currentTarget.value ? parseFloat(e.currentTarget.value) : null)}
+                    onInput={(e) => {
+                      const raw = e.currentTarget.value;
+                      if (!raw) { setObserverLongitude(null); setLngError(null); return; }
+                      const v = parseFloat(raw);
+                      setObserverLongitude(v);
+                      setLngError(v < -180 || v > 180 ? "Must be between -180 and 180" : null);
+                    }}
                     onBlur={async () => {
+                      if (lngError()) return;
                       const current = settings()?.general;
                       if (current) {
                         try {
@@ -316,6 +350,9 @@ const ScanManager: Component = () => {
                       }
                     }}
                   />
+                  <Show when={lngError()}>
+                    <p class="text-xs text-red-500">{lngError()}</p>
+                  </Show>
                 </div>
               </div>
             </section>

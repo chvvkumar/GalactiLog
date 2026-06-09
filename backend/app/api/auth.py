@@ -4,7 +4,7 @@ from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import settings, limiter, async_redis
+from app.config import settings, limiter, async_redis, client_ip_from_request
 from app.database import get_session
 from app.models.user import User, UserRole
 from app.schemas.auth import (
@@ -31,6 +31,7 @@ from app.services.auth import (
     verify_password_timing_safe,
 )
 from app.api.deps import get_current_user, require_admin
+from app.schemas.common import StatusResponse
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -76,10 +77,10 @@ def _clear_auth_cookies(response: Response) -> None:
 
 
 def _get_client_ip(request: Request) -> str:
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    return request.client.host if request.client else "unknown"
+    # Centralized in config.client_ip_from_request so the rate limiter and the
+    # login lockout derive the real client IP the same way (behind nginx the
+    # raw socket peer is always 127.0.0.1; X-Forwarded-For carries the client).
+    return client_ip_from_request(request)
 
 
 MAX_LOGIN_FAILURES = 5
@@ -87,15 +88,25 @@ LOGIN_FAILURE_WINDOW = 900       # 15 minutes
 LOCKOUT_DURATION = 1800          # 30 minutes
 
 
-async def _increment_login_failures(redis, username: str) -> None:
-    key = f"auth:failures:{username}"
+def _lockout_id(username: str, ip: str) -> str:
+    """Identity used for login failure tracking: per username + client IP.
+
+    Keying on both prevents a single client from locking out a victim account
+    globally, while still throttling brute-force attempts from one source.
+    """
+    return f"{username}|{ip}"
+
+
+async def _increment_login_failures(redis, username: str, ip: str) -> None:
+    identity = _lockout_id(username, ip)
+    key = f"auth:failures:{identity}"
     pipe = redis.pipeline()
     pipe.incr(key)
     pipe.expire(key, LOGIN_FAILURE_WINDOW)
     results = await pipe.execute()
     failures = results[0]
     if failures >= MAX_LOGIN_FAILURES:
-        await redis.setex(f"auth:lockout:{username}", LOCKOUT_DURATION, "locked")
+        await redis.setex(f"auth:lockout:{identity}", LOCKOUT_DURATION, "locked")
 
 
 # ---------------------------------------------------------------------------
@@ -111,10 +122,11 @@ async def login(
     session: AsyncSession = Depends(get_session),
 ):
     ip = _get_client_ip(request)
+    identity = _lockout_id(body.username, ip)
 
-    # Check account lockout
+    # Check account lockout (per username + client IP)
     async with async_redis() as redis:
-        locked = await redis.exists(f"auth:lockout:{body.username}")
+        locked = await redis.exists(f"auth:lockout:{identity}")
         if locked:
             audit_log("login", username=body.username, source_ip=ip, success=False, detail="Account locked")
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Account temporarily locked")
@@ -125,12 +137,12 @@ async def login(
         valid = verify_password_timing_safe(body.password, password_hash)
 
         if not valid or user is None or not user.is_active:
-            await _increment_login_failures(redis, body.username)
+            await _increment_login_failures(redis, body.username, ip)
             audit_log("login", username=body.username, source_ip=ip, success=False, detail="Invalid credentials")
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
         # Successful login - clear failure counter
-        await redis.delete(f"auth:failures:{body.username}")
+        await redis.delete(f"auth:failures:{identity}")
 
     access = create_access_token(user.id, user.role.value)
     refresh = generate_refresh_token()
@@ -143,7 +155,7 @@ async def login(
     return LoginResponse(username=user.username, role=user.role.value)
 
 
-@router.post("/refresh")
+@router.post("/refresh", response_model=StatusResponse)
 @limiter.limit("10/minute")
 async def refresh(
     request: Request,
@@ -186,7 +198,7 @@ async def refresh(
     return {"status": "ok"}
 
 
-@router.post("/logout")
+@router.post("/logout", response_model=StatusResponse)
 async def logout(
     request: Request,
     response: Response,
@@ -219,7 +231,7 @@ async def me(user: User = Depends(get_current_user)):
     return MeResponse(id=user.id, username=user.username, role=user.role.value)
 
 
-@router.put("/password")
+@router.put("/password", response_model=StatusResponse)
 async def change_password(
     body: PasswordChangeRequest,
     request: Request,

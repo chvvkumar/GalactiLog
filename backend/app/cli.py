@@ -1,6 +1,7 @@
 import argparse
 import asyncio
 import getpass
+import logging
 import sys
 
 from sqlalchemy import select
@@ -10,18 +11,20 @@ from app.database import async_session
 from app.models.user import User
 from app.services.auth import hash_password
 
+logger = logging.getLogger(__name__)
+
 
 async def create_user(username: str, role: str) -> None:
     password = getpass.getpass("Password (min 8 chars): ")
     if len(password) < 8:
-        print("Error: Password must be at least 8 characters.")
+        logger.error("Password must be at least 8 characters.")
         sys.exit(1)
     if len(password) > 128:
-        print("Error: Password must be at most 128 characters.")
+        logger.error("Password must be at most 128 characters.")
         sys.exit(1)
     confirm = getpass.getpass("Confirm password: ")
     if password != confirm:
-        print("Error: Passwords do not match.")
+        logger.error("Passwords do not match.")
         sys.exit(1)
 
     async with async_session() as session:
@@ -29,7 +32,7 @@ async def create_user(username: str, role: str) -> None:
             select(User).where(User.username == username)
         )
         if existing.scalar_one_or_none():
-            print(f"Error: User '{username}' already exists.")
+            logger.error("User '%s' already exists.", username)
             sys.exit(1)
         user = User(
             username=username,
@@ -38,10 +41,11 @@ async def create_user(username: str, role: str) -> None:
         )
         session.add(user)
         await session.commit()
-        print(f"User '{username}' created with role '{role}'.")
+        logger.info("User '%s' created with role '%s'.", username, role)
 
 
 def main() -> None:
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
     parser = argparse.ArgumentParser(prog="app.cli", description="GalactiLog CLI")
     sub = parser.add_subparsers(dest="command")
     create_cmd = sub.add_parser("create-user", help="Create a new user account")

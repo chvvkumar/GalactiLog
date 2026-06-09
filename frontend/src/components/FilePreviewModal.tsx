@@ -1,7 +1,7 @@
 import { createSignal, Show, onCleanup, onMount, createEffect, createMemo } from "solid-js";
-import { Portal } from "solid-js/web";
 import { useSettingsContext } from "./SettingsProvider";
 import HelpPopover from "./HelpPopover";
+import Dialog from "./Dialog";
 
 export type PreviewFile = {
   imageId: string;
@@ -127,9 +127,8 @@ export function FilePreviewModal(props: Props) {
   const previewResolution = () => settings()?.general.preview_resolution ?? 2400;
 
   const handleKey = (e: KeyboardEvent) => {
-    if (e.key === "Escape") {
-      props.onClose();
-    } else if (hasList() && e.key === "ArrowLeft") {
+    // Escape is handled by Dialog; only intercept arrow navigation here.
+    if (hasList() && e.key === "ArrowLeft") {
       e.preventDefault();
       goPrev();
     } else if (hasList() && e.key === "ArrowRight") {
@@ -171,19 +170,20 @@ export function FilePreviewModal(props: Props) {
   });
 
   return (
-    <Portal>
+    <Dialog
+      open
+      aria-labelledby="file-preview-title"
+      class="bg-black/80 backdrop-blur-sm"
+      onClose={props.onClose}
+    >
       <div
-        class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm"
-        onClick={props.onClose}
+        class="relative max-h-[90vh] max-w-[90vw] rounded-lg bg-neutral-900 p-4 shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
         onPointerDown={(e) => e.stopPropagation()}
         onPointerMove={(e) => e.stopPropagation()}
         onPointerUp={(e) => e.stopPropagation()}
         onPointerCancel={(e) => e.stopPropagation()}
       >
-        <div
-          class="relative max-h-[90vh] max-w-[90vw] rounded-lg bg-neutral-900 p-4 shadow-2xl"
-          onClick={(e) => e.stopPropagation()}
-        >
           <button
             class="absolute right-2 top-2 rounded px-2 py-1 text-neutral-400 hover:bg-neutral-800 hover:text-white"
             onClick={props.onClose}
@@ -250,7 +250,7 @@ export function FilePreviewModal(props: Props) {
               </div>
             </div>
           </Show>
-          <div class="mb-2 pr-8 text-xs text-neutral-400 truncate" title={current().filePath}>
+          <div id="file-preview-title" class="mb-2 pr-8 text-xs text-neutral-400 truncate" title={current().filePath}>
             {current().filePath}
           </div>
 
@@ -319,7 +319,6 @@ export function FilePreviewModal(props: Props) {
             </Show>
           </div>
         </div>
-      </div>
-    </Portal>
+    </Dialog>
   );
 }

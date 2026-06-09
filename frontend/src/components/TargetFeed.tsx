@@ -1,6 +1,7 @@
-import { Component, Show, For } from "solid-js";
+import { Component, Show, For, createMemo } from "solid-js";
 import { useDashboardFilters, type SortKey } from "./DashboardFilterProvider";
 import TargetTable from "./TargetTable";
+import type { ActiveFilters } from "../types";
 
 const SkeletonRow: Component = () => (
   <tr class="border-b border-theme-border">
@@ -32,16 +33,38 @@ const SkeletonCard: Component = () => (
   </div>
 );
 
+// Returns true when any filter/search is active (i.e. results could be narrowed).
+function hasActiveFilters(f: ActiveFilters): boolean {
+  if (f.searchQuery) return true;
+  if (f.selectedTargetId) return true;
+  if (f.camera) return true;
+  if (f.telescope) return true;
+  if (f.catalog) return true;
+  if (f.opticalFilters.length > 0) return true;
+  if (f.objectTypes.length > 0) return true;
+  if (f.dateRange.start || f.dateRange.end) return true;
+  if (f.fitsQueries.length > 0) return true;
+  if (f.customColumnFilters.length > 0) return true;
+  if (Object.keys(f.qualityFilters).length > 0) return true;
+  if (Object.keys(f.metricFilters).length > 0) return true;
+  return false;
+}
+
+// Sort options ordered to match the desktop table column order left-to-right.
+// Each entry maps a SortKey to the label shown in the mobile sort select.
+const MOBILE_SORT_OPTIONS: { key: SortKey; label: string }[] = [
+  { key: "name", label: "Target Name" },
+  { key: "integration", label: "Integration Time" },
+  { key: "equipment", label: "Equipment Profile" },
+  { key: "lastSession", label: "Last Session" },
+];
+
 const TargetFeed: Component = () => {
-  const { targetData, refetchTargets, fetchError, page, totalPages, totalCount, setPage, pageSize, setPageSize, sortKey, sortDir, toggleSort } = useDashboardFilters();
+  const { targetData, refetchTargets, fetchError, page, totalPages, totalCount, setPage, pageSize, setPageSize, sortKey, sortDir, toggleSort, filters } = useDashboardFilters();
   const PAGE_SIZES = [10, 25, 50, 100, 250];
 
-  const SORT_LABELS: Record<SortKey, string> = {
-    name: "Name",
-    integration: "Integration",
-    lastSession: "Last Session",
-    equipment: "Equipment",
-  };
+  // True when the current result set is empty due to active filters/search (not an empty catalog).
+  const isFilteredEmpty = createMemo(() => totalCount() === 0 && hasActiveFilters(filters()));
 
 
   const pageRange = () => {
@@ -119,7 +142,21 @@ const TargetFeed: Component = () => {
             {(data) => (
               <Show
                 when={data().targets.length > 0}
-                fallback={<div class="text-center text-theme-text-secondary py-8">No targets match your filters</div>}
+                fallback={
+                  <div class="text-center text-theme-text-secondary py-8">
+                    <Show
+                      when={isFilteredEmpty()}
+                      fallback={
+                        <div class="space-y-1">
+                          <p class="text-sm font-medium">No targets in the catalog yet.</p>
+                          <p class="text-xs text-theme-text-tertiary">Run a scan or import FITS files to populate the catalog.</p>
+                        </div>
+                      }
+                    >
+                      No targets match your filters.
+                    </Show>
+                  </div>
+                }
               >
                 <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
                   <div class="flex items-center gap-3 flex-wrap">
@@ -135,15 +172,16 @@ const TargetFeed: Component = () => {
                         {(size) => <option value={size}>{size} / page</option>}
                       </For>
                     </select>
-                    {/* Mobile sort controls - hidden on md+ where table headers handle sorting */}
+                    {/* Mobile sort controls - hidden on md+ where table headers handle sorting.
+                        Options mirror every sortable column in TargetTable in left-to-right order. */}
                     <div class="flex items-center gap-1 md:hidden">
                       <select
                         value={sortKey()}
                         onChange={(e) => toggleSort(e.currentTarget.value as SortKey)}
                         class="px-2 py-1 text-xs rounded border border-theme-border bg-theme-input text-theme-text-secondary cursor-pointer transition-colors hover:border-theme-border-em"
                       >
-                        <For each={(Object.keys(SORT_LABELS) as SortKey[])}>
-                          {(key) => <option value={key}>{SORT_LABELS[key]}</option>}
+                        <For each={MOBILE_SORT_OPTIONS}>
+                          {(opt) => <option value={opt.key}>{opt.label}</option>}
                         </For>
                       </select>
                       <button

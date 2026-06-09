@@ -138,6 +138,24 @@ class SessionStatusUpdate(BaseModel):
     exclude: list[str] = []
 
 
+class StatusResponse(BaseModel):
+    status: str
+
+
+class OkResponse(BaseModel):
+    ok: bool
+
+
+class DetectionResponse(BaseModel):
+    status: str
+    new_suggestions: int
+
+
+class PanelCreateResponse(BaseModel):
+    status: str
+    panel_id: str
+
+
 class MosaicSuggestionResponse(BaseModel):
     id: str
     suggested_name: str

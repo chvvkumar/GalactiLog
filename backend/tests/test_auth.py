@@ -72,8 +72,13 @@ async def test_health_no_auth():
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         resp = await client.get("/api/health")
-    assert resp.status_code == 200
-    assert resp.json() == {"status": "ok"}
+    # Health endpoint returns 200 when all services are up, 503 when any are unavailable.
+    # Either way it must be reachable without auth and return the expected structure.
+    assert resp.status_code in (200, 503)
+    data = resp.json()
+    assert "status" in data
+    assert "postgres" in data
+    assert "redis" in data
 
 
 @pytest.mark.asyncio
@@ -109,6 +114,51 @@ async def test_viewer_blocked_on_scan(viewer_user):
         resp = await client.post("/api/scan")
     assert resp.status_code == 403
     app.dependency_overrides.clear()
+
+
+class TestLockoutIdentity:
+    def test_identity_includes_username_and_ip(self):
+        from app.api.auth import _lockout_id
+        assert _lockout_id("alice", "203.0.113.7") == "alice|203.0.113.7"
+
+    def test_different_ip_yields_different_identity(self):
+        from app.api.auth import _lockout_id
+        a = _lockout_id("alice", "203.0.113.7")
+        b = _lockout_id("alice", "198.51.100.4")
+        assert a != b
+
+    @pytest.mark.asyncio
+    async def test_increment_locks_out_after_threshold(self):
+        from app.api.auth import _increment_login_failures, MAX_LOGIN_FAILURES, _lockout_id
+        redis = MagicMock()
+        pipe = MagicMock()
+        pipe.incr = MagicMock()
+        pipe.expire = MagicMock()
+        pipe.execute = AsyncMock(return_value=[MAX_LOGIN_FAILURES])
+        redis.pipeline = MagicMock(return_value=pipe)
+        redis.setex = AsyncMock()
+
+        await _increment_login_failures(redis, "alice", "203.0.113.7")
+
+        identity = _lockout_id("alice", "203.0.113.7")
+        redis.setex.assert_awaited_once()
+        args = redis.setex.await_args.args
+        assert args[0] == f"auth:lockout:{identity}"
+
+    @pytest.mark.asyncio
+    async def test_increment_no_lockout_below_threshold(self):
+        from app.api.auth import _increment_login_failures
+        redis = MagicMock()
+        pipe = MagicMock()
+        pipe.incr = MagicMock()
+        pipe.expire = MagicMock()
+        pipe.execute = AsyncMock(return_value=[1])
+        redis.pipeline = MagicMock(return_value=pipe)
+        redis.setex = AsyncMock()
+
+        await _increment_login_failures(redis, "alice", "203.0.113.7")
+
+        redis.setex.assert_not_awaited()
 
 
 class TestPasswordPolicy:

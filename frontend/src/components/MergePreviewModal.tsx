@@ -1,6 +1,7 @@
 import { Component, Show, createSignal, onMount, For } from "solid-js";
 import { api } from "../api/client";
 import { showToast } from "./Toast";
+import Dialog from "./Dialog";
 
 interface TargetPreview {
   id?: string;
@@ -99,13 +100,13 @@ const MergePreviewModal: Component<MergePreviewModalProps> = (props) => {
   const valueClass = "text-sm text-theme-text-primary";
 
   return (
-    <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={props.onClose}>
+    <Dialog open aria-labelledby="merge-preview-title" onClose={props.onClose}>
       <div
         class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-lg)] max-w-2xl w-full mx-4 max-h-[85vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
         <div class="p-4 border-b border-theme-border">
-          <h3 class="text-theme-text-primary font-medium">Preview Merge</h3>
+          <h3 id="merge-preview-title" class="text-theme-text-primary font-medium">Preview Merge</h3>
           <p class="text-xs text-theme-text-secondary mt-1">
             Review what will happen before confirming the merge.
           </p>
@@ -305,7 +306,7 @@ const MergePreviewModal: Component<MergePreviewModalProps> = (props) => {
           </div>
         </div>
       </div>
-    </div>
+    </Dialog>
   );
 };
 

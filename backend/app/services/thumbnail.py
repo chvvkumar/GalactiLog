@@ -44,13 +44,92 @@ def debayer_superpixel(data: np.ndarray, pattern: str) -> np.ndarray:
     return np.stack([r, g, b], axis=0)
 
 
-def get_bayer_pattern(fits_path: Path) -> str | None:
-    """Read BAYERPAT from a FITS header, return None if absent."""
-    header = fitsio.read_header(str(fits_path), ext=0)
+def get_bayer_pattern(fits_path: Path, header=None) -> str | None:
+    """Read BAYERPAT from a FITS header, return None if absent.
+
+    If ``header`` is provided (an already-read FITS header), it is used
+    directly so the file is not opened a second time. Otherwise the header
+    is read from disk.
+    """
+    if header is None:
+        header = fitsio.read_header(str(fits_path), ext=0)
     pat = header.get("BAYERPAT")
     if pat and str(pat).strip().upper() in _BAYER_OFFSETS:
         return str(pat).strip().upper()
     return None
+
+
+def _read_bayer_debayered(fits_path: Path, header=None) -> np.ndarray:
+    """Read a 2D Bayer frame in row strips and superpixel-debayer it.
+
+    Reading the sensor one horizontal strip at a time, debayering each strip,
+    and concatenating the half-resolution channels avoids ever holding the
+    full raw frame and the full debayered result in memory at the same time.
+    The output is byte-identical to ``debayer_superpixel(fits[0].read(), ...)``
+    because every strip starts on an even row, preserving the 2x2 Bayer phase.
+
+    ``header`` may be a header the caller already read; it is used to resolve
+    the Bayer pattern so the file is not opened an extra time.
+
+    Returns a [3, H//2, W//2] float32 array (channels-first RGB).
+    """
+    with fitsio.FITS(str(fits_path), "r") as fits:
+        hdu = fits[0]
+        # Resolve the pattern from the caller-supplied header when available,
+        # else from the HDU header read in this same open.
+        if header is None:
+            header = hdu.read_header()
+        pattern = get_bayer_pattern(fits_path, header=header)
+        if pattern is None:
+            # Callers only invoke this for Bayer data, so a missing/invalid
+            # BAYERPAT here is a genuine error, not something to silently
+            # mis-debayer with a raw header value.
+            raise ValueError(
+                f"No valid BAYERPAT in FITS header for {fits_path}"
+            )
+
+        info = hdu.get_info()
+        dims = info.get("dims", [])
+        if len(dims) != 2:
+            # Not a plain 2D sensor frame: fall back to full read + debayer.
+            return debayer_superpixel(hdu.read().astype(np.float32), pattern)
+
+        # Per-pattern Bayer offsets, matching debayer_superpixel: R sits at
+        # (r_row, r_col) within each 2x2 cell, B at the diagonal opposite, and
+        # the two G samples at the off-diagonal corners.
+        r_row, r_col = _BAYER_OFFSETS[pattern]
+        b_row = 1 - r_row
+        b_col = 1 - r_col
+
+        # fitsio reads images as C-order NumPy arrays of shape (NAXIS2, NAXIS1)
+        # = (height, width), and get_info()["dims"] mirrors that array shape.
+        # So dims[0] is the row count (height) and dims[1] the column count
+        # (width); hdu[rows, cols] slices in the same (height, width) order.
+        h = (dims[0] // 2) * 2  # height (rows)
+        w = (dims[1] // 2) * 2  # width (columns)
+
+        # Strip height must be even so each strip begins on a Bayer phase
+        # boundary (an even absolute row), making concatenation equivalent
+        # to debayering the whole frame at once.
+        strip_rows = 512
+        r_parts: list[np.ndarray] = []
+        g_parts: list[np.ndarray] = []
+        b_parts: list[np.ndarray] = []
+        r0 = 0
+        while r0 < h:
+            r1 = min(r0 + strip_rows, h)
+            d = hdu[r0:r1, 0:w].astype(np.float32)
+            r_parts.append(d[r_row::2, r_col::2])
+            b_parts.append(d[b_row::2, b_col::2])
+            g_parts.append(
+                (d[r_row::2, b_col::2] + d[b_row::2, r_col::2]) / 2.0
+            )
+            r0 = r1
+
+    r = np.concatenate(r_parts, axis=0)
+    g = np.concatenate(g_parts, axis=0)
+    b = np.concatenate(b_parts, axis=0)
+    return np.stack([r, g, b], axis=0)
 
 
 def _read_binned(fits_path: Path, max_width: int) -> np.ndarray:
@@ -100,11 +179,14 @@ def generate_thumbnail(
     Pipeline: read → block-bin → flip → resize (raw linear) → MTF stretch → save.
     Handles mono (2D), color (3D [3, H, W]), and Bayer-patterned (2D + BAYERPAT) data.
     """
-    bayer = get_bayer_pattern(fits_path)
+    header = fitsio.read_header(str(fits_path), ext=0)
+    bayer = get_bayer_pattern(fits_path, header=header)
     if bayer:
-        with fitsio.FITS(str(fits_path), "r") as fits:
-            raw = fits[0].read().astype(np.float32)
-        data = debayer_superpixel(raw, bayer)
+        # Strip-read + debayer to avoid loading the full sensor frame and the
+        # full debayered result simultaneously. resize_array (below) still
+        # receives the identical debayered channels, so output is unchanged.
+        # Reuse the header already read above so the file isn't reopened.
+        data = _read_bayer_debayered(fits_path, header=header)
     else:
         data = _read_binned(fits_path, max_width)
 

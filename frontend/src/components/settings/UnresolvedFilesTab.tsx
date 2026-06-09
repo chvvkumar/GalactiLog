@@ -85,7 +85,8 @@ export const UnresolvedFilesTab: Component = () => {
       stopPolling = pollTask(task_id, {
         onSuccess: (result) => {
           dismissToast();
-          const count = result?.candidates_found ?? 0;
+          const r = result as { candidates_found?: number } | null | undefined;
+          const count = r?.candidates_found ?? 0;
           showToast(`Detection complete - ${count} candidate(s) found`);
           setDetecting(false);
           refresh();

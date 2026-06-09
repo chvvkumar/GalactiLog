@@ -9,6 +9,7 @@ import { showToast } from "../components/Toast";
 import InlineEditCell from "../components/InlineEditCell";
 import { isColumnVisible } from "../utils/displaySettings";
 import KonvaMosaicArranger from "../components/mosaics/KonvaMosaicArranger";
+import ConfirmDialog from "../components/ConfirmDialog";
 
 const MosaicDetailPage: Component = () => {
   const ctx = useSettingsContext();
@@ -77,11 +78,19 @@ const MosaicDetailPage: Component = () => {
       setNotesSaving(true);
       try {
         await api.updateMosaic(params.mosaicId, { notes: text || undefined });
+      } catch {
+        showToast("Failed to save notes", "error", 5000);
       } finally {
         setNotesSaving(false);
       }
     }, 1000);
   };
+
+  // State for the delete-panel confirmation dialog.
+  const [deletePanelConfirm, setDeletePanelConfirm] = createSignal<{
+    panelId: string;
+    panelLabel: string;
+  } | null>(null);
 
   const handleFilterChange = async (filter: string) => {
     setSelectedFilter(filter);
@@ -460,18 +469,12 @@ const MosaicDetailPage: Component = () => {
                             <Show when={included().length === 0 && !panelSessions.loading}>
                               <div class="p-3 border-t border-theme-border/50 flex justify-end">
                                 <button
-                                  onClick={async () => {
-                                    if (!window.confirm(`Delete panel "${panel.panel_label}"?`)) return;
-                                    const data = mosaic();
-                                    if (!data) return;
-                                    try {
-                                      await api.removeMosaicPanel(data.id, panel.panel_id);
-                                      showToast(`Deleted panel "${panel.panel_label}"`);
-                                      refetch();
-                                    } catch {
-                                      showToast("Failed to delete panel", "error");
-                                    }
-                                  }}
+                                  onClick={() =>
+                                    setDeletePanelConfirm({
+                                      panelId: panel.panel_id,
+                                      panelLabel: panel.panel_label,
+                                    })
+                                  }
                                   class="text-xs text-theme-text-secondary hover:text-theme-danger transition-colors"
                                 >
                                   Delete panel
@@ -490,6 +493,28 @@ const MosaicDetailPage: Component = () => {
         )}
       </Show>
       </div>
+
+      <ConfirmDialog
+        open={deletePanelConfirm() !== null}
+        title="Delete panel"
+        message={`Delete panel "${deletePanelConfirm()?.panelLabel}"? This cannot be undone.`}
+        confirmLabel="Delete"
+        onConfirm={async () => {
+          const target = deletePanelConfirm();
+          setDeletePanelConfirm(null);
+          if (!target) return;
+          const data = mosaic();
+          if (!data) return;
+          try {
+            await api.removeMosaicPanel(data.id, target.panelId);
+            showToast(`Deleted panel "${target.panelLabel}"`);
+            refetch();
+          } catch {
+            showToast("Failed to delete panel", "error");
+          }
+        }}
+        onCancel={() => setDeletePanelConfirm(null)}
+      />
     </div>
   );
 };

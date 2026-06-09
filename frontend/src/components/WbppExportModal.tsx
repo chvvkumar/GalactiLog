@@ -1,7 +1,9 @@
 import { Component, For, Show, JSX, createSignal, createMemo, onMount } from "solid-js";
 import { api } from "../api/client";
 import { showToast } from "./Toast";
+import { getErrorMessage } from "../utils/errors";
 import { useSettingsContext } from "./SettingsProvider";
+import Dialog from "./Dialog";
 import {
   isFsAccessSupported,
   runBrowserCopy,
@@ -237,8 +239,8 @@ const WbppExportModal: Component<Props> = (props) => {
         init[s.session_date] = chosenLevels()[s.session_date] ?? s.default_level_index;
       }
       setChosenLevels(init);
-    } catch (e: any) {
-      setError(e?.message ?? "Failed to load preview");
+    } catch (e: unknown) {
+      setError(getErrorMessage(e, "Failed to load preview"));
     } finally {
       setPreviewing(false);
     }
@@ -272,8 +274,8 @@ const WbppExportModal: Component<Props> = (props) => {
       });
       setGenerated(resp);
       setShowScript(true);
-    } catch (e: any) {
-      setError(e?.message ?? "Failed to generate script");
+    } catch (e: unknown) {
+      setError(getErrorMessage(e, "Failed to generate script"));
     } finally {
       setGenerating(false);
     }
@@ -335,8 +337,8 @@ const WbppExportModal: Component<Props> = (props) => {
       setSrcHandle(h);
       await storeHandle(HANDLE_KEYS.source, h);
       setSrcPerm(await queryHandlePermission(h, "read"));
-    } catch (e: any) {
-      if (!(e instanceof CopyCancelledError)) setError(e?.message ?? "Could not open the folder picker.");
+    } catch (e: unknown) {
+      if (!(e instanceof CopyCancelledError)) setError(getErrorMessage(e, "Could not open the folder picker."));
     }
   };
 
@@ -347,8 +349,8 @@ const WbppExportModal: Component<Props> = (props) => {
       setDestHandle(h);
       await storeHandle(HANDLE_KEYS.dest, h);
       setDestPerm(await queryHandlePermission(h, "readwrite"));
-    } catch (e: any) {
-      if (!(e instanceof CopyCancelledError)) setError(e?.message ?? "Could not open the folder picker.");
+    } catch (e: unknown) {
+      if (!(e instanceof CopyCancelledError)) setError(getErrorMessage(e, "Could not open the folder picker."));
     }
   };
 
@@ -395,8 +397,8 @@ const WbppExportModal: Component<Props> = (props) => {
       setSrcPerm("granted");
       setDestPerm("granted");
       showToast(`Copied ${result.copied} file${result.copied !== 1 ? "s" : ""} to ${result.destinationName}`);
-    } catch (e: any) {
-      if (!(e instanceof CopyCancelledError)) setError(e?.message ?? "Browser copy failed.");
+    } catch (e: unknown) {
+      if (!(e instanceof CopyCancelledError)) setError(getErrorMessage(e, "Browser copy failed."));
     } finally {
       setCopying(false);
       abortController = null;
@@ -408,23 +410,21 @@ const WbppExportModal: Component<Props> = (props) => {
   const copyReady = () => !!srcHandle() && !!destHandle() && srcPerm() !== "denied" && destPerm() !== "denied";
 
   return (
-    <div
-      class="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
-      onClick={props.onClose}
-    >
+    <Dialog open aria-labelledby="wbpp-export-title" onClose={props.onClose}>
       <div
         class="modal-surface border border-theme-border-em rounded-[var(--radius-md)] shadow-[0_24px_64px_rgba(0,0,0,0.7)] ring-1 ring-white/10 max-w-4xl w-full mx-4 max-h-[85vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
         <div class="p-4 border-b border-theme-border flex items-center justify-between">
-          <h2 class="text-sm font-medium text-theme-text-primary">
+          <h2 id="wbpp-export-title" class="text-sm font-medium text-theme-text-primary">
             Export to WBPP - {props.targetName}
           </h2>
           <button
             class="text-theme-text-secondary hover:text-theme-text-primary"
             onClick={props.onClose}
+            aria-label="Close"
           >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
               <line x1="6" y1="6" x2="18" y2="18" /><line x1="6" y1="18" x2="18" y2="6" />
             </svg>
           </button>
@@ -806,7 +806,7 @@ const WbppExportModal: Component<Props> = (props) => {
           </button>
         </div>
       </div>
-    </div>
+    </Dialog>
   );
 };
 
