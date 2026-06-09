@@ -49,10 +49,33 @@ def determine_vizier_catalog(catalog_id: str | None) -> tuple[str, str, str] | N
     cleaned = catalog_id.strip()
 
     for pattern, viz_id, table, num_col in _CATALOG_MAP:
-        if pattern.match(cleaned):
+        # fullmatch so trailing junk (e.g. an injected "'; DROP ...") does not
+        # partially match a catalog pattern.
+        if pattern.fullmatch(cleaned):
             return (viz_id, table, num_col)
 
     return None
+
+
+def _adql_quote(value: str) -> str:
+    """Escape a value for use inside a single-quoted ADQL/SQL string literal.
+
+    Doubles single quotes per the SQL standard so the value cannot break out
+    of the surrounding quotes.
+    """
+    return value.replace("'", "''")
+
+
+def _adql_int(value: str) -> int | None:
+    """Coerce a value to int for use in an unquoted ADQL numeric comparison.
+
+    Returns None if the value is not a clean integer, so callers can decline
+    to build a query rather than interpolate raw text.
+    """
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
 
 
 def _extract_number(catalog_id: str) -> str:
@@ -75,7 +98,8 @@ def build_adql_query(catalog_id: str | None) -> str | None:
         return None
 
     viz_id, table, num_col = result
-    number = _extract_number(catalog_id)
+    raw_number = _extract_number(catalog_id)
+    number = _adql_int(raw_number)
 
     # Note: VizieR computed columns (_RA_icrs, _DE_icrs) appear in SELECT *
     # output but cannot be explicitly named in ADQL.  We only need size data
@@ -84,6 +108,8 @@ def build_adql_query(catalog_id: str | None) -> str | None:
 
     if viz_id == "VII/20":
         # Sharpless: Sh2 is integer, Diam in arcmin
+        if number is None:
+            return None
         return f'SELECT Sh2, Diam FROM {table} WHERE Sh2={number}'
 
     elif viz_id == "VII/9" and num_col == "LBN_COORD":
@@ -102,32 +128,44 @@ def build_adql_query(catalog_id: str | None) -> str | None:
 
     elif viz_id == "VII/9":
         # LBN: Seq is integer, Diam1/Diam2 in arcmin
+        if number is None:
+            return None
         return f'SELECT Seq, Diam1, Diam2 FROM {table} WHERE Seq={number}'
 
     elif viz_id == "VII/216":
         # RCW: RCW is integer, MajAxis/MinAxis in arcmin
+        if number is None:
+            return None
         return f'SELECT RCW, MajAxis, MinAxis FROM {table} WHERE RCW={number}'
 
     elif viz_id == "VII/21":
         # vdB: VdB is integer, BRadMax in arcmin (radius, need to double)
+        if number is None:
+            return None
         return f'SELECT VdB, BRadMax, RRadMax FROM {table} WHERE VdB={number}'
 
     elif viz_id == "VII/7A":
         # LDN: LDN is integer, Area in sq deg
+        if number is None:
+            return None
         return f'SELECT LDN, Area FROM {table} WHERE LDN={number}'
 
     elif viz_id == "VII/220A":
         # Barnard: Barn is CHAR(4), space-padded - use TRIM
+        if number is None:
+            return None
         return f"SELECT Barn, Diam FROM {table} WHERE TRIM(Barn)='{number}'"
 
     elif viz_id == "VII/231":
         # Cederblad: Ced is string
-        ced_num = catalog_id.split()[-1].strip() if " " in catalog_id else number
-        return f"SELECT Ced, Dim1, Dim2 FROM {table} WHERE TRIM(Ced)='{ced_num}'"
+        ced_num = catalog_id.split()[-1].strip() if " " in catalog_id else raw_number
+        return f"SELECT Ced, Dim1, Dim2 FROM {table} WHERE TRIM(Ced)='{_adql_quote(ced_num)}'"
 
     elif viz_id == "V/84":
         # Planetary nebulae (Abell PNe): query by Name containing "A <number>"
         # Join with diam table for optical diameter
+        if number is None:
+            return None
         return (
             f'SELECT m."Name", d.oDiam '
             f'FROM "V/84/main" AS m '
@@ -138,7 +176,7 @@ def build_adql_query(catalog_id: str | None) -> str | None:
     elif viz_id == "B/ocl":
         # Open clusters: Cluster is string like "Collinder 399"
         cluster_name = catalog_id.strip()
-        return f"SELECT \"Cluster\", Diam FROM {table} WHERE \"Cluster\"='{cluster_name}'"
+        return f"SELECT \"Cluster\", Diam FROM {table} WHERE \"Cluster\"='{_adql_quote(cluster_name)}'"
 
     return None
 

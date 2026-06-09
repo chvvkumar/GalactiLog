@@ -1,8 +1,15 @@
+import ipaddress
 import logging
+import os
 import re
+import socket
+from urllib.parse import urlparse
 
 import httpx
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends, HTTPException
+
+from app.api.deps import get_current_user
+from app.models.user import User
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -10,6 +17,84 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/integrations", tags=["integrations"])
 
 TIMEOUT = 5.0
+
+# Short timeout for the SSRF DNS resolution probe so a slow/hostile resolver
+# cannot hang the request.
+_DNS_TIMEOUT = 2.0
+
+
+def _is_blocked_ip(ip: ipaddress._BaseAddress) -> bool:
+    """Return True if *ip* points at loopback, link-local, or the cloud
+    metadata range (169.254.169.254 lives inside link-local 169.254.0.0/16).
+
+    Covers IPv4 (127.0.0.0/8, 169.254.0.0/16) and IPv6 (::1, fe80::/10),
+    including IPv4-mapped IPv6 forms which are unwrapped first.
+    """
+    # Unwrap IPv4-mapped / IPv4-compatible IPv6 (e.g. ::ffff:169.254.169.254).
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+        ip = ip.ipv4_mapped
+    return ip.is_loopback or ip.is_link_local
+
+
+def _validate_integration_url(url: str) -> None:
+    """Validate a caller-supplied integration URL to mitigate SSRF.
+
+    NINA/Stellarium typically run on the user's LAN, so normal private ranges
+    (10/8, 172.16/12, 192.168/16) are intentionally allowed. This rejects
+    non-http(s) schemes, loopback/link-local/metadata addresses (whether the
+    host is a literal IP or a hostname that resolves to one), and enforces an
+    optional host allowlist from GALACTILOG_INTEGRATION_ALLOWED_HOSTS.
+
+    Resolving the host introduces a residual TOCTOU window (DNS could change
+    between this check and the outbound request). That is accepted for this
+    self-hosted, authenticated, LAN-integration threat model.
+    """
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise HTTPException(status_code=400, detail="URL scheme must be http or https")
+
+    host = parsed.hostname
+    if not host:
+        raise HTTPException(status_code=400, detail="URL must include a host")
+
+    # Literal IP (IPv4 or IPv6): block loopback/link-local/metadata directly.
+    literal_ip = None
+    try:
+        literal_ip = ipaddress.ip_address(host)
+    except ValueError:
+        pass
+    if literal_ip is not None and _is_blocked_ip(literal_ip):
+        raise HTTPException(status_code=400, detail="URL host resolves to a blocked address")
+
+    allowed = os.environ.get("GALACTILOG_INTEGRATION_ALLOWED_HOSTS")
+    if allowed:
+        allowed_hosts = {h.strip().lower() for h in allowed.split(",") if h.strip()}
+        if host.lower() not in allowed_hosts:
+            raise HTTPException(status_code=400, detail="URL host is not in the allowlist")
+
+    # Hostname: resolve and reject if ANY address is blocked. On resolution
+    # failure, only reject if it was a literal IP (already handled above);
+    # otherwise allow, so air-gapped LAN names that don't resolve here still work.
+    if literal_ip is None:
+        old_timeout = socket.getdefaulttimeout()
+        try:
+            socket.setdefaulttimeout(_DNS_TIMEOUT)
+            infos = socket.getaddrinfo(host, parsed.port, proto=socket.IPPROTO_TCP)
+        except (socket.gaierror, OSError):
+            infos = None
+        finally:
+            socket.setdefaulttimeout(old_timeout)
+        if infos:
+            for info in infos:
+                addr = info[4][0]
+                try:
+                    resolved = ipaddress.ip_address(addr)
+                except ValueError:
+                    continue
+                if _is_blocked_ip(resolved):
+                    raise HTTPException(
+                        status_code=400, detail="URL host resolves to a blocked address"
+                    )
 
 _CATALOG_RE = re.compile(
     r"^(NGC|IC|M|Sh2|LDN|LBN|Abell|Ced|vdB|Cr|Mel|Barnard|PGC|UGC|Arp)\s*[-]?\s*\d+",
@@ -47,9 +132,10 @@ class StellariumRequest(BaseModel):
 
 
 @router.post("/nina/send-coordinates")
-async def send_to_nina(req: NinaRequest):
+async def send_to_nina(req: NinaRequest, current_user: User = Depends(get_current_user)):
     import asyncio
 
+    _validate_integration_url(req.url)
     base = req.url.rstrip("/")
     endpoint = f"{base}/v2/api/framing/set-coordinates?RAangle={req.ra}&DecAngle={req.dec}"
     try:
@@ -74,7 +160,8 @@ async def send_to_nina(req: NinaRequest):
 
 
 @router.post("/stellarium/send-coordinates")
-async def send_to_stellarium(req: StellariumRequest):
+async def send_to_stellarium(req: StellariumRequest, current_user: User = Depends(get_current_user)):
+    _validate_integration_url(req.url)
     base = req.url.rstrip("/")
     try:
         async with httpx.AsyncClient(timeout=TIMEOUT) as client:

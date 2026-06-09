@@ -9,6 +9,15 @@ logger = logging.getLogger(__name__)
 SIMBAD_TAP_URL = "https://simbad.cds.unistra.fr/simbad/sim-tap/sync"
 
 
+def _escape_adql_string(value: str) -> str:
+    """Escape a value for use inside a single-quoted ADQL/SQL string literal.
+
+    Doubles single quotes per the SQL standard so the value cannot break out
+    of the surrounding quotes.
+    """
+    return value.replace("'", "''")
+
+
 def normalize_object_name(name: str, *, upper: bool = True) -> str:
     """Normalize a target name: strip outer whitespace, collapse inner spaces.
 
@@ -181,7 +190,7 @@ async def _fetch_tap_aliases(object_name: str) -> list[str]:
     safe_chars = string.printable.replace('\n', '').replace('\r', '').replace('\t', '')
     sanitized = ''.join(c for c in object_name if c in safe_chars).strip()
 
-    query = f"SELECT id FROM ident JOIN basic ON ident.oidref = basic.oid WHERE basic.main_id = '{sanitized}'"
+    query = f"SELECT id FROM ident JOIN basic ON ident.oidref = basic.oid WHERE basic.main_id = '{_escape_adql_string(sanitized)}'"
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
             resp = await client.get(

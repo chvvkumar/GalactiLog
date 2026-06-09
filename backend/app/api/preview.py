@@ -9,9 +9,11 @@ from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.deps import get_current_user
 from app.config import get_sync_redis, settings
 from app.database import get_session
 from app.models import Image, UserSettings, SETTINGS_ROW_ID
+from app.models.user import User
 from app.schemas.settings import GeneralSettings
 from app.services.preview import generate_preview
 from app.services.preview_cache import PreviewCache
@@ -28,6 +30,7 @@ async def get_preview(
     image_id: UUID,
     resolution: int = Query(..., ge=0, le=20000),
     session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
 ) -> Response:
     """Serve a high-resolution preview JPEG for an image.
 

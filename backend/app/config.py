@@ -1,6 +1,10 @@
+import logging
+import os
 import secrets
 
 from pydantic_settings import BaseSettings
+
+logger = logging.getLogger(__name__)
 
 
 class Settings(BaseSettings):
@@ -11,6 +15,10 @@ class Settings(BaseSettings):
     previews_path: str = "/app/data/thumbnails/previews"
     thumbnail_max_width: int = 800
     jwt_secret: str = ""
+    # Path to persist an auto-generated JWT secret when GALACTILOG_JWT_SECRET is
+    # unset. Default lives under the FITS/thumbnail data volume so it survives
+    # restarts and is shared by all workers.
+    jwt_secret_file: str = "/app/data/.jwt_secret"
     access_token_expiry: int = 1800
     refresh_token_expiry: int = 604800
     https: bool = True
@@ -24,11 +32,69 @@ class Settings(BaseSettings):
 
 settings = Settings()
 
-# Auto-generate JWT secret if not set -- stable for the lifetime of the process,
-# but tokens won't survive a restart. Fine for getting started; set GALACTILOG_JWT_SECRET
-# in .env for persistence across restarts.
+
+def load_or_create_jwt_secret(secret_file: str) -> str:
+    """Load a persisted JWT secret from ``secret_file`` or create one.
+
+    The generated secret is written to a stable file so it survives process
+    restarts and is shared across multiple workers. The write tolerates
+    concurrent workers racing to create the file: if another worker wins the
+    race, the secret it persisted is read back and returned.
+    """
+    # Fast path: file already exists.
+    try:
+        with open(secret_file, "r", encoding="utf-8") as fh:
+            existing = fh.read().strip()
+        if existing:
+            return existing
+    except FileNotFoundError:
+        pass
+    except OSError as exc:
+        logger.warning("Could not read JWT secret file %s: %s", secret_file, exc)
+
+    secret = secrets.token_hex(32)
+    parent = os.path.dirname(secret_file)
+    if parent:
+        try:
+            os.makedirs(parent, exist_ok=True)
+        except OSError as exc:
+            logger.warning("Could not create directory for JWT secret file %s: %s", parent, exc)
+
+    try:
+        # O_EXCL ensures only the first worker writes; others race-lose here.
+        fd = os.open(secret_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        try:
+            os.write(fd, secret.encode("utf-8"))
+        finally:
+            os.close(fd)
+        return secret
+    except FileExistsError:
+        # Another worker created it first; read back its secret.
+        try:
+            with open(secret_file, "r", encoding="utf-8") as fh:
+                persisted = fh.read().strip()
+            if persisted:
+                return persisted
+        except OSError as exc:
+            logger.warning("Could not read JWT secret file %s after race: %s", secret_file, exc)
+        return secret
+    except OSError as exc:
+        # Could not persist (read-only FS etc.); fall back to in-memory secret.
+        logger.warning(
+            "Could not persist JWT secret to %s: %s. Using an in-memory secret; "
+            "sessions will not survive restarts.",
+            secret_file,
+            exc,
+        )
+        return secret
+
+
+# Auto-generate JWT secret if not set. The secret is persisted to a stable file
+# (settings.jwt_secret_file) so it survives restarts and is shared by all
+# workers. Operators should still set GALACTILOG_JWT_SECRET explicitly for
+# production/multi-host deployments (see the startup warning in main.py).
 if not settings.jwt_secret:
-    settings.jwt_secret = secrets.token_hex(32)
+    settings.jwt_secret = load_or_create_jwt_secret(settings.jwt_secret_file)
 
 import redis.asyncio as aioredis
 import redis as sync_redis
@@ -53,9 +119,31 @@ def get_sync_redis() -> sync_redis.Redis:
     return sync_redis.from_url(settings.redis_url, decode_responses=True)
 
 from slowapi import Limiter
-from slowapi.util import get_remote_address
+
+
+def client_ip_from_request(request) -> str:
+    """Derive the real client IP from the X-Forwarded-For header.
+
+    Security assumption: nginx is the sole entry point and the backend is bound
+    to localhost, so X-Forwarded-For can only have been set by our own trusted
+    proxy (clients cannot reach the app directly to spoof it). nginx sets the
+    header via ``$proxy_add_x_forwarded_for``, which appends the connecting peer
+    to any pre-existing value, producing the order
+    ``original-client, proxy1, proxy2, ...``; hence the left-most non-empty
+    entry is the originating client. Falls back to the direct socket peer
+    (request.client.host) when no header is present (e.g. local dev without
+    nginx).
+    """
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        for part in forwarded.split(","):
+            ip = part.strip()
+            if ip:
+                return ip
+    return request.client.host if request.client else "unknown"
+
 
 limiter = Limiter(
-    key_func=get_remote_address,
+    key_func=client_ip_from_request,
     storage_uri=settings.redis_url,
 )
