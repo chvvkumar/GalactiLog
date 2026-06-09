@@ -18,6 +18,13 @@ def _admin_user():
     return u
 
 
+def _override_admin():
+    """Set auth overrides so all settings endpoints accept the request."""
+    admin = _admin_user()
+    app.dependency_overrides[get_current_user] = lambda: admin
+    app.dependency_overrides[require_admin] = lambda: admin
+
+
 def _make_settings_row(
     general=None,
     filters=None,
@@ -57,6 +64,7 @@ async def test_get_settings_returns_defaults():
         yield mock_session
 
     app.dependency_overrides[get_session] = override
+    _override_admin()
     try:
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -117,6 +125,7 @@ async def test_get_settings_creates_row_when_missing():
         yield mock_session
 
     app.dependency_overrides[get_session] = override
+    _override_admin()
     try:
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -149,6 +158,7 @@ async def test_get_settings_with_stored_values():
         yield mock_session
 
     app.dependency_overrides[get_session] = override
+    _override_admin()
     try:
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -181,6 +191,7 @@ async def test_get_settings_returns_dismissed_suggestions():
         yield mock_session
 
     app.dependency_overrides[get_session] = override
+    _override_admin()
     try:
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -209,6 +220,7 @@ async def test_get_settings_defaults_dismissed_suggestions_empty():
         yield mock_session
 
     app.dependency_overrides[get_session] = override
+    _override_admin()
     try:
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -245,6 +257,7 @@ async def test_put_general_updates_and_returns_settings():
         yield mock_session
 
     app.dependency_overrides[get_session] = override
+    _override_admin()
     try:
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -268,15 +281,32 @@ async def test_put_general_updates_and_returns_settings():
 @pytest.mark.asyncio
 async def test_put_general_invalid_payload():
     """PUT /api/settings/general rejects non-boolean for auto_scan_enabled."""
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        resp = await client.put(
-            "/api/settings/general",
-            json={"auto_scan_enabled": "yes", "auto_scan_interval": -1,
-                  "thumbnail_width": 800, "default_page_size": 50},
-        )
-    # Pydantic will coerce "yes" string to bool - just check it responds
-    assert resp.status_code in (200, 422)
+    row = _make_settings_row()
+    mock_result = MagicMock()
+    mock_result.scalar_one_or_none.return_value = row
+    mock_session = AsyncMock()
+    mock_session.execute = AsyncMock(return_value=mock_result)
+    mock_session.commit = AsyncMock()
+    mock_session.refresh = AsyncMock()
+
+    async def override():
+        yield mock_session
+
+    app.dependency_overrides[get_session] = override
+    app.dependency_overrides[get_current_user] = lambda: _admin_user()
+    app.dependency_overrides[require_admin] = lambda: _admin_user()
+    try:
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.put(
+                "/api/settings/general",
+                json={"auto_scan_enabled": "yes", "auto_scan_interval": -1,
+                      "thumbnail_width": 800, "default_page_size": 50},
+            )
+        # Pydantic will coerce "yes" string to bool - just check it responds
+        assert resp.status_code in (200, 422)
+    finally:
+        app.dependency_overrides.clear()
 
 
 # ---------------------------------------------------------------------------
@@ -300,6 +330,7 @@ async def test_put_filters_updates_filter_config():
         yield mock_session
 
     app.dependency_overrides[get_session] = override
+    _override_admin()
     try:
         payload = {
             "Ha": {"color": "#ff0000", "aliases": ["Halpha"]},
@@ -338,6 +369,7 @@ async def test_put_equipment_updates_equipment_config():
         yield mock_session
 
     app.dependency_overrides[get_session] = override
+    _override_admin()
     try:
         payload = {
             "cameras": {"ASI2600MC": {"aliases": ["ASI 2600 MC", "ASI2600"]}},
@@ -376,6 +408,7 @@ async def test_put_dismissed_suggestions_stores_sorted_lists():
         yield mock_session
 
     app.dependency_overrides[get_session] = override
+    _override_admin()
     try:
         payload = [["ha", "Ha"], ["ASI533", "ASI 533"]]
         transport = ASGITransport(app=app)
@@ -416,6 +449,7 @@ async def test_suggestions_filters_groups_case_insensitive():
         yield mock_session
 
     app.dependency_overrides[get_session] = override
+    _override_admin()
     try:
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -464,6 +498,7 @@ async def test_suggestions_filters_no_duplicates():
         yield mock_session
 
     app.dependency_overrides[get_session] = override
+    _override_admin()
     try:
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -492,6 +527,7 @@ async def test_suggestions_filters_levenshtein_grouping():
         yield mock_session
 
     app.dependency_overrides[get_session] = override
+    _override_admin()
     try:
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -522,6 +558,7 @@ async def test_suggestions_filters_short_strings_not_levenshtein_grouped():
         yield mock_session
 
     app.dependency_overrides[get_session] = override
+    _override_admin()
     try:
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -565,6 +602,7 @@ async def test_suggestions_equipment_returns_camera_and_telescope():
         yield mock_session
 
     app.dependency_overrides[get_session] = override
+    _override_admin()
     try:
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -593,6 +631,7 @@ async def test_suggestions_equipment_empty_db():
         yield mock_session
 
     app.dependency_overrides[get_session] = override
+    _override_admin()
     try:
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -638,6 +677,7 @@ async def test_suggestions_filters_excludes_dismissed():
         yield mock_session
 
     app.dependency_overrides[get_session] = override
+    _override_admin()
     try:
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -669,6 +709,7 @@ async def test_discovered_filters_returns_names_and_counts():
         yield mock_session
 
     app.dependency_overrides[get_session] = override
+    _override_admin()
     try:
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -700,6 +741,7 @@ async def test_discovered_cameras_returns_names_and_counts():
         yield mock_session
 
     app.dependency_overrides[get_session] = override
+    _override_admin()
     try:
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -723,6 +765,7 @@ async def test_discovered_invalid_section_returns_422():
         yield mock_session
 
     app.dependency_overrides[get_session] = override
+    _override_admin()
     try:
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:

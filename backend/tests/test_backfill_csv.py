@@ -31,9 +31,13 @@ if "fitsio" not in sys.modules:
 
 def _bootstrap_tasks_module():
     """Import app.worker.tasks with DB engine mocked out."""
-    # If already imported (e.g. by another test file), just return it
-    if "app.worker.tasks" in sys.modules:
-        return sys.modules["app.worker.tasks"]
+    # If already imported and it's the real module (not a conftest MagicMock), return it
+    cached = sys.modules.get("app.worker.tasks")
+    if cached is not None and not isinstance(cached, MagicMock):
+        return cached
+
+    # Remove the conftest stub so we can import the real module
+    sys.modules.pop("app.worker.tasks", None)
 
     # Patch sqlalchemy create_engine to return a mock, preventing DB connection
     mock_engine = MagicMock()
@@ -109,7 +113,7 @@ def test_backfill_csv_metrics_updates_rows(tmp_path):
          patch.object(_tasks, "settings") as mock_settings, \
          patch.object(_tasks, "_sync_engine") as mock_engine, \
          patch.object(_tasks, "set_idle_sync") as mock_idle, \
-         patch.object(_tasks, "start_scanning_sync") as mock_start, \
+         patch.object(_tasks, "set_ingesting_sync") as mock_ingesting, \
          patch.object(_tasks, "increment_completed_sync") as mock_increment, \
          patch.object(_tasks, "parse_image_metadata_csv") as mock_image_csv, \
          patch.object(_tasks, "parse_weather_csv") as mock_weather_csv:
@@ -128,7 +132,7 @@ def test_backfill_csv_metrics_updates_rows(tmp_path):
 
     assert result["dirs"] == 1
     assert result["updated"] == 1
-    mock_start.assert_called_once_with(mock_redis_conn, total=1)
+    mock_ingesting.assert_called_once_with(mock_redis_conn, total=1)
     mock_increment.assert_called_once_with(mock_redis_conn)
     mock_idle.assert_called_once_with(mock_redis_conn)
     mock_conn.commit.assert_called_once()
@@ -250,8 +254,18 @@ def test_backfill_csv_metrics_no_file_name_match(tmp_path):
 @pytest.mark.asyncio
 async def test_backfill_csv_endpoint_accepted():
     """POST /scan/backfill-csv returns accepted when state is idle."""
+    import uuid
     from httpx import AsyncClient, ASGITransport
     from app.main import app
+    from app.api.deps import require_admin
+    from app.models.user import User, UserRole
+
+    def _admin_override():
+        user = MagicMock(spec=User)
+        user.id = uuid.uuid4()
+        user.role = UserRole.admin
+        user.is_active = True
+        return user
 
     with patch("app.api.scan.async_redis") as mock_redis_cm, \
          patch("app.api.scan.backfill_csv_metrics") as mock_task:
@@ -260,9 +274,13 @@ async def test_backfill_csv_endpoint_accepted():
         mock_redis.hgetall = AsyncMock(return_value={})
         mock_redis_cm.side_effect = _mock_async_redis(mock_redis)
 
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            resp = await client.post("/api/scan/backfill-csv")
+        app.dependency_overrides[require_admin] = _admin_override
+        try:
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://test") as client:
+                resp = await client.post("/api/scan/backfill-csv")
+        finally:
+            app.dependency_overrides.pop(require_admin, None)
 
     assert resp.status_code == 200
     data = resp.json()
@@ -273,8 +291,18 @@ async def test_backfill_csv_endpoint_accepted():
 @pytest.mark.asyncio
 async def test_backfill_csv_endpoint_already_running_scanning():
     """POST /scan/backfill-csv returns already_running when scanning."""
+    import uuid
     from httpx import AsyncClient, ASGITransport
     from app.main import app
+    from app.api.deps import require_admin
+    from app.models.user import User, UserRole
+
+    def _admin_override():
+        user = MagicMock(spec=User)
+        user.id = uuid.uuid4()
+        user.role = UserRole.admin
+        user.is_active = True
+        return user
 
     with patch("app.api.scan.async_redis") as mock_redis_cm, \
          patch("app.api.scan.backfill_csv_metrics") as mock_task:
@@ -293,9 +321,13 @@ async def test_backfill_csv_endpoint_already_running_scanning():
         mock_redis.get = AsyncMock(return_value=str(_time.time()))
         mock_redis_cm.side_effect = _mock_async_redis(mock_redis)
 
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            resp = await client.post("/api/scan/backfill-csv")
+        app.dependency_overrides[require_admin] = _admin_override
+        try:
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://test") as client:
+                resp = await client.post("/api/scan/backfill-csv")
+        finally:
+            app.dependency_overrides.pop(require_admin, None)
 
     assert resp.status_code == 200
     data = resp.json()
@@ -307,8 +339,18 @@ async def test_backfill_csv_endpoint_already_running_scanning():
 @pytest.mark.asyncio
 async def test_backfill_csv_endpoint_already_running_ingesting():
     """POST /scan/backfill-csv returns already_running when ingesting."""
+    import uuid
     from httpx import AsyncClient, ASGITransport
     from app.main import app
+    from app.api.deps import require_admin
+    from app.models.user import User, UserRole
+
+    def _admin_override():
+        user = MagicMock(spec=User)
+        user.id = uuid.uuid4()
+        user.role = UserRole.admin
+        user.is_active = True
+        return user
 
     with patch("app.api.scan.async_redis") as mock_redis_cm, \
          patch("app.api.scan.backfill_csv_metrics") as mock_task:
@@ -324,9 +366,13 @@ async def test_backfill_csv_endpoint_already_running_ingesting():
         })
         mock_redis_cm.side_effect = _mock_async_redis(mock_redis)
 
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            resp = await client.post("/api/scan/backfill-csv")
+        app.dependency_overrides[require_admin] = _admin_override
+        try:
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://test") as client:
+                resp = await client.post("/api/scan/backfill-csv")
+        finally:
+            app.dependency_overrides.pop(require_admin, None)
 
     assert resp.status_code == 200
     data = resp.json()

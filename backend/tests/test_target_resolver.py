@@ -82,7 +82,8 @@ class TestResolveTarget:
         mock_redis.sismember.return_value = False
 
         with patch("app.services.target_resolver.find_target_by_name", return_value=None), \
-             patch("app.services.target_resolver.resolve_target_name_cached", return_value=None):
+             patch("app.services.target_resolver.resolve_target_name_cached", return_value=None), \
+             patch("app.services.target_resolver.resolve_sesame_cached", return_value=None):
             result = resolve_target("FlatWizard", mock_session, redis=mock_redis)
 
         assert result is None
@@ -122,7 +123,8 @@ class TestResolveTarget:
         mock_session = MagicMock()
 
         with patch("app.services.target_resolver.find_target_by_name", return_value=None), \
-             patch("app.services.target_resolver.resolve_target_name_cached", return_value=None):
+             patch("app.services.target_resolver.resolve_target_name_cached", return_value=None), \
+             patch("app.services.target_resolver.resolve_sesame_cached", return_value=None):
             result = resolve_target("FlatWizard", mock_session, redis=None)
 
         assert result is None

@@ -9,10 +9,13 @@ os.environ.setdefault("GALACTILOG_THUMBNAILS_PATH", "/tmp/test_thumbnails")
 os.environ.setdefault("GALACTILOG_JWT_SECRET", "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2")
 os.environ.setdefault("GALACTILOG_HTTPS", "false")
 
-# Stub out native modules that may not be available in the test environment
-for _mod in ("fitsio",):
-    if _mod not in sys.modules:
-        sys.modules[_mod] = MagicMock()
+# Stub out native modules that may not be available in the test environment.
+# Use the real library when it is importable (CI with compiled extensions);
+# fall back to MagicMock only when it is absent (Windows dev without fitsio).
+try:
+    import fitsio as _fitsio_real  # noqa: F401
+except ImportError:
+    sys.modules.setdefault("fitsio", MagicMock())
 
 # Stub out worker.tasks to avoid sync DB connection at import time
 _tasks_mock = MagicMock()

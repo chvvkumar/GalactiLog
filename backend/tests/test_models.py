@@ -45,7 +45,7 @@ from app.models.user_settings import UserSettings, SETTINGS_ROW_ID
 def test_user_settings_has_expected_columns():
     """UserSettings model has all expected columns."""
     columns = {c.name for c in UserSettings.__table__.columns}
-    assert columns == {"id", "general", "filters", "equipment", "dismissed_suggestions", "updated_at"}
+    assert columns == {"id", "general", "filters", "equipment", "dismissed_suggestions", "display", "graph", "updated_at"}
 
 def test_user_settings_fixed_row_id():
     """The fixed single-row ID is a valid UUID."""
@@ -71,6 +71,7 @@ def test_activity_event_columns():
     assert cols == {
         "id", "timestamp", "severity", "category", "event_type",
         "message", "details", "target_id", "actor", "duration_ms",
+        "parent_id",
     }
 
 

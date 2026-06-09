@@ -6,7 +6,8 @@ def test_activity_item_fields():
     from app.schemas.activity import ActivityItem
     fields = set(ActivityItem.model_fields.keys())
     assert fields == {"id", "timestamp", "severity", "category", "event_type",
-                      "message", "details", "target_id", "actor", "duration_ms"}
+                      "message", "details", "target_id", "actor", "duration_ms",
+                      "parent_id", "children"}
 
 
 def test_activity_item_serializes():

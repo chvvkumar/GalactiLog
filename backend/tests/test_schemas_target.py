@@ -51,6 +51,8 @@ def test_frame_record():
         sensor_temp=-10.0,
         gain=100,
         file_name="Light_Ha_001.fits",
+        image_id="img-001",
+        file_path="/data/fits/2026-03-20/Light_Ha_001.fits",
     )
     assert fr.file_name == "Light_Ha_001.fits"
 
