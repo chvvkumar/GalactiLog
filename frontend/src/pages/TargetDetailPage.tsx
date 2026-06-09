@@ -1,4 +1,4 @@
-import { Component, Show, For, createResource, createSignal, createEffect, createMemo, on } from "solid-js";
+import { Component, Show, For, createResource, createSignal, createEffect, createMemo, on, onMount } from "solid-js";
 import { A, useParams, useSearchParams } from "@solidjs/router";
 import { api } from "../api/client";
 import type { TargetDetailResponse, SessionDetail, TargetSearchResultFuzzy, MergedTargetResponse } from "../types";
@@ -45,7 +45,16 @@ const MergeFromDetailFlow: Component<MergeFromDetailFlowProps> = (props) => {
   const [searching, setSearching] = createSignal(false);
   const [selectedTarget, setSelectedTarget] = createSignal<TargetSearchResultFuzzy | null>(null);
 
+  let searchInputRef: HTMLInputElement | undefined;
   let searchTimeout: ReturnType<typeof setTimeout>;
+
+  onMount(() => {
+    searchInputRef?.focus();
+  });
+
+  const handleKeyDown = (e: KeyboardEvent) => {
+    if (e.key === "Escape") props.onClose();
+  };
 
   const handleSearch = (q: string) => {
     setSearchQuery(q);
@@ -68,19 +77,29 @@ const MergeFromDetailFlow: Component<MergeFromDetailFlowProps> = (props) => {
     }, 300);
   };
 
-  const picked = selectedTarget();
+  const dialogId = "merge-from-detail-dialog";
+  const titleId = "merge-from-detail-title";
 
   return (
     <Show
       when={selectedTarget()}
       fallback={
-        <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={props.onClose}>
+        <div
+          class="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+          onClick={props.onClose}
+          onKeyDown={handleKeyDown}
+        >
           <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={titleId}
+            id={dialogId}
             class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-lg)] max-w-lg w-full mx-4 max-h-[80vh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => e.stopPropagation()}
           >
             <div class="p-4 border-b border-theme-border">
-              <h3 class="text-theme-text-primary font-medium">
+              <h3 id={titleId} class="text-theme-text-primary font-medium">
                 Merge into "{props.winnerName}"
               </h3>
               <p class="text-xs text-theme-text-secondary mt-1">
@@ -94,6 +113,7 @@ const MergeFromDetailFlow: Component<MergeFromDetailFlowProps> = (props) => {
               <div>
                 <label class="block text-xs text-theme-text-secondary mb-1">Search for target to merge</label>
                 <input
+                  ref={searchInputRef}
                   type="text"
                   class="w-full px-2 py-1.5 text-sm bg-theme-base border border-theme-border rounded-[var(--radius-sm)] text-theme-text-primary focus:border-theme-accent focus:outline-none"
                   value={searchQuery()}
@@ -225,7 +245,12 @@ const TargetDetailPage: Component = () => {
     const detail = targetDetail();
     if (!detail) return;
     const name = editName().trim();
-    if (!name || name === detail.primary_name) {
+    if (!name) {
+      showToast("Name cannot be empty", "error");
+      return;
+    }
+    if (name === detail.primary_name) {
+      showToast("Name is unchanged", "error");
       setEditing(false);
       return;
     }
@@ -281,6 +306,8 @@ const TargetDetailPage: Component = () => {
       setNotesSaving(true);
       try {
         await api.updateTargetNotes(params.targetId, text || null);
+      } catch (e: unknown) {
+        showToast(getErrorMessage(e, "Failed to save notes"), "error");
       } finally {
         setNotesSaving(false);
       }
@@ -411,6 +438,8 @@ const TargetDetailPage: Component = () => {
     navigator.clipboard.writeText(csv).then(() => {
       setCsvCopied(true);
       setTimeout(() => setCsvCopied(false), 2000);
+    }).catch(() => {
+      showToast("Failed to copy to clipboard", "error");
     });
   };
 
@@ -558,6 +587,7 @@ const TargetDetailPage: Component = () => {
                             <button
                               class="text-theme-text-tertiary hover:text-theme-text-primary transition-colors text-lg leading-none"
                               title="Rename target"
+                              aria-label="Rename target"
                               disabled={savingIdentity()}
                               onClick={() => {
                                 setEditName(detail().primary_name);
@@ -569,6 +599,7 @@ const TargetDetailPage: Component = () => {
                             <button
                               class="text-theme-text-tertiary hover:text-theme-text-primary transition-colors text-lg leading-none"
                               title="Re-resolve from SIMBAD"
+                              aria-label="Re-resolve from SIMBAD"
                               disabled={savingIdentity()}
                               onClick={handleReResolve}
                             >
@@ -593,6 +624,7 @@ const TargetDetailPage: Component = () => {
                       <button
                         class="text-theme-text-tertiary hover:text-green-400 transition-colors text-lg leading-none"
                         title="Save"
+                        aria-label="Save name"
                         onClick={handleRename}
                         disabled={savingIdentity()}
                       >
@@ -601,6 +633,7 @@ const TargetDetailPage: Component = () => {
                       <button
                         class="text-theme-text-tertiary hover:text-theme-error transition-colors text-lg leading-none"
                         title="Cancel"
+                        aria-label="Cancel rename"
                         onClick={() => setEditing(false)}
                         disabled={savingIdentity()}
                       >
@@ -633,6 +666,7 @@ const TargetDetailPage: Component = () => {
                               <button
                                 class="text-theme-text-tertiary hover:text-theme-text-primary transition-colors leading-none"
                                 title="Edit object type"
+                                aria-label="Edit object type"
                                 disabled={savingObjectType()}
                                 onClick={() => setEditingObjectType(true)}
                               >
@@ -657,6 +691,7 @@ const TargetDetailPage: Component = () => {
                           <button
                             class="text-theme-text-tertiary hover:text-theme-error transition-colors leading-none"
                             title="Cancel"
+                            aria-label="Cancel object type edit"
                             onClick={() => setEditingObjectType(false)}
                             disabled={savingObjectType()}
                           >

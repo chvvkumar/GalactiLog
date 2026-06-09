@@ -127,6 +127,76 @@ async def test_target_detail_resolved():
     assert len(data["sessions"]) == 2
     assert data["sessions"][0]["session_date"] == "2026-03-20"
     assert data["sessions"][0]["frame_count"] == 2
+    # object_type "Nebula" is not a SIMBAD code, so it categorizes to "Other"
+    assert data["object_type"] == "Nebula"
+    assert data["object_category"] == "Other"
+
+    app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_target_detail_derives_object_category():
+    """Detail response must derive object_category from the stored SIMBAD code.
+
+    Regression: the editor on TargetDetailPage reads object_category for both
+    display and the <select> value. The detail endpoint previously never set
+    object_category, so a saved object type (e.g. "G") never appeared and the
+    inline editor looked like it reset on save.
+    """
+    tid = uuid.uuid4()
+    target = MagicMock(spec=Target)
+    target.id = tid
+    target.primary_name = "NGC 7331"
+    target.aliases = []
+    target.object_type = "G"  # SIMBAD code for Galaxy
+    target.ra = 339.267
+    target.dec = 34.416
+    target.merged_into_id = None
+    target.notes = None
+    target.sac_description = None
+    target.sac_notes = None
+    target.reference_thumbnail_path = None
+    target.name_locked = False
+
+    images = [make_image(tid, "2026-03-20T21:00:00", filter_used="L")]
+
+    mock_session = AsyncMock()
+    mock_session.get = AsyncMock(return_value=target)
+
+    mock_img_result = MagicMock()
+    mock_img_result.all.return_value = images
+    mock_alias_result = MagicMock()
+    mock_alias_result.scalar_one_or_none.return_value = None
+    mock_notes_result = MagicMock()
+    mock_notes_result.all.return_value = []
+    mock_cv_result = MagicMock()
+    mock_cv_result.all.return_value = []
+    mock_memberships_result = MagicMock()
+    mock_memberships_result.scalars.return_value.all.return_value = []
+
+    mock_session.execute = AsyncMock(
+        side_effect=[
+            mock_img_result, mock_alias_result, mock_notes_result,
+            mock_cv_result, mock_memberships_result,
+        ]
+    )
+
+    async def override():
+        yield mock_session
+
+    from app.services.normalization import invalidate_alias_cache
+    invalidate_alias_cache()
+    app.dependency_overrides[get_session] = override
+    app.dependency_overrides[get_current_user] = lambda: _admin_user()
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get(f"/api/targets/{tid}/detail")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["object_type"] == "G"
+    assert data["object_category"] == "Galaxy"
 
     app.dependency_overrides.clear()
 

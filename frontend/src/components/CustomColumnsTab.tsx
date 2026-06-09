@@ -3,6 +3,7 @@ import { api } from "../api/client";
 import type { CustomColumn } from "../types";
 import { useSettingsContext } from "./SettingsProvider";
 import HelpPopover from "./HelpPopover";
+import ConfirmDialog from "./ConfirmDialog";
 
 function OptionsList(props: { options: string[]; onChange: (opts: string[]) => void }) {
   const [draft, setDraft] = createSignal("");
@@ -71,6 +72,7 @@ export default function CustomColumnsTab() {
   const [editingId, setEditingId] = createSignal<string | null>(null);
   const [editName, setEditName] = createSignal("");
   const [editOptions, setEditOptions] = createSignal<string[]>([]);
+  const [deleteConfirmId, setDeleteConfirmId] = createSignal<string | null>(null);
 
   async function handleCreate() {
     const name = newName().trim();
@@ -90,7 +92,6 @@ export default function CustomColumnsTab() {
   }
 
   async function handleDelete(id: string) {
-    if (!confirm("Delete this column and all its values?")) return;
     await api.deleteCustomColumn(id);
     refetch();
   }
@@ -262,7 +263,7 @@ export default function CustomColumnsTab() {
                         <button onClick={() => handleSaveEdit(col)} class="px-4 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded text-sm font-medium hover:bg-theme-accent/25 transition-colors">Save</button>
                         <button onClick={() => setEditingId(null)} class="text-xs text-theme-text-secondary hover:underline">Cancel</button>
                       </Show>
-                      <button onClick={() => handleDelete(col.id)} class="text-xs text-red-500 hover:underline">Delete</button>
+                      <button onClick={() => setDeleteConfirmId(col.id)} class="text-xs text-red-500 hover:underline">Delete</button>
                     </div>
                   </td>
                 </tr>
@@ -272,6 +273,19 @@ export default function CustomColumnsTab() {
           </table>
         </Show>
       </div>
+
+      <ConfirmDialog
+        open={deleteConfirmId() !== null}
+        title="Delete column"
+        message="Delete this column and all its values? This cannot be undone."
+        confirmLabel="Delete"
+        onConfirm={() => {
+          const id = deleteConfirmId();
+          setDeleteConfirmId(null);
+          if (id) handleDelete(id);
+        }}
+        onCancel={() => setDeleteConfirmId(null)}
+      />
     </div>
   );
 }

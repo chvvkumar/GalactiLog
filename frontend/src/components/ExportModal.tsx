@@ -3,6 +3,8 @@ import { api } from "../api/client";
 import type { ExportResponse, SessionOverview } from "../types";
 
 import { formatIntegration } from "../utils/format";
+import { showToast } from "./Toast";
+import Dialog from "./Dialog";
 
 function generateTextExport(data: ExportResponse): string {
   const lines: string[] = [];
@@ -198,9 +200,13 @@ const ExportModal: Component<Props> = (props) => {
   const copyText = async () => {
     const data = exportData();
     if (!data) return;
-    await navigator.clipboard.writeText(renderExport(format(), data));
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    try {
+      await navigator.clipboard.writeText(renderExport(format(), data));
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      showToast("Could not copy to clipboard", "error");
+    }
   };
 
   const downloadFile = () => {
@@ -219,15 +225,15 @@ const ExportModal: Component<Props> = (props) => {
   };
 
   return (
-    <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={props.onClose}>
+    <Dialog open aria-labelledby="export-modal-title" onClose={props.onClose}>
       <div
         class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-lg)] max-w-lg w-full mx-4 max-h-[80vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
         <div class="p-4 border-b border-theme-border flex items-center justify-between">
-          <h2 class="text-sm font-medium text-theme-text-primary">Export - {props.targetName}</h2>
-          <button class="text-theme-text-secondary hover:text-theme-text-primary" onClick={props.onClose}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <h2 id="export-modal-title" class="text-sm font-medium text-theme-text-primary">Export - {props.targetName}</h2>
+          <button class="text-theme-text-secondary hover:text-theme-text-primary" onClick={props.onClose} aria-label="Close">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
               <line x1="6" y1="6" x2="18" y2="18" /><line x1="6" y1="18" x2="18" y2="6" />
             </svg>
           </button>
@@ -315,7 +321,7 @@ const ExportModal: Component<Props> = (props) => {
           </button>
         </div>
       </div>
-    </div>
+    </Dialog>
   );
 };
 

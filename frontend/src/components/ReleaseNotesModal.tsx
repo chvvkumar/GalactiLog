@@ -1,5 +1,5 @@
 import { Component, Show } from "solid-js";
-import { Portal } from "solid-js/web";
+import Dialog from "./Dialog";
 
 interface ReleaseInfo {
   tag: string;
@@ -174,17 +174,18 @@ const ReleaseNotesModal: Component<{
   const rel = () => props.release.release;
 
   return (
-    <Portal>
+    <Dialog
+      open
+      aria-labelledby="release-notes-title"
+      class="bg-black/80 backdrop-blur-sm p-4"
+      onClose={props.onClose}
+    >
       <div
-        class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4"
-        onClick={props.onClose}
+        class="modal-surface relative max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-[var(--radius-md)] border border-theme-border shadow-[var(--shadow-lg)]"
+        onClick={(e) => e.stopPropagation()}
       >
-        <div
-          class="modal-surface relative max-h-[85vh] w-full max-w-md overflow-y-auto rounded-[var(--radius-md)] border border-theme-border shadow-[var(--shadow-lg)]"
-          onClick={(e) => e.stopPropagation()}
-        >
           <div class="modal-surface sticky top-0 border-b border-theme-border px-5 py-3 flex items-start justify-between gap-4">
-            <h2 class="text-lg font-semibold text-theme-text-primary">
+            <h2 id="release-notes-title" class="text-lg font-semibold text-theme-text-primary">
               A newer build is available
             </h2>
             <button
@@ -306,8 +307,7 @@ const ReleaseNotesModal: Component<{
             </div>
           </Show>
         </div>
-      </div>
-    </Portal>
+    </Dialog>
   );
 };
 

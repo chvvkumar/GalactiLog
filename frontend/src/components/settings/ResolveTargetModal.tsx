@@ -2,6 +2,7 @@ import { Component, Show, createSignal, createEffect, For } from "solid-js";
 import { api } from "../../api/client";
 import { showToast } from "../Toast";
 import type { MergeCandidateResponse, OrphanPreviewResponse, TargetSearchResultFuzzy } from "../../types";
+import Dialog from "../Dialog";
 
 interface Props {
   candidate: MergeCandidateResponse;
@@ -118,13 +119,13 @@ const ResolveTargetModal: Component<Props> = (props) => {
   const labelClass = "block text-xs text-theme-text-secondary mb-1";
 
   return (
-    <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={props.onClose}>
+    <Dialog open aria-labelledby="resolve-target-title" onClose={props.onClose}>
       <div
         class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-lg)] max-w-lg w-full mx-4 max-h-[80vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
         <div class="p-4 border-b border-theme-border">
-          <h3 class="text-theme-text-primary font-medium">
+          <h3 id="resolve-target-title" class="text-theme-text-primary font-medium">
             Resolve "{props.candidate.source_name}"
           </h3>
           <p class="text-xs text-theme-text-secondary mt-1">
@@ -281,7 +282,7 @@ const ResolveTargetModal: Component<Props> = (props) => {
           </Show>
         </div>
       </div>
-    </div>
+    </Dialog>
   );
 };
 

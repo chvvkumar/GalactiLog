@@ -1,4 +1,4 @@
-import { Component, createSignal, createEffect, onCleanup, Show } from "solid-js";
+import { Component, createSignal, createEffect, onCleanup, onMount, Show } from "solid-js";
 import { A } from "@solidjs/router";
 import { scanFilters } from "../api/scanFilters";
 import { showToast } from "./Toast";
@@ -37,7 +37,7 @@ const ScanFiltersOnboarding: Component<Props> = (props) => {
   });
 
   const onConfigured = () => setShow(false);
-  window.addEventListener("scan-filters-configured", onConfigured);
+  onMount(() => window.addEventListener("scan-filters-configured", onConfigured));
   onCleanup(() => window.removeEventListener("scan-filters-configured", onConfigured));
 
   const useDefaults = async () => {
