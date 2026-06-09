@@ -1,4 +1,4 @@
-import { Component, createSignal, createEffect, onCleanup, Show, For } from "solid-js";
+import { Component, createSignal, createEffect, onCleanup, onMount, Show, For } from "solid-js";
 import { createStore, produce } from "solid-js/store";
 import { scanFilters } from "../api/scanFilters";
 import type { BrowseEntry } from "../api/scanFilters";
@@ -30,11 +30,26 @@ const makeNode = (e: BrowseEntry): TreeNode => ({
   children: [],
 });
 
+// Focusable element selector shared between focus-move-in and the trap.
+const FOCUSABLE =
+  'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
+
 const FolderBrowserModal: Component<Props> = (props) => {
   const [tree, setTree] = createStore<{ roots: TreeNode[] }>({ roots: [] });
   const [selected, setSelected] = createSignal<Set<string>>(new Set());
   const [loading, setLoading] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
+
+  // Focus management: move focus in on open, restore on close.
+  let modalRef: HTMLDivElement | undefined;
+  let previouslyFocused: Element | null = null;
+
+  const getFocusable = (): HTMLElement[] => {
+    if (!modalRef) return [];
+    return Array.from(modalRef.querySelectorAll<HTMLElement>(FOCUSABLE)).filter(
+      (el) => el.offsetParent !== null || el.getClientRects().length > 0 || el.closest("[hidden]") === null,
+    );
+  };
 
   // Resolve a path of indices to the current node inside the store.
   const nodeAt = (path: number[]): TreeNode => {
@@ -126,14 +141,63 @@ const FolderBrowserModal: Component<Props> = (props) => {
     if (props.open) {
       setSelected(new Set<string>());
       loadRoot();
+      // Capture the element that had focus before this modal opened so we can
+      // restore it when the modal closes.
+      previouslyFocused = document.activeElement;
+      queueMicrotask(() => {
+        const focusable = getFocusable();
+        if (focusable.length > 0) {
+          focusable[0].focus();
+        } else {
+          modalRef?.focus();
+        }
+      });
+    } else {
+      if (previouslyFocused && (previouslyFocused as HTMLElement).focus) {
+        (previouslyFocused as HTMLElement).focus();
+      }
+      previouslyFocused = null;
+    }
+  });
+
+  onCleanup(() => {
+    if (previouslyFocused && (previouslyFocused as HTMLElement).focus) {
+      (previouslyFocused as HTMLElement).focus();
     }
   });
 
   const onKey = (e: KeyboardEvent) => {
-    if (e.key === "Escape" && props.open) props.onCancel();
+    if (!props.open) return;
+    if (e.key === "Escape") {
+      props.onCancel();
+      return;
+    }
+    if (e.key === "Tab") {
+      const focusable = getFocusable();
+      if (focusable.length === 0) {
+        e.preventDefault();
+        modalRef?.focus();
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (e.shiftKey) {
+        if (document.activeElement === first || document.activeElement === modalRef) {
+          e.preventDefault();
+          last.focus();
+        }
+      } else {
+        if (document.activeElement === last || document.activeElement === modalRef) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+    }
   };
-  window.addEventListener("keydown", onKey);
-  onCleanup(() => window.removeEventListener("keydown", onKey));
+  onMount(() => {
+    window.addEventListener("keydown", onKey);
+    onCleanup(() => window.removeEventListener("keydown", onKey));
+  });
 
   const renderNode = (node: TreeNode, path: number[], depth: number) => (
     <div>
@@ -217,10 +281,12 @@ const FolderBrowserModal: Component<Props> = (props) => {
   return (
     <Show when={props.open}>
       <div
+        ref={modalRef}
         class="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
         role="dialog"
         aria-modal="true"
         aria-labelledby="folder-browser-title"
+        tabIndex={-1}
       >
         <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] w-full max-w-xl max-h-[80vh] flex flex-col">
           <div class="p-4 border-b border-theme-border">
