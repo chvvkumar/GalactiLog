@@ -24,7 +24,7 @@ from app.schemas.mosaic import (
     PanelThumbnail,
     PanelSessionsResponse, PanelSessionInfo, SessionStatusUpdate,
 )
-from app.api.auth import get_current_user
+from app.api.deps import get_current_user, require_admin
 from app.services.mosaic_composite import build_mosaic_composite, find_default_filter
 
 router = APIRouter(prefix="/mosaics", tags=["mosaics"])
@@ -508,7 +508,7 @@ async def _batch_panel_stats(
 @router.post("/detect")
 async def trigger_detection(
     session: AsyncSession = Depends(get_session),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_admin),
 ):
     from app.services.mosaic_detection import detect_mosaic_panels
 
@@ -641,7 +641,7 @@ async def accept_suggestion(
     suggestion_id: uuid.UUID,
     body: AcceptSuggestionRequest = AcceptSuggestionRequest(),
     session: AsyncSession = Depends(get_session),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_admin),
 ):
     suggestion = await session.get(MosaicSuggestion, suggestion_id)
     if not suggestion or suggestion.status != "pending":
@@ -738,7 +738,7 @@ async def accept_suggestion(
 async def dismiss_suggestion(
     suggestion_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_admin),
 ):
     suggestion = await session.get(MosaicSuggestion, suggestion_id)
     if not suggestion or suggestion.status != "pending":
@@ -751,7 +751,7 @@ async def dismiss_suggestion(
 @router.post("/clear-reviews")
 async def clear_all_reviews(
     session: AsyncSession = Depends(get_session),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_admin),
 ):
     from sqlalchemy import update
     await session.execute(
@@ -954,7 +954,7 @@ async def list_mosaics(
 async def create_mosaic(
     body: MosaicCreate,
     session: AsyncSession = Depends(get_session),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_admin),
 ):
     mosaic = Mosaic(name=body.name, notes=body.notes)
     session.add(mosaic)
@@ -1330,7 +1330,7 @@ async def update_mosaic(
     mosaic_id: uuid.UUID,
     body: MosaicUpdate,
     session: AsyncSession = Depends(get_session),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_admin),
 ):
     mosaic = await session.get(Mosaic, mosaic_id)
     if not mosaic:
@@ -1351,7 +1351,7 @@ async def update_mosaic(
 async def delete_mosaic(
     mosaic_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_admin),
 ):
     mosaic = await session.get(Mosaic, mosaic_id)
     if not mosaic:
@@ -1381,7 +1381,7 @@ async def add_panel(
     mosaic_id: uuid.UUID,
     body: MosaicPanelCreate,
     session: AsyncSession = Depends(get_session),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_admin),
 ):
     mosaic = await session.get(Mosaic, mosaic_id)
     if not mosaic:
@@ -1423,7 +1423,7 @@ async def batch_update_panels(
     mosaic_id: uuid.UUID,
     body: MosaicPanelBatchRequest,
     session: AsyncSession = Depends(get_session),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_admin),
 ):
     """Update multiple panels in a single transaction (positions, rotation, flip)."""
     q = (
@@ -1485,7 +1485,7 @@ async def update_panel(
     panel_id: uuid.UUID,
     body: MosaicPanelUpdate,
     session: AsyncSession = Depends(get_session),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_admin),
 ):
     panel = await session.get(MosaicPanel, panel_id)
     if not panel or panel.mosaic_id != mosaic_id:
@@ -1515,7 +1515,7 @@ async def remove_panel(
     mosaic_id: uuid.UUID,
     panel_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_admin),
 ):
     panel = await session.get(MosaicPanel, panel_id)
     if not panel or panel.mosaic_id != mosaic_id:
@@ -1608,7 +1608,7 @@ async def update_panel_sessions(
     panel_id: uuid.UUID,
     body: SessionStatusUpdate,
     session: AsyncSession = Depends(get_session),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_admin),
 ):
     """Bulk include/exclude sessions for a panel."""
     from datetime import date as date_type

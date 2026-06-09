@@ -1,5 +1,54 @@
 import pytest
-from app.services.vizier import determine_vizier_catalog, build_adql_query
+from app.services.vizier import (
+    determine_vizier_catalog,
+    build_adql_query,
+    _adql_quote,
+    _adql_int,
+)
+
+
+class TestAdqlEscaping:
+    def test_adql_quote_doubles_single_quote(self):
+        assert _adql_quote("a'b") == "a''b"
+
+    def test_adql_quote_injection(self):
+        assert _adql_quote("x'; DROP TABLE y--") == "x''; DROP TABLE y--"
+
+    def test_adql_int_valid(self):
+        assert _adql_int("129") == 129
+        assert _adql_int(" 33 ") == 33
+
+    def test_adql_int_rejects_non_numeric(self):
+        assert _adql_int("129; DROP") is None
+        assert _adql_int("") is None
+
+    def test_cluster_name_injection_does_not_match(self):
+        """fullmatch prevents an injected cluster name from over-matching B/ocl."""
+        # "Collinder 399'; DROP ..." no longer matches the cluster pattern,
+        # so no query is built at all.
+        assert determine_vizier_catalog("Collinder 399'; DROP TABLE x--") is None
+        assert build_adql_query("Collinder 399'; DROP TABLE x--") is None
+
+    def test_cluster_name_quote_escaped(self):
+        """A legitimately matching cluster value still has quotes doubled.
+
+        Ced uses a permissive `(.+)$` capture, so a quote in the value is kept
+        and must be escaped rather than allowed to break out of the literal.
+        """
+        q = build_adql_query("Ced 51'--")
+        assert q is not None
+        assert "''" in q
+        assert "='51'--'" not in q
+
+    def test_cederblad_quote_escaped(self):
+        q = build_adql_query("Ced 51'--")
+        assert q is not None
+        assert "''" in q
+
+    def test_numeric_catalog_rejects_injection(self):
+        """A Sharpless id whose number part is not an int yields no query."""
+        # Forge a value where _extract_number returns non-numeric text.
+        assert build_adql_query("SH 2-1 OR 1=1") is None
 
 
 class TestDetermineVizierCatalog:

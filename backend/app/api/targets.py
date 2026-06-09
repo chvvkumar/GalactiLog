@@ -35,7 +35,7 @@ def _parse_sexa_dec(s: str) -> float | None:
         return sign * (d + m / 60 + sec / 3600)
     except (ValueError, IndexError):
         return None
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, require_admin
 from app.config import settings, async_redis
 from app.models import Target, Image
 from app.models.catalog_membership import TargetCatalogMembership
@@ -1997,7 +1997,7 @@ async def update_target_notes(
     target_id: uuid.UUID,
     body: NotesUpdate,
     session: AsyncSession = Depends(get_session),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_admin),
 ):
     target = await session.get(Target, target_id)
     if not target:
@@ -2013,7 +2013,7 @@ async def update_session_notes(
     date: str,
     body: NotesUpdate,
     session: AsyncSession = Depends(get_session),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_admin),
 ):
     session_date = date_type.fromisoformat(date)
 

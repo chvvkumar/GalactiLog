@@ -12,6 +12,7 @@ from app.services.simbad import (
     build_primary_name,
     _fetch_tap_aliases,
     _get_simbad_id,
+    _escape_adql_string,
 )
 
 
@@ -514,3 +515,43 @@ class TestGetSimbadId:
         """Descriptive suffix after ' - ' should be stripped, then checked in Stellarium."""
         result = _get_simbad_id("Horsehead Nebula - some description")
         assert result == "Barnard 33"
+
+
+class TestEscapeAdqlString:
+    def test_doubles_single_quote(self):
+        assert _escape_adql_string("M31'; DROP TABLE x--") == "M31''; DROP TABLE x--"
+
+    def test_no_quote_unchanged(self):
+        assert _escape_adql_string("NGC 7000") == "NGC 7000"
+
+    def test_multiple_quotes(self):
+        assert _escape_adql_string("a'b'c") == "a''b''c"
+
+    @pytest.mark.asyncio
+    async def test_tap_query_escapes_injected_quote(self):
+        """A single quote in the object name is doubled in the constructed ADQL."""
+        captured = {}
+
+        class _FakeResp:
+            text = "id\n"
+
+            def raise_for_status(self):
+                pass
+
+        class _FakeClient:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *a):
+                return False
+
+            async def get(self, url, params=None, timeout=None):
+                captured["query"] = params["query"]
+                return _FakeResp()
+
+        with patch("app.services.simbad.httpx.AsyncClient", return_value=_FakeClient()):
+            await _fetch_tap_aliases("M31'; DROP TABLE x--")
+
+        # The injected quote must be doubled and not break out of the literal.
+        assert "main_id = 'M31''; DROP TABLE x--'" in captured["query"]
+        assert "main_id = 'M31'; DROP" not in captured["query"]
