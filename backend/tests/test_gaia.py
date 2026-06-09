@@ -42,15 +42,25 @@ class TestIsClusterType:
     def test_mixed_tokens_one_cluster(self):
         assert _is_cluster_type("HII|OpC") is True
 
-    def test_star_cluster_multi_word_does_not_match_due_to_tokenizer(self):
-        # The tokenizer splits on spaces, so "Open Cluster" becomes ["Open", "Cluster"].
-        # Neither token is in _CLUSTER_CODES, so it returns False.
-        # This is a known limitation of the current tokenizer approach.
-        assert _is_cluster_type("Open Cluster") is False
+    def test_open_cluster_multi_word_matches(self):
+        # Bug fix: "Open Cluster" is a multi-word code and must now match.
+        assert _is_cluster_type("Open Cluster") is True
+
+    def test_globular_cluster_multi_word_matches(self):
+        assert _is_cluster_type("Globular Cluster") is True
+
+    def test_star_cluster_multi_word_matches(self):
+        assert _is_cluster_type("Star Cluster") is True
 
     def test_mixed_tokens_star_cluster_code_with_ocl(self):
         # OCl is a single-word cluster code and does match
         assert _is_cluster_type("OCl") is True
+
+    def test_galaxy_not_cluster(self):
+        assert _is_cluster_type("Galaxy") is False
+
+    def test_hii_not_cluster(self):
+        assert _is_cluster_type("HII") is False
 
 
 # ---------------------------------------------------------------------------

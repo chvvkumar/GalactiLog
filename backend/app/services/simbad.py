@@ -1,10 +1,32 @@
+import asyncio
 import re
 import logging
+import threading
 from typing import Any
 
 import httpx
 
 logger = logging.getLogger(__name__)
+
+# Thread-local storage for persistent event loops.  Celery workers may run on
+# different threads; each thread gets its own loop that is created once and
+# reused across all calls from that thread, avoiding per-call setup/teardown.
+_tls = threading.local()
+
+
+def _get_or_create_loop() -> asyncio.AbstractEventLoop:
+    """Return this thread's persistent event loop, creating it if necessary."""
+    loop = getattr(_tls, "loop", None)
+    if loop is None or loop.is_closed():
+        loop = asyncio.new_event_loop()
+        _tls.loop = loop
+    return loop
+
+
+def _run_async(coro):
+    """Run *coro* on this thread's persistent event loop."""
+    return _get_or_create_loop().run_until_complete(coro)
+
 
 SIMBAD_TAP_URL = "https://simbad.cds.unistra.fr/simbad/sim-tap/sync"
 
@@ -499,8 +521,6 @@ def resolve_target_name_cached(
 
     If skip_simbad=True, only returns cached data (for smart rebuild).
     """
-    import asyncio
-
     normalized = normalize_object_name(object_name)
     mapped = _get_simbad_id(object_name)
     mapped_norm = normalize_object_name(mapped) if mapped != object_name else None
@@ -534,13 +554,9 @@ def resolve_target_name_cached(
         result = await _query_simbad_raw(original_name)
         return result, False
 
-    loop = asyncio.new_event_loop()
-    try:
-        raw, used_mapped = loop.run_until_complete(
-            _resolve_both(mapped if mapped_norm else None, object_name)
-        )
-    finally:
-        loop.close()
+    raw, used_mapped = _run_async(
+        _resolve_both(mapped if mapped_norm else None, object_name)
+    )
 
     if used_mapped and raw:
         save_simbad_cache(mapped_norm, raw, db_session)

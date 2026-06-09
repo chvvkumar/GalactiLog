@@ -420,25 +420,33 @@ def generate_panel_thumbnail(
     Returns (image, native_width) where native_width is the original sensor
     width in pixels before any downscaling.
     """
-    from app.services.thumbnail import get_bayer_pattern, debayer_superpixel
+    from app.services.thumbnail import _read_bayer_debayered, get_bayer_pattern
 
-    # Read native dimensions before decimation
+    # Read native dimensions and header in one open before decimation.
     with fitsio.FITS(str(fits_path), "r") as fits:
-        info = fits[0].get_info()
+        hdu = fits[0]
+        info = hdu.get_info()
+        header = hdu.read_header()
         dims = info.get("dims", [])
-        # dims is [NAXIS1, NAXIS2] for 2D (NAXIS1=width), [3, H, W] for color
+        # fitsio dims mirror the C-order NumPy shape: 2D is [height, width]
+        # (NAXIS2, NAXIS1); color is [3, height, width]. Width is the last
+        # axis in both cases. NOTE: the 2D branch below uses dims[0] (height),
+        # which is the long-standing behavior of the mosaic layout scaling and
+        # is preserved here intentionally; correcting it to dims[1] is a
+        # behavior change tracked separately, not part of this perf work.
         if len(dims) == 2:
-            native_width = dims[0]  # NAXIS1 = width
+            native_width = dims[0]
         elif len(dims) == 3:
             native_width = dims[2]
         else:
             native_width = max(dims) if dims else max_width
 
-    bayer = get_bayer_pattern(fits_path)
+    bayer = get_bayer_pattern(fits_path, header=header)
     if bayer:
-        with fitsio.FITS(str(fits_path), "r") as fits:
-            raw = fits[0].read().astype(np.float32)
-        data = debayer_superpixel(raw, bayer)
+        # Strip-read + debayer to avoid holding the full sensor frame; the
+        # debayered channels feed resize_array unchanged (identical output).
+        # Reuse the header already read so the file isn't reopened.
+        data = _read_bayer_debayered(fits_path, header=header)
     else:
         data = _read_binned(fits_path, max_width)
 

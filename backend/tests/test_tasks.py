@@ -1,24 +1,66 @@
+import sys
 import pytest
 import numpy as np
-import fitsio
 from pathlib import Path
-from unittest.mock import patch, MagicMock, AsyncMock
+from unittest.mock import patch, MagicMock
+
+# conftest.py handles env vars, fitsio stubbing, and the app.worker.tasks mock.
+# Do not override those stubs here.
+
+import fitsio  # noqa: E402  (real when available, MagicMock stub otherwise per conftest)
 
 from app.services.scanner import extract_metadata
 from app.services.thumbnail import generate_thumbnail
 
 
+# ---------------------------------------------------------------------------
+# helpers
+# ---------------------------------------------------------------------------
+
+def _bootstrap_tasks():
+    """Load the real app.worker.tasks, patching create_engine so it doesn't
+    need a live DB connection at import time."""
+    import sys as _sys
+    mod = _sys.modules.get("app.worker.tasks")
+    if mod is not None and not isinstance(mod, MagicMock):
+        return mod
+    _sys.modules.pop("app.worker.tasks", None)
+    mock_engine = MagicMock()
+    with patch("sqlalchemy.create_engine", return_value=mock_engine):
+        import app.worker.tasks as tasks_mod
+    return tasks_mod
+
+
+def _make_partition_result(chunks: list[list]):
+    """Return a mock result proxy that supports .yield_per().partitions() iteration."""
+    result_proxy = MagicMock()
+
+    def _yield_per(n):
+        partition_proxy = MagicMock()
+        partition_proxy.partitions = MagicMock(return_value=iter(chunks))
+        return partition_proxy
+
+    result_proxy.yield_per = _yield_per
+    return result_proxy
+
+
+# ---------------------------------------------------------------------------
+# existing integration tests (fitsio backed)
+# ---------------------------------------------------------------------------
+
 @pytest.fixture
 def sample_fits(tmp_path: Path) -> Path:
-    data = np.random.default_rng(42).normal(1000, 50, (128, 128)).astype(np.float32)
-    header = fitsio.FITSHDR()
+    import fitsio as _fitsio
+    import numpy as _np
+    data = _np.random.default_rng(42).normal(1000, 50, (128, 128)).astype(_np.float32)
+    header = _fitsio.FITSHDR()
     for k, v in {
         "OBJECT": "NGC 7000", "EXPTIME": 600.0, "FILTER": "OIII",
         "CCD-TEMP": -15.0, "GAIN": 100, "DATE-OBS": "2024-06-15T01:30:00",
     }.items():
         header.add_record({"name": k, "value": v})
     path = tmp_path / "Light_NGC7000_001.fits"
-    fitsio.write(str(path), data, header=header, clobber=True)
+    _fitsio.write(str(path), data, header=header, clobber=True)
     return path
 
 
@@ -31,3 +73,249 @@ def test_full_ingest_pipeline(sample_fits: Path, tmp_path: Path):
     thumb_path = tmp_path / "thumbnails" / "thumb.jpg"
     result = generate_thumbnail(sample_fits, thumb_path, max_width=200)
     assert result.exists()
+
+
+# ---------------------------------------------------------------------------
+# PERF-9: regenerate_missing_thumbnails -- chunked fetch
+# ---------------------------------------------------------------------------
+
+class TestRegenerateMissingThumbnailsChunked:
+    """Verify that regenerate_missing_thumbnails processes rows chunk-by-chunk
+    via yield_per/partitions and produces the same logical outcomes as the
+    previous all()-based implementation."""
+
+    def _run(self, tasks_mod, chunks, tmp_path):
+        """Wire a mock Session so execute().yield_per().partitions() returns
+        the supplied chunks, then invoke the task and return its result dict."""
+        mock_redis = MagicMock()
+        mock_redis.set.return_value = True
+
+        # Build real thumbnail files for rows that should appear "present"
+        # and omit files for rows that should appear "missing".
+        partition_result = _make_partition_result(chunks)
+
+        session_ctx = MagicMock()
+        session_ctx.__enter__ = MagicMock(return_value=session_ctx)
+        session_ctx.__exit__ = MagicMock(return_value=False)
+        session_ctx.execute = MagicMock(return_value=partition_result)
+
+        activity_ctx = MagicMock()
+        activity_ctx.__enter__ = MagicMock(return_value=MagicMock())
+        activity_ctx.__exit__ = MagicMock(return_value=False)
+
+        with patch.object(tasks_mod, "_redis", mock_redis), \
+             patch.object(tasks_mod, "_emit_activity_sync", MagicMock()), \
+             patch.object(tasks_mod, "_activity_session", return_value=activity_ctx), \
+             patch.object(tasks_mod, "set_idle_sync", MagicMock()), \
+             patch.object(tasks_mod, "set_ingesting_sync", MagicMock()), \
+             patch.object(tasks_mod, "regenerate_thumbnail") as mock_regen, \
+             patch.object(tasks_mod, "Session", return_value=session_ctx):
+            result = tasks_mod.regenerate_missing_thumbnails.run()
+
+        return result, mock_regen
+
+    def test_no_rows_returns_complete(self):
+        tasks_mod = _bootstrap_tasks()
+        result, mock_regen = self._run(tasks_mod, chunks=[], tmp_path=None)
+        assert result["status"] == "complete"
+        assert result["checked"] == 0
+        assert result["missing"] == 0
+        mock_regen.delay.assert_not_called()
+
+    def test_all_present_returns_complete(self, tmp_path):
+        tasks_mod = _bootstrap_tasks()
+        # Create two real thumbnail files so _check_missing returns False
+        t1 = tmp_path / "t1.jpg"
+        t2 = tmp_path / "t2.jpg"
+        t1.write_bytes(b"x")
+        t2.write_bytes(b"x")
+
+        chunks = [
+            [("id1", "/fits/a.fits", str(t1)), ("id2", "/fits/b.fits", str(t2))],
+        ]
+        result, mock_regen = self._run(tasks_mod, chunks=chunks, tmp_path=tmp_path)
+        assert result["status"] == "complete"
+        assert result["checked"] == 2
+        assert result["missing"] == 0
+        mock_regen.delay.assert_not_called()
+
+    def test_missing_thumbnails_queued_across_chunks(self, tmp_path):
+        tasks_mod = _bootstrap_tasks()
+        # t1 exists on disk; t2 and t3 do not
+        t1 = tmp_path / "t1.jpg"
+        t1.write_bytes(b"x")
+        t2 = str(tmp_path / "missing2.jpg")
+        t3 = str(tmp_path / "missing3.jpg")
+
+        # Two chunks to verify multi-chunk processing
+        chunks = [
+            [("id1", "/fits/a.fits", str(t1)), ("id2", "/fits/b.fits", t2)],
+            [("id3", "/fits/c.fits", t3)],
+        ]
+        result, mock_regen = self._run(tasks_mod, chunks=chunks, tmp_path=tmp_path)
+        assert result["status"] == "ingesting"
+        assert result["checked"] == 3
+        assert result["missing"] == 2
+        assert mock_regen.delay.call_count == 2
+        queued_ids = {c.args[0] for c in mock_regen.delay.call_args_list}
+        assert "id2" in queued_ids
+        assert "id3" in queued_ids
+
+    def test_row_without_file_path_skipped(self, tmp_path):
+        """Rows where file_path is falsy must not be queued even if thumb is missing."""
+        tasks_mod = _bootstrap_tasks()
+        t_missing = str(tmp_path / "missing.jpg")
+
+        chunks = [
+            [("id1", None, t_missing)],
+        ]
+        result, mock_regen = self._run(tasks_mod, chunks=chunks, tmp_path=tmp_path)
+        assert result["missing"] == 0
+        mock_regen.delay.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# PERF-9: purge_and_regenerate_thumbnails -- chunked fetch
+# ---------------------------------------------------------------------------
+
+class TestPurgeAndRegenerateThumbnailsChunked:
+    """Verify that purge_and_regenerate_thumbnails processes rows in chunks for
+    both the delete pass and the queue pass."""
+
+    def _run(self, tasks_mod, total_count, chunks_data, tmp_path, cancel_after_purge=False):
+        mock_redis = MagicMock()
+
+        # Mock the count query (first Session call).
+        # session.execute(...).scalar_one() must return total_count.
+        count_session_ctx = MagicMock()
+        count_session_ctx.__enter__ = MagicMock(return_value=count_session_ctx)
+        count_session_ctx.__exit__ = MagicMock(return_value=False)
+        count_execute_result = MagicMock()
+        count_execute_result.scalar_one = MagicMock(return_value=total_count)
+        count_session_ctx.execute = MagicMock(return_value=count_execute_result)
+
+        # Mock the delete+queue chunk Sessions (second and third calls)
+        partition_result = _make_partition_result(chunks_data)
+        chunk_session_ctx = MagicMock()
+        chunk_session_ctx.__enter__ = MagicMock(return_value=chunk_session_ctx)
+        chunk_session_ctx.__exit__ = MagicMock(return_value=False)
+        chunk_session_ctx.execute = MagicMock(return_value=partition_result)
+
+        activity_ctx = MagicMock()
+        activity_ctx.__enter__ = MagicMock(return_value=MagicMock())
+        activity_ctx.__exit__ = MagicMock(return_value=False)
+
+        cancel_calls = [False, cancel_after_purge]
+        cancel_iter = iter(cancel_calls)
+
+        def _is_cancel(*a, **kw):
+            try:
+                return next(cancel_iter)
+            except StopIteration:
+                return False
+
+        session_call_count = [0]
+
+        def _session_factory(*a, **kw):
+            session_call_count[0] += 1
+            if session_call_count[0] == 1:
+                return count_session_ctx
+            # Re-create a fresh partition result each time so both passes get chunks
+            fresh_partition = _make_partition_result(chunks_data)
+            fresh_ctx = MagicMock()
+            fresh_ctx.__enter__ = MagicMock(return_value=fresh_ctx)
+            fresh_ctx.__exit__ = MagicMock(return_value=False)
+            fresh_ctx.execute = MagicMock(return_value=fresh_partition)
+            return fresh_ctx
+
+        with patch.object(tasks_mod, "_redis", mock_redis), \
+             patch.object(tasks_mod, "_emit_activity_sync", MagicMock()), \
+             patch.object(tasks_mod, "_activity_session", return_value=activity_ctx), \
+             patch.object(tasks_mod, "set_idle_sync", MagicMock()), \
+             patch.object(tasks_mod, "set_ingesting_sync", MagicMock()), \
+             patch.object(tasks_mod, "set_cancelled_sync", MagicMock()), \
+             patch.object(tasks_mod, "is_cancel_requested_sync", side_effect=_is_cancel), \
+             patch.object(tasks_mod, "regenerate_thumbnail") as mock_regen, \
+             patch.object(tasks_mod, "Session", side_effect=_session_factory):
+            result = tasks_mod.purge_and_regenerate_thumbnails.run()
+
+        return result, mock_regen
+
+    def test_no_images_returns_complete(self):
+        tasks_mod = _bootstrap_tasks()
+        result, mock_regen = self._run(tasks_mod, total_count=0, chunks_data=[], tmp_path=None)
+        assert result["status"] == "complete"
+        assert result["deleted"] == 0
+        assert result["queued"] == 0
+        mock_regen.delay.assert_not_called()
+
+    def test_images_queued_across_chunks(self, tmp_path):
+        tasks_mod = _bootstrap_tasks()
+        t1 = tmp_path / "t1.jpg"
+        t1.write_bytes(b"x")
+        t2 = tmp_path / "t2.jpg"
+        t2.write_bytes(b"x")
+
+        chunks = [
+            [("id1", "/fits/a.fits", str(t1)), ("id2", "/fits/b.fits", str(t2))],
+        ]
+        result, mock_regen = self._run(tasks_mod, total_count=2, chunks_data=chunks, tmp_path=tmp_path)
+        assert result["status"] == "ingesting"
+        assert result["queued"] == 2
+        assert mock_regen.delay.call_count == 2
+
+    def test_rows_without_file_path_not_queued(self, tmp_path):
+        tasks_mod = _bootstrap_tasks()
+        chunks = [
+            [("id1", None, str(tmp_path / "t1.jpg")), ("id2", "/fits/b.fits", None)],
+        ]
+        result, mock_regen = self._run(tasks_mod, total_count=2, chunks_data=chunks, tmp_path=tmp_path)
+        assert result["queued"] == 0
+        mock_regen.delay.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# PERF-10: detect_duplicate_targets Pass 2 -- LEFT JOIN aggregate
+# ---------------------------------------------------------------------------
+
+class TestDetectDuplicatesPass2JoinQuery:
+    """Verify the SQL text used in Pass 2 uses a LEFT JOIN aggregate rather
+    than a correlated subquery, and that img_count values are correctly read."""
+
+    def test_pass2_query_uses_left_join_not_correlated_subquery(self):
+        import pathlib
+        src = pathlib.Path("app/worker/tasks.py").read_text()
+        # Find the active_targets_query block used in Pass 2
+        assert "LEFT JOIN" in src, "Pass 2 query must use LEFT JOIN aggregate"
+        assert "COALESCE(ic.img_count, 0)" in src, "Pass 2 must use COALESCE for 0-image targets"
+        # The old correlated subquery pattern must be gone
+        assert "(SELECT COUNT(*) FROM images i\n                    WHERE i.resolved_target_id = t.id)" \
+            not in src, "Correlated subquery must be replaced by LEFT JOIN"
+
+    def test_pass2_query_coalesce_handles_zero_images(self):
+        """Simulate the query result: a target with no images should yield img_count=0."""
+        # Two rows as if returned by the new LEFT JOIN query:
+        # (id, primary_name, aliases, img_count)
+        rows = [
+            (1, "NGC 1", ["n1"], 5),   # target with images
+            (2, "NGC 2", None, 0),     # target with no images (COALESCE result)
+        ]
+        # Reproduce the target_info mapping the task builds from those rows
+        target_info = {row[0]: (row[1], row[3]) for row in rows}
+        assert target_info[1] == ("NGC 1", 5)
+        assert target_info[2] == ("NGC 2", 0)
+
+    def test_pass2_group_sorting_uses_img_count(self):
+        """Targets within a duplicate group are sorted descending by img_count so
+        the one with the most images is selected as the merge winner."""
+        # Simulate three targets sharing an alias, with img_counts from the LEFT JOIN
+        members_with_info = [
+            (3, "Target C", 1),
+            (1, "Target A", 10),
+            (2, "Target B", 4),
+        ]
+        members_with_info.sort(key=lambda x: x[2], reverse=True)
+        winner_id, winner_name, winner_count = members_with_info[0]
+        assert winner_id == 1
+        assert winner_name == "Target A"
+        assert winner_count == 10

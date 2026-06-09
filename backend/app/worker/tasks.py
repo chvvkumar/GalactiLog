@@ -599,14 +599,36 @@ def regenerate_missing_thumbnails() -> dict:
     """Check every image's thumbnail_path and regenerate only those whose
     files are missing from disk.  Much faster than a full regeneration when
     only a handful of files were lost.
+
+    Rows are fetched in chunks of 2000 to keep memory bounded regardless of
+    catalog size.  ThreadPoolExecutor parallelism is applied within each chunk.
     """
+    _CHUNK = 2000
+
+    from concurrent.futures import ThreadPoolExecutor
+
+    def _check_missing(thumb_path: str) -> bool:
+        return not Path(thumb_path).is_file()
+
+    checked = 0
+    missing: list[tuple[str, str, str]] = []
+
     with Session(_sync_engine) as session:
-        rows = session.execute(
+        result = session.execute(
             select(Image.id, Image.file_path, Image.thumbnail_path)
             .where(Image.thumbnail_path.isnot(None))
-        ).all()
+        ).yield_per(_CHUNK)
 
-    if not rows:
+        with ThreadPoolExecutor(max_workers=32) as pool:
+            for chunk in result.partitions(_CHUNK):
+                checked += len(chunk)
+                futures = {pool.submit(_check_missing, tp): (image_id, fp, tp)
+                           for image_id, fp, tp in chunk}
+                for fut, (image_id, file_path, thumb_path) in futures.items():
+                    if fut.result() and file_path:
+                        missing.append((str(image_id), file_path, thumb_path))
+
+    if checked == 0:
         set_idle_sync(_redis)
         with _activity_session() as _db:
             _emit_activity_sync(
@@ -617,30 +639,16 @@ def regenerate_missing_thumbnails() -> dict:
             )
         return {"status": "complete", "checked": 0, "missing": 0}
 
-    from concurrent.futures import ThreadPoolExecutor
-
-    def _check_missing(thumb_path: str) -> bool:
-        return not Path(thumb_path).is_file()
-
-    with ThreadPoolExecutor(max_workers=32) as pool:
-        results = list(pool.map(_check_missing, [tp for _, _, tp in rows]))
-
-    missing = [
-        (str(image_id), file_path, thumb_path)
-        for (image_id, file_path, thumb_path), is_missing in zip(rows, results)
-        if is_missing and file_path
-    ]
-
     if not missing:
         set_idle_sync(_redis)
         with _activity_session() as _db:
             _emit_activity_sync(
                 _db, redis=_redis, category="thumbnail", severity="info",
                 event_type="thumb_missing_complete",
-                message=f"All {len(rows)} thumbnails present on disk, nothing to regenerate",
-                details={"checked": len(rows), "missing": 0}, actor="system",
+                message=f"All {checked} thumbnails present on disk, nothing to regenerate",
+                details={"checked": checked, "missing": 0}, actor="system",
             )
-        return {"status": "complete", "checked": len(rows), "missing": 0}
+        return {"status": "complete", "checked": checked, "missing": 0}
 
     set_ingesting_sync(_redis, total=len(missing))
 
@@ -649,14 +657,14 @@ def regenerate_missing_thumbnails() -> dict:
             _db, redis=_redis, category="thumbnail", severity="info",
             event_type="thumb_missing_start",
             message=f"Found {len(missing)} missing thumbnail{'s' if len(missing) != 1 else ''} "
-                    f"out of {len(rows)} checked, queueing regeneration...",
-            details={"checked": len(rows), "missing": len(missing)}, actor="system",
+                    f"out of {checked} checked, queueing regeneration...",
+            details={"checked": checked, "missing": len(missing)}, actor="system",
         )
 
     for image_id, file_path, thumb_path in missing:
         regenerate_thumbnail.delay(image_id, file_path, thumb_path)
 
-    return {"status": "ingesting", "checked": len(rows), "missing": len(missing)}
+    return {"status": "ingesting", "checked": checked, "missing": len(missing)}
 
 
 @celery_app.task(name="purge_and_regenerate_thumbnails")
@@ -666,13 +674,30 @@ def purge_and_regenerate_thumbnails() -> dict:
     Logs start, per-batch progress, and completion of the delete phase to the
     activity log. The final "scan complete" activity is emitted by the usual
     check_complete_sync flow once all regenerate_thumbnail tasks finish.
-    """
-    with Session(_sync_engine) as session:
-        rows = session.execute(
-            select(Image.id, Image.file_path, Image.thumbnail_path)
-        ).all()
 
-    total = len(rows)
+    Rows are fetched in chunks of 2000 to keep memory bounded regardless of
+    catalog size.  ThreadPoolExecutor parallelism is applied within each chunk.
+    """
+    _CHUNK = 2000
+
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    def _unlink_one(thumb_path: str) -> str:
+        """Return 'deleted', 'missing', or 'error'. Network-IO bound."""
+        try:
+            Path(thumb_path).unlink()
+            return "deleted"
+        except FileNotFoundError:
+            return "missing"
+        except OSError as exc:
+            logger.warning("Failed to delete thumbnail %s: %s", thumb_path, exc)
+            return "error"
+
+    # First pass: count total rows (needed for cancel/start messages before deletion begins)
+    with Session(_sync_engine) as session:
+        total_result = session.execute(select(func.count(Image.id))).scalar_one()
+    total = total_result
+
     if not total:
         set_idle_sync(_redis)
         with _activity_session() as _db:
@@ -703,39 +728,36 @@ def purge_and_regenerate_thumbnails() -> dict:
             details={"total": total}, actor="system",
         )
 
-    from concurrent.futures import ThreadPoolExecutor, as_completed
-
-    def _unlink_one(thumb_path: str) -> str:
-        """Return 'deleted', 'missing', or 'error'. Network-IO bound."""
-        try:
-            Path(thumb_path).unlink()
-            return "deleted"
-        except FileNotFoundError:
-            return "missing"
-        except OSError as exc:
-            logger.warning("Failed to delete thumbnail %s: %s", thumb_path, exc)
-            return "error"
-
-    paths = [tp for (_id, _fp, tp) in rows if tp]
+    # Second pass: delete thumbnails chunk-by-chunk
     deleted = 0
-    missing = 0
-    with ThreadPoolExecutor(max_workers=32) as pool:
-        futures = [pool.submit(_unlink_one, tp) for tp in paths]
-        for fut in as_completed(futures):
-            result = fut.result()
-            if result == "deleted":
-                deleted += 1
-            elif result == "missing":
-                missing += 1
+    missing_files = 0
+    with Session(_sync_engine) as session:
+        result = session.execute(
+            select(Image.id, Image.file_path, Image.thumbnail_path)
+        ).yield_per(_CHUNK)
+
+        with ThreadPoolExecutor(max_workers=32) as pool:
+            for chunk in result.partitions(_CHUNK):
+                paths_in_chunk = [(image_id, fp, tp) for image_id, fp, tp in chunk if tp]
+                if not paths_in_chunk:
+                    continue
+                futures = {pool.submit(_unlink_one, tp): (image_id, fp, tp)
+                           for image_id, fp, tp in paths_in_chunk}
+                for fut in as_completed(futures):
+                    outcome = fut.result()
+                    if outcome == "deleted":
+                        deleted += 1
+                    elif outcome == "missing":
+                        missing_files += 1
 
     with _activity_session() as _db:
         _emit_activity_sync(
             _db, redis=_redis, category="thumbnail", severity="info",
             event_type="thumb_purge_complete",
             message=f"Deleted {deleted} thumbnail{'s' if deleted != 1 else ''}"
-                    + (f" ({missing} already missing)" if missing else "")
+                    + (f" ({missing_files} already missing)" if missing_files else "")
                     + f", queueing {total} for regeneration...",
-            details={"deleted": deleted, "missing": missing, "queued": total},
+            details={"deleted": deleted, "missing": missing_files, "queued": total},
             actor="system",
         )
 
@@ -746,20 +768,27 @@ def purge_and_regenerate_thumbnails() -> dict:
                 _db, redis=_redis, category="thumbnail", severity="info",
                 event_type="rebuild_cancelled",
                 message=f"Thumbnail purge cancelled after deleting {deleted} files; regen skipped",
-                details={"deleted": deleted, "missing": missing, "queued": 0, "total": total},
+                details={"deleted": deleted, "missing": missing_files, "queued": 0, "total": total},
                 actor="system",
             )
-        return {"status": "cancelled", "deleted": deleted, "missing": missing, "queued": 0}
+        return {"status": "cancelled", "deleted": deleted, "missing": missing_files, "queued": 0}
 
     set_ingesting_sync(_redis, total=total)
 
+    # Third pass: queue regeneration chunk-by-chunk
     queued = 0
-    for image_id, file_path, thumb_path in rows:
-        if file_path and thumb_path:
-            regenerate_thumbnail.delay(str(image_id), file_path, thumb_path)
-            queued += 1
+    with Session(_sync_engine) as session:
+        result = session.execute(
+            select(Image.id, Image.file_path, Image.thumbnail_path)
+        ).yield_per(_CHUNK)
 
-    return {"status": "ingesting", "deleted": deleted, "missing": missing, "queued": queued}
+        for chunk in result.partitions(_CHUNK):
+            for image_id, file_path, thumb_path in chunk:
+                if file_path and thumb_path:
+                    regenerate_thumbnail.delay(str(image_id), file_path, thumb_path)
+                    queued += 1
+
+    return {"status": "ingesting", "deleted": deleted, "missing": missing_files, "queued": queued}
 
 
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=10)
@@ -954,12 +983,18 @@ def detect_duplicate_targets(parent_activity_id: int | None = None):
         )
         existing_names_p2 = {row[0] for row in existing_pass2.all()}
 
-        # Load all active (non-merged) targets with their image counts
+        # Load all active (non-merged) targets with their image counts.
+        # Use a LEFT JOIN to a grouped aggregate instead of a correlated subquery
+        # so the planner can execute a single hash-join rather than N index scans.
         active_targets_query = sa_text("""
             SELECT t.id, t.primary_name, t.aliases,
-                   (SELECT COUNT(*) FROM images i
-                    WHERE i.resolved_target_id = t.id) AS img_count
+                   COALESCE(ic.img_count, 0) AS img_count
             FROM targets t
+            LEFT JOIN (
+                SELECT resolved_target_id, COUNT(*) AS img_count
+                FROM images
+                GROUP BY resolved_target_id
+            ) ic ON ic.resolved_target_id = t.id
             WHERE t.merged_into_id IS NULL
         """)
         active_rows = db.execute(active_targets_query).all()

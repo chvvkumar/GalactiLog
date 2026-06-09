@@ -616,7 +616,7 @@ async def get_mosaic_composite_debug(
         exists = fits_path.exists()
         if exists:
             try:
-                tile_img, nw = generate_panel_thumbnail(fits_path, max_width=400)
+                tile_img, nw = await asyncio.to_thread(generate_panel_thumbnail, fits_path, 400)
                 native_width = nw
                 tile_w, tile_h = tile_img.size
             except Exception as e:
