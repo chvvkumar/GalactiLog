@@ -235,6 +235,7 @@ def resolve_target(
     # single create-collision cannot cascade NULLs across the scan batch.
     existing = match_target_by_identity(result, object_name, session)
     if existing is not None:
+        session.commit()
         return str(existing.id)
 
     return _create_target(result, normalized, session)

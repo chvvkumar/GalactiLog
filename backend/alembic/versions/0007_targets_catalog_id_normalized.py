@@ -126,14 +126,22 @@ def upgrade() -> None:
             "ON targets (catalog_id_normalized)"
         ))
     else:
-        # Leave the index uncreated; backfill + duplicate-detection resolve the
-        # rest, and a later `alembic upgrade head` re-run creates it once clean.
-        # The migration still succeeds (revision advances to 0007); the unique
-        # index lands on the next upgrade after duplicates are cleared.
+        # Leave the index uncreated. The migration still succeeds (revision
+        # advances to 0007), but the unique index is not present. Re-running
+        # `alembic upgrade head` will NOT re-execute this block because the
+        # revision is already stamped. The operator must resolve the remaining
+        # duplicates (via the app's merge tools or the catalog-identity backfill
+        # endpoint) and then create the index manually:
+        #
+        #   CREATE UNIQUE INDEX IF NOT EXISTS uq_targets_catalog_id_normalized
+        #       ON targets (catalog_id_normalized);
         logger.warning(
-            "0007: %d duplicate catalog identities remain; UNIQUE index NOT "
-            "created. Resolve duplicates (backfill / duplicate-detection) then "
-            "re-run `alembic upgrade head` to create the index.", remaining,
+            "0007: %d active targets still share a normalized catalog identity; "
+            "the UNIQUE index uq_targets_catalog_id_normalized was NOT created. "
+            "Resolve the remaining duplicates (use the app's merge tools or the "
+            "catalog-identity backfill endpoint), then create the index manually: "
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_targets_catalog_id_normalized "
+            "ON targets (catalog_id_normalized);", remaining,
         )
 
 
