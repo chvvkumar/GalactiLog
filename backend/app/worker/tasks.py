@@ -1121,13 +1121,21 @@ def rebuild_targets(self) -> dict:
     clear_cancel_sync(_redis)
     set_rebuild_running_sync(_redis, "full", "Clearing existing targets...")
 
-    # Phase 1: Clear everything
+    # Phase 1: Clear everything except user-defined custom targets, which SIMBAD
+    # cannot recreate. Unlink only images NOT attached to a surviving custom
+    # target so a custom "Jupiter" and its frames survive the rebuild.
     with Session(_sync_engine) as session:
-        session.execute(text("UPDATE images SET resolved_target_id = NULL"))
+        session.execute(text("""
+            UPDATE images SET resolved_target_id = NULL
+            WHERE resolved_target_id IS NULL
+               OR resolved_target_id NOT IN (
+                   SELECT id FROM targets WHERE user_defined = TRUE
+               )
+        """))
         session.execute(text("DELETE FROM merge_candidates"))
-        session.execute(text("DELETE FROM targets"))
+        session.execute(text("DELETE FROM targets WHERE user_defined = FALSE"))
         session.commit()
-    logger.info("rebuild_targets: cleared all targets and links")
+    logger.info("rebuild_targets: cleared all non-custom targets and links")
 
     _redis.delete("target_resolver:negative")
 
@@ -1532,7 +1540,7 @@ def _smart_rebuild_inner(manual: bool = False, parent_activity_id: int | None = 
                 stats["rederived"] = rederived
                 session.commit()
                 return _emit_cancelled()
-            if target.name_locked:
+            if target.name_locked or target.user_defined:
                 continue
             # Try to find cached SIMBAD data for this target
             cached = get_cached_simbad(normalize_object_name(target.catalog_id or target.primary_name), session)
@@ -1578,6 +1586,7 @@ def _smart_rebuild_inner(manual: bool = False, parent_activity_id: int | None = 
             WHERE merged_into_id IS NULL
               AND (catalog_id IS NOT NULL OR common_name IS NOT NULL)
               AND name_locked = FALSE
+              AND user_defined = FALSE
               AND primary_name != CASE
                 WHEN catalog_id IS NOT NULL AND common_name IS NOT NULL
                     THEN catalog_id || ' - ' || common_name

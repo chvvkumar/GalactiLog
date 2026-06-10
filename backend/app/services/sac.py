@@ -169,6 +169,8 @@ def enrich_target_from_sac(session: Session, target: Target) -> bool:
 
     Returns True if any fields were updated.
     """
+    if getattr(target, "user_defined", False):
+        return False
     entry = lookup_sac(session, target.catalog_id, target.aliases)
     if not entry:
         return False

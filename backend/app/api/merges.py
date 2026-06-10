@@ -1,7 +1,8 @@
 import uuid
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select, update, func, delete
+from sqlalchemy import select, update, func, delete, or_, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 from app.database import get_session
@@ -10,7 +11,8 @@ from app.models.user import User
 from app.models.target import Target
 from app.models.image import Image
 from app.models.merge_candidate import MergeCandidate
-from app.schemas.target import MergeCandidateResponse, MergedTargetResponse, MergeRequest, OrphanPreviewRequest, OrphanPreviewResponse, OrphanCreateRequest, MergePreviewRequest, MergePreviewResponse, TargetIdentityRequest, TargetIdentityResponse, StatusResponse, MergeCandidateCountResponse, DuplicateDetectionResponse, OrphanCreateResponse
+from app.schemas.target import MergeCandidateResponse, MergedTargetResponse, MergeRequest, OrphanPreviewRequest, OrphanPreviewResponse, OrphanCreateRequest, MergePreviewRequest, MergePreviewResponse, TargetIdentityRequest, TargetIdentityResponse, StatusResponse, MergeCandidateCountResponse, DuplicateDetectionResponse, OrphanCreateResponse, CustomTargetCreateRequest, CustomTargetCreateResponse
+from app.services.simbad import normalize_catalog_id, normalize_object_name
 from app.models.simbad_cache import SimbadCache
 from app.models.sesame_cache import SesameCache
 from app.config import async_redis
@@ -196,6 +198,88 @@ async def orphan_preview(
     )
 
 
+def _build_aliases(primary_name: str, raw_aliases) -> list[str]:
+    """Build the stored aliases for a manually created target.
+
+    Keeps the user-typed alias strings and additionally stores the normalized
+    uppercase form (normalize_object_name) of the primary name and of every
+    alias. The scanner uppercases an incoming OBJECT before matching it against
+    aliases, so without these a custom "Jupiter" with alias "Jove" would not
+    link OBJECT=JUPITER or OBJECT=JOVE. The primary name's own literal string is
+    not stored as an alias (it is matched separately on primary_name), but its
+    normalized uppercase form is, so future images link. Order-stable and
+    deduped case-insensitively.
+    """
+    primary = primary_name.strip()
+    aliases: list[str] = []
+    # Exclude only the literal primary string; its normalized form is allowed.
+    seen = {primary}
+
+    def _add(value: str) -> None:
+        v = value.strip()
+        if v and v not in seen:
+            aliases.append(v)
+            seen.add(v)
+
+    for raw in raw_aliases:
+        a = (raw or "").strip()
+        if not a:
+            continue
+        _add(a)
+        _add(normalize_object_name(a))
+    _add(normalize_object_name(primary))
+    return aliases
+
+
+async def _find_name_conflict(
+    session: AsyncSession, name: str, aliases: list[str]
+) -> tuple[list[str], "Target | None"]:
+    """Case-insensitive conflict lookup across primary names and aliases.
+
+    Returns (names_upper, conflicting_target_or_None). names_upper is every
+    name the new target would answer to, uppercased. Historical aliases were
+    stored as-typed by orphan_create, so an exact-case alias match would miss
+    mixed-case collisions.
+    """
+    names_upper = sorted({name.upper(), *(a.upper() for a in aliases)})
+    conflict = (await session.execute(
+        select(Target).where(
+            Target.merged_into_id.is_(None),
+            or_(
+                func.upper(Target.primary_name).in_(names_upper),
+                text(
+                    "EXISTS (SELECT 1 FROM unnest(targets.aliases) a"
+                    " WHERE upper(a) = ANY(:conflict_names))"
+                ).bindparams(conflict_names=names_upper),
+            ),
+        )
+    )).scalars().first()
+    return names_upper, conflict
+
+
+def _enrich_new_target(target_id) -> None:
+    """Best-effort catalog enrichment for a newly created target."""
+    try:
+        from sqlalchemy.orm import Session as SyncSession
+        from app.database import sync_engine
+        from app.services.openngc import enrich_target_from_openngc
+        from app.services.sac import enrich_target_from_sac
+        from app.services.vizier import enrich_target_from_vizier
+
+        with SyncSession(sync_engine) as sync_db:
+            db_target = sync_db.get(Target, target_id)
+            if db_target:
+                enrich_target_from_openngc(sync_db, db_target)
+                sync_db.commit()
+                if db_target.size_major is None:
+                    enrich_target_from_vizier(sync_db, db_target)
+                    sync_db.commit()
+                enrich_target_from_sac(sync_db, db_target)
+                sync_db.commit()
+    except Exception:
+        pass
+
+
 @router.post("/orphan-create", response_model=OrphanCreateResponse)
 async def orphan_create(
     body: OrphanCreateRequest,
@@ -209,15 +293,34 @@ async def orphan_create(
     if candidate.status != "pending":
         raise HTTPException(status_code=400, detail="Candidate is not pending")
 
+    name = body.primary_name.strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="Primary name is required")
+
     now = datetime.now(timezone.utc)
 
+    aliases = _build_aliases(name, [candidate.source_name, *body.aliases])
+
+    _, conflict = await _find_name_conflict(session, name, aliases)
+    if conflict:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f'Name already in use by "{conflict.primary_name}". '
+                'Use "Merge into Existing" to attach these images to it.'
+            ),
+        )
+
     target = Target(
-        primary_name=body.primary_name,
+        primary_name=name,
         catalog_id=body.catalog_id,
-        aliases=[candidate.source_name] if candidate.source_name != body.primary_name else [],
+        catalog_id_normalized=normalize_catalog_id(body.catalog_id),
+        aliases=aliases,
         ra=body.ra,
         dec=body.dec,
         object_type=body.object_type,
+        user_defined=body.user_defined,
+        name_locked=body.user_defined,
     )
     session.add(target)
     await session.flush()
@@ -235,30 +338,120 @@ async def orphan_create(
     candidate.status = "accepted"
     candidate.resolved_at = now
 
-    await session.commit()
-
-    # Run enrichment (sync, non-critical)
     try:
-        from sqlalchemy.orm import Session as SyncSession
-        from app.database import sync_engine
-        from app.services.openngc import enrich_target_from_openngc
-        from app.services.sac import enrich_target_from_sac
-        from app.services.vizier import enrich_target_from_vizier
+        await session.commit()
+    except IntegrityError:
+        # A unique constraint (e.g. primary_name) lost a race or collided with a
+        # soft-deleted merged target's name. Report a conflict, not a 500.
+        await session.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail=f'Name already in use by "{name}"',
+        )
 
-        with SyncSession(sync_engine) as sync_db:
-            db_target = sync_db.get(Target, target.id)
-            if db_target:
-                enrich_target_from_openngc(sync_db, db_target)
-                sync_db.commit()
-                if db_target.size_major is None:
-                    enrich_target_from_vizier(sync_db, db_target)
-                    sync_db.commit()
-                enrich_target_from_sac(sync_db, db_target)
-                sync_db.commit()
-    except Exception:
-        pass
+    if not body.user_defined:
+        _enrich_new_target(target.id)
 
     return {"target_id": str(target.id)}
+
+
+@router.post("/custom", response_model=CustomTargetCreateResponse)
+async def create_custom_target(
+    body: CustomTargetCreateRequest,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(require_admin),
+):
+    """Create a target manually, unattached to any merge candidate.
+
+    Used for custom objects (planets, comets) and pre-creating targets before
+    their images are scanned. Retro-links any pending orphan candidates whose
+    source name matches the new target's names.
+    """
+    name = body.primary_name.strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="Primary name is required")
+
+    aliases = _build_aliases(name, body.aliases)
+
+    names_upper, conflict = await _find_name_conflict(session, name, aliases)
+    if conflict:
+        raise HTTPException(
+            status_code=409,
+            detail=f'Name already in use by "{conflict.primary_name}"',
+        )
+
+    cat_norm = normalize_catalog_id(body.catalog_id)
+    if cat_norm:
+        dup = (await session.execute(
+            select(Target).where(
+                Target.merged_into_id.is_(None),
+                Target.catalog_id_normalized == cat_norm,
+            )
+        )).scalars().first()
+        if dup:
+            raise HTTPException(
+                status_code=409,
+                detail=f'Catalog ID already belongs to "{dup.primary_name}"',
+            )
+
+    target = Target(
+        primary_name=name,
+        catalog_id=body.catalog_id,
+        catalog_id_normalized=cat_norm,
+        aliases=aliases,
+        ra=body.ra,
+        dec=body.dec,
+        object_type=body.object_type,
+        user_defined=body.user_defined,
+        name_locked=True,
+    )
+    session.add(target)
+    await session.flush()
+
+    # Retro-link pending orphan candidates whose source name matches, and
+    # resolve their images, so pre-created targets absorb existing orphans.
+    pending = (await session.execute(
+        select(MergeCandidate).where(
+            MergeCandidate.status == "pending",
+            func.upper(MergeCandidate.source_name).in_(names_upper),
+        )
+    )).scalars().all()
+
+    now = datetime.now(timezone.utc)
+    linked_images = 0
+    for cand in pending:
+        result = await session.execute(
+            update(Image)
+            .where(
+                Image.raw_headers["OBJECT"].astext == cand.source_name,
+                Image.resolved_target_id.is_(None),
+            )
+            .values(resolved_target_id=target.id)
+        )
+        linked_images += result.rowcount or 0
+        cand.suggested_target_id = target.id
+        cand.status = "accepted"
+        cand.resolved_at = now
+
+    try:
+        await session.commit()
+    except IntegrityError:
+        # A unique constraint (e.g. primary_name) lost a race or collided with a
+        # soft-deleted merged target's name. Report a conflict, not a 500.
+        await session.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail=f'Name already in use by "{name}"',
+        )
+
+    if not body.user_defined:
+        _enrich_new_target(target.id)
+
+    return {
+        "target_id": str(target.id),
+        "linked_candidates": len(pending),
+        "linked_images": linked_images,
+    }
 
 
 @router.get("/merged-targets", response_model=list[MergedTargetResponse])

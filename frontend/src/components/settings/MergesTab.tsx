@@ -6,7 +6,8 @@ import { UnresolvedFilesTab } from "./UnresolvedFilesTab";
 import HelpPopover from "../HelpPopover";
 import { emitWithToast } from "../../lib/emitWithToast";
 import type { MergeCandidateResponse } from "../../types";
-import ResolveTargetModal from "./ResolveTargetModal";
+import CreateTargetFromOrphanModal from "./CreateTargetFromOrphanModal";
+import MergeOrphanModal from "./MergeOrphanModal";
 
 export const MergesTab: Component = () => {
   const { isAdmin } = useAuth();
@@ -16,6 +17,7 @@ export const MergesTab: Component = () => {
   const [view, setView] = createSignal<"suggestions" | "merged" | "unresolved">("suggestions");
   const [unresolvedCount, setUnresolvedCount] = createSignal(0);
   const [resolveCandidate, setResolveCandidate] = createSignal<MergeCandidateResponse | null>(null);
+  const [resolveMode, setResolveMode] = createSignal<"create" | "merge">("merge");
 
 
   const refresh = async () => {
@@ -36,7 +38,8 @@ export const MergesTab: Component = () => {
     api.getFilenameCandidateCount().then((r) => setUnresolvedCount(r.count)).catch(() => {});
   });
 
-  const handleResolve = (candidate: MergeCandidateResponse) => {
+  const handleResolve = (candidate: MergeCandidateResponse, mode: "create" | "merge") => {
+    setResolveMode(mode);
     setResolveCandidate(candidate);
   };
 
@@ -160,11 +163,19 @@ export const MergesTab: Component = () => {
                     <Show when={isAdmin()}>
                       <div class="flex gap-2">
                         <button
-                          onClick={() => handleResolve(c)}
+                          onClick={() => handleResolve(c, "merge")}
                           class="px-2 py-1 text-xs border border-theme-accent/50 text-theme-accent rounded-[var(--radius-sm)] hover:bg-theme-accent/10 transition-colors"
                         >
-                          {c.suggested_target_id ? "Merge" : "Resolve..."}
+                          {c.suggested_target_id ? "Merge" : "Merge into Existing"}
                         </button>
+                        <Show when={!c.suggested_target_id}>
+                          <button
+                            onClick={() => handleResolve(c, "create")}
+                            class="px-2 py-1 text-xs border border-theme-border text-theme-text-secondary rounded-[var(--radius-sm)] hover:text-theme-text-primary transition-colors"
+                          >
+                            Create New Target
+                          </button>
+                        </Show>
                         <button
                           onClick={() => handleDismiss(c)}
                           class="px-2 py-1 text-xs border border-theme-border text-theme-text-secondary rounded hover:text-theme-text-primary transition-colors"
@@ -219,11 +230,22 @@ export const MergesTab: Component = () => {
       </div>
       <Show when={resolveCandidate()}>
         {(c) => (
-          <ResolveTargetModal
-            candidate={c()}
-            onClose={() => setResolveCandidate(null)}
-            onResolved={handleResolved}
-          />
+          <Show
+            when={resolveMode() === "merge"}
+            fallback={
+              <CreateTargetFromOrphanModal
+                candidate={c()}
+                onClose={() => setResolveCandidate(null)}
+                onResolved={handleResolved}
+              />
+            }
+          >
+            <MergeOrphanModal
+              candidate={c()}
+              onClose={() => setResolveCandidate(null)}
+              onResolved={handleResolved}
+            />
+          </Show>
         )}
       </Show>
     </div>

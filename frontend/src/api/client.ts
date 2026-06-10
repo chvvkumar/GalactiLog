@@ -9,6 +9,8 @@ import type {
   MergedTargetResponse,
   OrphanPreviewResponse,
   OrphanCreateRequest,
+  CustomTargetCreateRequest,
+  CustomTargetCreateResponse,
   FilenameCandidateResponse,
   ScanResult,
   ScanStatus,
@@ -478,6 +480,12 @@ export const api = {
 
   orphanCreate: (body: OrphanCreateRequest) =>
     fetchJson<{ target_id: string }>("/targets/orphan-create", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  createCustomTarget: (body: CustomTargetCreateRequest) =>
+    fetchJson<CustomTargetCreateResponse>("/targets/custom", {
       method: "POST",
       body: JSON.stringify(body),
     }),

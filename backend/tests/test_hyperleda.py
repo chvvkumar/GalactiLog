@@ -200,6 +200,7 @@ class TestEnrichTargetFromHyperleda:
     def test_uses_cached_data(self):
         session = MagicMock()
         target = MagicMock()
+        target.user_defined = False
         target.object_type = "G"
         target.catalog_id = "NGC 224"
         target.hubble_t_type = None
@@ -219,6 +220,7 @@ class TestEnrichTargetFromHyperleda:
     def test_does_not_overwrite_existing_t_type(self):
         session = MagicMock()
         target = MagicMock()
+        target.user_defined = False
         target.object_type = "G"
         target.catalog_id = "NGC 224"
         target.hubble_t_type = 5.0  # already set
@@ -253,6 +255,7 @@ class TestEnrichTargetFromHyperleda:
     def test_queries_hyperleda_when_no_cache(self):
         session = MagicMock()
         target = MagicMock()
+        target.user_defined = False
         target.object_type = "G"
         target.catalog_id = "NGC 224"
         target.hubble_t_type = None

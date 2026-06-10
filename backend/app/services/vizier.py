@@ -333,6 +333,9 @@ def enrich_target_from_vizier(session: Session, target: "Target") -> bool:
 
     Returns True if any fields were updated.
     """
+    if getattr(target, "user_defined", False):
+        return False
+
     if not target.catalog_id:
         return False
 

@@ -22,6 +22,7 @@ export interface TargetAggregation {
   mosaic_id: string | null;
   mosaic_name: string | null;
   custom_values?: Record<string, string> | null;
+  user_defined?: boolean;
 }
 
 export interface AggregateStats {
@@ -156,6 +157,7 @@ export interface TargetDetailResponse {
   // Catalog memberships
   catalog_memberships: CatalogMembershipEntry[];
   name_locked: boolean;
+  user_defined: boolean;
 }
 
 export interface RigDetail {
@@ -428,6 +430,24 @@ export interface OrphanCreateRequest {
   dec: number | null;
   object_type: string | null;
   catalog_id: string | null;
+  user_defined?: boolean;
+  aliases?: string[];
+}
+
+export interface CustomTargetCreateRequest {
+  primary_name: string;
+  ra: number | null;
+  dec: number | null;
+  object_type: string | null;
+  catalog_id: string | null;
+  user_defined: boolean;
+  aliases: string[];
+}
+
+export interface CustomTargetCreateResponse {
+  target_id: string;
+  linked_candidates: number;
+  linked_images: number;
 }
 
 export interface MergedTargetResponse {

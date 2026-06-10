@@ -42,6 +42,7 @@ class Target(Base):
     hubble_t_type: Mapped[float | None] = mapped_column(Float, nullable=True)
     inclination: Mapped[float | None] = mapped_column(Float, nullable=True)
     name_locked: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"), default=False)
+    user_defined: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"), default=False)
 
     images: Mapped[list["Image"]] = relationship(back_populates="target")
 

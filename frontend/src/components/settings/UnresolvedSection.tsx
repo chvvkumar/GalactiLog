@@ -4,7 +4,8 @@ import { api } from "../../api/client";
 import { showToast } from "../Toast";
 import { useAuth } from "../AuthProvider";
 import type { MergeCandidateResponse, OrphanPreviewResponse } from "../../types";
-import ResolveTargetModal from "./ResolveTargetModal";
+import CreateTargetFromOrphanModal from "./CreateTargetFromOrphanModal";
+import MergeOrphanModal from "./MergeOrphanModal";
 
 interface UnresolvedSectionProps {
   candidates: Accessor<MergeCandidateResponse[]>;
@@ -22,6 +23,7 @@ const UnresolvedSection: Component<UnresolvedSectionProps> = (props) => {
 
   const [previews, setPreviews] = createSignal<Record<string, PreviewState>>({});
   const [resolveCandidate, setResolveCandidate] = createSignal<MergeCandidateResponse | null>(null);
+  const [resolveMode, setResolveMode] = createSignal<"create" | "merge">("create");
 
   // Fetch SIMBAD previews when candidates change
   createEffect(
@@ -93,7 +95,8 @@ const UnresolvedSection: Component<UnresolvedSectionProps> = (props) => {
     }
   };
 
-  const handleCreateTarget = (c: MergeCandidateResponse) => {
+  const handleResolve = (c: MergeCandidateResponse, mode: "create" | "merge") => {
+    setResolveMode(mode);
     setResolveCandidate(c);
   };
 
@@ -170,7 +173,13 @@ const UnresolvedSection: Component<UnresolvedSectionProps> = (props) => {
                           </button>
                         </Show>
                         <button
-                          onClick={() => handleCreateTarget(c)}
+                          onClick={() => handleResolve(c, "merge")}
+                          class="px-2 py-1 text-xs border border-theme-border text-theme-text-secondary rounded-[var(--radius-sm)] hover:text-theme-text-primary transition-colors"
+                        >
+                          Merge into Existing
+                        </button>
+                        <button
+                          onClick={() => handleResolve(c, "create")}
                           class="px-2 py-1 text-xs border border-theme-border text-theme-text-secondary rounded-[var(--radius-sm)] hover:text-theme-text-primary transition-colors"
                         >
                           Create New Target
@@ -191,14 +200,24 @@ const UnresolvedSection: Component<UnresolvedSectionProps> = (props) => {
         </Show>
       </div>
 
-      {/* ResolveTargetModal */}
       <Show when={resolveCandidate()}>
         {(c) => (
-          <ResolveTargetModal
-            candidate={c()}
-            onClose={() => setResolveCandidate(null)}
-            onResolved={handleResolved}
-          />
+          <Show
+            when={resolveMode() === "merge"}
+            fallback={
+              <CreateTargetFromOrphanModal
+                candidate={c()}
+                onClose={() => setResolveCandidate(null)}
+                onResolved={handleResolved}
+              />
+            }
+          >
+            <MergeOrphanModal
+              candidate={c()}
+              onClose={() => setResolveCandidate(null)}
+              onResolved={handleResolved}
+            />
+          </Show>
         )}
       </Show>
     </>

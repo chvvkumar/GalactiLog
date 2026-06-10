@@ -19,7 +19,12 @@ const TargetCard: Component<{ target: TargetAggregation }> = (props) => {
         onClick={() => toggleExpanded(props.target.target_id)}
       >
         <div>
-          <h3 class="text-theme-text-primary font-medium">{props.target.primary_name}</h3>
+          <h3 class="text-theme-text-primary font-medium flex items-center gap-2">
+            {props.target.primary_name}
+            <Show when={props.target.user_defined}>
+              <span class="px-2 py-0.5 rounded-full text-caption font-medium bg-theme-accent/15 text-theme-accent" title="User-defined target, excluded from catalog enrichment">Custom</span>
+            </Show>
+          </h3>
           <Show when={props.target.aliases.length > 0}>
             <p class="text-xs text-theme-text-secondary">{props.target.aliases.join(", ")}</p>
           </Show>

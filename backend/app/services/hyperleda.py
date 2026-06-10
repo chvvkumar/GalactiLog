@@ -140,6 +140,9 @@ def enrich_target_from_hyperleda(session: Session, target: "Target") -> bool:
 
     Returns True if any fields were updated.
     """
+    if getattr(target, "user_defined", False):
+        return False
+
     if not _is_galaxy_type(target.object_type):
         return False
 
