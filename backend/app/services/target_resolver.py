@@ -173,7 +173,10 @@ def _create_target(
         # FINAL post-enrichment primary_name, then by catalog identity.
         cat_norm = normalize_catalog_id(simbad_result.get("catalog_id"))
         existing = session.execute(
-            select(Target).where(Target.primary_name == target.primary_name)
+            select(Target).where(
+                Target.merged_into_id.is_(None),
+                Target.primary_name == target.primary_name,
+            )
         ).scalar_one_or_none()
         if existing is None and cat_norm:
             existing = session.execute(

@@ -140,3 +140,75 @@ class TestCreateTargetReordered:
 
         assert result == "winner"
         session.rollback.assert_called_once()
+
+
+class TestCreateTargetEnrichmentRenameLinksRealChain:
+    """End-to-end: real OpenNGC rename must feed the identity match and link.
+
+    Pins the literal NGC 6543 scenario: a first-seen 'NGC 6543' resolves to a
+    bare primary_name, the REAL enrich_target_from_openngc renames it to
+    'NGC 6543 - Cat's Eye Nebula', and the REAL match_target_by_identity then
+    links to the pre-existing Cat's Eye target by normalized catalog identity
+    instead of inserting a row that would collide on the unique primary_name.
+    Only lookup_openngc is stubbed (to supply the OpenNGC common name), so the
+    enrich -> match -> link chain runs for real.
+    """
+
+    def test_openngc_rename_links_to_existing_identity(self):
+        from app.services.target_resolver import _create_target
+
+        existing = MagicMock()
+        existing.id = "cats-eye-existing"
+        existing.primary_name = "NGC 6543 - Cat's Eye Nebula"
+        existing.catalog_id = "NGC 6543"
+        existing.catalog_id_normalized = "NGC 6543"
+        existing.aliases = ["NGC 6543"]
+
+        session = MagicMock()
+        # Both the OpenNGC lookup inside enrichment and the identity lookup go
+        # through session.execute; the identity lookup is the one that resolves
+        # to the seeded Cat's Eye target by catalog_id_normalized.
+        session.execute.return_value.scalar_one_or_none.return_value = existing
+
+        # A real OpenNGC entry carrying the common name so the rename happens for
+        # real. The six enrichment fields are None so the axis/mag loop is a
+        # no-op and only the common-name rename fires.
+        ngc_entry = MagicMock()
+        ngc_entry.common_names = "Cat's Eye Nebula"
+        ngc_entry.constellation = None
+        ngc_entry.major_axis = None
+        ngc_entry.minor_axis = None
+        ngc_entry.position_angle = None
+        ngc_entry.v_mag = None
+        ngc_entry.surface_brightness = None
+
+        simbad_result = {
+            "primary_name": "NGC 6543",
+            "catalog_id": "NGC 6543",
+            "common_name": None,
+            "aliases": ["NGC 6543"],
+            "ra": 269.6, "dec": 66.6, "object_type": "PN",
+        }
+
+        # Capture the real Target instance (without replacing the class, which
+        # would break the matcher's select(Target)) to prove the REAL OpenNGC
+        # rename fired before the match.
+        from app.services import target_resolver as tr
+        RealTarget = tr.Target
+        built = {}
+
+        class _CapturingTarget(RealTarget):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                built["instance"] = self
+
+        with patch("app.services.openngc.lookup_openngc", return_value=ngc_entry), \
+             patch("app.services.target_resolver.Target", _CapturingTarget):
+            result = _create_target(simbad_result, "NGC 6543", session)
+
+        # The real enrichment renamed the in-memory target before matching.
+        assert built["instance"].primary_name == "NGC 6543 - Cat's Eye Nebula"
+        assert built["instance"].common_name == "Cat's Eye Nebula"
+        # Linked to the existing target, no insert, never None.
+        assert result == "cats-eye-existing"
+        session.add.assert_not_called()
