@@ -149,7 +149,9 @@ class TestCreateTarget:
             "aliases": ["NGC 7000"],
         }
 
-        result = _create_target(simbad_result, "NGC 7000", mock_session)
+        with patch("app.services.target_resolver.match_target_by_identity", return_value=None), \
+             patch("app.services.target_resolver.enrich_target_from_openngc"):
+            result = _create_target(simbad_result, "NGC 7000", mock_session)
         assert result == "existing-target"
         mock_session.rollback.assert_called_once()
 

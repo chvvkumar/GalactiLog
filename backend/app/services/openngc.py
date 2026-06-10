@@ -188,7 +188,9 @@ def enrich_target_from_openngc(session: Session, target: Target) -> bool:
         ngc_common = extract_openngc_common_name(entry.common_names)
         if ngc_common:
             target.common_name = ngc_common
-            # Rebuild primary_name with the new common name
+            # Rebuild primary_name with the new common name.
+            # primary_name is a label; catalog_id (and its normalized identity)
+            # are unchanged here, so catalog_id_normalized stays valid.
             from app.services.simbad import build_primary_name
             target.primary_name = build_primary_name(target.catalog_id, ngc_common)
             updated = True

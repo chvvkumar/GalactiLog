@@ -117,7 +117,16 @@ def match_target_by_identity(
 def _create_target(
     simbad_result: dict, normalized_name: str, session: Session,
 ) -> str | None:
-    """Create a new Target from a SIMBAD result. Handles race conditions."""
+    """Enrich the resolved identity, match an existing target, else create one.
+
+    Order (eliminates the insert-then-rename-then-collide class):
+      1. Enrich the in-memory identity from OpenNGC so primary_name is final.
+      2. Match an existing target by catalog identity (then name fallback).
+         If found, link to it (and record the incoming OBJECT as an alias).
+      3. Otherwise insert. The IntegrityError net re-queries by the FINAL
+         post-enrichment primary_name AND by catalog identity, never returning
+         None for a name that resolved.
+    """
     aliases = simbad_result.get("aliases", [])
     # Strip panel suffixes from the FITS-derived lookup name before adding as alias
     clean_name = _PANEL_RE.sub("", normalized_name).strip()
@@ -127,16 +136,30 @@ def _create_target(
     target = Target(
         primary_name=simbad_result["primary_name"],
         catalog_id=simbad_result.get("catalog_id"),
+        catalog_id_normalized=normalize_catalog_id(simbad_result.get("catalog_id")),
         common_name=simbad_result.get("common_name"),
         aliases=aliases,
         ra=simbad_result.get("ra"),
         dec=simbad_result.get("dec"),
         object_type=simbad_result.get("object_type"),
     )
+
+    # Enrich the detached instance so primary_name / catalog_id are final BEFORE
+    # any match or insert. enrich_target_from_openngc reads target.catalog_id and
+    # may rewrite primary_name; it does not change catalog_id, so the normalized
+    # identity computed above stays correct.
+    enrich_target_from_openngc(session, target)
+
+    # Match by final identity. If an existing target carries this identity, link
+    # to it rather than inserting a colliding row.
+    existing = match_target_by_identity(simbad_result, normalized_name, session)
+    if existing is not None:
+        session.commit()
+        return str(existing.id)
+
     try:
         session.add(target)
         session.flush()
-        enrich_target_from_openngc(session, target)
         session.commit()
         if target.size_major is None:
             enrich_target_from_vizier(session, target)
@@ -146,10 +169,19 @@ def _create_target(
         return str(target.id)
     except IntegrityError:
         session.rollback()
-        # Another worker inserted this target - re-query
+        # Race: another worker inserted this identity/name. Re-query by the
+        # FINAL post-enrichment primary_name, then by catalog identity.
+        cat_norm = normalize_catalog_id(simbad_result.get("catalog_id"))
         existing = session.execute(
-            select(Target).where(Target.primary_name == simbad_result["primary_name"])
+            select(Target).where(Target.primary_name == target.primary_name)
         ).scalar_one_or_none()
+        if existing is None and cat_norm:
+            existing = session.execute(
+                select(Target).where(
+                    Target.merged_into_id.is_(None),
+                    Target.catalog_id_normalized == cat_norm,
+                )
+            ).scalar_one_or_none()
         return str(existing.id) if existing else None
 
 
