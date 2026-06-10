@@ -36,7 +36,7 @@ from app.services.scan_state import (
     get_scan_state, get_failed_files, start_scanning, set_ingesting, set_idle, reset_scan,
     get_rebuild_state, request_cancel,
 )
-from app.worker.tasks import regenerate_thumbnail, run_scan, rebuild_targets, smart_rebuild_targets, retry_unresolved, backfill_csv_metrics, generate_reference_thumbnails, purge_and_regenerate_thumbnails, regenerate_missing_thumbnails
+from app.worker.tasks import regenerate_thumbnail, run_scan, rebuild_targets, smart_rebuild_targets, retry_unresolved, backfill_csv_metrics, generate_reference_thumbnails, purge_and_regenerate_thumbnails, regenerate_missing_thumbnails, backfill_catalog_identity
 
 logger = logging.getLogger(__name__)
 
@@ -246,6 +246,26 @@ async def trigger_retry_unresolved(user: User = Depends(require_admin)):
 
         task = retry_unresolved.delay()
         return {"status": "accepted", "message": "Retry unresolved queued as background task", "task_id": task.id}
+
+
+@router.post("/backfill-catalog-identity", response_model=ScanAcceptResponse)
+async def trigger_backfill_catalog_identity(user: User = Depends(require_admin)):
+    """Repair corrupted SIMBAD cache and re-link catalog orphans by identity.
+
+    Re-runs the shared catalog-identity matcher over unlinked light frames and
+    attaches those that now resolve to an existing target. One-time after deploy,
+    safely re-runnable. Runs as a background Celery task.
+    """
+    async with async_redis() as r:
+        state = await get_scan_state(r)
+        if state.state in ("scanning", "ingesting"):
+            raise HTTPException(
+                status_code=409,
+                detail="A scan is already running. Wait for it to complete first.",
+            )
+
+        task = backfill_catalog_identity.delay()
+        return {"status": "accepted", "message": "Catalog-identity backfill queued as background task", "task_id": task.id}
 
 
 @router.post("/generate-reference-thumbnails", response_model=ScanAcceptResponse)

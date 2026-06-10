@@ -194,7 +194,8 @@ const TargetDetailPage: Component = () => {
 
   const [mergeHistory, { refetch: refetchMergeHistory }] = createResource(
     () => params.targetId,
-    (id) => api.getMergeHistory(id),
+    (id): Promise<MergedTargetResponse[]> | MergedTargetResponse[] =>
+      id.startsWith("obj:") ? [] : api.getMergeHistory(id).catch(() => []),
   );
   const [mergeHistoryExpanded, setMergeHistoryExpanded] = createSignal(false);
   const [undoingMerge, setUndoingMerge] = createSignal<string | null>(null);
