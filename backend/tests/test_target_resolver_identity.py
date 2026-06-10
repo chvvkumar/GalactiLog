@@ -270,3 +270,28 @@ class TestNegativeCacheCorrectness:
             result = resolve_target("NGC 6543", session, redis=redis)
 
         assert result == "cats-eye"
+
+    def test_recheck_link_commits_session_so_alias_persists(self):
+        """post-SIMBAD recheck: when match_target_by_identity links to an existing
+        target, session.commit() must be called before returning so any alias
+        mutation made by the matcher is not rolled back by the caller.
+        """
+        from app.services.target_resolver import resolve_target
+
+        session = MagicMock()
+        redis = MagicMock()
+        redis.sismember.return_value = False
+        existing = MagicMock()
+        existing.id = "cats-eye"
+
+        with patch("app.services.target_resolver.find_target_by_name", return_value=None), \
+             patch("app.services.target_resolver.resolve_target_name_cached", return_value=self._simbad()), \
+             patch("app.services.target_resolver.match_target_by_identity", return_value=existing), \
+             patch("app.services.target_resolver._create_target") as mock_create:
+            result = resolve_target("NGC 6543", session, redis=redis)
+
+        assert result == "cats-eye"
+        # Alias mutation from match_target_by_identity must be persisted before
+        # returning, consistent with the _create_target link branch.
+        session.commit.assert_called()
+        mock_create.assert_not_called()
