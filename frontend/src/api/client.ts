@@ -358,6 +358,9 @@ export const api = {
   retryUnresolved: () =>
     fetchJson<{ status: string; message: string; task_id?: string }>("/scan/retry-unresolved", { method: "POST" }),
 
+  backfillCatalogIdentity: () =>
+    fetchJson<{ status: string; message: string; task_id?: string }>("/scan/backfill-catalog-identity", { method: "POST" }),
+
   getRebuildStatus: () =>
     fetchJson<import("../types").RebuildStatus>("/scan/rebuild-status"),
 
