@@ -476,3 +476,19 @@ async def test_null_session_date_does_not_inflate_normal_targets(seeded_db):
     # M31 has frames on two distinct dates, none NULL -> total_sessions == 2.
     assert m31["total_sessions"] == 2
     assert m31["matched_sessions"] <= m31["total_sessions"]
+
+
+@pytest.mark.asyncio
+async def test_search_includes_unresolved_groups(seeded_db):
+    """include_unresolved appends unlinked OBJECT-name groups as pseudo entries."""
+    plain = await _get("/search?q=NGC%207000")
+    assert all(not r.get("unresolved") for r in plain)
+
+    data = await _get("/search?q=NGC%207000&include_unresolved=true")
+    pseudo = [r for r in data if r.get("unresolved")]
+    assert len(pseudo) == 1
+    assert pseudo[0]["id"] == "obj:NGC 7000"
+    assert pseudo[0]["primary_name"] == "NGC 7000"
+    assert pseudo[0]["image_count"] == 1
+    # Frames without an OBJECT header never appear as a mergeable group.
+    assert all(r["id"] != "obj:__uncategorized__" for r in data)

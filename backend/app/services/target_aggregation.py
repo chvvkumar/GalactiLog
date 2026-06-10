@@ -319,8 +319,15 @@ def compute_insights(
     return insights
 
 
-async def search_targets(q: str, limit: int, session: AsyncSession) -> list[TargetSearchResultFuzzy]:
-    """Search targets by name or alias with fuzzy trigram matching."""
+async def search_targets(
+    q: str, limit: int, session: AsyncSession, *, include_unresolved: bool = False,
+) -> list[TargetSearchResultFuzzy]:
+    """Search targets by name or alias with fuzzy trigram matching.
+
+    With include_unresolved, distinct unlinked OBJECT header names matching the
+    query are appended as "obj:<name>" pseudo entries so merge flows can offer
+    unresolved image groups as merge sources.
+    """
     escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
     pattern = f"%{escaped}%"
 
@@ -442,6 +449,28 @@ async def search_targets(q: str, limit: int, session: AsyncSession) -> list[Targ
                 aliases=target.aliases or [],
                 match_source=best_alias,
                 similarity_score=float(score),
+            ))
+
+    if include_unresolved:
+        unresolved_rows = (await session.execute(
+            text("""
+                SELECT raw_headers->>'OBJECT' AS obj, COUNT(*) AS cnt
+                FROM images
+                WHERE resolved_target_id IS NULL
+                  AND raw_headers->>'OBJECT' IS NOT NULL
+                  AND raw_headers->>'OBJECT' != ''
+                  AND raw_headers->>'OBJECT' ILIKE :pattern
+                GROUP BY raw_headers->>'OBJECT'
+                ORDER BY cnt DESC
+                LIMIT :lim
+            """).bindparams(pattern=pattern, lim=limit)
+        )).all()
+        for obj_name, cnt in unresolved_rows:
+            results.append(TargetSearchResultFuzzy(
+                id=f"obj:{obj_name}",
+                primary_name=obj_name,
+                unresolved=True,
+                image_count=cnt,
             ))
 
     return results

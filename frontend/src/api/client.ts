@@ -276,8 +276,10 @@ export const api = {
   getFitsKeys: () =>
     fetchJson<string[]>("/targets/fits-keys"),
 
-  searchTargets: (query: string) =>
-    fetchJson<TargetSearchResultFuzzy[]>(`/targets/search?q=${encodeURIComponent(query)}`),
+  searchTargets: (query: string, includeUnresolved = false) =>
+    fetchJson<TargetSearchResultFuzzy[]>(
+      `/targets/search?q=${encodeURIComponent(query)}${includeUnresolved ? "&include_unresolved=true" : ""}`,
+    ),
 
   getStats: () =>
     fetchJson<StatsResponse>("/stats"),
