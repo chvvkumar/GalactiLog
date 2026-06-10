@@ -231,6 +231,32 @@ def _build_aliases(primary_name: str, raw_aliases) -> list[str]:
     return aliases
 
 
+async def _find_name_conflict(
+    session: AsyncSession, name: str, aliases: list[str]
+) -> tuple[list[str], "Target | None"]:
+    """Case-insensitive conflict lookup across primary names and aliases.
+
+    Returns (names_upper, conflicting_target_or_None). names_upper is every
+    name the new target would answer to, uppercased. Historical aliases were
+    stored as-typed by orphan_create, so an exact-case alias match would miss
+    mixed-case collisions.
+    """
+    names_upper = sorted({name.upper(), *(a.upper() for a in aliases)})
+    conflict = (await session.execute(
+        select(Target).where(
+            Target.merged_into_id.is_(None),
+            or_(
+                func.upper(Target.primary_name).in_(names_upper),
+                text(
+                    "EXISTS (SELECT 1 FROM unnest(targets.aliases) a"
+                    " WHERE upper(a) = ANY(:conflict_names))"
+                ).bindparams(conflict_names=names_upper),
+            ),
+        )
+    )).scalars().first()
+    return names_upper, conflict
+
+
 def _enrich_new_target(target_id) -> None:
     """Best-effort catalog enrichment for a newly created target."""
     try:
@@ -275,6 +301,16 @@ async def orphan_create(
 
     aliases = _build_aliases(name, [candidate.source_name, *body.aliases])
 
+    _, conflict = await _find_name_conflict(session, name, aliases)
+    if conflict:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f'Name already in use by "{conflict.primary_name}". '
+                'Use "Merge into Existing" to attach these images to it.'
+            ),
+        )
+
     target = Target(
         primary_name=name,
         catalog_id=body.catalog_id,
@@ -302,7 +338,16 @@ async def orphan_create(
     candidate.status = "accepted"
     candidate.resolved_at = now
 
-    await session.commit()
+    try:
+        await session.commit()
+    except IntegrityError:
+        # A unique constraint (e.g. primary_name) lost a race or collided with a
+        # soft-deleted merged target's name. Report a conflict, not a 500.
+        await session.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail=f'Name already in use by "{name}"',
+        )
 
     if not body.user_defined:
         _enrich_new_target(target.id)
@@ -328,22 +373,7 @@ async def create_custom_target(
 
     aliases = _build_aliases(name, body.aliases)
 
-    # Every name the new target answers to, uppercased, for a case-insensitive
-    # conflict check. Historical aliases were stored as-typed by orphan_create,
-    # so an exact-case alias match would miss mixed-case collisions.
-    names_upper = sorted({name.upper(), *(a.upper() for a in aliases)})
-    conflict = (await session.execute(
-        select(Target).where(
-            Target.merged_into_id.is_(None),
-            or_(
-                func.upper(Target.primary_name).in_(names_upper),
-                text(
-                    "EXISTS (SELECT 1 FROM unnest(targets.aliases) a"
-                    " WHERE upper(a) = ANY(:conflict_names))"
-                ).bindparams(conflict_names=names_upper),
-            ),
-        )
-    )).scalars().first()
+    names_upper, conflict = await _find_name_conflict(session, name, aliases)
     if conflict:
         raise HTTPException(
             status_code=409,

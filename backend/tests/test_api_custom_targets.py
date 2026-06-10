@@ -241,3 +241,64 @@ async def test_orphan_create_blank_name_422(admin_user):
         assert resp.status_code == 422
     finally:
         app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_orphan_create_name_conflict_409(admin_user):
+    """Creating from an orphan whose name matches an existing target must 409
+    and point the user at the merge flow, not crash with a unique violation.
+
+    Regression: orphan-create on a "Moon" candidate 500ed against an existing
+    custom Moon target because it had no conflict pre-check.
+    """
+    candidate = MagicMock(spec=MergeCandidate)
+    candidate.status = "pending"
+    candidate.source_name = "Moon"
+
+    mock_session = AsyncMock()
+    mock_session.get = AsyncMock(return_value=candidate)
+    conflict = MagicMock(spec=Target)
+    conflict.primary_name = "Moon"
+    found = MagicMock()
+    found.scalars.return_value.first.return_value = conflict
+    mock_session.execute = AsyncMock(return_value=found)
+    _override_session(mock_session)
+    app.dependency_overrides[require_admin] = lambda: admin_user
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            resp = await client.post("/api/targets/orphan-create", json={
+                "candidate_id": str(uuid.uuid4()),
+                "primary_name": "Moon",
+            })
+        assert resp.status_code == 409
+        assert "Merge into Existing" in resp.json()["detail"]
+        mock_session.add.assert_not_called()
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_orphan_create_integrity_error_maps_to_409(admin_user):
+    """A unique-constraint violation on commit returns 409, not 500."""
+    from sqlalchemy.exc import IntegrityError
+
+    candidate = MagicMock(spec=MergeCandidate)
+    candidate.status = "pending"
+    candidate.source_name = "Moon"
+
+    mock_session = _no_conflict_session()
+    mock_session.get = AsyncMock(return_value=candidate)
+    mock_session.commit = AsyncMock(side_effect=IntegrityError("stmt", {}, Exception("dup")))
+    mock_session.rollback = AsyncMock()
+    _override_session(mock_session)
+    app.dependency_overrides[require_admin] = lambda: admin_user
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            resp = await client.post("/api/targets/orphan-create", json={
+                "candidate_id": str(uuid.uuid4()),
+                "primary_name": "Moon",
+            })
+        assert resp.status_code == 409
+        mock_session.rollback.assert_awaited()
+    finally:
+        app.dependency_overrides.clear()
