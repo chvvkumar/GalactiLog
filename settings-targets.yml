@@ -1,0 +1,258 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - link "GalactiLog logo GalactiLog" [ref=e5] [cursor=pointer]:
+      - /url: /
+      - img "GalactiLog logo" [ref=e6]
+      - heading "GalactiLog" [level=1] [ref=e7]
+    - navigation [ref=e8]:
+      - link "Dashboard" [ref=e9] [cursor=pointer]:
+        - /url: /
+      - link "Mosaics" [ref=e10] [cursor=pointer]:
+        - /url: /mosaics
+      - link "Statistics" [ref=e11] [cursor=pointer]:
+        - /url: /statistics
+      - link "Analysis" [ref=e12] [cursor=pointer]:
+        - /url: /analysis
+      - link "Settings" [ref=e13] [cursor=pointer]:
+        - /url: /settings
+    - generic [ref=e14]:
+      - generic [ref=e22]: chvvkumar
+      - button "Sign out" [ref=e23]
+      - link "snd" [ref=e16] [cursor=pointer]:
+        - /url: https://github.com/chvvkumar/GalactiLog/commit/b1a7e383a2ae97e9545549abbc57c43ea2f75efd
+      - link "GitHub" [ref=e17] [cursor=pointer]:
+        - /url: https://github.com/chvvkumar/GalactiLog
+        - img [ref=e18]
+  - generic [ref=e24]:
+    - heading "Settings" [level=1] [ref=e25]
+    - generic [ref=e26]:
+      - generic [ref=e27]:
+        - button "Library" [ref=e28] [cursor=pointer]
+        - button "Equipment" [ref=e29] [cursor=pointer]
+        - button "Display" [ref=e30] [cursor=pointer]
+        - button "External Tools" [ref=e31] [cursor=pointer]
+        - button "Target Management" [active] [ref=e32] [cursor=pointer]
+        - button "Custom Columns" [ref=e33] [cursor=pointer]
+        - button "Backup & Restore" [ref=e34] [cursor=pointer]
+        - button "Users" [ref=e35] [cursor=pointer]
+        - button "Activity Log" [ref=e36] [cursor=pointer]
+        - button "Metrics" [ref=e37] [cursor=pointer]
+      - button "About this section" [ref=e39] [cursor=pointer]:
+        - img [ref=e40]
+    - generic [ref=e1138]:
+      - generic [ref=e1139]:
+        - paragraph [ref=e1140]: Last Scan
+        - generic [ref=e1142]: "Files ingested: 673"
+      - generic [ref=e1143]:
+        - heading "Duplicates (0)" [level=3] [ref=e1144]
+        - paragraph [ref=e1145]: No duplicates found.
+      - generic [ref=e1146]:
+        - heading "Unresolved Names (0)" [level=3] [ref=e1147]
+        - paragraph [ref=e1148]: No unresolved names.
+      - generic [ref=e1149]:
+        - button "Merge History (15)" [ref=e1150] [cursor=pointer]:
+          - heading "Merge History (15)" [level=3] [ref=e1151]
+          - img [ref=e1152]
+        - generic [ref=e1155]:
+          - generic [ref=e1156]:
+            - generic [ref=e1157]:
+              - generic [ref=e1158]:
+                - generic [ref=e1159]: Caldwell 4
+                - generic [ref=e1160]: →
+                - link "NGC 7023 - Iris Nebula" [ref=e1161] [cursor=pointer]:
+                  - /url: /targets/e83503e4-f12b-4df6-b946-59002c0e3110
+              - generic [ref=e1162]:
+                - generic [ref=e1163]: Merged on Apr 12, 2026
+                - generic [ref=e1164]: 60 images
+            - button "Undo Merge" [ref=e1166]
+          - generic [ref=e1167]:
+            - generic [ref=e1168]:
+              - generic [ref=e1169]:
+                - generic [ref=e1170]: Cigar Galaxy
+                - generic [ref=e1171]: →
+                - link "M 82 - Cigar Galaxy" [ref=e1172] [cursor=pointer]:
+                  - /url: /targets/22efe4c7-dbc7-4a5e-ad25-07f6f489ddf8
+              - generic [ref=e1173]:
+                - generic [ref=e1174]: Merged on Apr 12, 2026
+                - generic [ref=e1175]: 158 images
+            - button "Undo Merge" [ref=e1177]
+          - generic [ref=e1178]:
+            - generic [ref=e1179]:
+              - generic [ref=e1180]:
+                - generic [ref=e1181]: NGC 6503
+                - generic [ref=e1182]: →
+                - link "NGC 6503" [ref=e1183] [cursor=pointer]:
+                  - /url: /targets/9d76a01b-e91d-43db-a19b-7923a784430c
+              - generic [ref=e1184]:
+                - generic [ref=e1185]: Merged on Apr 12, 2026
+                - generic [ref=e1186]: 82 images
+            - button "Undo Merge" [ref=e1188]
+          - generic [ref=e1189]:
+            - generic [ref=e1190]:
+              - generic [ref=e1191]:
+                - generic [ref=e1192]: NGC 6543
+                - generic [ref=e1193]: →
+                - link "NGC 6543 - Cat's Eye Nebula" [ref=e1194] [cursor=pointer]:
+                  - /url: /targets/e482bfaf-f08d-4bb6-999e-f268944556fa
+              - generic [ref=e1195]:
+                - generic [ref=e1196]: Merged on Jun 10, 2026
+                - generic [ref=e1197]: 196 images
+            - button "Undo Merge" [ref=e1199]
+          - generic [ref=e1200]:
+            - generic [ref=e1201]:
+              - generic [ref=e1202]:
+                - generic [ref=e1203]: Makarian's Chain
+                - generic [ref=e1204]: →
+                - link "Markarian's Chain" [ref=e1205] [cursor=pointer]:
+                  - /url: /targets/c4937f8d-f103-4bc2-8bcf-6c3a5d34c4b0
+              - generic [ref=e1206]:
+                - generic [ref=e1207]: Merged on Apr 20, 2026
+                - generic [ref=e1208]: 30 images
+            - button "Undo Merge" [ref=e1210]
+          - generic [ref=e1211]:
+            - generic [ref=e1212]:
+              - generic [ref=e1213]:
+                - generic [ref=e1214]: Andromeda Nebula Panel 1
+                - generic [ref=e1215]: →
+                - link "M 31 - Andromeda Nebula" [ref=e1216] [cursor=pointer]:
+                  - /url: /targets/1a52fd1d-6b8e-42f3-9e7c-21983795c2e5
+              - generic [ref=e1217]:
+                - generic [ref=e1218]: Merged on Apr 19, 2026
+                - generic [ref=e1219]: 123 images
+            - button "Undo Merge" [ref=e1221]
+          - generic [ref=e1222]:
+            - generic [ref=e1223]:
+              - generic [ref=e1224]:
+                - generic [ref=e1225]: Andromeda Nebula Panel 3
+                - generic [ref=e1226]: →
+                - link "M 31 - Andromeda Nebula" [ref=e1227] [cursor=pointer]:
+                  - /url: /targets/1a52fd1d-6b8e-42f3-9e7c-21983795c2e5
+              - generic [ref=e1228]:
+                - generic [ref=e1229]: Merged on Apr 19, 2026
+                - generic [ref=e1230]: 61 images
+            - button "Undo Merge" [ref=e1232]
+          - generic [ref=e1233]:
+            - generic [ref=e1234]:
+              - generic [ref=e1235]:
+                - generic [ref=e1236]: Part of Cat's Eye Nebula
+                - generic [ref=e1237]: →
+                - link "NGC 6543 - Cat's Eye Nebula" [ref=e1238] [cursor=pointer]:
+                  - /url: /targets/e482bfaf-f08d-4bb6-999e-f268944556fa
+              - generic [ref=e1239]:
+                - generic [ref=e1240]: Merged on Apr 12, 2026
+                - generic [ref=e1241]: 73 images
+            - button "Undo Merge" [ref=e1243]
+          - generic [ref=e1244]:
+            - generic [ref=e1245]:
+              - generic [ref=e1246]:
+                - generic [ref=e1247]: Andromeda Nebula Panel 2
+                - generic [ref=e1248]: →
+                - link "M 31 - Andromeda Nebula" [ref=e1249] [cursor=pointer]:
+                  - /url: /targets/1a52fd1d-6b8e-42f3-9e7c-21983795c2e5
+              - generic [ref=e1250]:
+                - generic [ref=e1251]: Merged on Apr 19, 2026
+                - generic [ref=e1252]: 74 images
+            - button "Undo Merge" [ref=e1254]
+          - generic [ref=e1255]:
+            - generic [ref=e1256]:
+              - generic [ref=e1257]:
+                - generic [ref=e1258]: NGC 896 Panel 1
+                - generic [ref=e1259]: →
+                - link "NGC 896" [ref=e1260] [cursor=pointer]:
+                  - /url: /targets/be7a0d21-82bf-4c69-8023-955f3e8a6ef7
+              - generic [ref=e1261]:
+                - generic [ref=e1262]: Merged on Apr 12, 2026
+                - generic [ref=e1263]: 19 images
+            - button "Undo Merge" [ref=e1265]
+          - generic [ref=e1266]:
+            - generic [ref=e1267]:
+              - generic [ref=e1268]:
+                - generic [ref=e1269]: NGC 896 Panel 2
+                - generic [ref=e1270]: →
+                - link "NGC 896" [ref=e1271] [cursor=pointer]:
+                  - /url: /targets/be7a0d21-82bf-4c69-8023-955f3e8a6ef7
+              - generic [ref=e1272]:
+                - generic [ref=e1273]: Merged on Apr 12, 2026
+                - generic [ref=e1274]: 15 images
+            - button "Undo Merge" [ref=e1276]
+          - generic [ref=e1277]:
+            - generic [ref=e1278]:
+              - generic [ref=e1279]:
+                - generic [ref=e1280]: NGC 896 Panel 3
+                - generic [ref=e1281]: →
+                - link "NGC 896" [ref=e1282] [cursor=pointer]:
+                  - /url: /targets/be7a0d21-82bf-4c69-8023-955f3e8a6ef7
+              - generic [ref=e1283]:
+                - generic [ref=e1284]: Merged on Apr 12, 2026
+                - generic [ref=e1285]: 11 images
+            - button "Undo Merge" [ref=e1287]
+          - generic [ref=e1288]:
+            - generic [ref=e1289]:
+              - generic [ref=e1290]:
+                - generic [ref=e1291]: NGC 896 Panel 4
+                - generic [ref=e1292]: →
+                - link "NGC 896" [ref=e1293] [cursor=pointer]:
+                  - /url: /targets/be7a0d21-82bf-4c69-8023-955f3e8a6ef7
+              - generic [ref=e1294]:
+                - generic [ref=e1295]: Merged on Apr 12, 2026
+                - generic [ref=e1296]: 27 images
+            - button "Undo Merge" [ref=e1298]
+          - generic [ref=e1299]:
+            - generic [ref=e1300]:
+              - generic [ref=e1301]:
+                - generic [ref=e1302]: Markarian's Chain
+                - generic [ref=e1303]: →
+                - link "Markarian's Chain" [ref=e1304] [cursor=pointer]:
+                  - /url: /targets/c4937f8d-f103-4bc2-8bcf-6c3a5d34c4b0
+              - generic [ref=e1305]:
+                - generic [ref=e1306]: Merged on Apr 20, 2026
+                - generic [ref=e1307]: 146 images
+            - button "Undo Merge" [ref=e1309]
+          - generic [ref=e1310]:
+            - generic [ref=e1311]:
+              - generic [ref=e1312]:
+                - generic [ref=e1313]: Markarian
+                - generic [ref=e1314]: →
+                - link "Markarian's Chain" [ref=e1315] [cursor=pointer]:
+                  - /url: /targets/c4937f8d-f103-4bc2-8bcf-6c3a5d34c4b0
+              - generic [ref=e1316]:
+                - generic [ref=e1317]: Merged on Apr 21, 2026
+                - generic [ref=e1318]: 100 images
+            - button "Undo Merge" [ref=e1320]
+      - generic [ref=e1321]:
+        - heading "Maintenance" [level=3] [ref=e1322]
+        - generic [ref=e1323]:
+          - generic [ref=e1325]:
+            - generic [ref=e1326]:
+              - generic [ref=e1327]:
+                - paragraph [ref=e1328]: Repair Target Links
+                - generic [ref=e1329]: Safe
+              - paragraph [ref=e1330]: Re-links images to targets using cached data. No network calls. Fixes broken links after merges or name changes.
+              - paragraph [ref=e1331]: Run this if images appear under the wrong target or are missing from a target.
+            - button "Run Repair" [ref=e1332]
+          - generic [ref=e1334]:
+            - generic [ref=e1335]:
+              - generic [ref=e1336]:
+                - paragraph [ref=e1337]: Retry Failed Lookups
+                - generic [ref=e1338]: Moderate
+              - paragraph [ref=e1339]: Clears failed lookup caches and re-queries SIMBAD for all unresolved names. Requires internet.
+              - paragraph [ref=e1340]: Run this after correcting FITS headers or if SIMBAD was down during the last scan.
+            - button "Retry Lookups" [ref=e1341]
+          - generic [ref=e1343]:
+            - generic [ref=e1344]:
+              - generic [ref=e1345]:
+                - paragraph [ref=e1346]: Re-link Catalog Orphans
+                - generic [ref=e1347]: Moderate
+              - paragraph [ref=e1348]: Repairs SIMBAD cache and re-links unattached frames to existing targets by catalog identity (e.g. NGC 6543). Requires internet for cache repair.
+              - paragraph [ref=e1349]: Run once after upgrading. Safe to re-run. Frames that match no catalog object stay listed under their object name.
+            - button "Re-link Orphans" [ref=e1350]
+          - generic [ref=e1352]:
+            - generic [ref=e1353]:
+              - generic [ref=e1354]:
+                - paragraph [ref=e1355]: Full Rebuild
+                - generic [ref=e1356]: Destructive
+              - paragraph [ref=e1357]: Deletes all targets and re-resolves every image from scratch via SIMBAD. This is slow and rate-limited.
+              - paragraph [ref=e1358]: Only needed if the target catalog is fundamentally broken. All manual edits (notes, locked names) will be lost.
+            - button "Full Rebuild" [ref=e1359]
+  - status
+  - alert

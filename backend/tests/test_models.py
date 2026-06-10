@@ -89,3 +89,21 @@ def test_activity_event_instantiation():
     assert ev.details["completed"] == 5
     assert ev.target_id is None
     assert ev.duration_ms is None
+
+
+class TestTargetCatalogIdNormalized:
+    def test_target_has_catalog_id_normalized_column(self):
+        from app.models.target import Target
+        assert "catalog_id_normalized" in Target.__table__.columns
+
+    def test_catalog_id_normalized_is_nullable(self):
+        from app.models.target import Target
+        assert Target.__table__.columns["catalog_id_normalized"].nullable is True
+
+    def test_unique_index_on_catalog_id_normalized_declared(self):
+        from app.models.target import Target
+        idx_names = {ix.name for ix in Target.__table__.indexes}
+        assert "uq_targets_catalog_id_normalized" in idx_names
+        ux = next(ix for ix in Target.__table__.indexes
+                  if ix.name == "uq_targets_catalog_id_normalized")
+        assert ux.unique is True

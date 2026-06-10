@@ -1,0 +1,956 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - link "GalactiLog logo GalactiLog" [ref=e5] [cursor=pointer]:
+      - /url: /
+      - img "GalactiLog logo" [ref=e6]
+      - heading "GalactiLog" [level=1] [ref=e7]
+    - navigation [ref=e8]:
+      - link "Dashboard" [ref=e9] [cursor=pointer]:
+        - /url: /
+      - link "Mosaics" [ref=e10] [cursor=pointer]:
+        - /url: /mosaics
+      - link "Statistics" [ref=e11] [cursor=pointer]:
+        - /url: /statistics
+      - link "Analysis" [ref=e12] [cursor=pointer]:
+        - /url: /analysis
+      - link "Settings" [ref=e13] [cursor=pointer]:
+        - /url: /settings
+    - generic [ref=e14]:
+      - generic [ref=e22]: chvvkumar
+      - button "Sign out" [ref=e23]
+      - link "snd" [ref=e16] [cursor=pointer]:
+        - /url: https://github.com/chvvkumar/GalactiLog/commit/b1a7e383a2ae97e9545549abbc57c43ea2f75efd
+      - link "GitHub" [ref=e17] [cursor=pointer]:
+        - /url: https://github.com/chvvkumar/GalactiLog
+        - img [ref=e18]
+  - generic [ref=e24]:
+    - heading "Settings" [level=1] [ref=e25]
+    - generic [ref=e26]:
+      - generic [ref=e27]:
+        - button "Library" [ref=e28] [cursor=pointer]
+        - button "Equipment" [ref=e29] [cursor=pointer]
+        - button "Display" [ref=e30] [cursor=pointer]
+        - button "External Tools" [ref=e31] [cursor=pointer]
+        - button "Target Management" [ref=e32] [cursor=pointer]
+        - button "Custom Columns" [ref=e33] [cursor=pointer]
+        - button "Backup & Restore" [ref=e34] [cursor=pointer]
+        - button "Users" [ref=e35] [cursor=pointer]
+        - button "Activity Log" [ref=e36] [cursor=pointer]
+        - button "Metrics" [ref=e37] [cursor=pointer]
+      - button "About this section" [ref=e39] [cursor=pointer]:
+        - img [ref=e40]
+    - generic [ref=e43]:
+      - generic [ref=e44]:
+        - generic [ref=e45]:
+          - generic [ref=e46]:
+            - generic [ref=e47]: 33,237
+            - generic [ref=e48]: Total Images
+          - generic [ref=e49]:
+            - generic [ref=e50]: 31,537
+            - generic [ref=e51]: Light Frames
+          - generic [ref=e52]:
+            - generic [ref=e53]: "117"
+            - generic [ref=e54]: Targets
+          - generic "Light frames whose OBJECT name could not be matched to a known target in SIMBAD." [ref=e55] [cursor=pointer]:
+            - generic [ref=e56]: "670"
+            - generic [ref=e57]: Unresolved
+          - generic [ref=e58]:
+            - generic [ref=e59]: 1,906
+            - generic [ref=e60]: From CSV
+          - generic "On-disk size of raw FITS capture files." [ref=e61]:
+            - generic [ref=e62]: 0 KB
+            - generic [ref=e63]: FITS
+          - generic "On-disk size of generated preview thumbnails." [ref=e64]:
+            - generic [ref=e65]: 8.2 GB
+            - generic [ref=e66]: Thumbnails
+          - generic "On-disk size of the PostgreSQL database." [ref=e67]:
+            - generic [ref=e68]: 215 MB
+            - generic [ref=e69]: Database
+        - generic [ref=e70]:
+          - generic "165 SIMBAD lookups cached locally. 7 returned no match." [ref=e71]: 165 SIMBAD cached (7 negative)
+          - generic "7 SESAME (NED+VizieR) fallback lookups cached locally. 7 returned no match." [ref=e72]: 7 SESAME cached (7 negative)
+          - generic "30 VizieR lookups cached locally. 6 returned no data." [ref=e73]: 30 VizieR cached (6 negative)
+      - generic [ref=e75]:
+        - heading "Capture Activity" [level=3] [ref=e76]
+        - generic [ref=e77]: Frames per capture night (last 30)
+      - generic [ref=e80]:
+        - generic [ref=e81]:
+          - generic [ref=e82]:
+            - generic [ref=e83]:
+              - heading "Library Scanning" [level=3] [ref=e84]
+              - button "About this section" [ref=e86] [cursor=pointer]:
+                - img [ref=e87]
+            - generic [ref=e89]:
+              - generic [ref=e90]:
+                - heading "Auto-scan" [level=4] [ref=e91]
+                - button "About this section" [ref=e93] [cursor=pointer]:
+                  - img [ref=e94]
+              - generic [ref=e96]:
+                - generic [ref=e97]: Enable automatic scanning
+                - button [ref=e98]
+              - generic [ref=e100]:
+                - generic [ref=e101]: Scan interval
+                - combobox [ref=e102]:
+                  - option "1 hour"
+                  - option "2 hours"
+                  - option "4 hours"
+                  - option "8 hours" [selected]
+                  - option "12 hours"
+                  - option "24 hours"
+            - generic [ref=e103]:
+              - generic [ref=e104]:
+                - heading "Observer Location" [level=4] [ref=e105]
+                - button "About this section" [ref=e107] [cursor=pointer]:
+                  - img [ref=e108]
+              - generic [ref=e110]:
+                - generic [ref=e111]:
+                  - text: Name
+                  - textbox [ref=e112]: Home
+                - generic [ref=e113]:
+                  - text: Latitude
+                  - spinbutton [ref=e114]: "38.7582179"
+                - generic [ref=e115]:
+                  - text: Longitude
+                  - spinbutton [ref=e116]: "-90.6893767"
+            - group [ref=e117]:
+              - generic "Path & name rules — 0 include path(s), 3 exclude path(s), 0 name rule(s)" [ref=e118] [cursor=pointer]
+              - generic [ref=e119]:
+                - generic [ref=e120]:
+                  - button "About this section" [ref=e121] [cursor=pointer]:
+                    - img [ref=e122]
+                    - generic [ref=e124]: About this section
+                    - img [ref=e125]
+                  - generic [ref=e128]:
+                    - paragraph [ref=e129]:
+                      - text: Filtering happens in
+                      - strong [ref=e130]: two layers
+                      - text: ", applied in order."
+                    - generic [ref=e131]:
+                      - paragraph [ref=e132]: 1. Paths, which folders to walk
+                      - list [ref=e133]:
+                        - listitem [ref=e134]:
+                          - strong [ref=e135]: Include paths
+                          - text: limit the scan to specific subtrees.
+                          - emphasis [ref=e136]: Empty means scan everything under the data root.
+                        - listitem [ref=e137]:
+                          - strong [ref=e138]: Exclude paths
+                          - text: skip subtrees entirely.
+                          - emphasis [ref=e139]: Exclude always wins over include.
+                    - generic [ref=e140]:
+                      - paragraph [ref=e141]: 2. Name rules, which files and folders to keep
+                      - list [ref=e142]:
+                        - listitem [ref=e143]:
+                          - text: Patterns match against
+                          - strong [ref=e144]: file names
+                          - text: or
+                          - strong [ref=e145]: folder names
+                          - text: ", using"
+                          - strong [ref=e146]: wildcard
+                          - text: ","
+                          - strong [ref=e147]: substring
+                          - text: ", or"
+                          - strong [ref=e148]: regex
+                          - text: .
+                        - listitem [ref=e149]:
+                          - strong [ref=e150]: Exclude rules
+                          - text: are checked first, then
+                          - strong [ref=e151]: include rules
+                          - text: narrow the result.
+                        - listitem [ref=e152]:
+                          - text: If any include rule exists for a target kind (file or folder), that target
+                          - strong [ref=e153]: must
+                          - text: match at least one.
+                    - generic [ref=e154]:
+                      - paragraph [ref=e155]: Example
+                      - generic [ref=e156]: include path /app/data/fits/2025 exclude path /app/data/fits/2025/rejected exclude rule *_bad.fits (wildcard, file) include rule ^M\d+$ (regex, folder)
+                      - paragraph [ref=e157]:
+                        - text: "Result: scans only"
+                        - code [ref=e158]: "2025"
+                        - text: ", skips"
+                        - code [ref=e159]: rejected/
+                        - text: ", drops any file ending in"
+                        - code [ref=e160]: _bad.fits
+                        - text: ", and only keeps files whose parent folder name is an M-catalog designation like"
+                        - code [ref=e161]: M31
+                        - text: or
+                        - code [ref=e162]: M42
+                        - text: .
+                - generic [ref=e163]:
+                  - generic [ref=e164]:
+                    - heading "Include paths" [level=4] [ref=e165]
+                    - button "Browse…" [ref=e166]
+                  - paragraph [ref=e167]: When empty, scans the entire configured data path. When set, scans only these folders (each must resolve inside the data root).
+                  - paragraph [ref=e168]: None
+                  - generic [ref=e169]:
+                    - textbox "/app/data/fits/subfolder" [ref=e170]
+                    - button "Add" [disabled] [ref=e171]
+                - generic [ref=e172]:
+                  - generic [ref=e173]:
+                    - heading "Exclude paths" [level=4] [ref=e174]
+                    - button "Browse…" [ref=e175]
+                  - paragraph [ref=e176]: Subtrees to skip entirely. Exclude always wins over include.
+                  - list [ref=e177]:
+                    - listitem [ref=e178]:
+                      - code [ref=e179]: /app/data/fits/Calibration Frames
+                      - button "Remove" [ref=e180]
+                    - listitem [ref=e181]:
+                      - code [ref=e182]: /app/data/fits/@eaDir
+                      - button "Remove" [ref=e183]
+                    - listitem [ref=e184]:
+                      - code [ref=e185]: /app/data/fits/delete
+                      - button "Remove" [ref=e186]
+                  - generic [ref=e187]:
+                    - textbox "/app/data/fits/subfolder" [ref=e188]
+                    - button "Add" [disabled] [ref=e189]
+                - generic [ref=e190]:
+                  - heading "Name rules" [level=4] [ref=e191]
+                  - generic [ref=e192]:
+                    - button "About this section" [ref=e193] [cursor=pointer]:
+                      - img [ref=e194]
+                      - generic [ref=e196]: About this section
+                      - img [ref=e197]
+                    - paragraph [ref=e200]:
+                      - text: "Pattern syntax:"
+                      - strong [ref=e201]: wildcard
+                      - text: uses
+                      - code [ref=e202]: "*"
+                      - text: for any characters and
+                      - code [ref=e203]: "?"
+                      - text: for a single character (e.g.
+                      - code [ref=e204]: "*_bad.fits"
+                      - text: ","
+                      - code [ref=e205]: "*_calibration"
+                      - text: ).
+                      - strong [ref=e206]: Substring
+                      - text: matches anywhere inside the name, case-insensitive (e.g.
+                      - code [ref=e207]: rejected
+                      - text: ","
+                      - code [ref=e208]: test_
+                      - text: ).
+                      - strong [ref=e209]: Regex
+                      - text: is a full regular expression (e.g.
+                      - code [ref=e210]: ^M\d+$
+                      - text: ","
+                      - code [ref=e211]: .*_v[0-9]+\.fits
+                      - text: ).
+                  - table [ref=e213]:
+                    - rowgroup [ref=e214]:
+                      - row "On Action Type Target Pattern" [ref=e215]:
+                        - columnheader "On" [ref=e216]
+                        - columnheader "Action" [ref=e217]
+                        - columnheader "Type" [ref=e218]
+                        - columnheader "Target" [ref=e219]
+                        - columnheader "Pattern" [ref=e220]
+                        - columnheader [ref=e221]
+                    - rowgroup
+                  - button "Add rule" [ref=e222]
+                - generic [ref=e223]:
+                  - heading "Test a path" [level=4] [ref=e224]
+                  - paragraph [ref=e225]: Paste a file or folder path to see how the current rules would treat it. The path does not need to exist on disk. Unsaved changes are not used; save first to test them.
+                  - generic [ref=e227]:
+                    - textbox "/app/data/fits/2025/M31/frame_bad.fits" [ref=e228]
+                    - combobox "Treat the path as a file, a folder, or auto-detect" [ref=e229]:
+                      - option "auto" [selected]
+                      - option "file"
+                      - option "folder"
+                    - button "Test" [disabled] [ref=e230]
+                - generic [ref=e231]:
+                  - button "Save rules" [disabled] [ref=e232]
+                  - button "Revert" [disabled] [ref=e233]
+                  - button "Apply now" [ref=e234]
+            - generic [ref=e235]:
+              - generic [ref=e236]:
+                - generic [ref=e237]: "Include:"
+                - generic [ref=e238] [cursor=pointer]:
+                  - radio "All frames" [ref=e239]
+                  - generic [ref=e240]: All frames
+                - generic [ref=e241] [cursor=pointer]:
+                  - radio "Light frames only" [checked] [ref=e242]
+                  - generic [ref=e243]: Light frames only
+              - generic [ref=e244]:
+                - button "Stop" [ref=e245]
+                - button "Scan Directory" [ref=e246]
+          - generic [ref=e248]:
+            - heading "Maintenance" [level=3] [ref=e249]
+            - generic [ref=e250]:
+              - button "Fetch Reference Images" [ref=e251]
+              - button "Regenerate Thumbnails" [ref=e252]
+        - generic [ref=e255]:
+          - generic [ref=e256]:
+            - generic [ref=e257]:
+              - heading "Activity" [level=3] [ref=e258]
+              - generic [ref=e259]: 1 live
+            - button "Clear" [ref=e260]
+          - status [ref=e261]:
+            - paragraph [ref=e262]: Now Running
+            - generic [ref=e264]:
+              - generic [ref=e265]:
+                - generic [ref=e266]: Rebuild
+                - generic [ref=e267]: Repairing SIMBAD cache...
+              - generic [ref=e269]: 01:04 ago
+          - generic [ref=e272]:
+            - generic [ref=e273]:
+              - paragraph [ref=e274]: History
+              - generic [ref=e275]:
+                - button "all" [ref=e276]
+                - button "info" [ref=e277]
+                - button "warn" [ref=e278]
+                - button "error" [ref=e279]
+              - generic [ref=e280]:
+                - button "all" [ref=e281]
+                - button "scan" [ref=e282]
+                - button "reb" [ref=e283]
+                - button "thumb" [ref=e284]
+                - button "enrich" [ref=e285]
+                - button "mosaic" [ref=e286]
+                - button "migr" [ref=e287]
+                - button "user" [ref=e288]
+                - button "sys" [ref=e289]
+            - generic [ref=e291]:
+              - generic [ref=e295]:
+                - 'button "10:33 am ▲ enrich Retry Unresolved: enrichment failed for 7 of 7 object names ›" [ref=e296]':
+                  - generic [ref=e297]: 10:33 am
+                  - generic "warning" [ref=e298]: ▲
+                  - generic [ref=e299]: enrich
+                  - generic [ref=e300]: "Retry Unresolved: enrichment failed for 7 of 7 object names"
+                  - generic [ref=e301]: ›
+                - generic [ref=e304]:
+                  - generic [ref=e305]:
+                    - term [ref=e306]: Total
+                    - definition [ref=e307]: "7"
+                  - generic [ref=e308]:
+                    - term [ref=e309]: Failed targets
+                    - definition [ref=e310]: "7"
+              - generic [ref=e314]:
+                - 'button "10:33 am ● reb Retry Unresolved: 0 resolved, 7 still unresolved out of 7 names ›" [ref=e315]':
+                  - generic [ref=e316]: 10:33 am
+                  - generic "info" [ref=e317]: ●
+                  - generic [ref=e318]: reb
+                  - generic [ref=e319]: "Retry Unresolved: 0 resolved, 7 still unresolved out of 7 names"
+                  - generic [ref=e320]: ›
+                - generic [ref=e323]:
+                  - generic [ref=e324]:
+                    - term [ref=e325]: Total
+                    - definition [ref=e326]: "7"
+                  - generic [ref=e327]:
+                    - term [ref=e328]: Failed
+                    - definition [ref=e329]: "7"
+                  - generic [ref=e330]:
+                    - term [ref=e331]: Resolved
+                    - definition [ref=e332]: "0"
+              - generic [ref=e337]:
+                - generic [ref=e338]: 10:33 am
+                - generic "info" [ref=e339]: ●
+                - generic [ref=e340]: mosaic
+                - generic [ref=e341]: "Mosaic detection complete: 0 new suggestions found"
+              - generic [ref=e345]:
+                - 'button "10:33 am ● reb Quick Fix: No issues found ›" [ref=e346]':
+                  - generic [ref=e347]: 10:33 am
+                  - generic "info" [ref=e348]: ●
+                  - generic [ref=e349]: reb
+                  - generic [ref=e350]: "Quick Fix: No issues found"
+                  - generic [ref=e351]: ›
+                - generic [ref=e354]:
+                  - generic [ref=e355]:
+                    - term [ref=e356]: Rederived
+                    - definition [ref=e357]: "0"
+                  - generic [ref=e358]:
+                    - term [ref=e359]: Names rebuilt
+                    - definition [ref=e360]: "0"
+                  - generic [ref=e361]:
+                    - term [ref=e362]: Aliases updated
+                    - definition [ref=e363]: "0"
+                  - generic [ref=e364]:
+                    - term [ref=e365]: Linked unresolved
+                    - definition [ref=e366]: "0"
+                  - generic [ref=e367]:
+                    - term [ref=e368]: Redirected merged
+                    - definition [ref=e369]: "0"
+                  - generic [ref=e370]:
+                    - term [ref=e371]: Stale candidates removed
+                    - definition [ref=e372]: "0"
+              - generic [ref=e377]:
+                - generic [ref=e378]: 10:31 am
+                - generic "info" [ref=e379]: ●
+                - generic [ref=e380]: mosaic
+                - generic [ref=e381]: "Mosaic detection complete: 0 new suggestions found"
+              - generic [ref=e386]:
+                - generic [ref=e387]: 10:31 am
+                - generic "info" [ref=e388]: ●
+                - generic [ref=e389]: mosaic
+                - generic [ref=e390]: "Mosaic detection complete: 0 new suggestions found"
+              - generic [ref=e395]:
+                - generic [ref=e396]: 07:32 am
+                - generic "info" [ref=e397]: ●
+                - generic [ref=e398]: mosaic
+                - generic [ref=e399]: "Mosaic detection complete: 0 new suggestions found"
+              - generic [ref=e404]:
+                - generic [ref=e405]: 07:32 am
+                - generic "info" [ref=e406]: ●
+                - generic [ref=e407]: mosaic
+                - generic [ref=e408]: "Mosaic detection complete: 0 new suggestions found"
+              - generic [ref=e409]:
+                - generic [ref=e410]:
+                  - generic [ref=e412]:
+                    - 'button "06:53 am ● scan Scan complete: no new files found (83633 already cataloged) ›" [ref=e413]':
+                      - generic [ref=e414]: 06:53 am
+                      - generic "info" [ref=e415]: ●
+                      - generic [ref=e416]: scan
+                      - generic [ref=e417]: "Scan complete: no new files found (83633 already cataloged)"
+                      - generic [ref=e418]: ›
+                    - generic [ref=e421]:
+                      - generic [ref=e422]:
+                        - term [ref=e423]: Failed
+                        - definition [ref=e424]: "0"
+                      - generic [ref=e425]:
+                        - term [ref=e426]: Removed
+                        - definition [ref=e427]: "0"
+                      - generic [ref=e428]:
+                        - term [ref=e429]: Completed
+                        - definition [ref=e430]: "0"
+                      - generic [ref=e431]:
+                        - term [ref=e432]: Already known
+                        - definition [ref=e433]: 83,633
+                  - button "1 sub-task ›" [ref=e434]:
+                    - generic [ref=e435]: 1 sub-task
+                    - generic [ref=e436]: ›
+                - generic [ref=e438]:
+                  - 'button "06:53 am ● thumb Reference Thumbnails: fetched 0/0 ›" [ref=e439]':
+                    - generic [ref=e440]: 06:53 am
+                    - generic "info" [ref=e441]: ●
+                    - generic [ref=e442]: thumb
+                    - generic [ref=e443]: "Reference Thumbnails: fetched 0/0"
+                    - generic [ref=e444]: ›
+                  - generic [ref=e447]:
+                    - generic [ref=e448]:
+                      - term [ref=e449]: Total
+                      - definition [ref=e450]: "0"
+                    - generic [ref=e451]:
+                      - term [ref=e452]: Fetched
+                      - definition [ref=e453]: "0"
+              - generic [ref=e454]:
+                - generic [ref=e455]:
+                  - generic [ref=e457]:
+                    - 'button "06:29 am ● scan Scan complete: 283 new files added, 390 calibration frames skipped, 283 CSV enriched ›" [ref=e458]':
+                      - generic [ref=e459]: 06:29 am
+                      - generic "info" [ref=e460]: ●
+                      - generic [ref=e461]: scan
+                      - generic [ref=e462]: "Scan complete: 283 new files added, 390 calibration frames skipped, 283 CSV enriched"
+                      - generic [ref=e463]: ›
+                    - generic [ref=e466]:
+                      - generic [ref=e467]:
+                        - term [ref=e468]: Total
+                        - definition [ref=e469]: "673"
+                      - generic [ref=e470]:
+                        - term [ref=e471]: Failed
+                        - definition [ref=e472]: "0"
+                      - generic [ref=e473]:
+                        - term [ref=e474]: Removed
+                        - definition [ref=e475]: "0"
+                      - generic [ref=e476]:
+                        - term [ref=e477]: Completed
+                        - definition [ref=e478]: "673"
+                      - generic [ref=e479]:
+                        - term [ref=e480]: New files
+                        - definition [ref=e481]: "673"
+                      - generic [ref=e482]:
+                        - term [ref=e483]: Csv enriched
+                        - definition [ref=e484]: "283"
+                      - generic [ref=e485]:
+                        - term [ref=e486]: Changed files
+                        - definition [ref=e487]: "0"
+                      - generic [ref=e488]:
+                        - term [ref=e489]: Skipped calibration
+                        - definition [ref=e490]: "390"
+                  - button "4 sub-tasks ›" [ref=e491]:
+                    - generic [ref=e492]: 4 sub-tasks
+                    - generic [ref=e493]: ›
+                - generic [ref=e494]:
+                  - generic [ref=e495]:
+                    - 'button "06:29 am ● reb Quick Fix: No issues found ›" [ref=e496]':
+                      - generic [ref=e497]: 06:29 am
+                      - generic "info" [ref=e498]: ●
+                      - generic [ref=e499]: reb
+                      - generic [ref=e500]: "Quick Fix: No issues found"
+                      - generic [ref=e501]: ›
+                    - generic [ref=e504]:
+                      - generic [ref=e505]:
+                        - term [ref=e506]: Rederived
+                        - definition [ref=e507]: "0"
+                      - generic [ref=e508]:
+                        - term [ref=e509]: Names rebuilt
+                        - definition [ref=e510]: "0"
+                      - generic [ref=e511]:
+                        - term [ref=e512]: Aliases updated
+                        - definition [ref=e513]: "0"
+                      - generic [ref=e514]:
+                        - term [ref=e515]: Linked unresolved
+                        - definition [ref=e516]: "0"
+                      - generic [ref=e517]:
+                        - term [ref=e518]: Redirected merged
+                        - definition [ref=e519]: "0"
+                      - generic [ref=e520]:
+                        - term [ref=e521]: Stale candidates removed
+                        - definition [ref=e522]: "0"
+                  - generic [ref=e523]:
+                    - 'button "06:29 am ● thumb Reference Thumbnails: fetched 0/0 ›" [ref=e524]':
+                      - generic [ref=e525]: 06:29 am
+                      - generic "info" [ref=e526]: ●
+                      - generic [ref=e527]: thumb
+                      - generic [ref=e528]: "Reference Thumbnails: fetched 0/0"
+                      - generic [ref=e529]: ›
+                    - generic [ref=e532]:
+                      - generic [ref=e533]:
+                        - term [ref=e534]: Total
+                        - definition [ref=e535]: "0"
+                      - generic [ref=e536]:
+                        - term [ref=e537]: Fetched
+                        - definition [ref=e538]: "0"
+                  - generic [ref=e540]:
+                    - generic [ref=e541]: 06:29 am
+                    - generic "info" [ref=e542]: ●
+                    - generic [ref=e543]: mosaic
+                    - generic [ref=e544]: "Mosaic detection complete: 0 new suggestions found"
+                  - generic [ref=e546]:
+                    - generic [ref=e547]: 06:29 am
+                    - generic "info" [ref=e548]: ●
+                    - generic [ref=e549]: mosaic
+                    - generic [ref=e550]: "Mosaic detection complete: 0 new suggestions found"
+              - generic [ref=e555]:
+                - generic [ref=e556]: 06:16 am
+                - generic "info" [ref=e557]: ●
+                - generic [ref=e558]: scan
+                - generic [ref=e559]: Scan stopped by user (0 files discovered before stop)
+              - generic [ref=e560]:
+                - generic [ref=e561]:
+                  - generic [ref=e563]:
+                    - 'button "10:53 pm ● scan Scan complete: no new files found (82960 already cataloged) ›" [ref=e564]':
+                      - generic [ref=e565]: 10:53 pm
+                      - generic "info" [ref=e566]: ●
+                      - generic [ref=e567]: scan
+                      - generic [ref=e568]: "Scan complete: no new files found (82960 already cataloged)"
+                      - generic [ref=e569]: ›
+                    - generic [ref=e572]:
+                      - generic [ref=e573]:
+                        - term [ref=e574]: Failed
+                        - definition [ref=e575]: "0"
+                      - generic [ref=e576]:
+                        - term [ref=e577]: Removed
+                        - definition [ref=e578]: "0"
+                      - generic [ref=e579]:
+                        - term [ref=e580]: Completed
+                        - definition [ref=e581]: "0"
+                      - generic [ref=e582]:
+                        - term [ref=e583]: Already known
+                        - definition [ref=e584]: 82,960
+                  - button "1 sub-task ›" [ref=e585]:
+                    - generic [ref=e586]: 1 sub-task
+                    - generic [ref=e587]: ›
+                - generic [ref=e589]:
+                  - 'button "10:53 pm ● thumb Reference Thumbnails: fetched 0/0 ›" [ref=e590]':
+                    - generic [ref=e591]: 10:53 pm
+                    - generic "info" [ref=e592]: ●
+                    - generic [ref=e593]: thumb
+                    - generic [ref=e594]: "Reference Thumbnails: fetched 0/0"
+                    - generic [ref=e595]: ›
+                  - generic [ref=e598]:
+                    - generic [ref=e599]:
+                      - term [ref=e600]: Total
+                      - definition [ref=e601]: "0"
+                    - generic [ref=e602]:
+                      - term [ref=e603]: Fetched
+                      - definition [ref=e604]: "0"
+              - generic [ref=e605]:
+                - generic [ref=e606]:
+                  - generic [ref=e608]:
+                    - 'button "08:35 pm ● scan Scan complete: no new files found (82960 already cataloged), 18 deleted files purged from catalog ›" [ref=e609]':
+                      - generic [ref=e610]: 08:35 pm
+                      - generic "info" [ref=e611]: ●
+                      - generic [ref=e612]: scan
+                      - generic [ref=e613]: "Scan complete: no new files found (82960 already cataloged), 18 deleted files purged from catalog"
+                      - generic [ref=e614]: ›
+                    - generic [ref=e617]:
+                      - generic [ref=e618]:
+                        - term [ref=e619]: Failed
+                        - definition [ref=e620]: "0"
+                      - generic [ref=e621]:
+                        - term [ref=e622]: Removed
+                        - definition [ref=e623]: "18"
+                      - generic [ref=e624]:
+                        - term [ref=e625]: Completed
+                        - definition [ref=e626]: "0"
+                      - generic [ref=e627]:
+                        - term [ref=e628]: Already known
+                        - definition [ref=e629]: 82,960
+                  - button "1 sub-task ›" [ref=e630]:
+                    - generic [ref=e631]: 1 sub-task
+                    - generic [ref=e632]: ›
+                - generic [ref=e634]:
+                  - 'button "08:35 pm ● thumb Reference Thumbnails: fetched 0/0 ›" [ref=e635]':
+                    - generic [ref=e636]: 08:35 pm
+                    - generic "info" [ref=e637]: ●
+                    - generic [ref=e638]: thumb
+                    - generic [ref=e639]: "Reference Thumbnails: fetched 0/0"
+                    - generic [ref=e640]: ›
+                  - generic [ref=e643]:
+                    - generic [ref=e644]:
+                      - term [ref=e645]: Total
+                      - definition [ref=e646]: "0"
+                    - generic [ref=e647]:
+                      - term [ref=e648]: Fetched
+                      - definition [ref=e649]: "0"
+              - generic [ref=e654]:
+                - generic [ref=e655]: 08:35 pm
+                - generic "info" [ref=e656]: ●
+                - generic [ref=e657]: scan
+                - generic [ref=e658]: Removed 18 deleted files from catalog
+              - generic [ref=e662]:
+                - 'button "07:03 pm ▲ enrich Retry Unresolved: enrichment failed for 8 of 8 object names ›" [ref=e663]':
+                  - generic [ref=e664]: 07:03 pm
+                  - generic "warning" [ref=e665]: ▲
+                  - generic [ref=e666]: enrich
+                  - generic [ref=e667]: "Retry Unresolved: enrichment failed for 8 of 8 object names"
+                  - generic [ref=e668]: ›
+                - generic [ref=e671]:
+                  - generic [ref=e672]:
+                    - term [ref=e673]: Total
+                    - definition [ref=e674]: "8"
+                  - generic [ref=e675]:
+                    - term [ref=e676]: Failed targets
+                    - definition [ref=e677]: "8"
+              - generic [ref=e681]:
+                - 'button "07:03 pm ● reb Retry Unresolved: 0 resolved, 8 still unresolved out of 8 names ›" [ref=e682]':
+                  - generic [ref=e683]: 07:03 pm
+                  - generic "info" [ref=e684]: ●
+                  - generic [ref=e685]: reb
+                  - generic [ref=e686]: "Retry Unresolved: 0 resolved, 8 still unresolved out of 8 names"
+                  - generic [ref=e687]: ›
+                - generic [ref=e690]:
+                  - generic [ref=e691]:
+                    - term [ref=e692]: Total
+                    - definition [ref=e693]: "8"
+                  - generic [ref=e694]:
+                    - term [ref=e695]: Failed
+                    - definition [ref=e696]: "8"
+                  - generic [ref=e697]:
+                    - term [ref=e698]: Resolved
+                    - definition [ref=e699]: "0"
+              - generic [ref=e704]:
+                - generic [ref=e705]: 07:03 pm
+                - generic "info" [ref=e706]: ●
+                - generic [ref=e707]: mosaic
+                - generic [ref=e708]: "Mosaic detection complete: 0 new suggestions found"
+              - generic [ref=e713]:
+                - generic [ref=e714]: 07:03 pm
+                - generic "info" [ref=e715]: ●
+                - generic [ref=e716]: mosaic
+                - generic [ref=e717]: "Mosaic detection complete: 0 new suggestions found"
+              - generic [ref=e722]:
+                - generic [ref=e723]: 07:03 pm
+                - generic "info" [ref=e724]: ●
+                - generic [ref=e725]: mosaic
+                - generic [ref=e726]: "Mosaic detection complete: 0 new suggestions found"
+              - generic [ref=e730]:
+                - 'button "07:03 pm ● migr Data upgrade complete: v11: HyperLEDA: 29 galaxies enriched (32 network queries) ›" [ref=e731]':
+                  - generic [ref=e732]: 07:03 pm
+                  - generic "info" [ref=e733]: ●
+                  - generic [ref=e734]: migr
+                  - generic [ref=e735]: "Data upgrade complete: v11: HyperLEDA: 29 galaxies enriched (32 network queries)"
+                  - generic [ref=e736]: ›
+                - generic [ref=e739]:
+                  - generic [ref=e740]:
+                    - term [ref=e741]: To version
+                    - definition [ref=e742]: "11"
+                  - generic [ref=e743]:
+                    - term [ref=e744]: From version
+                    - definition [ref=e745]: "10"
+              - generic [ref=e749]:
+                - 'button "07:03 pm ● reb Quick Fix: No issues found ›" [ref=e750]':
+                  - generic [ref=e751]: 07:03 pm
+                  - generic "info" [ref=e752]: ●
+                  - generic [ref=e753]: reb
+                  - generic [ref=e754]: "Quick Fix: No issues found"
+                  - generic [ref=e755]: ›
+                - generic [ref=e758]:
+                  - generic [ref=e759]:
+                    - term [ref=e760]: Rederived
+                    - definition [ref=e761]: "0"
+                  - generic [ref=e762]:
+                    - term [ref=e763]: Names rebuilt
+                    - definition [ref=e764]: "0"
+                  - generic [ref=e765]:
+                    - term [ref=e766]: Aliases updated
+                    - definition [ref=e767]: "0"
+                  - generic [ref=e768]:
+                    - term [ref=e769]: Linked unresolved
+                    - definition [ref=e770]: "0"
+                  - generic [ref=e771]:
+                    - term [ref=e772]: Redirected merged
+                    - definition [ref=e773]: "0"
+                  - generic [ref=e774]:
+                    - term [ref=e775]: Stale candidates removed
+                    - definition [ref=e776]: "0"
+              - generic [ref=e777]:
+                - generic [ref=e778]:
+                  - generic [ref=e780]:
+                    - 'button "05:42 pm ● scan Scan complete: no new files found (82978 already cataloged) ›" [ref=e781]':
+                      - generic [ref=e782]: 05:42 pm
+                      - generic "info" [ref=e783]: ●
+                      - generic [ref=e784]: scan
+                      - generic [ref=e785]: "Scan complete: no new files found (82978 already cataloged)"
+                      - generic [ref=e786]: ›
+                    - generic [ref=e789]:
+                      - generic [ref=e790]:
+                        - term [ref=e791]: Failed
+                        - definition [ref=e792]: "0"
+                      - generic [ref=e793]:
+                        - term [ref=e794]: Removed
+                        - definition [ref=e795]: "0"
+                      - generic [ref=e796]:
+                        - term [ref=e797]: Completed
+                        - definition [ref=e798]: "0"
+                      - generic [ref=e799]:
+                        - term [ref=e800]: Already known
+                        - definition [ref=e801]: 82,978
+                  - button "1 sub-task ›" [ref=e802]:
+                    - generic [ref=e803]: 1 sub-task
+                    - generic [ref=e804]: ›
+                - generic [ref=e806]:
+                  - 'button "05:43 pm ● thumb Reference Thumbnails: fetched 0/0 ›" [ref=e807]':
+                    - generic [ref=e808]: 05:43 pm
+                    - generic "info" [ref=e809]: ●
+                    - generic [ref=e810]: thumb
+                    - generic [ref=e811]: "Reference Thumbnails: fetched 0/0"
+                    - generic [ref=e812]: ›
+                  - generic [ref=e815]:
+                    - generic [ref=e816]:
+                      - term [ref=e817]: Total
+                      - definition [ref=e818]: "0"
+                    - generic [ref=e819]:
+                      - term [ref=e820]: Fetched
+                      - definition [ref=e821]: "0"
+              - generic [ref=e825]:
+                - 'button "05:40 pm ▲ enrich Retry Unresolved: enrichment failed for 8 of 8 object names ›" [ref=e826]':
+                  - generic [ref=e827]: 05:40 pm
+                  - generic "warning" [ref=e828]: ▲
+                  - generic [ref=e829]: enrich
+                  - generic [ref=e830]: "Retry Unresolved: enrichment failed for 8 of 8 object names"
+                  - generic [ref=e831]: ›
+                - generic [ref=e834]:
+                  - generic [ref=e835]:
+                    - term [ref=e836]: Total
+                    - definition [ref=e837]: "8"
+                  - generic [ref=e838]:
+                    - term [ref=e839]: Failed targets
+                    - definition [ref=e840]: "8"
+              - generic [ref=e844]:
+                - 'button "05:40 pm ● reb Retry Unresolved: 0 resolved, 8 still unresolved out of 8 names ›" [ref=e845]':
+                  - generic [ref=e846]: 05:40 pm
+                  - generic "info" [ref=e847]: ●
+                  - generic [ref=e848]: reb
+                  - generic [ref=e849]: "Retry Unresolved: 0 resolved, 8 still unresolved out of 8 names"
+                  - generic [ref=e850]: ›
+                - generic [ref=e853]:
+                  - generic [ref=e854]:
+                    - term [ref=e855]: Total
+                    - definition [ref=e856]: "8"
+                  - generic [ref=e857]:
+                    - term [ref=e858]: Failed
+                    - definition [ref=e859]: "8"
+                  - generic [ref=e860]:
+                    - term [ref=e861]: Resolved
+                    - definition [ref=e862]: "0"
+              - generic [ref=e867]:
+                - generic [ref=e868]: 05:40 pm
+                - generic "info" [ref=e869]: ●
+                - generic [ref=e870]: mosaic
+                - generic [ref=e871]: "Mosaic detection complete: 0 new suggestions found"
+              - generic [ref=e875]:
+                - 'button "05:40 pm ● reb Quick Fix: No issues found ›" [ref=e876]':
+                  - generic [ref=e877]: 05:40 pm
+                  - generic "info" [ref=e878]: ●
+                  - generic [ref=e879]: reb
+                  - generic [ref=e880]: "Quick Fix: No issues found"
+                  - generic [ref=e881]: ›
+                - generic [ref=e884]:
+                  - generic [ref=e885]:
+                    - term [ref=e886]: Rederived
+                    - definition [ref=e887]: "0"
+                  - generic [ref=e888]:
+                    - term [ref=e889]: Names rebuilt
+                    - definition [ref=e890]: "0"
+                  - generic [ref=e891]:
+                    - term [ref=e892]: Aliases updated
+                    - definition [ref=e893]: "0"
+                  - generic [ref=e894]:
+                    - term [ref=e895]: Linked unresolved
+                    - definition [ref=e896]: "0"
+                  - generic [ref=e897]:
+                    - term [ref=e898]: Redirected merged
+                    - definition [ref=e899]: "0"
+                  - generic [ref=e900]:
+                    - term [ref=e901]: Stale candidates removed
+                    - definition [ref=e902]: "0"
+              - generic [ref=e907]:
+                - generic [ref=e908]: 05:35 pm
+                - generic "info" [ref=e909]: ●
+                - generic [ref=e910]: mosaic
+                - generic [ref=e911]: "Mosaic detection complete: 0 new suggestions found"
+              - generic [ref=e916]:
+                - generic [ref=e917]: 05:35 pm
+                - generic "info" [ref=e918]: ●
+                - generic [ref=e919]: mosaic
+                - generic [ref=e920]: "Mosaic detection complete: 0 new suggestions found"
+              - generic [ref=e925]:
+                - generic [ref=e926]: 05:29 pm
+                - generic "info" [ref=e927]: ●
+                - generic [ref=e928]: mosaic
+                - generic [ref=e929]: "Mosaic detection complete: 0 new suggestions found"
+              - generic [ref=e934]:
+                - generic [ref=e935]: 05:29 pm
+                - generic "info" [ref=e936]: ●
+                - generic [ref=e937]: mosaic
+                - generic [ref=e938]: "Mosaic detection complete: 0 new suggestions found"
+              - generic [ref=e943]:
+                - generic [ref=e944]: 04:49 pm
+                - generic "info" [ref=e945]: ●
+                - generic [ref=e946]: mosaic
+                - generic [ref=e947]: "Mosaic detection complete: 0 new suggestions found"
+              - generic [ref=e952]:
+                - generic [ref=e953]: 04:49 pm
+                - generic "info" [ref=e954]: ●
+                - generic [ref=e955]: mosaic
+                - generic [ref=e956]: "Mosaic detection complete: 0 new suggestions found"
+              - generic [ref=e960]:
+                - 'button "04:37 pm ▲ enrich Retry Unresolved: enrichment failed for 8 of 8 object names ›" [ref=e961]':
+                  - generic [ref=e962]: 04:37 pm
+                  - generic "warning" [ref=e963]: ▲
+                  - generic [ref=e964]: enrich
+                  - generic [ref=e965]: "Retry Unresolved: enrichment failed for 8 of 8 object names"
+                  - generic [ref=e966]: ›
+                - generic [ref=e969]:
+                  - generic [ref=e970]:
+                    - term [ref=e971]: Total
+                    - definition [ref=e972]: "8"
+                  - generic [ref=e973]:
+                    - term [ref=e974]: Failed targets
+                    - definition [ref=e975]: "8"
+              - generic [ref=e979]:
+                - 'button "04:37 pm ● reb Retry Unresolved: 0 resolved, 8 still unresolved out of 8 names ›" [ref=e980]':
+                  - generic [ref=e981]: 04:37 pm
+                  - generic "info" [ref=e982]: ●
+                  - generic [ref=e983]: reb
+                  - generic [ref=e984]: "Retry Unresolved: 0 resolved, 8 still unresolved out of 8 names"
+                  - generic [ref=e985]: ›
+                - generic [ref=e988]:
+                  - generic [ref=e989]:
+                    - term [ref=e990]: Total
+                    - definition [ref=e991]: "8"
+                  - generic [ref=e992]:
+                    - term [ref=e993]: Failed
+                    - definition [ref=e994]: "8"
+                  - generic [ref=e995]:
+                    - term [ref=e996]: Resolved
+                    - definition [ref=e997]: "0"
+              - generic [ref=e1002]:
+                - generic [ref=e1003]: 04:36 pm
+                - generic "info" [ref=e1004]: ●
+                - generic [ref=e1005]: mosaic
+                - generic [ref=e1006]: "Mosaic detection complete: 0 new suggestions found"
+              - generic [ref=e1010]:
+                - 'button "04:36 pm ● reb Quick Fix: No issues found ›" [ref=e1011]':
+                  - generic [ref=e1012]: 04:36 pm
+                  - generic "info" [ref=e1013]: ●
+                  - generic [ref=e1014]: reb
+                  - generic [ref=e1015]: "Quick Fix: No issues found"
+                  - generic [ref=e1016]: ›
+                - generic [ref=e1019]:
+                  - generic [ref=e1020]:
+                    - term [ref=e1021]: Rederived
+                    - definition [ref=e1022]: "0"
+                  - generic [ref=e1023]:
+                    - term [ref=e1024]: Names rebuilt
+                    - definition [ref=e1025]: "0"
+                  - generic [ref=e1026]:
+                    - term [ref=e1027]: Aliases updated
+                    - definition [ref=e1028]: "0"
+                  - generic [ref=e1029]:
+                    - term [ref=e1030]: Linked unresolved
+                    - definition [ref=e1031]: "0"
+                  - generic [ref=e1032]:
+                    - term [ref=e1033]: Redirected merged
+                    - definition [ref=e1034]: "0"
+                  - generic [ref=e1035]:
+                    - term [ref=e1036]: Stale candidates removed
+                    - definition [ref=e1037]: "0"
+              - generic [ref=e1042]:
+                - generic [ref=e1043]: 04:24 pm
+                - generic "info" [ref=e1044]: ●
+                - generic [ref=e1045]: mosaic
+                - generic [ref=e1046]: "Mosaic detection complete: 0 new suggestions found"
+              - generic [ref=e1051]:
+                - generic [ref=e1052]: 04:24 pm
+                - generic "info" [ref=e1053]: ●
+                - generic [ref=e1054]: mosaic
+                - generic [ref=e1055]: "Mosaic detection complete: 0 new suggestions found"
+              - generic [ref=e1060]:
+                - generic [ref=e1061]: 03:56 pm
+                - generic "info" [ref=e1062]: ●
+                - generic [ref=e1063]: mosaic
+                - generic [ref=e1064]: "Mosaic detection complete: 0 new suggestions found"
+              - generic [ref=e1069]:
+                - generic [ref=e1070]: 03:56 pm
+                - generic "info" [ref=e1071]: ●
+                - generic [ref=e1072]: mosaic
+                - generic [ref=e1073]: "Mosaic detection complete: 0 new suggestions found"
+              - generic [ref=e1078]:
+                - generic [ref=e1079]: 03:21 pm
+                - generic "info" [ref=e1080]: ●
+                - generic [ref=e1081]: mosaic
+                - generic [ref=e1082]: "Mosaic detection complete: 0 new suggestions found"
+              - generic [ref=e1087]:
+                - generic [ref=e1088]: 03:21 pm
+                - generic "info" [ref=e1089]: ●
+                - generic [ref=e1090]: mosaic
+                - generic [ref=e1091]: "Mosaic detection complete: 0 new suggestions found"
+              - generic [ref=e1092]:
+                - generic [ref=e1093]:
+                  - generic [ref=e1095]:
+                    - 'button "02:53 pm ● scan Scan complete: no new files found (82978 already cataloged) ›" [ref=e1096]':
+                      - generic [ref=e1097]: 02:53 pm
+                      - generic "info" [ref=e1098]: ●
+                      - generic [ref=e1099]: scan
+                      - generic [ref=e1100]: "Scan complete: no new files found (82978 already cataloged)"
+                      - generic [ref=e1101]: ›
+                    - generic [ref=e1104]:
+                      - generic [ref=e1105]:
+                        - term [ref=e1106]: Failed
+                        - definition [ref=e1107]: "0"
+                      - generic [ref=e1108]:
+                        - term [ref=e1109]: Removed
+                        - definition [ref=e1110]: "0"
+                      - generic [ref=e1111]:
+                        - term [ref=e1112]: Completed
+                        - definition [ref=e1113]: "0"
+                      - generic [ref=e1114]:
+                        - term [ref=e1115]: Already known
+                        - definition [ref=e1116]: 82,978
+                  - button "1 sub-task ›" [ref=e1117]:
+                    - generic [ref=e1118]: 1 sub-task
+                    - generic [ref=e1119]: ›
+                - generic [ref=e1121]:
+                  - 'button "02:53 pm ● thumb Reference Thumbnails: fetched 0/0 ›" [ref=e1122]':
+                    - generic [ref=e1123]: 02:53 pm
+                    - generic "info" [ref=e1124]: ●
+                    - generic [ref=e1125]: thumb
+                    - generic [ref=e1126]: "Reference Thumbnails: fetched 0/0"
+                    - generic [ref=e1127]: ›
+                  - generic [ref=e1130]:
+                    - generic [ref=e1131]:
+                      - term [ref=e1132]: Total
+                      - definition [ref=e1133]: "0"
+                    - generic [ref=e1134]:
+                      - term [ref=e1135]: Fetched
+                      - definition [ref=e1136]: "0"
+  - status
+  - alert

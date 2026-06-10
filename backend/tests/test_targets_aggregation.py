@@ -210,6 +210,7 @@ EXPECTED_TARGETS = {
         "mosaic_id": None,
         "mosaic_name": None,
         "custom_values": None,
+        "user_defined": False,
     },
     "obj:NGC 7000": {
         "target_id": "obj:NGC 7000",
@@ -228,6 +229,7 @@ EXPECTED_TARGETS = {
         "mosaic_id": None,
         "mosaic_name": None,
         "custom_values": None,
+        "user_defined": False,
     },
     "obj:__uncategorized__": {
         "target_id": "obj:__uncategorized__",
@@ -246,6 +248,7 @@ EXPECTED_TARGETS = {
         "mosaic_id": None,
         "mosaic_name": None,
         "custom_values": None,
+        "user_defined": False,
     },
 }
 

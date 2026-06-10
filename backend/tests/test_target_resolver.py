@@ -70,6 +70,7 @@ class TestResolveTarget:
 
         with patch("app.services.target_resolver.find_target_by_name", return_value=None), \
              patch("app.services.target_resolver.resolve_target_name_cached", return_value=simbad_result), \
+             patch("app.services.target_resolver.match_target_by_identity", return_value=None), \
              patch("app.services.target_resolver._create_target", return_value="new-target-id"):
             result = resolve_target("NGC 7000", mock_session, redis=mock_redis)
         assert result == "new-target-id"
@@ -108,9 +109,11 @@ class TestResolveTarget:
             "ra": 314.0, "dec": 44.0, "object_type": "HII",
         }
 
-        # First call (initial lookup) returns None, second call (re-check) returns target
-        with patch("app.services.target_resolver.find_target_by_name", side_effect=[None, mock_target]), \
+        # Initial lookup misses; the post-SIMBAD re-check now routes through the
+        # shared identity matcher, which finds the concurrently-created target.
+        with patch("app.services.target_resolver.find_target_by_name", return_value=None), \
              patch("app.services.target_resolver.resolve_target_name_cached", return_value=simbad_result), \
+             patch("app.services.target_resolver.match_target_by_identity", return_value=mock_target), \
              patch("app.services.target_resolver._create_target") as mock_create:
             result = resolve_target("NGC 7000", mock_session, redis=mock_redis)
 
@@ -149,7 +152,9 @@ class TestCreateTarget:
             "aliases": ["NGC 7000"],
         }
 
-        result = _create_target(simbad_result, "NGC 7000", mock_session)
+        with patch("app.services.target_resolver.match_target_by_identity", return_value=None), \
+             patch("app.services.target_resolver.enrich_target_from_openngc"):
+            result = _create_target(simbad_result, "NGC 7000", mock_session)
         assert result == "existing-target"
         mock_session.rollback.assert_called_once()
 

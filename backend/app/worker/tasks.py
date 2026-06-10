@@ -17,7 +17,8 @@ from app.services.simbad import (
     normalize_object_name, resolve_target_name_cached,
     curate_simbad_result, get_cached_simbad,
 )
-from app.services.target_resolver import resolve_target, normalize_sql_expr
+from app.services.target_resolver import resolve_target, normalize_sql_expr, match_target_by_identity
+from app.services.simbad_repair import repair_corrupted_simbad_cache
 from app.services.thumbnail import generate_thumbnail
 from app.services.xisf_parser import extract_xisf_metadata, generate_xisf_thumbnail
 from app.services.session_date import compute_session_date, extract_longitude
@@ -1120,13 +1121,21 @@ def rebuild_targets(self) -> dict:
     clear_cancel_sync(_redis)
     set_rebuild_running_sync(_redis, "full", "Clearing existing targets...")
 
-    # Phase 1: Clear everything
+    # Phase 1: Clear everything except user-defined custom targets, which SIMBAD
+    # cannot recreate. Unlink only images NOT attached to a surviving custom
+    # target so a custom "Jupiter" and its frames survive the rebuild.
     with Session(_sync_engine) as session:
-        session.execute(text("UPDATE images SET resolved_target_id = NULL"))
+        session.execute(text("""
+            UPDATE images SET resolved_target_id = NULL
+            WHERE resolved_target_id IS NULL
+               OR resolved_target_id NOT IN (
+                   SELECT id FROM targets WHERE user_defined = TRUE
+               )
+        """))
         session.execute(text("DELETE FROM merge_candidates"))
-        session.execute(text("DELETE FROM targets"))
+        session.execute(text("DELETE FROM targets WHERE user_defined = FALSE"))
         session.commit()
-    logger.info("rebuild_targets: cleared all targets and links")
+    logger.info("rebuild_targets: cleared all non-custom targets and links")
 
     _redis.delete("target_resolver:negative")
 
@@ -1328,6 +1337,90 @@ def retry_unresolved(self) -> dict:
     return {"status": "complete", **details}
 
 
+@celery_app.task(bind=True)
+def backfill_catalog_identity(self) -> dict:
+    """Re-link catalog orphans by identity and repair corrupted SIMBAD cache.
+
+    Phase 1 (required): repair pre-b9c61a6 SIMBAD cache rows whose quote-
+    corrupted aliases curate to empty.
+    Phase 2: for each distinct unlinked LIGHT OBJECT name, resolve it and match
+    an existing target by catalog identity; link the images if matched. Names
+    that resolve to nothing or to no existing target stay orphaned for
+    duplicate-detection plus manual accept. One-time and safely re-runnable.
+    """
+    logger.info("backfill_catalog_identity: starting")
+    clear_cancel_sync(_redis)
+    set_rebuild_running_sync(_redis, "backfill", "Repairing SIMBAD cache...")
+
+    # Phase 1: corrupted-cache repair.
+    with Session(_sync_engine) as session:
+        repair_summary = repair_corrupted_simbad_cache(session)
+    logger.info("backfill_catalog_identity: cache repair %s", repair_summary)
+
+    # Phase 2: distinct unlinked LIGHT OBJECT names.
+    with Session(_sync_engine) as session:
+        rows = session.execute(text("""
+            SELECT raw_headers->>'OBJECT' AS obj, COUNT(*) AS cnt
+            FROM images
+            WHERE resolved_target_id IS NULL
+              AND image_type = 'LIGHT'
+              AND raw_headers->>'OBJECT' IS NOT NULL
+              AND raw_headers->>'OBJECT' != ''
+            GROUP BY raw_headers->>'OBJECT'
+            ORDER BY cnt DESC
+        """)).all()
+
+    total = len(rows)
+    set_rebuild_progress_sync(_redis, f"Linking 0/{total} orphaned names...")
+    linked = 0
+    skipped = 0
+
+    for i, (obj_name, img_count) in enumerate(rows):
+        if is_cancel_requested_sync(_redis):
+            details = {"linked": linked, "skipped": skipped, "total": total, "processed": i}
+            set_rebuild_cancelled_sync(
+                _redis, f"Cancelled after {i}/{total} names", details,
+            )
+            return {"status": "cancelled", **details}
+
+        with Session(_sync_engine) as session:
+            resolved = resolve_target_name_cached(obj_name, session)
+            session.commit()
+            target = match_target_by_identity(resolved, obj_name, session) if resolved else None
+            if target is not None:
+                target_id = target.id
+                session.commit()  # persist alias addition from the matcher
+                session.execute(text("""
+                    UPDATE images
+                    SET resolved_target_id = :tid
+                    WHERE resolved_target_id IS NULL
+                      AND raw_headers->>'OBJECT' = :obj
+                """), {"tid": target_id, "obj": obj_name})
+                session.commit()
+                linked += 1
+                logger.info("backfill: linked %d images for '%s' -> %s",
+                            img_count, obj_name, target_id)
+            else:
+                skipped += 1
+
+        if (i + 1) % 5 == 0 or i + 1 == total:
+            set_rebuild_progress_sync(_redis, f"Linking {i + 1}/{total} orphaned names...")
+        time.sleep(0.1)
+
+    details = {
+        "linked": linked, "skipped": skipped, "total": total,
+        "cache_repaired": repair_summary["repaired"],
+    }
+    set_rebuild_complete_sync(
+        _redis,
+        f"Re-linked {linked} catalog orphans, {skipped} left unresolved "
+        f"({repair_summary['repaired']} cache rows repaired)",
+        details,
+    )
+    logger.info("backfill_catalog_identity: complete %s", details)
+    return {"status": "complete", **details}
+
+
 SMART_REBUILD_LOCK = "smart_rebuild:lock"
 SMART_REBUILD_LOCK_TTL = 300  # 5 minutes
 
@@ -1447,7 +1540,7 @@ def _smart_rebuild_inner(manual: bool = False, parent_activity_id: int | None = 
                 stats["rederived"] = rederived
                 session.commit()
                 return _emit_cancelled()
-            if target.name_locked:
+            if target.name_locked or target.user_defined:
                 continue
             # Try to find cached SIMBAD data for this target
             cached = get_cached_simbad(normalize_object_name(target.catalog_id or target.primary_name), session)
@@ -1493,6 +1586,7 @@ def _smart_rebuild_inner(manual: bool = False, parent_activity_id: int | None = 
             WHERE merged_into_id IS NULL
               AND (catalog_id IS NOT NULL OR common_name IS NOT NULL)
               AND name_locked = FALSE
+              AND user_defined = FALSE
               AND primary_name != CASE
                 WHEN catalog_id IS NOT NULL AND common_name IS NOT NULL
                     THEN catalog_id || ' - ' || common_name

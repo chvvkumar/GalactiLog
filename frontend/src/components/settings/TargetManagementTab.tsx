@@ -6,6 +6,7 @@ import DuplicatesSection from "./DuplicatesSection";
 import UnresolvedSection from "./UnresolvedSection";
 import MergeHistorySection from "./MergeHistorySection";
 import MaintenanceSection from "./MaintenanceSection";
+import CreateTargetModal from "./CreateTargetModal";
 
 interface ScanSummary {
   completed_at: string;
@@ -23,6 +24,7 @@ export const TargetManagementTab: Component = () => {
   const [pending, setPending] = createSignal<MergeCandidateResponse[]>([]);
   const [accepted, setAccepted] = createSignal<MergeCandidateResponse[]>([]);
   const [scanSummary, setScanSummary] = createSignal<ScanSummary | null>(null);
+  const [showCreate, setShowCreate] = createSignal(false);
 
   const refresh = async () => {
     try {
@@ -52,6 +54,28 @@ export const TargetManagementTab: Component = () => {
 
   return (
     <div class="space-y-4">
+
+      {/* Header actions */}
+      <Show when={isAdmin()}>
+        <div class="flex justify-end">
+          <button
+            onClick={() => setShowCreate(true)}
+            class="px-3 py-1.5 text-sm bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded-[var(--radius-sm)] hover:bg-theme-accent/25 transition-colors"
+          >
+            Create Target
+          </button>
+        </div>
+      </Show>
+
+      <Show when={showCreate()}>
+        <CreateTargetModal
+          onClose={() => setShowCreate(false)}
+          onCreated={() => {
+            setShowCreate(false);
+            refresh();
+          }}
+        />
+      </Show>
 
       {/* Post-scan summary banner */}
       <Show when={scanSummary()}>

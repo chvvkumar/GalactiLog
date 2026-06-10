@@ -51,6 +51,21 @@ guides/plans/
 guides/specs/
 guides/superpowers/
 
+# Image files at the repo root only (stray screenshots, scratch exports)
+# Subdirectory images (frontend assets, images/, docs references) stay tracked.
+/*.png
+/*.jpg
+/*.jpeg
+/*.gif
+/*.bmp
+/*.webp
+/*.tif
+/*.tiff
+/*.ico
+/*.svg
+/*.heic
+/*.avif
+
 # Log files
 *.log
 .worktrees/

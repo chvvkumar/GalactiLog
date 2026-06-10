@@ -9,6 +9,8 @@ import type {
   MergedTargetResponse,
   OrphanPreviewResponse,
   OrphanCreateRequest,
+  CustomTargetCreateRequest,
+  CustomTargetCreateResponse,
   FilenameCandidateResponse,
   ScanResult,
   ScanStatus,
@@ -358,6 +360,9 @@ export const api = {
   retryUnresolved: () =>
     fetchJson<{ status: string; message: string; task_id?: string }>("/scan/retry-unresolved", { method: "POST" }),
 
+  backfillCatalogIdentity: () =>
+    fetchJson<{ status: string; message: string; task_id?: string }>("/scan/backfill-catalog-identity", { method: "POST" }),
+
   getRebuildStatus: () =>
     fetchJson<import("../types").RebuildStatus>("/scan/rebuild-status"),
 
@@ -475,6 +480,12 @@ export const api = {
 
   orphanCreate: (body: OrphanCreateRequest) =>
     fetchJson<{ target_id: string }>("/targets/orphan-create", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  createCustomTarget: (body: CustomTargetCreateRequest) =>
+    fetchJson<CustomTargetCreateResponse>("/targets/custom", {
       method: "POST",
       body: JSON.stringify(body),
     }),

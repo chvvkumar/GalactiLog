@@ -138,6 +138,46 @@ async def test_unmerge_target_not_found_returns_404(admin_user):
 
 
 @pytest.mark.asyncio
+async def test_merge_history_obj_pseudo_target_returns_empty_list(viewer_user):
+    """obj:<name> pseudo-targets have no DB row, so merge-history must return
+    an empty list with HTTP 200 instead of a 422 from UUID path coercion."""
+    mock_session = AsyncMock()
+    # No DB access expected for a non-UUID id; fail loudly if it is attempted.
+    mock_session.get = AsyncMock(side_effect=AssertionError("session.get called"))
+    mock_session.execute = AsyncMock(side_effect=AssertionError("execute called"))
+
+    _override_session(mock_session)
+    app.dependency_overrides[get_current_user] = lambda: viewer_user
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            resp = await client.get("/api/targets/obj:SomeName/merge-history")
+        assert resp.status_code == 200, resp.text
+        assert resp.json() == []
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_merge_history_unknown_uuid_returns_404(viewer_user):
+    """A well-formed UUID with no matching row still returns 404."""
+    mock_session = AsyncMock()
+    mock_session.get = AsyncMock(return_value=None)
+
+    _override_session(mock_session)
+    app.dependency_overrides[get_current_user] = lambda: viewer_user
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            resp = await client.get(f"/api/targets/{uuid.uuid4()}/merge-history")
+        assert resp.status_code == 404
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
 async def test_merge_candidate_count_returns_count(viewer_user):
     mock_result = MagicMock()
     mock_result.scalar_one.return_value = 7
