@@ -4,7 +4,8 @@ import { api } from "../../api/client";
 import { showToast } from "../Toast";
 import { useAuth } from "../AuthProvider";
 import type { MergeCandidateResponse, OrphanPreviewResponse } from "../../types";
-import ResolveTargetModal from "./ResolveTargetModal";
+import CreateTargetFromOrphanModal from "./CreateTargetFromOrphanModal";
+import MergeOrphanModal from "./MergeOrphanModal";
 
 interface UnresolvedSectionProps {
   candidates: Accessor<MergeCandidateResponse[]>;
@@ -199,15 +200,24 @@ const UnresolvedSection: Component<UnresolvedSectionProps> = (props) => {
         </Show>
       </div>
 
-      {/* ResolveTargetModal */}
       <Show when={resolveCandidate()}>
         {(c) => (
-          <ResolveTargetModal
-            candidate={c()}
-            initialMode={resolveMode()}
-            onClose={() => setResolveCandidate(null)}
-            onResolved={handleResolved}
-          />
+          <Show
+            when={resolveMode() === "merge"}
+            fallback={
+              <CreateTargetFromOrphanModal
+                candidate={c()}
+                onClose={() => setResolveCandidate(null)}
+                onResolved={handleResolved}
+              />
+            }
+          >
+            <MergeOrphanModal
+              candidate={c()}
+              onClose={() => setResolveCandidate(null)}
+              onResolved={handleResolved}
+            />
+          </Show>
         )}
       </Show>
     </>
