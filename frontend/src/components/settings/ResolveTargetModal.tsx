@@ -3,6 +3,8 @@ import { api } from "../../api/client";
 import { showToast } from "../Toast";
 import type { MergeCandidateResponse, OrphanPreviewResponse, TargetSearchResultFuzzy } from "../../types";
 import Dialog from "../Dialog";
+import TargetCreateForm, { TargetFormValues } from "./TargetCreateForm";
+import { getErrorMessage } from "../../utils/errors";
 
 interface Props {
   candidate: MergeCandidateResponse;
@@ -17,11 +19,6 @@ const ResolveTargetModal: Component<Props> = (props) => {
   // Create New Target state
   const [preview, setPreview] = createSignal<OrphanPreviewResponse | null>(null);
   const [loadingPreview, setLoadingPreview] = createSignal(false);
-  const [primaryName, setPrimaryName] = createSignal("");
-  const [ra, setRa] = createSignal<string>("");
-  const [dec, setDec] = createSignal<string>("");
-  const [objectType, setObjectType] = createSignal("");
-  const [catalogId, setCatalogId] = createSignal("");
   const [creating, setCreating] = createSignal(false);
 
   // Merge into Existing state
@@ -42,11 +39,6 @@ const ResolveTargetModal: Component<Props> = (props) => {
     try {
       const res = await api.orphanPreview(props.candidate.source_name);
       setPreview(res);
-      setPrimaryName(res.primary_name);
-      setRa(res.ra != null ? String(Math.round(res.ra * 10000) / 10000) : "");
-      setDec(res.dec != null ? String(Math.round(res.dec * 10000) / 10000) : "");
-      setObjectType(res.object_type ?? "");
-      setCatalogId(res.catalog_id ?? "");
     } catch {
       showToast("Failed to load preview", "error");
     } finally {
@@ -54,25 +46,17 @@ const ResolveTargetModal: Component<Props> = (props) => {
     }
   };
 
-  const handleCreate = async () => {
-    if (!primaryName().trim()) {
-      showToast("Primary name is required", "error");
-      return;
-    }
+  const handleCreate = async (values: TargetFormValues) => {
     setCreating(true);
     try {
       await api.orphanCreate({
         candidate_id: props.candidate.id,
-        primary_name: primaryName().trim(),
-        ra: ra() ? parseFloat(ra()) : null,
-        dec: dec() ? parseFloat(dec()) : null,
-        object_type: objectType().trim() || null,
-        catalog_id: catalogId().trim() || null,
+        ...values,
       });
-      showToast(`Created target "${primaryName().trim()}"`);
+      showToast(`Created target "${values.primary_name}"`);
       props.onResolved();
-    } catch {
-      showToast("Failed to create target", "error");
+    } catch (e: unknown) {
+      showToast(getErrorMessage(e, "Failed to create target"), "error");
     } finally {
       setCreating(false);
     }
@@ -174,46 +158,20 @@ const ResolveTargetModal: Component<Props> = (props) => {
                         : "No catalog match, coordinates from FITS headers"}
                     </div>
 
-                    <div>
-                      <label class={labelClass}>Primary Name</label>
-                      <input type="text" class={inputClass} value={primaryName()} onInput={(e) => setPrimaryName(e.currentTarget.value)} />
-                    </div>
-                    <div class="grid grid-cols-2 gap-3">
-                      <div>
-                        <label class={labelClass}>RA (degrees)</label>
-                        <input type="text" class={inputClass} value={ra()} onInput={(e) => setRa(e.currentTarget.value)} />
-                      </div>
-                      <div>
-                        <label class={labelClass}>Dec (degrees)</label>
-                        <input type="text" class={inputClass} value={dec()} onInput={(e) => setDec(e.currentTarget.value)} />
-                      </div>
-                    </div>
-                    <div class="grid grid-cols-2 gap-3">
-                      <div>
-                        <label class={labelClass}>Object Type</label>
-                        <input type="text" class={inputClass} value={objectType()} onInput={(e) => setObjectType(e.currentTarget.value)} placeholder="e.g. Galaxy, Nebula, Asterism" />
-                      </div>
-                      <div>
-                        <label class={labelClass}>Catalog ID</label>
-                        <input type="text" class={inputClass} value={catalogId()} onInput={(e) => setCatalogId(e.currentTarget.value)} placeholder="e.g. NGC 1234, IC 456" />
-                      </div>
-                    </div>
-
-                    <div class="flex justify-end gap-2 pt-2">
-                      <button
-                        onClick={props.onClose}
-                        class="px-3 py-1.5 text-sm border border-theme-border text-theme-text-secondary rounded-[var(--radius-sm)] hover:text-theme-text-primary transition-colors"
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        onClick={handleCreate}
-                        disabled={creating() || !primaryName().trim()}
-                        class="px-3 py-1.5 text-sm bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded-[var(--radius-sm)] hover:bg-theme-accent/25 transition-colors disabled:opacity-50"
-                      >
-                        {creating() ? "Creating..." : "Create Target"}
-                      </button>
-                    </div>
+                    <TargetCreateForm
+                      initial={{
+                        primary_name: p().primary_name,
+                        ra: p().ra,
+                        dec: p().dec,
+                        object_type: p().object_type,
+                        catalog_id: p().catalog_id,
+                        user_defined: !p().resolved,
+                      }}
+                      submitLabel={creating() ? "Creating..." : "Create Target"}
+                      submitting={creating()}
+                      onSubmit={handleCreate}
+                      onCancel={props.onClose}
+                    />
                   </div>
                 )}
               </Show>

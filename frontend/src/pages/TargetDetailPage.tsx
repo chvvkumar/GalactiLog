@@ -16,6 +16,7 @@ import HelpPopover from "../components/HelpPopover";
 import { timezoneLabel } from "../utils/dateTime";
 import MergePreviewModal from "../components/MergePreviewModal";
 import { useAuth } from "../components/AuthProvider";
+import { OBJECT_TYPE_OPTIONS } from "../constants/objectTypes";
 
 import { formatIntegration } from "../utils/format";
 import { getErrorMessage } from "../utils/errors";
@@ -212,18 +213,6 @@ const TargetDetailPage: Component = () => {
   const [savingIdentity, setSavingIdentity] = createSignal(false);
 
   // Object type edit
-  const OBJECT_TYPE_OPTIONS = [
-    "Emission Nebula",
-    "Reflection Nebula",
-    "Dark Nebula",
-    "Planetary Nebula",
-    "Supernova Remnant",
-    "Galaxy",
-    "Open Cluster",
-    "Globular Cluster",
-    "Star",
-    "Other",
-  ];
   const [editingObjectType, setEditingObjectType] = createSignal(false);
   const [savingObjectType, setSavingObjectType] = createSignal(false);
 
