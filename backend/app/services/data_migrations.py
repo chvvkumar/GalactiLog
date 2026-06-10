@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 # Current data version - bump this and add a migration function when
 # code changes affect how stored target data is derived.
-DATA_VERSION = 10
+DATA_VERSION = 11
 
 
 def _migrate_v1_fix_catalog_designations(session: Session) -> str:
@@ -423,6 +423,56 @@ def _migrate_v10_openngc_messier_common_names(session: Session) -> str:
     return f"Re-enriched {enriched}/{total} targets with OpenNGC data (Messier fix)"
 
 
+def _migrate_v11_hyperleda_galaxies(session: Session) -> str:
+    """Backfill HyperLEDA morphological type and inclination for galaxies.
+
+    enrich_target_from_hyperleda is a no-op for non-galaxy targets, so the
+    galaxy gate inside it filters the full target list. This re-triggers the
+    enrichment that v8 never ran (it predated wiring HyperLEDA in).
+    """
+    import time
+    from app.models import Target
+    from app.services.hyperleda import (
+        _is_galaxy_type, enrich_target_from_hyperleda, get_cached_hyperleda,
+    )
+
+    targets = session.execute(
+        select(Target).where(Target.merged_into_id.is_(None))
+    ).scalars().all()
+
+    queried = 0
+    enriched = 0
+    for target in targets:
+        # enrich_target_from_hyperleda only hits the network on a cache miss
+        # for a galaxy target with a catalog_id. Pre-check those cheap,
+        # side-effect-free conditions so the pacing sleep runs only when an
+        # actual HTTP call will be made, not for every target.
+        will_query = (
+            _is_galaxy_type(target.object_type)
+            and bool(target.catalog_id)
+            and get_cached_hyperleda(target.catalog_id, session) is None
+        )
+
+        try:
+            if enrich_target_from_hyperleda(session, target):
+                enriched += 1
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "HyperLEDA enrichment failed for %s: %s",
+                target.catalog_id or target.primary_name, exc,
+            )
+
+        # Pace network queries to avoid hammering the HyperLEDA endpoint,
+        # matching the per-target sleep used by the Gaia/SAC enrichment loop.
+        # Skip the sleep for non-galaxies and cache hits, which make no call.
+        if will_query:
+            queried += 1
+            time.sleep(0.5)
+
+    session.flush()
+    return f"HyperLEDA: {enriched} galaxies enriched ({queried} network queries)"
+
+
 # Registry: version number -> (description, migration function)
 # Version numbers must be sequential starting from 1.
 MIGRATIONS: dict[int, tuple[str, Callable[[Session], str]]] = {
@@ -436,6 +486,7 @@ MIGRATIONS: dict[int, tuple[str, Callable[[Session], str]]] = {
     8: ("Fix Question Mark Galaxy mapping from NGC 4258 to NGC 5194 (M51)", _migrate_v8_fix_question_mark_galaxy),
     9: ("Stellarium common name cache refresh", _migrate_v9_stellarium_names),
     10: ("Re-enrich targets from OpenNGC (Messier lookup fix)", _migrate_v10_openngc_messier_common_names),
+    11: ("Backfill HyperLEDA morphological type and inclination for galaxies", _migrate_v11_hyperleda_galaxies),
 }
 
 

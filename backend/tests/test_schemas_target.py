@@ -78,6 +78,28 @@ def test_target_detail_response():
     )
     assert td.primary_name == "M 42"
     assert td.session_count == 12
+    # New HyperLEDA fields default to None when not supplied.
+    assert td.hubble_t_type is None
+    assert td.inclination is None
+
+
+def test_target_detail_response_hyperleda_fields():
+    td = TargetDetailResponse(
+        target_id="abc-123",
+        primary_name="M 31",
+        total_integration_seconds=0.0,
+        total_frames=0,
+        filters_used=[],
+        equipment=[],
+        first_session_date="",
+        last_session_date="",
+        session_count=0,
+        sessions=[],
+        hubble_t_type=3.0,
+        inclination=67.3,
+    )
+    assert td.hubble_t_type == 3.0
+    assert td.inclination == 67.3
 
 
 def test_session_detail_response_new_fields():

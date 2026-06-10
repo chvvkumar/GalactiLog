@@ -886,6 +886,8 @@ async def get_target_detail(target_id: str, session: AsyncSession) -> TargetDeta
         sac_notes=target_obj.sac_notes if target_obj else None,
         reference_thumbnail_path=target_obj.reference_thumbnail_path if target_obj else None,
         distance_pc=target_obj.distance_pc if target_obj else None,
+        hubble_t_type=target_obj.hubble_t_type if target_obj else None,
+        inclination=target_obj.inclination if target_obj else None,
         catalog_memberships=catalog_memberships,
         name_locked=target_obj.name_locked if target_obj else False,
     )
