@@ -296,13 +296,20 @@ async def list_merged_targets(
     ]
 
 
-@router.get("/{target_id}/merge-history", response_model=list[MergedTargetResponse])
+@router.get("/{target_id:path}/merge-history", response_model=list[MergedTargetResponse])
 async def get_merge_history(
-    target_id: uuid.UUID,
+    target_id: str,
     session: AsyncSession = Depends(get_session),
     user: User = Depends(get_current_user),
 ):
     """Return all targets that were merged into a given target."""
+    # Synthetic "obj:<name>" pseudo-targets (and any non-UUID id) have no DB row
+    # and can never have merge history, so return an empty list rather than 422.
+    try:
+        target_id = uuid.UUID(target_id)
+    except ValueError:
+        return []
+
     target = await session.get(Target, target_id)
     if not target:
         raise HTTPException(status_code=404, detail="Target not found")
