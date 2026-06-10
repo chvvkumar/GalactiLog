@@ -50,6 +50,18 @@ def normalize_object_name(name: str, *, upper: bool = True) -> str:
     return cleaned.upper() if upper else cleaned
 
 
+def normalize_catalog_id(catalog_id: str | None) -> str | None:
+    """Canonical catalog-identity key: whitespace-collapsed, uppercased.
+
+    Returns None for falsy/blank input so callers can store NULL when a target
+    has no catalog identity. Equivalent to normalize_object_name(x, upper=True)
+    but None-safe, since catalog_id is nullable on the targets table.
+    """
+    if not catalog_id or not catalog_id.strip():
+        return None
+    return normalize_object_name(catalog_id, upper=True)
+
+
 # Ordered list: index = priority (lower wins).
 CATALOG_PATTERNS: list[re.Pattern] = [
     re.compile(r"^M\s*\d+$"),                         # 0  Messier
