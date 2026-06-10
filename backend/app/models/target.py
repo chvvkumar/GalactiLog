@@ -47,4 +47,5 @@ class Target(Base):
 
     __table_args__ = (
         Index("ix_targets_aliases", "aliases", postgresql_using="gin"),
+        Index("uq_targets_catalog_id_normalized", "catalog_id_normalized", unique=True),
     )
