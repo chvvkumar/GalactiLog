@@ -1,7 +1,7 @@
 import uuid
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class NotesUpdate(BaseModel):
@@ -335,8 +335,8 @@ class OrphanPreviewResponse(BaseModel):
 class OrphanCreateRequest(BaseModel):
     candidate_id: uuid.UUID
     primary_name: str
-    ra: float | None = None
-    dec: float | None = None
+    ra: float | None = Field(default=None, ge=0, le=360)
+    dec: float | None = Field(default=None, ge=-90, le=90)
     object_type: str | None = None
     catalog_id: str | None = None
     user_defined: bool = False
@@ -417,8 +417,8 @@ class OrphanCreateResponse(BaseModel):
 
 class CustomTargetCreateRequest(BaseModel):
     primary_name: str
-    ra: float | None = None
-    dec: float | None = None
+    ra: float | None = Field(default=None, ge=0, le=360)
+    dec: float | None = Field(default=None, ge=-90, le=90)
     object_type: str | None = None
     catalog_id: str | None = None
     user_defined: bool = True
