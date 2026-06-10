@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from app.models import Target
 from app.services.simbad import (
     normalize_object_name,
+    normalize_catalog_id,
     resolve_target_name_cached,
     _PANEL_RE,
 )
@@ -73,6 +74,43 @@ def find_target_by_name(object_name: str, session: Session) -> Target | None:
             Target.primary_name == normalize_object_name(object_name, upper=False),
         )
     ).scalar_one_or_none()
+    return target
+
+
+def match_target_by_identity(
+    resolved: dict, object_name: str, session: Session,
+) -> "Target | None":
+    """Find an existing target for a resolved identity, identity-first.
+
+    Order:
+      1. Normalized catalog identity (catalog_id_normalized) -- stable, primary.
+      2. Name fallback via find_target_by_name (aliases / primary_name) for
+         non-catalog objects or when identity is not yet populated.
+
+    On a match, the normalized incoming OBJECT string is recorded as an alias so
+    future direct lookups hit and the linkage is visible. Returns the Target or
+    None. Never creates.
+    """
+    cat_norm = normalize_catalog_id(resolved.get("catalog_id"))
+    target: "Target | None" = None
+
+    if cat_norm:
+        target = session.execute(
+            select(Target).where(
+                Target.merged_into_id.is_(None),
+                Target.catalog_id_normalized == cat_norm,
+            )
+        ).scalar_one_or_none()
+
+    if target is None:
+        target = find_target_by_name(object_name, session)
+
+    if target is not None:
+        incoming = _PANEL_RE.sub("", normalize_object_name(object_name)).strip()
+        if incoming and incoming not in [a.upper() for a in (target.aliases or [])]:
+            # Reassign to trigger ORM change tracking on the ARRAY column.
+            target.aliases = list(target.aliases or []) + [incoming]
+
     return target
 
 
