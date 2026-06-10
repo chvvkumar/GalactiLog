@@ -38,6 +38,8 @@ def _migrate_v1_fix_catalog_designations(session: Session) -> str:
 
     updated = 0
     for target in targets:
+        if getattr(target, "user_defined", False):
+            continue
         # Try multiple cache lookup keys - the cache may be stored under
         # the FITS object name, the catalog_id, or the primary_name
         fits_result = session.execute(text("""
@@ -95,6 +97,7 @@ def _migrate_v1_fix_catalog_designations(session: Session) -> str:
             ELSE 'Unknown'
         END
         WHERE merged_into_id IS NULL
+          AND user_defined = FALSE
           AND primary_name != CASE
             WHEN catalog_id IS NOT NULL AND common_name IS NOT NULL
                 THEN catalog_id || ' - ' || common_name

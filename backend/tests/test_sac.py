@@ -179,6 +179,7 @@ class TestEnrichTargetFromSac:
     def test_fills_description_when_missing(self):
         session = MagicMock()
         target = MagicMock()
+        target.user_defined = False
         target.catalog_id = "NGC 31"
         target.aliases = []
         target.sac_description = None
@@ -216,6 +217,7 @@ class TestEnrichTargetFromSac:
     def test_fills_notes_when_missing(self):
         session = MagicMock()
         target = MagicMock()
+        target.user_defined = False
         target.catalog_id = "NGC 31"
         target.aliases = []
         target.sac_description = None

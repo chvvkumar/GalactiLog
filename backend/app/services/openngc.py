@@ -165,6 +165,8 @@ def enrich_target_from_openngc(session: Session, target: Target) -> bool:
 
     Returns True if any fields were updated.
     """
+    if getattr(target, "user_defined", False):
+        return False
     entry = lookup_openngc(session, target.catalog_id)
     if not entry:
         return False
