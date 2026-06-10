@@ -214,12 +214,27 @@ SIMBAD_CATEGORY_MAP: dict[str, str] = {
 }
 
 
+# Solar-system categories for user-defined targets (planets, comets, ...).
+# These are not SIMBAD otypes; they are assigned manually at creation.
+SOLAR_SYSTEM_CATEGORIES: tuple[str, ...] = ("Planet", "Moon", "Sun", "Comet", "Asteroid")
+
+# Category names themselves are valid object_type values (admin edits and
+# custom targets store them directly), so categorization passes them through.
+_CATEGORY_NAME_LOOKUP: dict[str, str] = {
+    v.upper(): v
+    for v in (*SIMBAD_CATEGORY_MAP.values(), *SOLAR_SYSTEM_CATEGORIES, "Other")
+}
+
+
 def categorize_object_type(raw: str | None) -> str:
     """Map a raw SIMBAD object type string to a human-readable category."""
     if not raw:
         return "Other"
     primary = raw.split(",")[0].strip()
-    return SIMBAD_CATEGORY_MAP.get(primary, "Other")
+    mapped = SIMBAD_CATEGORY_MAP.get(primary)
+    if mapped:
+        return mapped
+    return _CATEGORY_NAME_LOOKUP.get(primary.upper(), "Other")
 
 
 def sort_clause(sort_by: str, sort_dir: str) -> str:
@@ -1158,6 +1173,7 @@ async def list_targets_aggregated(
     WITH grouped AS (
         SELECT {gk} AS target_key,
                coalesce(min(t.primary_name), min(nullif(i.raw_headers->>'OBJECT', '')), 'Uncategorized') AS primary_name,
+               coalesce(bool_or(t.user_defined), false) AS user_defined,
                sum(coalesce(i.exposure_time, 0)) AS total_integration,
                count(i.id) AS total_frames,
                count(distinct coalesce(CAST(i.session_date AS VARCHAR), 'unknown')) AS session_count,
@@ -1183,7 +1199,7 @@ async def list_targets_aggregated(
            (SELECT total_frames FROM agg) AS agg_total_frames,
            (SELECT oldest FROM agg) AS agg_oldest,
            (SELECT newest FROM agg) AS agg_newest,
-           p.target_key, p.primary_name, p.total_integration, p.total_frames, p.session_count
+           p.target_key, p.primary_name, p.user_defined, p.total_integration, p.total_frames, p.session_count
     FROM page p
     """)
     params["page_size"] = page_size
@@ -1220,6 +1236,7 @@ async def list_targets_aggregated(
         page_basics[tk] = {
             "target_key": tk,
             "primary_name": row.primary_name,
+            "user_defined": bool(row.user_defined),
             "total_integration": float(row.total_integration),
             "total_frames": int(row.total_frames),
             "session_count": int(row.session_count),
@@ -1534,6 +1551,7 @@ async def list_targets_aggregated(
             mosaic_id=mosaic_map.get(basics["target_key"], (None, None))[0],
             mosaic_name=mosaic_map.get(basics["target_key"], (None, None))[1],
             custom_values=custom_values_map.get(basics["target_key"]) if include_custom else None,
+            user_defined=basics["user_defined"],
         ))
 
     return TargetAggregationResponse(

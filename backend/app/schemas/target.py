@@ -163,6 +163,7 @@ class TargetAggregation(BaseModel):
     mosaic_id: str | None = None
     mosaic_name: str | None = None
     custom_values: dict[str, str] | None = None
+    user_defined: bool = False
 
 
 class AggregateStats(BaseModel):
