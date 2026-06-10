@@ -18,7 +18,7 @@ const CreateTargetModal: Component<Props> = (props) => {
     try {
       const res = await api.createCustomTarget(values);
       const linked = res.linked_images > 0
-        ? ` and linked ${res.linked_images} existing images`
+        ? ` and linked ${res.linked_images} existing ${res.linked_images === 1 ? "image" : "images"}`
         : "";
       showToast(`Created target "${values.primary_name}"${linked}`);
       props.onCreated();

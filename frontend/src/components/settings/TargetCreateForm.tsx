@@ -1,5 +1,10 @@
 import { Component, Show, For, createSignal } from "solid-js";
 import { DEEP_SKY_TYPES, SOLAR_SYSTEM_TYPES, isSolarSystemType } from "../../constants/objectTypes";
+import { showToast } from "../Toast";
+
+// Coordinates display at most 4 decimals so prefilled FITS/SIMBAD values do not
+// surface full float noise (e.g. 83.82208333333334).
+const formatCoord = (v: number): string => String(Math.round(v * 10000) / 10000);
 
 export interface TargetFormValues {
   primary_name: string;
@@ -32,8 +37,8 @@ const TargetCreateForm: Component<Props> = (props) => {
   const startsOther = initialType !== "" && !KNOWN_TYPES.includes(initialType);
 
   const [primaryName, setPrimaryName] = createSignal(initial.primary_name ?? "");
-  const [ra, setRa] = createSignal(initial.ra != null ? String(initial.ra) : "");
-  const [dec, setDec] = createSignal(initial.dec != null ? String(initial.dec) : "");
+  const [ra, setRa] = createSignal(initial.ra != null ? formatCoord(initial.ra) : "");
+  const [dec, setDec] = createSignal(initial.dec != null ? formatCoord(initial.dec) : "");
   const [typeChoice, setTypeChoice] = createSignal(startsOther ? "__other__" : initialType);
   const [otherType, setOtherType] = createSignal(startsOther ? initialType : "");
   const [catalogId, setCatalogId] = createSignal(initial.catalog_id ?? "");
@@ -57,9 +62,32 @@ const TargetCreateForm: Component<Props> = (props) => {
     }
   };
 
+  // Parse an optional coordinate field. Returns the number, null when blank, or
+  // the literal false when the input is invalid (non-numeric or out of range).
+  // Number() (unlike parseFloat) rejects trailing garbage like "12abc".
+  const parseCoord = (raw: string, min: number, max: number): number | null | false => {
+    const trimmed = raw.trim();
+    if (!trimmed) return null;
+    const n = Number(trimmed);
+    if (!Number.isFinite(n) || n < min || n > max) return false;
+    return n;
+  };
+
   const handleSubmit = () => {
     const name = primaryName().trim();
     if (!name || props.submitting) return;
+
+    const raValue = parseCoord(ra(), 0, 360);
+    if (raValue === false) {
+      showToast("RA must be a number between 0 and 360 degrees", "error");
+      return;
+    }
+    const decValue = parseCoord(dec(), -90, 90);
+    if (decValue === false) {
+      showToast("Dec must be a number between -90 and 90 degrees", "error");
+      return;
+    }
+
     const aliases = aliasesText()
       .split(",")
       .map((a) => a.trim())
@@ -67,8 +95,8 @@ const TargetCreateForm: Component<Props> = (props) => {
     const type = resolvedType();
     props.onSubmit({
       primary_name: name,
-      ra: ra().trim() ? parseFloat(ra()) : null,
-      dec: dec().trim() ? parseFloat(dec()) : null,
+      ra: raValue,
+      dec: decValue,
       object_type: type || null,
       catalog_id: catalogId().trim() || null,
       aliases,
