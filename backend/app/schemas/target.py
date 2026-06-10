@@ -223,6 +223,9 @@ class TargetDetailResponse(BaseModel):
     reference_thumbnail_path: str | None = None
     # Gaia DR3
     distance_pc: float | None = None
+    # HyperLEDA
+    hubble_t_type: float | None = None
+    inclination: float | None = None
     # Catalog memberships
     catalog_memberships: list[CatalogMembershipEntry] = []
     name_locked: bool = False
