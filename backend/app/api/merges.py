@@ -1,7 +1,8 @@
 import uuid
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select, update, func, delete, or_
+from sqlalchemy import select, update, func, delete, or_, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 from app.database import get_session
@@ -11,7 +12,7 @@ from app.models.target import Target
 from app.models.image import Image
 from app.models.merge_candidate import MergeCandidate
 from app.schemas.target import MergeCandidateResponse, MergedTargetResponse, MergeRequest, OrphanPreviewRequest, OrphanPreviewResponse, OrphanCreateRequest, MergePreviewRequest, MergePreviewResponse, TargetIdentityRequest, TargetIdentityResponse, StatusResponse, MergeCandidateCountResponse, DuplicateDetectionResponse, OrphanCreateResponse, CustomTargetCreateRequest, CustomTargetCreateResponse
-from app.services.simbad import normalize_catalog_id
+from app.services.simbad import normalize_catalog_id, normalize_object_name
 from app.models.simbad_cache import SimbadCache
 from app.models.sesame_cache import SesameCache
 from app.config import async_redis
@@ -197,6 +198,39 @@ async def orphan_preview(
     )
 
 
+def _build_aliases(primary_name: str, raw_aliases) -> list[str]:
+    """Build the stored aliases for a manually created target.
+
+    Keeps the user-typed alias strings and additionally stores the normalized
+    uppercase form (normalize_object_name) of the primary name and of every
+    alias. The scanner uppercases an incoming OBJECT before matching it against
+    aliases, so without these a custom "Jupiter" with alias "Jove" would not
+    link OBJECT=JUPITER or OBJECT=JOVE. The primary name's own literal string is
+    not stored as an alias (it is matched separately on primary_name), but its
+    normalized uppercase form is, so future images link. Order-stable and
+    deduped case-insensitively.
+    """
+    primary = primary_name.strip()
+    aliases: list[str] = []
+    # Exclude only the literal primary string; its normalized form is allowed.
+    seen = {primary}
+
+    def _add(value: str) -> None:
+        v = value.strip()
+        if v and v not in seen:
+            aliases.append(v)
+            seen.add(v)
+
+    for raw in raw_aliases:
+        a = (raw or "").strip()
+        if not a:
+            continue
+        _add(a)
+        _add(normalize_object_name(a))
+    _add(normalize_object_name(primary))
+    return aliases
+
+
 def _enrich_new_target(target_id) -> None:
     """Best-effort catalog enrichment for a newly created target."""
     try:
@@ -233,18 +267,16 @@ async def orphan_create(
     if candidate.status != "pending":
         raise HTTPException(status_code=400, detail="Candidate is not pending")
 
+    name = body.primary_name.strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="Primary name is required")
+
     now = datetime.now(timezone.utc)
 
-    names_upper = {body.primary_name.strip().upper()}
-    aliases: list[str] = []
-    for raw in [candidate.source_name, *body.aliases]:
-        a = (raw or "").strip()
-        if a and a.upper() not in names_upper:
-            aliases.append(a)
-            names_upper.add(a.upper())
+    aliases = _build_aliases(name, [candidate.source_name, *body.aliases])
 
     target = Target(
-        primary_name=body.primary_name,
+        primary_name=name,
         catalog_id=body.catalog_id,
         catalog_id_normalized=normalize_catalog_id(body.catalog_id),
         aliases=aliases,
@@ -294,23 +326,21 @@ async def create_custom_target(
     if not name:
         raise HTTPException(status_code=422, detail="Primary name is required")
 
-    names_upper = {name.upper()}
-    aliases: list[str] = []
-    for raw in body.aliases:
-        a = raw.strip()
-        if a and a.upper() not in names_upper:
-            aliases.append(a)
-            names_upper.add(a.upper())
+    aliases = _build_aliases(name, body.aliases)
 
-    # A target conflicts if its primary name or any alias collides with any of
-    # the new names (case-insensitive on primary name, exact on aliases).
-    all_names = sorted({name, *aliases, *(n for n in names_upper)})
+    # Every name the new target answers to, uppercased, for a case-insensitive
+    # conflict check. Historical aliases were stored as-typed by orphan_create,
+    # so an exact-case alias match would miss mixed-case collisions.
+    names_upper = sorted({name.upper(), *(a.upper() for a in aliases)})
     conflict = (await session.execute(
         select(Target).where(
             Target.merged_into_id.is_(None),
             or_(
                 func.upper(Target.primary_name).in_(names_upper),
-                *[Target.aliases.any(n) for n in all_names],
+                text(
+                    "EXISTS (SELECT 1 FROM unnest(targets.aliases) a"
+                    " WHERE upper(a) = ANY(:conflict_names))"
+                ).bindparams(conflict_names=names_upper),
             ),
         )
     )).scalars().first()
@@ -373,7 +403,16 @@ async def create_custom_target(
         cand.status = "accepted"
         cand.resolved_at = now
 
-    await session.commit()
+    try:
+        await session.commit()
+    except IntegrityError:
+        # A unique constraint (e.g. primary_name) lost a race or collided with a
+        # soft-deleted merged target's name. Report a conflict, not a 500.
+        await session.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail=f'Name already in use by "{name}"',
+        )
 
     if not body.user_defined:
         _enrich_new_target(target.id)
