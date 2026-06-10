@@ -15,6 +15,7 @@ class Target(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     primary_name: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
     catalog_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    catalog_id_normalized: Mapped[str | None] = mapped_column(String(100), nullable=True)
     common_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     aliases: Mapped[list[str]] = mapped_column(ARRAY(String), nullable=False, default=list)
     ra: Mapped[float | None] = mapped_column(Float, nullable=True)
@@ -46,4 +47,5 @@ class Target(Base):
 
     __table_args__ = (
         Index("ix_targets_aliases", "aliases", postgresql_using="gin"),
+        Index("uq_targets_catalog_id_normalized", "catalog_id_normalized", unique=True),
     )

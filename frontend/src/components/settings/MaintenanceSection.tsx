@@ -143,6 +143,18 @@ const MaintenanceSection: Component<MaintenanceSectionProps> = (props) => {
       600_000,
     );
 
+  const handleBackfillIdentity = () =>
+    runOperation(
+      "backfill",
+      () => api.backfillCatalogIdentity() as Promise<{ task_id: string }>,
+      "Re-linking catalog orphans...",
+      "Catalog orphans re-linked",
+      "Backfill failed",
+      "rebuild",
+      "Re-link Catalog Orphans",
+      1_800_000,
+    );
+
   const handleFullRebuild = () => {
     setShowRebuildConfirm(false);
     runOperation(
@@ -277,6 +289,54 @@ const MaintenanceSection: Component<MaintenanceSectionProps> = (props) => {
             <p class="mt-2 text-xs text-green-400">Retry complete.</p>
           </Show>
           <Show when={isError("retry")}>
+            <p class="mt-2 text-xs text-theme-error">{errorMessage()}</p>
+          </Show>
+        </div>
+
+        {/* ---- Re-link Catalog Orphans ---- */}
+        <div class="p-3 bg-theme-base/50 border border-theme-border rounded-[var(--radius-sm)]">
+          <div class="flex items-start justify-between gap-4">
+            <div class="flex-1">
+              <div class="flex items-center gap-2 mb-1">
+                <p class="text-sm text-theme-text-primary font-medium">Re-link Catalog Orphans</p>
+                <span class="text-xs px-1.5 py-0.5 rounded bg-yellow-500/15 text-yellow-400 border border-yellow-500/20">
+                  Moderate
+                </span>
+              </div>
+              <p class="text-xs text-theme-text-secondary mt-0.5">
+                Repairs SIMBAD cache and re-links unattached frames to existing targets by catalog identity (e.g. NGC 6543). Requires internet for cache repair.
+              </p>
+              <p class="text-xs text-theme-text-tertiary mt-1">
+                Run once after upgrading. Safe to re-run. Frames that match no catalog object stay listed under their object name.
+              </p>
+            </div>
+
+            <Show when={isAdmin() && !isRunning("backfill") && !isComplete("backfill")}>
+              <button
+                onClick={handleBackfillIdentity}
+                disabled={anyRunning()}
+                class="px-3 py-1.5 text-xs border border-theme-border-em text-theme-text-secondary rounded-[var(--radius-sm)] hover:text-theme-text-primary hover:border-theme-accent transition-colors disabled:opacity-50 flex-shrink-0"
+              >
+                Re-link Orphans
+              </button>
+            </Show>
+          </div>
+
+          <Show when={isRunning("backfill")}>
+            <div class="mt-3 flex items-center gap-2">
+              <div class="w-4 h-4 border-2 border-theme-accent border-t-transparent rounded-full animate-spin flex-shrink-0" />
+              <div class="text-xs text-theme-text-secondary">
+                <p>{statusMessage() || "Re-linking catalog orphans..."}</p>
+                <Show when={formatDetails()}>
+                  <p class="text-theme-text-tertiary mt-0.5">{formatDetails()}</p>
+                </Show>
+              </div>
+            </div>
+          </Show>
+          <Show when={isComplete("backfill")}>
+            <p class="mt-2 text-xs text-green-400">Backfill complete.</p>
+          </Show>
+          <Show when={isError("backfill")}>
             <p class="mt-2 text-xs text-theme-error">{errorMessage()}</p>
           </Show>
         </div>

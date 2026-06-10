@@ -184,3 +184,29 @@ async def test_old_scan_activity_routes_removed():
         r2 = await c.delete("/api/scan/activity")
     assert r1.status_code == 404
     assert r2.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_backfill_catalog_identity_queues_task():
+    admin = _admin_user()
+    app.dependency_overrides[require_admin] = lambda: admin
+
+    fake_state = MagicMock()
+    fake_state.state = "idle"
+
+    try:
+        with patch("app.api.scan.get_scan_state", new=AsyncMock(return_value=fake_state)), \
+             patch("app.api.scan.backfill_catalog_identity") as task, \
+             patch("app.api.scan.async_redis") as mock_redis_cm:
+            task.delay.return_value = MagicMock(id="task-xyz")
+            mock_redis = AsyncMock()
+            mock_redis_cm.side_effect = _mock_async_redis(mock_redis)
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://test") as client:
+                resp = await client.post("/api/scan/backfill-catalog-identity")
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["status"] == "accepted"
+        task.delay.assert_called_once()
+    finally:
+        app.dependency_overrides.clear()
