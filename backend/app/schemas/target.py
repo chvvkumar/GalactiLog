@@ -229,6 +229,7 @@ class TargetDetailResponse(BaseModel):
     # Catalog memberships
     catalog_memberships: list[CatalogMembershipEntry] = []
     name_locked: bool = False
+    user_defined: bool = False
 
 
 class SessionDetailResponse(BaseModel):
@@ -337,6 +338,8 @@ class OrphanCreateRequest(BaseModel):
     dec: float | None = None
     object_type: str | None = None
     catalog_id: str | None = None
+    user_defined: bool = False
+    aliases: list[str] = []
 
 
 class MergedTargetResponse(BaseModel):
@@ -409,3 +412,19 @@ class DuplicateDetectionResponse(BaseModel):
 
 class OrphanCreateResponse(BaseModel):
     target_id: str
+
+
+class CustomTargetCreateRequest(BaseModel):
+    primary_name: str
+    ra: float | None = None
+    dec: float | None = None
+    object_type: str | None = None
+    catalog_id: str | None = None
+    user_defined: bool = True
+    aliases: list[str] = []
+
+
+class CustomTargetCreateResponse(BaseModel):
+    target_id: str
+    linked_candidates: int = 0
+    linked_images: int = 0

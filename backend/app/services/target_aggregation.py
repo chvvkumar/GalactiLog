@@ -890,6 +890,7 @@ async def get_target_detail(target_id: str, session: AsyncSession) -> TargetDeta
         inclination=target_obj.inclination if target_obj else None,
         catalog_memberships=catalog_memberships,
         name_locked=target_obj.name_locked if target_obj else False,
+        user_defined=target_obj.user_defined if target_obj else False,
     )
 
 
