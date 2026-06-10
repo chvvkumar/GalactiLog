@@ -22,6 +22,7 @@ const UnresolvedSection: Component<UnresolvedSectionProps> = (props) => {
 
   const [previews, setPreviews] = createSignal<Record<string, PreviewState>>({});
   const [resolveCandidate, setResolveCandidate] = createSignal<MergeCandidateResponse | null>(null);
+  const [resolveMode, setResolveMode] = createSignal<"create" | "merge">("create");
 
   // Fetch SIMBAD previews when candidates change
   createEffect(
@@ -93,7 +94,8 @@ const UnresolvedSection: Component<UnresolvedSectionProps> = (props) => {
     }
   };
 
-  const handleCreateTarget = (c: MergeCandidateResponse) => {
+  const handleResolve = (c: MergeCandidateResponse, mode: "create" | "merge") => {
+    setResolveMode(mode);
     setResolveCandidate(c);
   };
 
@@ -170,7 +172,13 @@ const UnresolvedSection: Component<UnresolvedSectionProps> = (props) => {
                           </button>
                         </Show>
                         <button
-                          onClick={() => handleCreateTarget(c)}
+                          onClick={() => handleResolve(c, "merge")}
+                          class="px-2 py-1 text-xs border border-theme-border text-theme-text-secondary rounded-[var(--radius-sm)] hover:text-theme-text-primary transition-colors"
+                        >
+                          Merge into Existing
+                        </button>
+                        <button
+                          onClick={() => handleResolve(c, "create")}
                           class="px-2 py-1 text-xs border border-theme-border text-theme-text-secondary rounded-[var(--radius-sm)] hover:text-theme-text-primary transition-colors"
                         >
                           Create New Target
@@ -196,6 +204,7 @@ const UnresolvedSection: Component<UnresolvedSectionProps> = (props) => {
         {(c) => (
           <ResolveTargetModal
             candidate={c()}
+            initialMode={resolveMode()}
             onClose={() => setResolveCandidate(null)}
             onResolved={handleResolved}
           />

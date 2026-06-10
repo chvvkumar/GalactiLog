@@ -8,13 +8,16 @@ import { getErrorMessage } from "../../utils/errors";
 
 interface Props {
   candidate: MergeCandidateResponse;
+  initialMode?: "create" | "merge";
   onClose: () => void;
   onResolved: () => void;
 }
 
 const ResolveTargetModal: Component<Props> = (props) => {
   const isOrphan = () => props.candidate.suggested_target_id === null;
-  const [mode, setMode] = createSignal<"create" | "merge">(isOrphan() ? "create" : "merge");
+  const [mode, setMode] = createSignal<"create" | "merge">(
+    props.initialMode ?? (isOrphan() ? "create" : "merge"),
+  );
 
   // Create New Target state
   const [preview, setPreview] = createSignal<OrphanPreviewResponse | null>(null);
@@ -22,7 +25,9 @@ const ResolveTargetModal: Component<Props> = (props) => {
   const [creating, setCreating] = createSignal(false);
 
   // Merge into Existing state
-  const [searchQuery, setSearchQuery] = createSignal(props.candidate.suggested_target_name ?? "");
+  const [searchQuery, setSearchQuery] = createSignal(
+    props.candidate.suggested_target_name ?? props.candidate.source_name,
+  );
   const [searchResults, setSearchResults] = createSignal<TargetSearchResultFuzzy[]>([]);
   const [selectedTarget, setSelectedTarget] = createSignal<TargetSearchResultFuzzy | null>(null);
   const [searching, setSearching] = createSignal(false);
@@ -31,6 +36,17 @@ const ResolveTargetModal: Component<Props> = (props) => {
   createEffect(() => {
     if (mode() === "create" && !preview()) {
       loadPreview();
+    }
+  });
+
+  // Run the prefilled search once when the merge tab first becomes active, so
+  // likely matches appear without retyping the unresolved name.
+  let searchedOnce = false;
+  createEffect(() => {
+    if (mode() === "merge" && !searchedOnce) {
+      searchedOnce = true;
+      const q = searchQuery().trim();
+      if (q.length >= 2) handleSearch(q);
     }
   });
 
