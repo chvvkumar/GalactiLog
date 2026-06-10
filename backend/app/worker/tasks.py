@@ -1121,13 +1121,21 @@ def rebuild_targets(self) -> dict:
     clear_cancel_sync(_redis)
     set_rebuild_running_sync(_redis, "full", "Clearing existing targets...")
 
-    # Phase 1: Clear everything
+    # Phase 1: Clear everything except user-defined custom targets, which SIMBAD
+    # cannot recreate. Unlink only images NOT attached to a surviving custom
+    # target so a custom "Jupiter" and its frames survive the rebuild.
     with Session(_sync_engine) as session:
-        session.execute(text("UPDATE images SET resolved_target_id = NULL"))
+        session.execute(text("""
+            UPDATE images SET resolved_target_id = NULL
+            WHERE resolved_target_id IS NULL
+               OR resolved_target_id NOT IN (
+                   SELECT id FROM targets WHERE user_defined = TRUE
+               )
+        """))
         session.execute(text("DELETE FROM merge_candidates"))
-        session.execute(text("DELETE FROM targets"))
+        session.execute(text("DELETE FROM targets WHERE user_defined = FALSE"))
         session.commit()
-    logger.info("rebuild_targets: cleared all targets and links")
+    logger.info("rebuild_targets: cleared all non-custom targets and links")
 
     _redis.delete("target_resolver:negative")
 
