@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select, update, func, delete
+from sqlalchemy import select, update, func, delete, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 from app.database import get_session
@@ -10,7 +10,8 @@ from app.models.user import User
 from app.models.target import Target
 from app.models.image import Image
 from app.models.merge_candidate import MergeCandidate
-from app.schemas.target import MergeCandidateResponse, MergedTargetResponse, MergeRequest, OrphanPreviewRequest, OrphanPreviewResponse, OrphanCreateRequest, MergePreviewRequest, MergePreviewResponse, TargetIdentityRequest, TargetIdentityResponse, StatusResponse, MergeCandidateCountResponse, DuplicateDetectionResponse, OrphanCreateResponse
+from app.schemas.target import MergeCandidateResponse, MergedTargetResponse, MergeRequest, OrphanPreviewRequest, OrphanPreviewResponse, OrphanCreateRequest, MergePreviewRequest, MergePreviewResponse, TargetIdentityRequest, TargetIdentityResponse, StatusResponse, MergeCandidateCountResponse, DuplicateDetectionResponse, OrphanCreateResponse, CustomTargetCreateRequest, CustomTargetCreateResponse
+from app.services.simbad import normalize_catalog_id
 from app.models.simbad_cache import SimbadCache
 from app.models.sesame_cache import SesameCache
 from app.config import async_redis
@@ -196,6 +197,29 @@ async def orphan_preview(
     )
 
 
+def _enrich_new_target(target_id) -> None:
+    """Best-effort catalog enrichment for a newly created target."""
+    try:
+        from sqlalchemy.orm import Session as SyncSession
+        from app.database import sync_engine
+        from app.services.openngc import enrich_target_from_openngc
+        from app.services.sac import enrich_target_from_sac
+        from app.services.vizier import enrich_target_from_vizier
+
+        with SyncSession(sync_engine) as sync_db:
+            db_target = sync_db.get(Target, target_id)
+            if db_target:
+                enrich_target_from_openngc(sync_db, db_target)
+                sync_db.commit()
+                if db_target.size_major is None:
+                    enrich_target_from_vizier(sync_db, db_target)
+                    sync_db.commit()
+                enrich_target_from_sac(sync_db, db_target)
+                sync_db.commit()
+    except Exception:
+        pass
+
+
 @router.post("/orphan-create", response_model=OrphanCreateResponse)
 async def orphan_create(
     body: OrphanCreateRequest,
@@ -211,13 +235,24 @@ async def orphan_create(
 
     now = datetime.now(timezone.utc)
 
+    names_upper = {body.primary_name.strip().upper()}
+    aliases: list[str] = []
+    for raw in [candidate.source_name, *body.aliases]:
+        a = (raw or "").strip()
+        if a and a.upper() not in names_upper:
+            aliases.append(a)
+            names_upper.add(a.upper())
+
     target = Target(
         primary_name=body.primary_name,
         catalog_id=body.catalog_id,
-        aliases=[candidate.source_name] if candidate.source_name != body.primary_name else [],
+        catalog_id_normalized=normalize_catalog_id(body.catalog_id),
+        aliases=aliases,
         ra=body.ra,
         dec=body.dec,
         object_type=body.object_type,
+        user_defined=body.user_defined,
+        name_locked=body.user_defined,
     )
     session.add(target)
     await session.flush()
@@ -237,28 +272,117 @@ async def orphan_create(
 
     await session.commit()
 
-    # Run enrichment (sync, non-critical)
-    try:
-        from sqlalchemy.orm import Session as SyncSession
-        from app.database import sync_engine
-        from app.services.openngc import enrich_target_from_openngc
-        from app.services.sac import enrich_target_from_sac
-        from app.services.vizier import enrich_target_from_vizier
-
-        with SyncSession(sync_engine) as sync_db:
-            db_target = sync_db.get(Target, target.id)
-            if db_target:
-                enrich_target_from_openngc(sync_db, db_target)
-                sync_db.commit()
-                if db_target.size_major is None:
-                    enrich_target_from_vizier(sync_db, db_target)
-                    sync_db.commit()
-                enrich_target_from_sac(sync_db, db_target)
-                sync_db.commit()
-    except Exception:
-        pass
+    if not body.user_defined:
+        _enrich_new_target(target.id)
 
     return {"target_id": str(target.id)}
+
+
+@router.post("/custom", response_model=CustomTargetCreateResponse)
+async def create_custom_target(
+    body: CustomTargetCreateRequest,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(require_admin),
+):
+    """Create a target manually, unattached to any merge candidate.
+
+    Used for custom objects (planets, comets) and pre-creating targets before
+    their images are scanned. Retro-links any pending orphan candidates whose
+    source name matches the new target's names.
+    """
+    name = body.primary_name.strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="Primary name is required")
+
+    names_upper = {name.upper()}
+    aliases: list[str] = []
+    for raw in body.aliases:
+        a = raw.strip()
+        if a and a.upper() not in names_upper:
+            aliases.append(a)
+            names_upper.add(a.upper())
+
+    # A target conflicts if its primary name or any alias collides with any of
+    # the new names (case-insensitive on primary name, exact on aliases).
+    all_names = sorted({name, *aliases, *(n for n in names_upper)})
+    conflict = (await session.execute(
+        select(Target).where(
+            Target.merged_into_id.is_(None),
+            or_(
+                func.upper(Target.primary_name).in_(names_upper),
+                *[Target.aliases.any(n) for n in all_names],
+            ),
+        )
+    )).scalars().first()
+    if conflict:
+        raise HTTPException(
+            status_code=409,
+            detail=f'Name already in use by "{conflict.primary_name}"',
+        )
+
+    cat_norm = normalize_catalog_id(body.catalog_id)
+    if cat_norm:
+        dup = (await session.execute(
+            select(Target).where(
+                Target.merged_into_id.is_(None),
+                Target.catalog_id_normalized == cat_norm,
+            )
+        )).scalars().first()
+        if dup:
+            raise HTTPException(
+                status_code=409,
+                detail=f'Catalog ID already belongs to "{dup.primary_name}"',
+            )
+
+    target = Target(
+        primary_name=name,
+        catalog_id=body.catalog_id,
+        catalog_id_normalized=cat_norm,
+        aliases=aliases,
+        ra=body.ra,
+        dec=body.dec,
+        object_type=body.object_type,
+        user_defined=body.user_defined,
+        name_locked=True,
+    )
+    session.add(target)
+    await session.flush()
+
+    # Retro-link pending orphan candidates whose source name matches, and
+    # resolve their images, so pre-created targets absorb existing orphans.
+    pending = (await session.execute(
+        select(MergeCandidate).where(
+            MergeCandidate.status == "pending",
+            func.upper(MergeCandidate.source_name).in_(names_upper),
+        )
+    )).scalars().all()
+
+    now = datetime.now(timezone.utc)
+    linked_images = 0
+    for cand in pending:
+        result = await session.execute(
+            update(Image)
+            .where(
+                Image.raw_headers["OBJECT"].astext == cand.source_name,
+                Image.resolved_target_id.is_(None),
+            )
+            .values(resolved_target_id=target.id)
+        )
+        linked_images += result.rowcount or 0
+        cand.suggested_target_id = target.id
+        cand.status = "accepted"
+        cand.resolved_at = now
+
+    await session.commit()
+
+    if not body.user_defined:
+        _enrich_new_target(target.id)
+
+    return {
+        "target_id": str(target.id),
+        "linked_candidates": len(pending),
+        "linked_images": linked_images,
+    }
 
 
 @router.get("/merged-targets", response_model=list[MergedTargetResponse])
