@@ -223,15 +223,18 @@ def resolve_target(
         session.commit()
 
     if result is None:
+        # Only names that did NOT resolve to any identity are negative-cached.
         if redis:
             redis.sadd(NEGATIVE_CACHE_KEY, normalized)
             redis.expire(NEGATIVE_CACHE_KEY, NEGATIVE_CACHE_TTL)
         return None
 
-    # Check again after SIMBAD - another worker may have created this target
-    # while we were waiting on SIMBAD
-    existing = find_target_by_name(result["primary_name"], session)
-    if existing:
+    # The name resolved to a (possibly catalog) identity. Re-check via the shared
+    # identity matcher in case a concurrent worker created the target while we
+    # waited on SIMBAD. A resolved identity is NEVER negative-cached below, so a
+    # single create-collision cannot cascade NULLs across the scan batch.
+    existing = match_target_by_identity(result, object_name, session)
+    if existing is not None:
         return str(existing.id)
 
     return _create_target(result, normalized, session)

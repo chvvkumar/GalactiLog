@@ -212,3 +212,61 @@ class TestCreateTargetEnrichmentRenameLinksRealChain:
         # Linked to the existing target, no insert, never None.
         assert result == "cats-eye-existing"
         session.add.assert_not_called()
+
+
+class TestNegativeCacheCorrectness:
+    def _simbad(self):
+        return {
+            "primary_name": "NGC 6543", "catalog_id": "NGC 6543",
+            "common_name": None, "aliases": ["NGC 6543"],
+            "ra": 269.6, "dec": 66.6, "object_type": "PN",
+        }
+
+    def test_resolved_identity_never_writes_negative_cache(self):
+        """A name that resolves to a catalog identity must never be negative-cached,
+        even if _create_target transiently returns None (e.g. a lost create race)."""
+        from app.services.target_resolver import resolve_target
+
+        session = MagicMock()
+        redis = MagicMock()
+        redis.sismember.return_value = False
+
+        with patch("app.services.target_resolver.find_target_by_name", return_value=None), \
+             patch("app.services.target_resolver.resolve_target_name_cached", return_value=self._simbad()), \
+             patch("app.services.target_resolver.match_target_by_identity", return_value=None), \
+             patch("app.services.target_resolver._create_target", return_value=None):
+            result = resolve_target("NGC 6543", session, redis=redis)
+
+        assert result is None
+        redis.sadd.assert_not_called()
+
+    def test_unresolvable_name_still_negative_cached(self):
+        from app.services.target_resolver import resolve_target
+
+        session = MagicMock()
+        redis = MagicMock()
+        redis.sismember.return_value = False
+
+        with patch("app.services.target_resolver.find_target_by_name", return_value=None), \
+             patch("app.services.target_resolver.resolve_target_name_cached", return_value=None), \
+             patch("app.services.target_resolver.resolve_sesame_cached", return_value=None):
+            result = resolve_target("FlatWizard", session, redis=redis)
+
+        assert result is None
+        redis.sadd.assert_called_once()
+
+    def test_resolve_uses_identity_matcher_after_simbad(self):
+        from app.services.target_resolver import resolve_target
+
+        session = MagicMock()
+        redis = MagicMock()
+        redis.sismember.return_value = False
+        existing = MagicMock()
+        existing.id = "cats-eye"
+
+        with patch("app.services.target_resolver.find_target_by_name", return_value=None), \
+             patch("app.services.target_resolver.resolve_target_name_cached", return_value=self._simbad()), \
+             patch("app.services.target_resolver.match_target_by_identity", return_value=existing):
+            result = resolve_target("NGC 6543", session, redis=redis)
+
+        assert result == "cats-eye"
