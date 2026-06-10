@@ -573,6 +573,9 @@ const TargetDetailPage: Component = () => {
                           <Show when={detail().name_locked}>
                             <span class="text-theme-text-tertiary text-lg" title="Name manually locked">&#128274;</span>
                           </Show>
+                          <Show when={detail().user_defined}>
+                            <span class="px-2 py-0.5 rounded-full text-label font-medium bg-theme-accent/15 text-theme-accent" title="User-defined target, excluded from catalog enrichment">Custom</span>
+                          </Show>
                           <Show when={auth.isAdmin()}>
                             <button
                               class="text-theme-text-tertiary hover:text-theme-text-primary transition-colors text-lg leading-none"
