@@ -192,6 +192,28 @@ def create_app() -> FastAPI:
             request.method,
             request.url.path,
         )
+        # Emit a curated api_error event on a fresh session so it commits
+        # independently of the request that failed. The full traceback is
+        # captured separately into app_logs by the root-logger handler above.
+        try:
+            from app.services.activity import emit
+            actor = None
+            user = getattr(request.state, "user", None)
+            if user is not None:
+                actor = getattr(user, "username", None)
+            async with async_session() as s:
+                await emit(
+                    s, category="system", severity="error", event_type="api_error",
+                    message=f"{request.method} {request.url.path} failed: {type(exc).__name__}",
+                    details={
+                        "method": request.method,
+                        "path": str(request.url.path),
+                        "exception": str(exc)[:500],
+                    },
+                    actor=actor,
+                )
+        except Exception:
+            logger.warning("Failed to emit api_error activity event", exc_info=True)
         return JSONResponse(
             status_code=500,
             content=ErrorEnvelope(detail="Internal server error").model_dump(),
