@@ -11,7 +11,7 @@ function formatBytes(b: number): string {
 
 const DatabaseOverview: Component<{
   summary: DbSummary | null;
-  storage?: { fits_bytes: number; thumbnail_bytes: number; database_bytes: number };
+  storage?: { fits_bytes: number; fits_disk_bytes: number; thumbnail_bytes: number; database_bytes: number };
 }> = (props) => {
   const navigate = useNavigate();
 
@@ -33,7 +33,8 @@ const DatabaseOverview: Component<{
           <Show when={props.storage}>
             {(s) => (
               <>
-                <StatTile label="FITS" value={formatBytes(s().fits_bytes)} title="On-disk size of raw FITS capture files." />
+                <StatTile label="FITS (catalogued)" value={formatBytes(s().fits_bytes)} title="Sum of catalogued FITS file sizes from the database. Tracks the include-calibration setting (excluded calibration frames are not counted)." />
+                <StatTile label="FITS (disk)" value={formatBytes(s().fits_disk_bytes)} title="Actual on-disk usage of the FITS directory, including files not yet catalogued such as excluded calibration frames." />
                 <StatTile label="Thumbnails" value={formatBytes(s().thumbnail_bytes)} title="On-disk size of generated preview thumbnails." />
                 <StatTile label="Database" value={formatBytes(s().database_bytes)} title="On-disk size of the PostgreSQL database." />
               </>

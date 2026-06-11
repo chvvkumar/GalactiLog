@@ -2,6 +2,13 @@ import { Component } from "solid-js";
 import type { OverviewStats } from "../types";
 import { formatIntegration } from "../utils/format";
 
+function formatBytes(b: number): string {
+  if (b < 1e6) return (b / 1e3).toFixed(0) + " KB";
+  if (b < 1e9) return (b / 1e6).toFixed(0) + " MB";
+  if (b < 1e12) return (b / 1e9).toFixed(1) + " GB";
+  return (b / 1e12).toFixed(2) + " TB";
+}
+
 function formatSpan(start: string | null, end: string | null): string {
   if (!start || !end) return "\u2014";
   const s = new Date(start);
@@ -25,8 +32,9 @@ function formatSpanSubtitle(start: string | null, end: string | null): string {
 
 const StatsOverview: Component<{
   overview: OverviewStats;
+  storage?: { fits_bytes: number; fits_disk_bytes: number; thumbnail_bytes: number; database_bytes: number };
 }> = (props) => {
-  const cards = () => {
+  const cards = (): { label: string; subtitle: string; value: string; title?: string }[] => {
     const ov = props.overview;
     const avgSession = ov.session_count > 0
       ? formatIntegration(ov.total_integration_seconds / ov.session_count)
@@ -37,6 +45,7 @@ const StatsOverview: Component<{
     return [
       { label: "Total Integration", subtitle: "all LIGHT frames", value: formatIntegration(ov.total_integration_seconds) },
       { label: "Total Frames", subtitle: "all LIGHT frames", value: ov.total_frames.toLocaleString() },
+      { label: "Catalogued Size", subtitle: props.storage ? `${formatBytes(props.storage.fits_disk_bytes)} on disk` : "", value: props.storage ? formatBytes(props.storage.fits_bytes) : "—", title: "Catalogued Size: total size of FITS files recorded in the catalog (sum of file sizes in the database; reflects the include-calibration setting). The 'on disk' figure is the actual disk usage of the FITS directory measured with du, including files not yet catalogued such as excluded calibration frames." },
       { label: "Active Span", subtitle: formatSpanSubtitle(ov.first_capture_date, ov.last_capture_date), value: formatSpan(ov.first_capture_date, ov.last_capture_date) },
       { label: "Avg Session Length", subtitle: `${ov.session_count.toLocaleString()} sessions`, value: avgSession },
       { label: "Avg per Target", subtitle: `${ov.target_count.toLocaleString()} targets`, value: avgPerTarget },
@@ -44,12 +53,12 @@ const StatsOverview: Component<{
   };
 
   return (
-    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
       {cards().map((c) => (
-        <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-4 text-center">
+        <div title={c.title} class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-4 text-center">
           <div class="text-xs text-theme-text-secondary mb-1">{c.label}</div>
           <div class="text-theme-text-primary font-semibold text-xl">{c.value}</div>
-          {c.subtitle && <div class="text-caption text-theme-text-tertiary italic mt-1">{c.subtitle}</div>}
+          {c.subtitle && <div class="text-[10px] leading-tight whitespace-nowrap text-theme-text-tertiary italic mt-1">{c.subtitle}</div>}
         </div>
       ))}
     </div>
