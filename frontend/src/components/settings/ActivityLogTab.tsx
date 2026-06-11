@@ -22,6 +22,10 @@ const LEVELS: AppLogLevel[] = ["debug", "info", "warning", "error", "critical"];
 const CAPTURE_LEVELS: AppLogLevel[] = ["debug", "info", "warning", "error"];
 const SOURCES: ("all" | AppLogSource)[] = ["all", "api", "worker", "beat"];
 
+// Shared style for the action buttons in the settings strip (Save, Clear, Download).
+const ACTION_BTN_CLASS =
+  "px-3 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded text-sm disabled:opacity-50 hover:bg-theme-accent/25 transition-colors";
+
 // Severity ranking, low to high. Drives the minimum-severity view filter.
 const LEVEL_ORDER: Record<AppLogLevel, number> = {
   debug: 10,
@@ -430,7 +434,7 @@ const ActivityLogTab: Component = () => {
               <button
                 onClick={handleSaveSettings}
                 disabled={savingSettings() || !isAdmin()}
-                class="px-3 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded text-sm disabled:opacity-50 hover:bg-theme-accent/25 transition-colors"
+                class={ACTION_BTN_CLASS}
               >
                 {savingSettings() ? "Saving..." : "Save"}
               </button>
@@ -468,7 +472,7 @@ const ActivityLogTab: Component = () => {
                   <button
                     onClick={() => setShowClearActivityConfirm(true)}
                     disabled={clearingActivity()}
-                    class="px-3 py-1.5 border border-theme-error/50 text-theme-error rounded text-sm disabled:opacity-50 hover:bg-theme-error/20 transition-colors"
+                    class={ACTION_BTN_CLASS}
                   >
                     Clear activity log
                   </button>
@@ -498,16 +502,13 @@ const ActivityLogTab: Component = () => {
                   <button
                     onClick={() => setShowClearLogsConfirm(true)}
                     disabled={clearingLogs()}
-                    class="px-3 py-1.5 border border-theme-error/50 text-theme-error rounded text-sm disabled:opacity-50 hover:bg-theme-error/20 transition-colors"
+                    class={ACTION_BTN_CLASS}
                   >
                     Clear application logs
                   </button>
                 </Show>
 
-                <a
-                  href={downloadUrl()}
-                  class="px-3 py-1.5 border border-theme-border-em text-theme-text-secondary rounded text-sm hover:text-theme-text-primary hover:border-theme-accent transition-colors"
-                >
+                <a href={downloadUrl()} class={ACTION_BTN_CLASS}>
                   Download
                 </a>
               </div>
