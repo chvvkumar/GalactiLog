@@ -32,6 +32,7 @@ from app.services.auth import (
 )
 from app.api.deps import get_current_user, require_admin
 from app.schemas.common import StatusResponse
+from app.services.activity import emit
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -139,6 +140,12 @@ async def login(
         if not valid or user is None or not user.is_active:
             await _increment_login_failures(redis, body.username, ip)
             audit_log("login", username=body.username, source_ip=ip, success=False, detail="Invalid credentials")
+            await emit(
+                session, category="user_action", severity="warning",
+                event_type="login_failed",
+                message=f"Failed login for '{body.username}'",
+                details={"username": body.username, "source_ip": ip},
+            )
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
         # Successful login - clear failure counter
@@ -248,6 +255,12 @@ async def change_password(
     await session.commit()
 
     audit_log("password_change", user_id=user.id, username=user.username, source_ip=ip, success=True)
+    await emit(
+        session, category="user_action", severity="info",
+        event_type="password_changed",
+        message=f"Password changed for '{user.username}'",
+        actor=user.username,
+    )
     return {"status": "ok"}
 
 
@@ -284,6 +297,11 @@ async def create_user(
     await session.refresh(new_user)
 
     audit_log("user_create", user_id=admin.id, username=admin.username, source_ip=ip, success=True, detail=f"Created user {body.username}")
+    await emit(
+        session, category="user_action", severity="info",
+        event_type="user_created",
+        message=f"User '{new_user.username}' created", actor=admin.username,
+    )
     return UserResponse.model_validate(new_user)
 
 
@@ -316,6 +334,12 @@ async def update_user(
     await session.refresh(target_user)
 
     audit_log("user_update", user_id=admin.id, username=admin.username, source_ip=ip, success=True, detail=f"Updated user {target_user.username}")
+    await emit(
+        session, category="user_action", severity="info",
+        event_type="user_updated",
+        message=f"User '{target_user.username}' updated", actor=admin.username,
+        details={"role": target_user.role.value, "is_active": target_user.is_active},
+    )
     return UserResponse.model_validate(target_user)
 
 
@@ -335,7 +359,13 @@ async def delete_user(
     if target_user is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
+    deleted_username = target_user.username
     await session.delete(target_user)
     await session.commit()
 
-    audit_log("user_delete", user_id=admin.id, username=admin.username, source_ip=ip, success=True, detail=f"Deleted user {target_user.username}")
+    audit_log("user_delete", user_id=admin.id, username=admin.username, source_ip=ip, success=True, detail=f"Deleted user {deleted_username}")
+    await emit(
+        session, category="user_action", severity="warning",
+        event_type="user_deleted",
+        message=f"User '{deleted_username}' deleted", actor=admin.username,
+    )

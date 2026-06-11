@@ -45,11 +45,19 @@ _SIMBAD_CATEGORY_MAP = SIMBAD_CATEGORY_MAP
 async def search_targets(
     q: str = Query(..., min_length=1),
     limit: int = Query(10, ge=1, le=50),
+    include_unresolved: bool = Query(False),
     session: AsyncSession = Depends(get_session),
     user: User = Depends(get_current_user),
 ):
-    """Search targets by name or alias with fuzzy trigram matching."""
-    return await target_aggregation.search_targets(q, limit, session)
+    """Search targets by name or alias with fuzzy trigram matching.
+
+    With include_unresolved=true, unlinked OBJECT-name groups matching the
+    query are appended as pseudo entries (unresolved=true) so merge flows can
+    offer them as merge sources.
+    """
+    return await target_aggregation.search_targets(
+        q, limit, session, include_unresolved=include_unresolved,
+    )
 
 
 # --- 2. Equipment (SECOND - before path-parameter routes) ---

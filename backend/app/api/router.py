@@ -24,6 +24,7 @@ from .planning import router as planning_router
 from .bootstrap import router as bootstrap_router
 from .preview import router as preview_router
 from .activity import router as activity_router
+from .logs import router as logs_router
 from .integrations import router as integrations_router
 from .wbpp import router as wbpp_router
 from app.database import async_session
@@ -53,6 +54,7 @@ api_router.include_router(planning_router)
 api_router.include_router(bootstrap_router)
 api_router.include_router(preview_router)
 api_router.include_router(activity_router)
+api_router.include_router(logs_router)
 api_router.include_router(integrations_router)
 api_router.include_router(wbpp_router)
 

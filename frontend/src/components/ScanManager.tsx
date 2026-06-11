@@ -178,7 +178,7 @@ const ScanManager: Component = () => {
         {(data) => <CaptureActivity history={data().ingest_history} />}
       </Show>
 
-      <div class="grid grid-cols-1 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] gap-4 items-start">
+      <div class="grid grid-cols-1 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] gap-4 items-stretch">
         {/* Left column: controls */}
         <div class="space-y-4 min-w-0">
           <ScanFiltersOnboarding
@@ -377,9 +377,9 @@ const ScanManager: Component = () => {
           </Show>
         </div>
 
-        {/* Right column: sticky activity feed */}
-        <div class="lg:sticky lg:top-4 lg:self-start min-w-0">
-          <div class="lg:max-h-[calc(100vh-2rem)] lg:overflow-hidden lg:flex lg:flex-col">
+        {/* Right column: activity feed matches left column height */}
+        <div class="relative min-w-0 min-h-[24rem] lg:min-h-0">
+          <div class="lg:absolute lg:inset-0 lg:flex lg:flex-col">
             <ActivityFeed />
           </div>
         </div>

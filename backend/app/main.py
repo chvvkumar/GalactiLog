@@ -33,6 +33,36 @@ async def lifespan(app: FastAPI):
             settings.jwt_secret_file,
         )
 
+    # Install the backend log capture handler (pushes to Redis, drained by Celery)
+    from app.services.log_capture import (
+        RedisLogHandler,
+        CAPTURE_LEVEL_KEY,
+        DEFAULT_LEVEL,
+    )
+    root_logger = logging.getLogger()
+    if not any(isinstance(h, RedisLogHandler) for h in root_logger.handlers):
+        root_logger.addHandler(RedisLogHandler(source="api"))
+    # Lower the app logger so debug/info records reach the handler; the handler's
+    # runtime capture floor decides what is actually recorded. The default root
+    # level (WARNING) would otherwise drop debug/info at the call site, making the
+    # capture-level setting below WARNING ineffective.
+    logging.getLogger("app").setLevel(logging.DEBUG)
+    # Seed the capture-level Redis key from stored settings so the configured
+    # level survives Redis restarts and is visible to the worker/beat handlers
+    # (which only read it from Redis).
+    try:
+        from sqlalchemy import select
+        from app.models.user_settings import UserSettings, SETTINGS_ROW_ID
+        async with async_session() as session:
+            general = await session.scalar(
+                select(UserSettings.general).where(UserSettings.id == SETTINGS_ROW_ID)
+            )
+        level = (general or {}).get("app_log_capture_level", DEFAULT_LEVEL)
+        async with async_redis() as r:
+            await r.set(CAPTURE_LEVEL_KEY, level)
+    except Exception:
+        logger.warning("Failed to seed app_logs capture level from settings", exc_info=True)
+
     # Ensure required PostgreSQL extensions exist (idempotent)
     from sqlalchemy import text
     async with async_session() as session:
@@ -186,6 +216,28 @@ def create_app() -> FastAPI:
             request.method,
             request.url.path,
         )
+        # Emit a curated api_error event on a fresh session so it commits
+        # independently of the request that failed. The full traceback is
+        # captured separately into app_logs by the root-logger handler above.
+        try:
+            from app.services.activity import emit
+            actor = None
+            user = getattr(request.state, "user", None)
+            if user is not None:
+                actor = getattr(user, "username", None)
+            async with async_session() as s:
+                await emit(
+                    s, category="system", severity="error", event_type="api_error",
+                    message=f"{request.method} {request.url.path} failed: {type(exc).__name__}",
+                    details={
+                        "method": request.method,
+                        "path": str(request.url.path),
+                        "exception": str(exc)[:500],
+                    },
+                    actor=actor,
+                )
+        except Exception:
+            logger.warning("Failed to emit api_error activity event", exc_info=True)
         return JSONResponse(
             status_code=500,
             content=ErrorEnvelope(detail="Internal server error").model_dump(),

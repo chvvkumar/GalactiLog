@@ -387,6 +387,8 @@ export interface TargetSearchResultFuzzy {
   aliases: string[];
   match_source: string | null;
   similarity_score: number;
+  unresolved?: boolean;
+  image_count?: number | null;
 }
 
 export interface ObjectTypeCount {
