@@ -41,6 +41,23 @@ class GeneralSettings(BaseModel):
     )
 
 
+class ActivitySettingsResponse(BaseModel):
+    activity_retention_days: int
+    app_log_capture_level: str
+    app_log_retention_days: int
+    app_log_max_rows: int
+
+
+class ActivitySettingsUpdate(BaseModel):
+    # `retention_days` is the legacy key the frontend currently sends for the
+    # activity-event retention; `activity_retention_days` is accepted too.
+    retention_days: int | None = Field(default=None, ge=1, le=3650)
+    activity_retention_days: int | None = Field(default=None, ge=1, le=3650)
+    app_log_capture_level: str | None = Field(default=None, pattern="^(debug|info|warning|error)$")
+    app_log_retention_days: int | None = Field(default=None, ge=1, le=3650)
+    app_log_max_rows: int | None = Field(default=None, ge=1000, le=5000000)
+
+
 class FilterConfig(BaseModel):
     color: str = "#808080"
     aliases: list[str] = Field(default_factory=list)

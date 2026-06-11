@@ -21,7 +21,9 @@ from app.schemas.settings import (
     DisplaySettings, default_display_settings,
     GraphSettings, default_graph_settings,
     ColumnVisibility,
+    ActivitySettingsResponse, ActivitySettingsUpdate,
 )
+from app.services.activity import emit
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 
@@ -236,6 +238,80 @@ async def update_general(
             pass  # Worker may not be available in dev
 
     return _row_to_response(row)
+
+
+def _activity_settings_payload(general: dict) -> dict:
+    """Build the activity-settings response dict from a stored general dict."""
+    return {
+        "activity_retention_days": int(general.get("activity_retention_days", 90)),
+        "app_log_capture_level": general.get("app_log_capture_level", "warning"),
+        "app_log_retention_days": int(general.get("app_log_retention_days", 14)),
+        "app_log_max_rows": int(general.get("app_log_max_rows", 50000)),
+    }
+
+
+@router.get("/activity", response_model=ActivitySettingsResponse)
+async def get_activity_settings(
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    """Return activity-event and application-log retention/capture settings."""
+    row = await _get_or_create_settings(session)
+    return _activity_settings_payload(row.general or {})
+
+
+@router.put("/activity", response_model=ActivitySettingsResponse)
+async def update_activity_settings(
+    payload: ActivitySettingsUpdate,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(require_admin),
+):
+    """Update activity-event and application-log retention/capture settings.
+
+    Accepts the legacy ``retention_days`` key (activity retention) as well as
+    the explicit field names. On a capture-level change the Redis key is updated
+    so log handlers in every process pick it up without a DB read.
+    """
+    row = await _get_or_create_settings(session)
+    old_general = dict(row.general or {})
+
+    changed: dict = {}
+    # Activity retention: accept either key, prefer the explicit one.
+    if payload.activity_retention_days is not None:
+        changed["activity_retention_days"] = payload.activity_retention_days
+    elif payload.retention_days is not None:
+        changed["activity_retention_days"] = payload.retention_days
+    if payload.app_log_capture_level is not None:
+        changed["app_log_capture_level"] = payload.app_log_capture_level
+    if payload.app_log_retention_days is not None:
+        changed["app_log_retention_days"] = payload.app_log_retention_days
+    if payload.app_log_max_rows is not None:
+        changed["app_log_max_rows"] = payload.app_log_max_rows
+
+    row.general = {**old_general, **changed, "_migrated": True}
+    await session.commit()
+    await session.refresh(row)
+
+    # Mirror capture level so log handlers in all processes see it without a DB read.
+    if "app_log_capture_level" in changed:
+        try:
+            from app.services.log_capture import CAPTURE_LEVEL_KEY
+            async with async_redis() as r:
+                await r.set(CAPTURE_LEVEL_KEY, changed["app_log_capture_level"])
+        except Exception:
+            pass
+
+    # Emit a curated event listing the changed keys (no secrets here).
+    changed_keys = [k for k in changed if old_general.get(k) != changed[k]]
+    if changed_keys:
+        await emit(
+            session, category="user_action", severity="info",
+            event_type="settings_changed",
+            message=f"Activity settings updated: {', '.join(changed_keys)}",
+            details={"keys": changed_keys}, actor=user.username,
+        )
+
+    return _activity_settings_payload(row.general)
 
 
 @router.put("/filters", response_model=SettingsResponse)
