@@ -17,6 +17,7 @@ import {
 } from "../../api/client";
 import { useAuth } from "../AuthProvider";
 import { showToast } from "../Toast";
+import HelpPopover from "../HelpPopover";
 
 const LEVELS: AppLogLevel[] = ["debug", "info", "warning", "error", "critical"];
 const CAPTURE_LEVELS: AppLogLevel[] = ["debug", "info", "warning", "error"];
@@ -352,7 +353,15 @@ const ActivityLogTab: Component = () => {
     <div class="space-y-4">
       {/* Settings strip */}
       <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-4 space-y-4">
-        <h3 class="text-theme-text-primary font-medium">Application Log</h3>
+        <div class="flex items-center gap-2">
+          <h3 class="text-theme-text-primary font-medium">Application Log</h3>
+          <HelpPopover title="Application Log">
+            <p>Captures the backend's own log records (from the web, worker, and scheduler processes) into the database so they survive restarts and can be filtered, searched, and downloaded here.</p>
+            <p><strong>Capture level</strong> sets the minimum severity that gets recorded. Leave it at <em>warning</em> for normal use; switch to <em>info</em> or <em>debug</em> to collect detailed logs while troubleshooting, then turn it back down. It takes effect within a few seconds, no restart needed.</p>
+            <p><strong>Activity retention</strong> is how long activity events (scans, merges, enrichment) are kept. <strong>Log retention</strong> and <strong>Log max rows</strong> bound the application log: the nightly pruner deletes records older than the retention or beyond the row cap, whichever comes first.</p>
+            <p><strong>Clear activity log</strong> and <strong>Clear application logs</strong> permanently delete those tables. <strong>Download</strong> exports the currently filtered log view as a plain-text file for sharing in a bug report.</p>
+          </HelpPopover>
+        </div>
 
         <Show when={settingsLoaded()} fallback={
           <p class="text-xs text-theme-text-secondary">Loading...</p>
@@ -521,9 +530,17 @@ const ActivityLogTab: Component = () => {
       <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)]">
         <div class="px-4 py-3 space-y-3 border-b border-theme-border">
           <div class="flex items-center justify-between gap-2">
-            <span class="text-xs text-theme-text-secondary tabular-nums">
-              {total()} {total() === 1 ? "entry" : "entries"}
-            </span>
+            <div class="flex items-center gap-2">
+              <span class="text-xs text-theme-text-secondary tabular-nums">
+                {total()} {total() === 1 ? "entry" : "entries"}
+              </span>
+              <HelpPopover title="Log viewer">
+                <p>Shows recorded log entries, newest first, with a color-coded severity column: debug (gray), info (blue), warning (amber), error and critical (red).</p>
+                <p>The <strong>level pills</strong> filter by minimum severity: pick a level to show it and everything more severe (for example, <em>warning</em> shows warning, error, and critical). The selected level and those above it are highlighted, and the choice persists across reloads.</p>
+                <p>Use the <strong>source</strong> dropdown to limit to the web (api), worker, or scheduler (beat) process, and the <strong>search</strong> box to match message text. Rows with a traceback expand when clicked.</p>
+                <p><strong>Live tail</strong> polls for new entries every few seconds and prepends them. This filters what is displayed, not what is recorded; the capture level above controls recording.</p>
+              </HelpPopover>
+            </div>
             <label class="flex items-center gap-2 text-xs text-theme-text-secondary cursor-pointer select-none">
               <input
                 type="checkbox"
