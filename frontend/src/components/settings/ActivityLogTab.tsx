@@ -85,7 +85,7 @@ const ActivityLogTab: Component = () => {
   const [loadingLogs, setLoadingLogs] = createSignal(false);
   const [loadingMore, setLoadingMore] = createSignal(false);
   const [expanded, setExpanded] = createSignal<Set<number>>(new Set());
-  const [liveTail, setLiveTail] = createSignal(false);
+  const [liveTail, setLiveTail] = createSignal(true);
 
   onMount(async () => {
     try {
