@@ -68,7 +68,7 @@ const MergeFromDetailFlow: Component<MergeFromDetailFlowProps> = (props) => {
     searchTimeout = setTimeout(async () => {
       setSearching(true);
       try {
-        const results = await api.searchTargets(q.trim());
+        const results = await api.searchTargets(q.trim(), true);
         setSearchResults(results.filter((t) => t.id !== props.winnerId));
       } catch {
         setSearchResults([]);
@@ -137,6 +137,11 @@ const MergeFromDetailFlow: Component<MergeFromDetailFlowProps> = (props) => {
                         <Show when={t.object_type}>
                           <span class="text-xs text-theme-text-secondary ml-2">{t.object_type}</span>
                         </Show>
+                        <Show when={t.unresolved}>
+                          <span class="text-xs text-yellow-400 ml-2">
+                            Unresolved{t.image_count != null ? ` · ${t.image_count} ${t.image_count === 1 ? "image" : "images"}` : ""}
+                          </span>
+                        </Show>
                       </button>
                     )}
                   </For>
@@ -161,7 +166,8 @@ const MergeFromDetailFlow: Component<MergeFromDetailFlowProps> = (props) => {
       {(t) => (
         <MergePreviewModal
           winnerId={props.winnerId}
-          loserId={t().id}
+          loserId={t().unresolved ? undefined : t().id}
+          loserName={t().unresolved ? t().primary_name : undefined}
           onClose={props.onClose}
           onMerged={props.onMerged}
         />

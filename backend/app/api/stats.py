@@ -35,7 +35,28 @@ router = APIRouter(prefix="/stats", tags=["stats"])
 _STATS_CACHE_KEY = "galactilog:stats:cache"
 _STATS_CACHE_TTL = 300  # 5 minutes
 
-# --- Storage size cache (expensive to compute, updated in background) ---
+
+def _should_cache_stats() -> bool:
+    """Whether a freshly computed stats response is safe to persist to Redis.
+
+    Guards the cold-start race: the on-disk storage sizes (fits_disk_bytes,
+    thumbnail_bytes, overview.disk_usage_bytes) come from _storage_cache, which
+    starts at 0 and is only filled by the background _refresh_storage_cache().
+    The very first request after startup runs before that du finishes, so its
+    response carries 0 for those sizes. Persisting that would freeze "0 on disk"
+    for the full cache TTL even though du warms the in-memory cache ~1.5s later.
+    _storage_last_update stays at 0 until at least one refresh has completed
+    (it is set on every refresh, including timeout), so a non-zero value means
+    storage has been computed at least once and the response is safe to cache.
+    """
+    return _storage_last_update != 0
+
+# --- Storage size cache (du over the FITS and thumbnails volumes) ---
+# Both the true on-disk FITS size and the thumbnail size are measured by du and
+# cached here. Separately, _compute_fits_bytes sums the catalogued FITS size
+# from the DB (Image.file_size); the two FITS figures are exposed side by side
+# (catalogued vs. true on-disk) since the FITS directory is an NFS share where a
+# recursive stat of ~90k files can be slow and may include uncatalogued files.
 _storage_cache: dict[str, int] = {"fits": 0, "thumbnails": 0}
 _storage_last_update: float = 0
 # No asyncio.Lock here: a module-level Lock binds to the first event loop that
@@ -44,7 +65,26 @@ _storage_last_update: float = 0
 _STORAGE_TTL = 300  # refresh every 5 minutes
 
 
-_DU_TIMEOUT = 12  # seconds; du on a large dataset can be slow but 12s is generous
+_DU_TIMEOUT = 120  # seconds; the local thumbnails volume is fast, but allow a
+# generous bound so a momentarily busy disk degrades to the cached value
+# rather than failing.
+
+
+async def _compute_fits_bytes(session: AsyncSession) -> int:
+    """Total bytes of catalogued FITS files, summed from the DB.
+
+    Replaces a recursive `du` over the FITS directory, which lives on an NFS
+    share where stat-ing ~90k files routinely exceeds any timeout. The DB
+    aggregate is O(rows) and runs in milliseconds.
+
+    This naturally tracks the `include_calibration` setting: when calibration
+    frames are excluded (the default) they are never ingested, so they are not
+    rows here and contribute nothing; when calibration is included, their
+    file_size is summed in. Rows with a NULL file_size (older ingests that
+    predate the column) are ignored by SUM, and COALESCE guards an empty table.
+    """
+    q = select(func.coalesce(func.sum(Image.file_size), 0))
+    return int((await session.execute(q)).scalar_one())
 
 
 def _compute_dir_size(path: str, fallback: int = 0) -> int:
@@ -70,9 +110,9 @@ def _compute_dir_size(path: str, fallback: int = 0) -> int:
 
 
 async def _refresh_storage_cache() -> None:
-    """Refresh storage sizes in a background thread.
+    """Refresh the FITS and thumbnail storage sizes in background threads.
 
-    On timeout or error, the existing cached values are preserved rather than
+    On timeout or error, the existing cached value is preserved rather than
     being overwritten with 0.  Concurrent refreshes within the same TTL window
     are harmless: the TTL guard short-circuits the second call and any races
     produce an idempotent last-write-wins outcome.
@@ -163,9 +203,12 @@ def _extract_site_coords_sync(session) -> SiteCoords | None:
 async def get_stats(session: AsyncSession = Depends(get_session), user: User = Depends(get_current_user)):
     """Return comprehensive database analytics for the admin page.
 
-    Storage sizes are cached and refreshed in the background every 5 minutes.
-    The first request after startup returns 0 for storage while du runs.
-    Stats response is cached in Redis for 5 minutes to avoid repeated full-table scans.
+    Two FITS sizes are reported: the catalogued size summed from the DB
+    (Image.file_size) and the true on-disk size measured by du. Both the FITS
+    and thumbnail du sizes are cached and refreshed in the background every 5
+    minutes, so the first request after startup may report 0 for those until
+    that du completes. Stats response is cached in Redis for 5 minutes to avoid
+    repeated full-table scans.
     """
 
     # Check Redis cache first
@@ -334,6 +377,15 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
             except Exception:
                 return 0
 
+    async def _query_fits_bytes():
+        async with async_session() as s:
+            return await _compute_fits_bytes(s)
+
+    async def _query_all_frames():
+        q = select(func.count(Image.id))
+        async with async_session() as s:
+            return (await s.execute(q)).scalar_one()
+
     async def _query_ingest_history():
         capture_day = Image.session_date.label('capture_day')
         q = select(
@@ -360,6 +412,8 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
         bucket_row,
         db_bytes,
         ingest_rows,
+        fits_bytes,
+        all_frames,
     ) = await asyncio.gather(
         _query_overview(),
         _query_cameras(),
@@ -375,6 +429,8 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
         _query_hfr_buckets(),
         _query_db_size(),
         _query_ingest_history(),
+        _query_fits_bytes(),
+        _query_all_frames(),
     )
 
     # --- Post-processing (sequential, CPU-only) ---
@@ -393,6 +449,7 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
         total_integration_seconds=float(total_seconds),
         target_count=target_count,
         total_frames=total_frames,
+        all_frames=all_frames,
         disk_usage_bytes=_storage_cache["fits"] + _storage_cache["thumbnails"],
         session_count=session_count or 0,
         first_capture_date=first_capture_date.isoformat() if first_capture_date else None,
@@ -572,7 +629,8 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
 
     # Storage
     storage = StorageStats(
-        fits_bytes=_storage_cache["fits"],
+        fits_bytes=fits_bytes,
+        fits_disk_bytes=_storage_cache["fits"],
         thumbnail_bytes=_storage_cache["thumbnails"],
         database_bytes=db_bytes,
     )
@@ -662,12 +720,15 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
         ingest_history=ingest_history,
     )
 
-    # Cache the computed response in Redis
-    try:
-        async with async_redis() as r:
-            await r.setex(_STATS_CACHE_KEY, _STATS_CACHE_TTL, response.model_dump_json())
-    except Exception:
-        logger.debug("Redis cache write failed for stats")
+    # Cache the computed response in Redis, but skip during the cold-start
+    # window when the on-disk storage sizes are still 0 (see _should_cache_stats)
+    # so we don't freeze a "0 on disk" response for the full TTL.
+    if _should_cache_stats():
+        try:
+            async with async_redis() as r:
+                await r.setex(_STATS_CACHE_KEY, _STATS_CACHE_TTL, response.model_dump_json())
+        except Exception:
+            logger.debug("Redis cache write failed for stats")
 
     return response
 

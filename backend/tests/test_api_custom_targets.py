@@ -302,3 +302,66 @@ async def test_orphan_create_integrity_error_maps_to_409(admin_user):
         mock_session.rollback.assert_awaited()
     finally:
         app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_revert_orphan_keeps_empty_user_defined_winner(admin_user):
+    """Reverting an orphan merge must never delete a user-defined winner.
+
+    Regression: reverting a Moon orphan merged into a custom Moon target
+    hard-deleted the custom target because it was left with zero images.
+    """
+    candidate = MagicMock(spec=MergeCandidate)
+    candidate.status = "accepted"
+    candidate.method = "orphan"
+    candidate.source_name = "Moon"
+    candidate.suggested_target_id = uuid.uuid4()
+
+    winner = MagicMock(spec=Target)
+    winner.id = candidate.suggested_target_id
+    winner.user_defined = True
+
+    mock_session = AsyncMock()
+    mock_session.get = AsyncMock(side_effect=[candidate, winner])
+    zero_images = MagicMock()
+    zero_images.scalar_one.return_value = 0
+    mock_session.execute = AsyncMock(return_value=zero_images)
+    _override_session(mock_session)
+    app.dependency_overrides[require_admin] = lambda: admin_user
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            resp = await client.post(f"/api/targets/merge-candidates/{uuid.uuid4()}/revert")
+        assert resp.status_code == 200, resp.text
+        mock_session.delete.assert_not_called()
+        assert candidate.status == "pending"
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_revert_orphan_still_deletes_empty_created_winner(admin_user):
+    """The disposable orphan-created winner (not user-defined) is still removed."""
+    candidate = MagicMock(spec=MergeCandidate)
+    candidate.status = "accepted"
+    candidate.method = "orphan"
+    candidate.source_name = "PGC 99999"
+    candidate.suggested_target_id = uuid.uuid4()
+
+    winner = MagicMock(spec=Target)
+    winner.id = candidate.suggested_target_id
+    winner.user_defined = False
+
+    mock_session = AsyncMock()
+    mock_session.get = AsyncMock(side_effect=[candidate, winner])
+    zero_images = MagicMock()
+    zero_images.scalar_one.return_value = 0
+    mock_session.execute = AsyncMock(return_value=zero_images)
+    _override_session(mock_session)
+    app.dependency_overrides[require_admin] = lambda: admin_user
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            resp = await client.post(f"/api/targets/merge-candidates/{uuid.uuid4()}/revert")
+        assert resp.status_code == 200, resp.text
+        mock_session.delete.assert_called_once_with(winner)
+    finally:
+        app.dependency_overrides.clear()

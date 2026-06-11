@@ -286,12 +286,16 @@ class EquipmentResponse(BaseModel):
 
 
 class TargetSearchResultFuzzy(BaseModel):
-    id: uuid.UUID
+    # Real targets carry their UUID; unresolved OBJECT-name groups (no target
+    # row) carry the "obj:<name>" pseudo id used by the dashboard.
+    id: uuid.UUID | str
     primary_name: str
     object_type: str | None = None
     aliases: list[str] = []
     match_source: str | None = None
     similarity_score: float = 1.0
+    unresolved: bool = False
+    image_count: int | None = None
 
 
 class ObjectTypeCount(BaseModel):

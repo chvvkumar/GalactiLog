@@ -5,6 +5,7 @@ class OverviewStats(BaseModel):
     total_integration_seconds: float
     target_count: int
     total_frames: int
+    all_frames: int
     disk_usage_bytes: int
     session_count: int
     first_capture_date: str | None
@@ -57,6 +58,7 @@ class DataQualityStats(BaseModel):
 
 class StorageStats(BaseModel):
     fits_bytes: int
+    fits_disk_bytes: int
     thumbnail_bytes: int
     database_bytes: int
 

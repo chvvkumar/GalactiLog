@@ -66,6 +66,34 @@ export interface RestoreResponse {
   error: string | null;
 }
 
+export type AppLogLevel = "debug" | "info" | "warning" | "error" | "critical";
+export type AppLogSource = "api" | "worker" | "beat";
+
+export interface AppLogItem {
+  id: number;
+  timestamp: string;
+  level: AppLogLevel;
+  source: AppLogSource;
+  logger: string;
+  message: string;
+  traceback: string | null;
+}
+
+export interface AppLogPageResponse {
+  items: AppLogItem[];
+  next_cursor: string | null;
+  total: number;
+}
+
+export interface LogQueryParams {
+  level?: AppLogLevel | AppLogLevel[];
+  source?: AppLogSource | AppLogSource[];
+  q?: string;
+  since?: string;
+  limit?: number;
+  cursor?: string;
+}
+
 export class ApiError extends Error {
   constructor(public status: number, message: string) {
     super(message);
@@ -276,8 +304,10 @@ export const api = {
   getFitsKeys: () =>
     fetchJson<string[]>("/targets/fits-keys"),
 
-  searchTargets: (query: string) =>
-    fetchJson<TargetSearchResultFuzzy[]>(`/targets/search?q=${encodeURIComponent(query)}`),
+  searchTargets: (query: string, includeUnresolved = false) =>
+    fetchJson<TargetSearchResultFuzzy[]>(
+      `/targets/search?q=${encodeURIComponent(query)}${includeUnresolved ? "&include_unresolved=true" : ""}`,
+    ),
 
   getStats: () =>
     fetchJson<StatsResponse>("/stats"),
@@ -342,11 +372,70 @@ export const api = {
   clearActivityLog: () =>
     fetchJson<{ status: string }>("/activity", { method: "DELETE" }),
 
-  getActivitySettings: () =>
-    fetchJson<{ activity_retention_days: number }>("/settings/activity"),
+  fetchLogs: (params: LogQueryParams = {}) => {
+    const qs = new URLSearchParams();
+    const levels = Array.isArray(params.level)
+      ? params.level
+      : params.level
+      ? [params.level]
+      : [];
+    levels.forEach((l) => qs.append("level", l));
+    const sources = Array.isArray(params.source)
+      ? params.source
+      : params.source
+      ? [params.source]
+      : [];
+    sources.forEach((s) => qs.append("source", s));
+    if (params.q) qs.set("q", params.q);
+    if (params.since) qs.set("since", params.since);
+    if (params.limit !== undefined) qs.set("limit", String(params.limit));
+    if (params.cursor) qs.set("cursor", params.cursor);
+    const q = qs.toString();
+    return fetchJson<AppLogPageResponse>(`/logs${q ? `?${q}` : ""}`);
+  },
 
-  setActivitySettings: (body: { retention_days: number }) =>
-    fetchJson<{ activity_retention_days: number }>("/settings/activity", {
+  clearLogs: () =>
+    fetchJson<{ status: string }>("/logs", { method: "DELETE" }),
+
+  logsDownloadUrl: (params: LogQueryParams = {}) => {
+    const qs = new URLSearchParams();
+    const levels = Array.isArray(params.level)
+      ? params.level
+      : params.level
+      ? [params.level]
+      : [];
+    levels.forEach((l) => qs.append("level", l));
+    const sources = Array.isArray(params.source)
+      ? params.source
+      : params.source
+      ? [params.source]
+      : [];
+    sources.forEach((s) => qs.append("source", s));
+    if (params.q) qs.set("q", params.q);
+    const q = qs.toString();
+    return `${API_BASE}/logs/download${q ? `?${q}` : ""}`;
+  },
+
+  getActivitySettings: () =>
+    fetchJson<{
+      activity_retention_days: number;
+      app_log_capture_level: AppLogLevel;
+      app_log_retention_days: number;
+      app_log_max_rows: number;
+    }>("/settings/activity"),
+
+  setActivitySettings: (body: {
+    retention_days?: number;
+    app_log_capture_level?: AppLogLevel;
+    app_log_retention_days?: number;
+    app_log_max_rows?: number;
+  }) =>
+    fetchJson<{
+      activity_retention_days: number;
+      app_log_capture_level: AppLogLevel;
+      app_log_retention_days: number;
+      app_log_max_rows: number;
+    }>("/settings/activity", {
       method: "PUT",
       body: JSON.stringify(body),
     }),

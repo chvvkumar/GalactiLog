@@ -567,7 +567,10 @@ async def revert_merge_candidate(
         remaining = await session.execute(
             select(func.count(Image.id)).where(Image.resolved_target_id == winner.id)
         )
-        if remaining.scalar_one() == 0:
+        # An empty winner is deleted only when it is a disposable creation from
+        # the orphan flow. A user-defined target the orphan was merged INTO must
+        # survive the revert even with zero images left.
+        if remaining.scalar_one() == 0 and not winner.user_defined:
             await session.delete(winner)
         candidate.suggested_target_id = None
         candidate.status = "pending"
