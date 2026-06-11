@@ -75,14 +75,21 @@ const levelActiveClass = (level: AppLogLevel): string => {
 const LevelPill: Component<{
   level: AppLogLevel;
   active: boolean;
+  disabled?: boolean;
+  title?: string;
   onClick: () => void;
 }> = (props) => (
   <button
+    type="button"
     onClick={props.onClick}
+    disabled={props.disabled}
+    title={props.title}
     class={`px-2 py-0.5 text-xs rounded-full border transition-colors ${
-      props.active
-        ? levelActiveClass(props.level)
-        : `border-theme-border opacity-60 hover:opacity-100 ${levelTextClass(props.level)}`
+      props.disabled
+        ? "border-theme-border text-theme-text-tertiary opacity-40 cursor-not-allowed"
+        : props.active
+          ? levelActiveClass(props.level)
+          : `border-theme-border opacity-60 hover:opacity-100 ${levelTextClass(props.level)}`
     }`}
   >
     {props.level}
@@ -167,11 +174,18 @@ const ActivityLogTab: Component = () => {
     onCleanup(() => clearTimeout(handle));
   });
 
+  // The capture level bounds what is recorded; the view filter can only narrow to
+  // that level or above, since nothing below it exists. Effective minimum is the
+  // higher of the view filter and the capture level.
+  const captureOrder = () => LEVEL_ORDER[captureLevel()];
+  const effectiveMinOrder = () =>
+    Math.max(LEVEL_ORDER[minLevel()], captureOrder());
+
   const buildParams = (extra: Partial<LogQueryParams> = {}): LogQueryParams => {
     const p: LogQueryParams = { limit: 50, ...extra };
     // Minimum-severity filter: include the selected level and everything above
     // it. Omit the param entirely when showing everything (debug and above).
-    const threshold = LEVEL_ORDER[minLevel()];
+    const threshold = effectiveMinOrder();
     const included = LEVELS.filter((l) => LEVEL_ORDER[l] >= threshold);
     if (included.length < LEVELS.length) p.level = included;
     if (source() !== "all") p.source = source() as AppLogSource;
@@ -216,9 +230,11 @@ const ActivityLogTab: Component = () => {
     }
   };
 
-  // Reload when filters change
+  // Reload when filters change. captureLevel() participates because it raises the
+  // effective minimum severity and changes which levels exist.
   createEffect(() => {
     minLevel();
+    captureLevel();
     source();
     search();
     loadInitial();
@@ -553,15 +569,24 @@ const ActivityLogTab: Component = () => {
           </div>
 
           <div class="flex flex-wrap items-center gap-3">
-            <div class="flex flex-wrap gap-1" title="Show this level and above">
+            <div class="flex flex-wrap gap-1">
               <For each={LEVELS}>
-                {(lvl) => (
-                  <LevelPill
-                    level={lvl}
-                    active={LEVEL_ORDER[lvl] >= LEVEL_ORDER[minLevel()]}
-                    onClick={() => setMinLevel(lvl)}
-                  />
-                )}
+                {(lvl) => {
+                  const isDisabled = () => LEVEL_ORDER[lvl] < captureOrder();
+                  return (
+                    <LevelPill
+                      level={lvl}
+                      active={LEVEL_ORDER[lvl] >= effectiveMinOrder()}
+                      disabled={isDisabled()}
+                      title={
+                        isDisabled()
+                          ? `No ${lvl} logs are recorded while the Capture level is "${captureLevel()}". Lower the Capture level (top of this card) to record and view ${lvl} entries.`
+                          : "Filter: show this level and above"
+                      }
+                      onClick={() => setMinLevel(lvl)}
+                    />
+                  );
+                }}
               </For>
             </div>
 
