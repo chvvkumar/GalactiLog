@@ -34,10 +34,34 @@ async def lifespan(app: FastAPI):
         )
 
     # Install the backend log capture handler (pushes to Redis, drained by Celery)
-    from app.services.log_capture import RedisLogHandler
+    from app.services.log_capture import (
+        RedisLogHandler,
+        CAPTURE_LEVEL_KEY,
+        DEFAULT_LEVEL,
+    )
     root_logger = logging.getLogger()
     if not any(isinstance(h, RedisLogHandler) for h in root_logger.handlers):
         root_logger.addHandler(RedisLogHandler(source="api"))
+    # Lower the app logger so debug/info records reach the handler; the handler's
+    # runtime capture floor decides what is actually recorded. The default root
+    # level (WARNING) would otherwise drop debug/info at the call site, making the
+    # capture-level setting below WARNING ineffective.
+    logging.getLogger("app").setLevel(logging.DEBUG)
+    # Seed the capture-level Redis key from stored settings so the configured
+    # level survives Redis restarts and is visible to the worker/beat handlers
+    # (which only read it from Redis).
+    try:
+        from sqlalchemy import select
+        from app.models.user_settings import UserSettings, SETTINGS_ROW_ID
+        async with async_session() as session:
+            general = await session.scalar(
+                select(UserSettings.general).where(UserSettings.id == SETTINGS_ROW_ID)
+            )
+        level = (general or {}).get("app_log_capture_level", DEFAULT_LEVEL)
+        async with async_redis() as r:
+            await r.set(CAPTURE_LEVEL_KEY, level)
+    except Exception:
+        logger.warning("Failed to seed app_logs capture level from settings", exc_info=True)
 
     # Ensure required PostgreSQL extensions exist (idempotent)
     from sqlalchemy import text

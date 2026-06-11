@@ -52,8 +52,15 @@ _FORMATTER = logging.Formatter()
 
 # Always excluded (noisy / recursion risk)
 _ALWAYS_EXCLUDE = {"uvicorn.access", __name__}
-# Excluded unless WARNING+
-_NOISY_PREFIXES = ("sqlalchemy.engine", "asyncio", "aiormq", "urllib3", "celery.utils")
+# Excluded unless WARNING+. Includes Celery's per-tick operational loggers
+# (beat scheduler, task trace, worker lifecycle): at an info/debug capture floor
+# the every-5s drain task would otherwise flood the log with "sending due task"
+# and "task succeeded" noise. WARNING+ from these (e.g. a task-failure traceback
+# from celery.app.trace) is still captured.
+_NOISY_PREFIXES = (
+    "sqlalchemy.engine", "asyncio", "aiormq", "urllib3",
+    "celery.utils", "celery.beat", "celery.app.trace", "celery.worker",
+)
 
 
 class RedisLogHandler(logging.Handler):

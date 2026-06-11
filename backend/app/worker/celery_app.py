@@ -47,6 +47,14 @@ celery_app.conf.update(
 
 celery_app.autodiscover_tasks(["app.worker"])
 
+# autodiscover_tasks only imports each package's `tasks` module. Tasks defined in
+# sibling modules are only registered when those modules are imported, so import
+# them explicitly here -- otherwise beat dispatches them by name and the worker
+# rejects them as "unregistered task". celery_app is already bound above, so these
+# imports do not create a circular-import problem.
+from app.worker import prune_activity as _prune_activity  # noqa: E402,F401
+from app.worker import drain_logs as _drain_logs  # noqa: E402,F401
+
 from app.metrics import register_celery_signals
 register_celery_signals()
 
@@ -63,6 +71,12 @@ def _install_log_handler(source: str):
     root = logging.getLogger()
     if not any(isinstance(h, RedisLogHandler) for h in root.handlers):
         root.addHandler(RedisLogHandler(source=source))
+    # Lower the app logger so debug/info records reach the handler; the handler's
+    # runtime capture floor decides what is actually recorded. Without this, the
+    # default root level (WARNING) drops debug/info at the call site and the
+    # capture-level setting below WARNING would have no effect. Library loggers
+    # stay at root level, keeping their debug noise out.
+    logging.getLogger("app").setLevel(logging.DEBUG)
 
 
 @worker_process_init.connect
