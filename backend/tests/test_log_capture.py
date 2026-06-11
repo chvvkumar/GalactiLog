@@ -95,3 +95,39 @@ def test_handler_never_raises():
 
 def test_level_order_constant():
     assert LEVEL_ORDER["debug"] < LEVEL_ORDER["warning"] < LEVEL_ORDER["error"]
+
+
+def test_handler_self_heals_after_failure():
+    # First client raises on lpush; the handler should reset and rebuild on the
+    # next emit, succeeding with a healthy client.
+    healthy = FakeRedis()
+    healthy.kv["app_logs:capture_level"] = "warning"
+
+    class Flaky:
+        def get(self, key):
+            return "warning"
+
+        def lpush(self, *a):
+            raise RuntimeError("redis down")
+
+        def ltrim(self, *a):
+            pass
+
+    clients = [Flaky(), healthy]
+
+    def factory():
+        return clients.pop(0)
+
+    h = RedisLogHandler(source="api", redis_factory=factory)
+    h.emit(make_record(level=logging.WARNING, msg="first"))  # fails, resets client
+    assert h._redis is None
+    h.emit(make_record(level=logging.WARNING, msg="second"))  # rebuilds -> healthy
+    assert len(healthy.lists["app_logs:buffer"]) == 1
+
+
+def test_default_factory_uses_short_socket_timeouts():
+    from app.services.log_capture import _default_redis_factory, _REDIS_SOCKET_TIMEOUT
+    client = _default_redis_factory()
+    kwargs = client.connection_pool.connection_kwargs
+    assert kwargs.get("socket_connect_timeout") == _REDIS_SOCKET_TIMEOUT
+    assert kwargs.get("socket_timeout") == _REDIS_SOCKET_TIMEOUT
