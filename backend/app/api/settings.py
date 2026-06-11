@@ -217,13 +217,24 @@ async def update_general(
     """Update general settings and return the full settings object."""
     row = await _get_or_create_settings(session)
     old_general = row.general or {}
+    new_values = payload.model_dump()
     row.general = {
         **old_general,
-        **payload.model_dump(),
+        **new_values,
         "_migrated": True,
     }
     await session.commit()
     await session.refresh(row)
+
+    # Emit a curated event listing which keys changed (no secrets in GeneralSettings).
+    changed_keys = [k for k, v in new_values.items() if old_general.get(k) != v]
+    if changed_keys:
+        await emit(
+            session, category="user_action", severity="info",
+            event_type="settings_changed",
+            message=f"Settings updated: {', '.join(changed_keys)}",
+            details={"keys": changed_keys}, actor=user.username,
+        )
 
     # Trigger session_date recompute if imaging night setting changed
     old_night = old_general.get("use_imaging_night", False)
