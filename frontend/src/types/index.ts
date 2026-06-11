@@ -537,6 +537,7 @@ export interface OverviewStats {
   total_integration_seconds: number;
   target_count: number;
   total_frames: number;
+  all_frames: number;
   disk_usage_bytes: number;
   session_count: number;
   first_capture_date: string | null;
@@ -565,6 +566,7 @@ export interface StatsResponse {
   };
   storage: {
     fits_bytes: number;
+    fits_disk_bytes: number;
     thumbnail_bytes: number;
     database_bytes: number;
   };

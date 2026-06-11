@@ -47,7 +47,7 @@ const StatisticsPage: Component = () => {
                   </p>
                 </HelpPopover>
               </div>
-              <StatsOverview overview={data().overview} />
+              <StatsOverview overview={data().overview} storage={data().storage} />
             </section>
 
             <section class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
