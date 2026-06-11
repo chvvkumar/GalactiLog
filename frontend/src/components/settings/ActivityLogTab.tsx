@@ -118,6 +118,9 @@ const ActivityLogTab: Component = () => {
     return p;
   };
 
+  // Reactive so the href tracks the current level/source/search filters
+  const downloadUrl = () => api.logsDownloadUrl(buildParams());
+
   const loadInitial = async () => {
     setLoadingLogs(true);
     try {
@@ -143,6 +146,7 @@ const ActivityLogTab: Component = () => {
       batch(() => {
         setLogs((prev) => [...prev, ...res.items]);
         setNextCursor(res.next_cursor);
+        setTotal(res.total);
       });
     } catch {
       /* ignore */
@@ -185,10 +189,13 @@ const ActivityLogTab: Component = () => {
           /* ignore */
         }
       }, 5000);
+      onCleanup(() => {
+        if (timer) {
+          clearInterval(timer);
+          timer = undefined;
+        }
+      });
     }
-  });
-  onCleanup(() => {
-    if (timer) clearInterval(timer);
   });
 
   const toggleLevel = (level: AppLogLevel) => {
@@ -438,7 +445,7 @@ const ActivityLogTab: Component = () => {
                 </Show>
 
                 <a
-                  href={api.logsDownloadUrl(buildParams())}
+                  href={downloadUrl()}
                   class="px-3 py-1.5 border border-theme-border-em text-theme-text-secondary rounded text-sm hover:text-theme-text-primary hover:border-theme-accent transition-colors"
                 >
                   Download
