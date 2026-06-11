@@ -15,6 +15,7 @@ from app.models.app_log import AppLog
 from app.models.user import User
 from app.schemas.app_log import AppLogItem, PaginatedAppLogResponse
 from app.schemas.common import StatusResponse
+from app.services.activity import emit
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/logs", tags=["logs"])
@@ -123,4 +124,11 @@ async def clear_logs(
 ):
     await session.execute(delete(AppLog))
     await session.commit()
+    # Audit trail: record who cleared the application logs.
+    await emit(
+        session, category="system", severity="warning",
+        event_type="app_logs_cleared",
+        message="Application logs cleared",
+        actor=user.username,
+    )
     return {"status": "cleared"}
