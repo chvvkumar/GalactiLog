@@ -22,8 +22,48 @@ const LEVELS: AppLogLevel[] = ["debug", "info", "warning", "error", "critical"];
 const CAPTURE_LEVELS: AppLogLevel[] = ["debug", "info", "warning", "error"];
 const SOURCES: ("all" | AppLogSource)[] = ["all", "api", "worker", "beat"];
 
-const FilterPill: Component<{
-  label: string;
+// Severity ranking, low to high. Drives the minimum-severity view filter.
+const LEVEL_ORDER: Record<AppLogLevel, number> = {
+  debug: 10,
+  info: 20,
+  warning: 30,
+  error: 40,
+  critical: 50,
+};
+
+// localStorage keys so the view filter persists across reloads.
+const LS_MIN_LEVEL = "galactilog.applog.minLevel";
+const LS_SOURCE = "galactilog.applog.source";
+
+// Severity text color, shared by the level column and the level selector so the
+// two stay consistent.
+const levelTextClass = (level: AppLogLevel): string => {
+  switch (level) {
+    case "error":
+    case "critical":
+      return "text-theme-error";
+    case "warning":
+      return "text-theme-warning";
+    default:
+      return "text-theme-text-secondary";
+  }
+};
+
+// Filled style for an active (included) level pill, tinted by severity.
+const levelActiveClass = (level: AppLogLevel): string => {
+  switch (level) {
+    case "error":
+    case "critical":
+      return "bg-theme-error/20 border-theme-error/50 text-theme-error";
+    case "warning":
+      return "bg-theme-warning/20 border-theme-warning/50 text-theme-warning";
+    default:
+      return "bg-theme-text-primary/10 border-theme-border-em text-theme-text-primary";
+  }
+};
+
+const LevelPill: Component<{
+  level: AppLogLevel;
   active: boolean;
   onClick: () => void;
 }> = (props) => (
@@ -31,30 +71,19 @@ const FilterPill: Component<{
     onClick={props.onClick}
     class={`px-2 py-0.5 text-xs rounded-full border transition-colors ${
       props.active
-        ? "bg-[var(--color-accent)]/20 text-[var(--color-accent)] border-[var(--color-accent)]/40"
-        : "border-theme-border text-theme-text-secondary hover:text-theme-text-primary hover:border-theme-border-em"
+        ? levelActiveClass(props.level)
+        : `border-theme-border opacity-60 hover:opacity-100 ${levelTextClass(props.level)}`
     }`}
   >
-    {props.label}
+    {props.level}
   </button>
 );
 
-const LevelBadge: Component<{ level: AppLogLevel }> = (props) => {
-  const cls = () => {
-    switch (props.level) {
-      case "error":
-      case "critical":
-        return "text-theme-error";
-      case "warning":
-        return "text-theme-warning";
-      default:
-        return "text-theme-text-secondary";
-    }
-  };
-  return (
-    <span class={`flex-shrink-0 w-[4rem] uppercase ${cls()}`}>{props.level}</span>
-  );
-};
+const LevelBadge: Component<{ level: AppLogLevel }> = (props) => (
+  <span class={`flex-shrink-0 w-[4rem] uppercase ${levelTextClass(props.level)}`}>
+    {props.level}
+  </span>
+);
 
 const ActivityLogTab: Component = () => {
   const { isAdmin } = useAuth();
@@ -74,9 +103,27 @@ const ActivityLogTab: Component = () => {
   const [clearingLogs, setClearingLogs] = createSignal(false);
   const [showClearLogsConfirm, setShowClearLogsConfirm] = createSignal(false);
 
-  // Log viewer state
-  const [levels, setLevels] = createSignal<AppLogLevel[]>([]);
-  const [source, setSource] = createSignal<"all" | AppLogSource>("all");
+  // Log viewer state. Minimum-severity threshold + source persist across reload.
+  const [minLevel, setMinLevel] = createSignal<AppLogLevel>(
+    (() => {
+      try {
+        const v = localStorage.getItem(LS_MIN_LEVEL);
+        return v && v in LEVEL_ORDER ? (v as AppLogLevel) : "debug";
+      } catch {
+        return "debug";
+      }
+    })(),
+  );
+  const [source, setSource] = createSignal<"all" | AppLogSource>(
+    (() => {
+      try {
+        const v = localStorage.getItem(LS_SOURCE);
+        return v === "api" || v === "worker" || v === "beat" ? v : "all";
+      } catch {
+        return "all";
+      }
+    })(),
+  );
   const [searchInput, setSearchInput] = createSignal("");
   const [search, setSearch] = createSignal("");
   const [logs, setLogs] = createSignal<AppLogItem[]>([]);
@@ -112,7 +159,11 @@ const ActivityLogTab: Component = () => {
 
   const buildParams = (extra: Partial<LogQueryParams> = {}): LogQueryParams => {
     const p: LogQueryParams = { limit: 50, ...extra };
-    if (levels().length) p.level = levels();
+    // Minimum-severity filter: include the selected level and everything above
+    // it. Omit the param entirely when showing everything (debug and above).
+    const threshold = LEVEL_ORDER[minLevel()];
+    const included = LEVELS.filter((l) => LEVEL_ORDER[l] >= threshold);
+    if (included.length < LEVELS.length) p.level = included;
     if (source() !== "all") p.source = source() as AppLogSource;
     if (search().trim()) p.q = search().trim();
     return p;
@@ -157,10 +208,20 @@ const ActivityLogTab: Component = () => {
 
   // Reload when filters change
   createEffect(() => {
-    levels();
+    minLevel();
     source();
     search();
     loadInitial();
+  });
+
+  // Persist the view filter so it survives a page reload.
+  createEffect(() => {
+    try {
+      localStorage.setItem(LS_MIN_LEVEL, minLevel());
+      localStorage.setItem(LS_SOURCE, source());
+    } catch {
+      /* ignore */
+    }
   });
 
   // Live tail: poll for rows newer than the newest loaded
@@ -182,7 +243,9 @@ const ActivityLogTab: Component = () => {
           if (res.items.length) {
             batch(() => {
               setLogs((prev) => [...res.items, ...prev]);
-              setTotal(res.total);
+              // res.total here is filtered by `since` (only the new rows), so
+              // add them to the running total instead of overwriting it.
+              setTotal((t) => t + res.items.length);
             });
           }
         } catch {
@@ -197,14 +260,6 @@ const ActivityLogTab: Component = () => {
       });
     }
   });
-
-  const toggleLevel = (level: AppLogLevel) => {
-    setLevels((prev) =>
-      prev.includes(level)
-        ? prev.filter((l) => l !== level)
-        : [...prev, level],
-    );
-  };
 
   const toggleExpanded = (id: number) => {
     setExpanded((prev) => {
@@ -475,13 +530,13 @@ const ActivityLogTab: Component = () => {
           </div>
 
           <div class="flex flex-wrap items-center gap-3">
-            <div class="flex flex-wrap gap-1">
+            <div class="flex flex-wrap gap-1" title="Show this level and above">
               <For each={LEVELS}>
                 {(lvl) => (
-                  <FilterPill
-                    label={lvl}
-                    active={levels().includes(lvl)}
-                    onClick={() => toggleLevel(lvl)}
+                  <LevelPill
+                    level={lvl}
+                    active={LEVEL_ORDER[lvl] >= LEVEL_ORDER[minLevel()]}
+                    onClick={() => setMinLevel(lvl)}
                   />
                 )}
               </For>
