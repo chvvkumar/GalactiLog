@@ -80,18 +80,30 @@ def _beat_log_handler(**_kwargs):
 # ---------------------------------------------------------------------------
 from celery.signals import task_failure, task_retry
 
+# Lazily-built module-level sync engine, reused across task-failure/retry signals
+# (mirrors drain_logs.py / prune_activity.py) to avoid per-call FD churn during a
+# task-failure storm.
+_task_event_engine = None
+
+
+def _get_task_event_engine():
+    global _task_event_engine
+    if _task_event_engine is None:
+        from sqlalchemy import create_engine
+        from app.config import settings
+        url = settings.database_url.replace("+asyncpg", "+psycopg2")
+        _task_event_engine = create_engine(url, pool_pre_ping=True, pool_size=1, max_overflow=1, pool_recycle=1800)
+    return _task_event_engine
+
 
 def _emit_task_event(event_type, severity, task_name, task_id, exc):
-    from sqlalchemy import create_engine
     from sqlalchemy.orm import Session
-    from app.config import settings, get_sync_redis
+    from app.config import get_sync_redis
     from app.services.activity import emit_sync
-    url = settings.database_url.replace("+asyncpg", "+psycopg2")
-    engine = create_engine(url, pool_pre_ping=True, pool_size=1, max_overflow=1)
     redis = get_sync_redis()
     verb = "failed" if event_type == "task_failure" else "retrying"
     try:
-        with Session(engine) as s:
+        with Session(_get_task_event_engine()) as s:
             emit_sync(
                 s, redis=redis, category="system", severity=severity,
                 event_type=event_type,
@@ -106,7 +118,6 @@ def _emit_task_event(event_type, severity, task_name, task_id, exc):
             redis.close()
         except Exception:
             pass
-        engine.dispose()
 
 
 @task_failure.connect

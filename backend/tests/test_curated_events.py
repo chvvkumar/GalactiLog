@@ -112,9 +112,10 @@ def test_emit_task_event_writes_event(monkeypatch):
     fake_engine = MagicMock()
     monkeypatch.setattr("app.services.activity.emit_sync", fake_emit_sync)
     monkeypatch.setattr("sqlalchemy.create_engine", lambda *a, **kw: fake_engine)
-    monkeypatch.setattr(cmod, "get_sync_redis", lambda: MagicMock(), raising=False)
     # get_sync_redis is imported lazily inside the function from app.config
     monkeypatch.setattr("app.config.get_sync_redis", lambda: MagicMock())
+    # Reset the lazily-built module-level engine so the patched create_engine runs.
+    monkeypatch.setattr(cmod, "_task_event_engine", None, raising=False)
 
     cmod._emit_task_event("task_failure", "error", "app.worker.tasks.ingest_file", "abc123", ValueError("boom"))
 
@@ -137,6 +138,7 @@ def test_emit_task_event_retry(monkeypatch):
     monkeypatch.setattr("app.services.activity.emit_sync", fake_emit_sync)
     monkeypatch.setattr("sqlalchemy.create_engine", lambda *a, **kw: MagicMock())
     monkeypatch.setattr("app.config.get_sync_redis", lambda: MagicMock())
+    monkeypatch.setattr(cmod, "_task_event_engine", None, raising=False)
 
     cmod._emit_task_event("task_retry", "warning", "app.worker.tasks.x", "id1", Exception("retry"))
 
