@@ -73,3 +73,50 @@ def _worker_log_handler(**_kwargs):
 @beat_init.connect
 def _beat_log_handler(**_kwargs):
     _install_log_handler("beat")
+
+
+# ---------------------------------------------------------------------------
+# Curated activity events for Celery task failures and retries.
+# ---------------------------------------------------------------------------
+from celery.signals import task_failure, task_retry
+
+
+def _emit_task_event(event_type, severity, task_name, task_id, exc):
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session
+    from app.config import settings, get_sync_redis
+    from app.services.activity import emit_sync
+    url = settings.database_url.replace("+asyncpg", "+psycopg2")
+    engine = create_engine(url, pool_pre_ping=True, pool_size=1, max_overflow=1)
+    redis = get_sync_redis()
+    verb = "failed" if event_type == "task_failure" else "retrying"
+    try:
+        with Session(engine) as s:
+            emit_sync(
+                s, redis=redis, category="system", severity=severity,
+                event_type=event_type,
+                message=f"Task {task_name} {verb}: {type(exc).__name__}",
+                details={"task": task_name, "task_id": str(task_id), "error": str(exc)[:500]},
+                actor="system",
+            )
+    except Exception:
+        pass
+    finally:
+        try:
+            redis.close()
+        except Exception:
+            pass
+        engine.dispose()
+
+
+@task_failure.connect
+def _on_task_failure(sender=None, task_id=None, exception=None, **_):
+    name = getattr(sender, "name", "unknown")
+    _emit_task_event("task_failure", "error", name, task_id, exception or Exception("unknown"))
+
+
+@task_retry.connect
+def _on_task_retry(sender=None, request=None, reason=None, **_):
+    name = getattr(sender, "name", "unknown")
+    tid = getattr(request, "id", None)
+    _emit_task_event("task_retry", "warning", name, tid, reason or Exception("retry"))
