@@ -38,6 +38,10 @@ celery_app.conf.update(
             "task": "app.worker.prune_activity.prune_activity_events",
             "schedule": crontab(hour=3, minute=0),
         },
+        "drain-app-logs": {
+            "task": "app.worker.drain_logs.drain_app_logs",
+            "schedule": 5.0,
+        },
     },
 )
 
