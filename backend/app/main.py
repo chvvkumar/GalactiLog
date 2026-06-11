@@ -33,6 +33,12 @@ async def lifespan(app: FastAPI):
             settings.jwt_secret_file,
         )
 
+    # Install the backend log capture handler (pushes to Redis, drained by Celery)
+    from app.services.log_capture import RedisLogHandler
+    root_logger = logging.getLogger()
+    if not any(isinstance(h, RedisLogHandler) for h in root_logger.handlers):
+        root_logger.addHandler(RedisLogHandler(source="api"))
+
     # Ensure required PostgreSQL extensions exist (idempotent)
     from sqlalchemy import text
     async with async_session() as session:

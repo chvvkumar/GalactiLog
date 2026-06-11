@@ -45,3 +45,27 @@ celery_app.autodiscover_tasks(["app.worker"])
 
 from app.metrics import register_celery_signals
 register_celery_signals()
+
+
+# ---------------------------------------------------------------------------
+# Backend log capture: install RedisLogHandler in worker and beat processes.
+# ---------------------------------------------------------------------------
+from celery.signals import worker_process_init, beat_init
+
+
+def _install_log_handler(source: str):
+    import logging
+    from app.services.log_capture import RedisLogHandler
+    root = logging.getLogger()
+    if not any(isinstance(h, RedisLogHandler) for h in root.handlers):
+        root.addHandler(RedisLogHandler(source=source))
+
+
+@worker_process_init.connect
+def _worker_log_handler(**_kwargs):
+    _install_log_handler("worker")
+
+
+@beat_init.connect
+def _beat_log_handler(**_kwargs):
+    _install_log_handler("beat")
