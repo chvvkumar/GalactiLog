@@ -57,6 +57,34 @@ def test_handler_drops_below_floor():
     assert "app_logs:buffer" not in fake.lists
 
 
+def test_handler_drops_drain_task_noise_below_warning():
+    fake = FakeRedis()
+    fake.kv["app_logs:capture_level"] = "debug"
+    h = RedisLogHandler(source="beat", redis_factory=lambda: fake)
+    # Beat scheduler / task-trace lines for the every-5s drain task are noise.
+    h.emit(make_record(
+        name="celery.beat", level=logging.INFO,
+        msg="Scheduler: Sending due task drain-app-logs (app.worker.drain_logs.drain_app_logs)",
+    ))
+    h.emit(make_record(
+        name="celery.app.trace", level=logging.INFO,
+        msg="Task app.worker.drain_logs.drain_app_logs[abc] succeeded in 0.004s",
+    ))
+    assert "app_logs:buffer" not in fake.lists
+
+
+def test_handler_keeps_other_celery_task_logs_at_debug():
+    fake = FakeRedis()
+    fake.kv["app_logs:capture_level"] = "debug"
+    h = RedisLogHandler(source="worker", redis_factory=lambda: fake)
+    # Real task activity (scans etc.) must still be captured at info/debug.
+    h.emit(make_record(
+        name="celery.app.trace", level=logging.INFO,
+        msg="Task app.worker.tasks.run_scan[xyz] succeeded in 8.7s",
+    ))
+    assert len(fake.lists["app_logs:buffer"]) == 1
+
+
 def test_handler_excludes_uvicorn_access():
     fake = FakeRedis()
     fake.kv["app_logs:capture_level"] = "debug"

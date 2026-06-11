@@ -52,15 +52,14 @@ _FORMATTER = logging.Formatter()
 
 # Always excluded (noisy / recursion risk)
 _ALWAYS_EXCLUDE = {"uvicorn.access", __name__}
-# Excluded unless WARNING+. Includes Celery's per-tick operational loggers
-# (beat scheduler, task trace, worker lifecycle): at an info/debug capture floor
-# the every-5s drain task would otherwise flood the log with "sending due task"
-# and "task succeeded" noise. WARNING+ from these (e.g. a task-failure traceback
-# from celery.app.trace) is still captured.
-_NOISY_PREFIXES = (
-    "sqlalchemy.engine", "asyncio", "aiormq", "urllib3",
-    "celery.utils", "celery.beat", "celery.app.trace", "celery.worker",
-)
+# Excluded unless WARNING+.
+_NOISY_PREFIXES = ("sqlalchemy.engine", "asyncio", "aiormq", "urllib3", "celery.utils")
+
+# The drain task runs every 5s. Its own beat-scheduler and task-lifecycle log
+# lines would flood the log at an info/debug capture floor, so they are dropped
+# below WARNING. Matched by the task name appearing in the message; other task
+# activity (scans, thumbnails, enrichment) is kept so the log stays useful.
+_DRAIN_TASK_MARKER = "drain_app_logs"
 
 
 class RedisLogHandler(logging.Handler):
@@ -93,8 +92,14 @@ class RedisLogHandler(logging.Handler):
     def _excluded(self, record: logging.LogRecord) -> bool:
         if record.name in _ALWAYS_EXCLUDE:
             return True
-        if record.levelno < logging.WARNING and record.name.startswith(_NOISY_PREFIXES):
-            return True
+        if record.levelno < logging.WARNING:
+            if record.name.startswith(_NOISY_PREFIXES):
+                return True
+            try:
+                if _DRAIN_TASK_MARKER in record.getMessage():
+                    return True
+            except Exception:
+                pass
         return False
 
     def emit(self, record: logging.LogRecord) -> None:
