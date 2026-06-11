@@ -39,11 +39,14 @@ const LS_SOURCE = "galactilog.applog.source";
 // two stay consistent.
 const levelTextClass = (level: AppLogLevel): string => {
   switch (level) {
-    case "error":
     case "critical":
+      return "text-theme-error font-semibold";
+    case "error":
       return "text-theme-error";
     case "warning":
       return "text-theme-warning";
+    case "info":
+      return "text-theme-info";
     default:
       return "text-theme-text-secondary";
   }
@@ -57,6 +60,8 @@ const levelActiveClass = (level: AppLogLevel): string => {
       return "bg-theme-error/20 border-theme-error/50 text-theme-error";
     case "warning":
       return "bg-theme-warning/20 border-theme-warning/50 text-theme-warning";
+    case "info":
+      return "bg-theme-info/20 border-theme-info/50 text-theme-info";
     default:
       return "bg-theme-text-primary/10 border-theme-border-em text-theme-text-primary";
   }
