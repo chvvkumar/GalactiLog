@@ -7,6 +7,8 @@ export interface SessionSummary {
   integration_seconds: number;
   frame_count: number;
   filters_used: string[];
+  median_hfr: number | null;
+  median_eccentricity: number | null;
 }
 
 export interface TargetAggregation {
