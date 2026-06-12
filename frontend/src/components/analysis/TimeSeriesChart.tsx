@@ -4,13 +4,22 @@ import "../../utils/chartRegistry";
 import "chartjs-adapter-date-fns";
 import type { TimeSeriesResponse } from "../../types";
 import { chartFontSize } from "../../utils/chartConfig";
+import { madZ, bandForZ, type MetricBaseline } from "../../utils/frameQuality";
 
 interface Props {
   data: TimeSeriesResponse | undefined;
   loading: boolean;
   smoothing: "raw" | "ma7" | "ma30";
   metricLabel?: string;
+  baseline?: MetricBaseline | null;
+  higherIsBetter?: boolean;
 }
+
+// Subtle point tints matching the theme warning/error tokens (watch/reject bands).
+const BAND_POINT_COLOR: Record<string, string | null> = {
+  watch: "rgba(245, 180, 80, 0.85)", // theme-warning (amber)
+  reject: "rgba(245, 110, 110, 0.9)", // theme-error (red)
+};
 
 const TimeSeriesChart: Component<Props> = (props) => {
   let canvasRef: HTMLCanvasElement | undefined;
@@ -21,19 +30,81 @@ const TimeSeriesChart: Component<Props> = (props) => {
     chartInstance?.destroy();
 
     const { points, ma_7, ma_30 } = props.data;
+    const baseline = props.baseline;
+    const higherIsBetter = props.higherIsBetter ?? false;
 
-    const datasets: any[] = [
-      {
-        label: "Nightly Median",
-        data: points.map((p) => ({ x: p.date, y: p.value })),
-        backgroundColor: "rgba(100, 180, 255, 0.6)",
-        borderColor: "rgba(130, 200, 255, 0.8)",
+    const defaultPointColor = "rgba(100, 180, 255, 0.6)";
+    const pointColors = baseline
+      ? points.map((p) => {
+          const band = bandForZ(madZ(p.value, baseline, higherIsBetter));
+          return BAND_POINT_COLOR[band] ?? defaultPointColor;
+        })
+      : defaultPointColor;
+
+    const datasets: any[] = [];
+
+    // Baseline reference bands drawn beneath the points: a filled median ± 1*MAD
+    // band and a fainter median + 3*MAD reject bound. Skipped when the baseline is
+    // too sparse or uniform (baseline === null).
+    if (baseline && baseline.median != null && baseline.mad != null && points.length > 0) {
+      const xs = points.map((p) => p.date);
+      const med = baseline.median;
+      const mad = baseline.mad;
+      const flat = (y: number) => xs.map((x) => ({ x, y }));
+      const lineBase = {
+        type: "line" as const,
+        pointRadius: 0,
+        pointHoverRadius: 0,
+        fill: false,
+        spanGaps: true,
+      };
+      // Reject bound: median + 3*MAD on the "worse" side (and mirror for better metrics).
+      datasets.push({
+        ...lineBase,
+        label: "+3 MAD",
+        data: flat(higherIsBetter ? med - 3 * mad : med + 3 * mad),
+        borderColor: "rgba(245, 110, 110, 0.35)",
         borderWidth: 1,
-        pointRadius: 4,
-        pointHoverRadius: 6,
-        showLine: false,
-      },
-    ];
+        borderDash: [4, 4],
+      });
+      // Upper edge of the ±1 MAD band.
+      datasets.push({
+        ...lineBase,
+        label: "+1 MAD",
+        data: flat(med + mad),
+        borderColor: "rgba(200, 210, 220, 0.25)",
+        borderWidth: 1,
+        backgroundColor: "rgba(120, 190, 255, 0.06)",
+        fill: "+1", // fill to the next dataset (lower edge of band)
+      });
+      // Lower edge of the ±1 MAD band.
+      datasets.push({
+        ...lineBase,
+        label: "-1 MAD",
+        data: flat(med - mad),
+        borderColor: "rgba(200, 210, 220, 0.25)",
+        borderWidth: 1,
+      });
+      // Baseline median line.
+      datasets.push({
+        ...lineBase,
+        label: "Baseline median",
+        data: flat(med),
+        borderColor: "rgba(200, 210, 220, 0.45)",
+        borderWidth: 1.5,
+      });
+    }
+
+    datasets.push({
+      label: "Nightly Median",
+      data: points.map((p) => ({ x: p.date, y: p.value })),
+      backgroundColor: pointColors,
+      borderColor: "rgba(130, 200, 255, 0.8)",
+      borderWidth: 1,
+      pointRadius: 4,
+      pointHoverRadius: 6,
+      showLine: false,
+    });
 
     if (props.smoothing === "ma7" && ma_7.length > 0) {
       datasets.push({
@@ -85,6 +156,8 @@ const TimeSeriesChart: Component<Props> = (props) => {
           tooltip: {
             titleFont: { size: chartFontSize.tooltipTitle() },
             bodyFont: { size: chartFontSize.tooltipBody() },
+            filter: (item) =>
+              !["Baseline median", "+1 MAD", "-1 MAD", "+3 MAD"].includes(item.dataset.label || ""),
             callbacks: {
               label: (ctx) => {
                 const pt = points.find((p) => p.value === ctx.parsed.y);
@@ -104,6 +177,8 @@ const TimeSeriesChart: Component<Props> = (props) => {
   createEffect(() => {
     const _d = props.data;
     const _s = props.smoothing;
+    const _b = props.baseline;
+    const _h = props.higherIsBetter;
     renderChart();
   });
 
