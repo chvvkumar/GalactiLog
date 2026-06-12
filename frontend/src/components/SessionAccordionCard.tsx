@@ -375,7 +375,7 @@ const SessionAccordionCard: Component<{
     );
     return (
     <table class="w-full text-label">
-      <thead class="sticky top-0 bg-theme-base">
+      <thead class="sticky top-0 z-10 glass-popover">
         <tr class="text-theme-text-secondary border-b border-theme-border">
           <SortHeader label={`Time (${timezoneLabel(settingsCtx.timezone())})`} column="timestamp" current={sortColumn()} asc={sortAsc()} onSort={toggleSort} />
           <SortHeader label="Filter" column="filter_used" current={sortColumn()} asc={sortAsc()} onSort={toggleSort} align="center" />
