@@ -1325,6 +1325,8 @@ async def list_targets_aggregated(
                    i.filter_used,
                    i.camera,
                    i.telescope,
+                   i.median_hfr,
+                   i.eccentricity,
                    CASE WHEN i.session_date IS NULL THEN 'unknown'
                         ELSE CAST(i.session_date AS VARCHAR) END AS session_key
             FROM images i LEFT JOIN targets t ON i.resolved_target_id = t.id
@@ -1340,7 +1342,11 @@ async def list_targets_aggregated(
             SELECT target_key, session_key,
                    sum(exp) AS session_exp,
                    count(*) AS frame_count,
-                   array_agg(DISTINCT filter_used) FILTER (WHERE filter_used IS NOT NULL) AS session_filters
+                   array_agg(DISTINCT filter_used) FILTER (WHERE filter_used IS NOT NULL) AS session_filters,
+                   percentile_cont(0.5) WITHIN GROUP (ORDER BY median_hfr)
+                       FILTER (WHERE median_hfr IS NOT NULL) AS session_median_hfr,
+                   percentile_cont(0.5) WITHIN GROUP (ORDER BY eccentricity)
+                       FILTER (WHERE eccentricity IS NOT NULL) AS session_median_ecc
             FROM frames
             GROUP BY target_key, session_key
         ),
@@ -1368,7 +1374,9 @@ async def list_targets_aggregated(
                        'session_key', session_key,
                        'session_exp', session_exp,
                        'frame_count', frame_count,
-                       'filters', coalesce(session_filters, ARRAY[]::varchar[]))) AS sessions
+                       'filters', coalesce(session_filters, ARRAY[]::varchar[]),
+                       'median_hfr', session_median_hfr,
+                       'median_eccentricity', session_median_ecc)) AS sessions
             FROM per_session
             GROUP BY target_key
         )
@@ -1429,10 +1437,21 @@ async def list_targets_aggregated(
                     "integration_seconds": 0,
                     "frame_count": 0,
                     "filters_set": set(),
+                    "median_hfr": None,
+                    "median_eccentricity": None,
                 }
             s = sessions_detail[tk][date_key]
             s["integration_seconds"] += float(sess["session_exp"])
             s["frame_count"] += int(sess["frame_count"])
+            # Per-session median sharpness/roundness, computed SQL-side over the
+            # session's frames (nulls ignored). Each (target_key, session_key)
+            # appears once per detail row, so a direct set is correct.
+            mh = sess.get("median_hfr")
+            if mh is not None:
+                s["median_hfr"] = float(mh)
+            me = sess.get("median_eccentricity")
+            if me is not None:
+                s["median_eccentricity"] = float(me)
             for raw_filter in (sess.get("filters") or []):
                 f = normalize_filter(raw_filter, filter_map)
                 if f:
@@ -1563,6 +1582,8 @@ async def list_targets_aggregated(
                 integration_seconds=s["integration_seconds"],
                 frame_count=s["frame_count"],
                 filters_used=sorted(s["filters_set"]),
+                median_hfr=s["median_hfr"],
+                median_eccentricity=s["median_eccentricity"],
             )
             for s in sessions_list
         ]

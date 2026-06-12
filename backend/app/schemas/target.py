@@ -35,6 +35,8 @@ class SessionSummary(BaseModel):
     integration_seconds: float
     frame_count: int
     filters_used: list[str]
+    median_hfr: float | None = None
+    median_eccentricity: float | None = None
 
 
 class FilterMedian(BaseModel):

@@ -112,24 +112,24 @@ async def seeded_db():
                    capture_date=datetime(2024, 1, 10, 20, 0, tzinfo=timezone.utc),
                    exposure_time=300.0, filter_used="Ha",
                    camera="ASI2600", telescope="ESPRIT100",
-                   median_hfr=2.0, raw_headers={"OBJECT": "M31"}))
+                   median_hfr=2.0, eccentricity=0.40, raw_headers={"OBJECT": "M31"}))
         s.add(_img(resolved_target_id=TID_M31, session_date=d1,
                    capture_date=datetime(2024, 1, 10, 20, 5, tzinfo=timezone.utc),
                    exposure_time=300.0, filter_used="H_alpha",
                    camera="2600MM", telescope="ESPRIT100",
-                   median_hfr=2.2, raw_headers={"OBJECT": "M31"}))
+                   median_hfr=2.2, eccentricity=0.42, raw_headers={"OBJECT": "M31"}))
         s.add(_img(resolved_target_id=TID_M31, session_date=d1,
                    capture_date=datetime(2024, 1, 10, 21, 0, tzinfo=timezone.utc),
                    exposure_time=120.0, filter_used="O3",
                    camera="ASI2600", telescope="ESPRIT100",
-                   median_hfr=2.1, raw_headers={"OBJECT": "M31"}))
+                   median_hfr=2.1, eccentricity=0.44, raw_headers={"OBJECT": "M31"}))
 
         # --- M31 session 2: another Ha-aliased frame
         s.add(_img(resolved_target_id=TID_M31, session_date=d2,
                    capture_date=datetime(2024, 1, 12, 20, 0, tzinfo=timezone.utc),
                    exposure_time=600.0, filter_used="Ha",
                    camera="ASI2600", telescope="ESPRIT100",
-                   median_hfr=5.0, raw_headers={"OBJECT": "M31 mosaic"}))
+                   median_hfr=5.0, eccentricity=0.70, raw_headers={"OBJECT": "M31 mosaic"}))
 
         # --- Unresolved frame WITH an OBJECT header -> obj:NGC 7000
         s.add(_img(resolved_target_id=None, session_date=d1,
@@ -201,9 +201,11 @@ EXPECTED_TARGETS = {
         "equipment": ["ASI2600MM Pro", "Esprit 100"],
         "sessions": [
             {"session_date": "2024-01-12", "integration_seconds": 600.0,
-             "frame_count": 1, "filters_used": ["H-alpha"]},
+             "frame_count": 1, "filters_used": ["H-alpha"],
+             "median_hfr": 5.0, "median_eccentricity": 0.7},
             {"session_date": "2024-01-10", "integration_seconds": 720.0,
-             "frame_count": 3, "filters_used": ["H-alpha", "OIII"]},
+             "frame_count": 3, "filters_used": ["H-alpha", "OIII"],
+             "median_hfr": 2.1, "median_eccentricity": 0.42},
         ],
         "matched_sessions": None,
         "total_sessions": None,
@@ -222,7 +224,8 @@ EXPECTED_TARGETS = {
         "equipment": ["ASI2600MM Pro", "Esprit 100"],
         "sessions": [
             {"session_date": "2024-01-10", "integration_seconds": 180.0,
-             "frame_count": 1, "filters_used": ["OIII"]},
+             "frame_count": 1, "filters_used": ["OIII"],
+             "median_hfr": None, "median_eccentricity": None},
         ],
         "matched_sessions": None,
         "total_sessions": None,
@@ -241,7 +244,8 @@ EXPECTED_TARGETS = {
         "equipment": ["ASI2600MM Pro", "Esprit 100"],
         "sessions": [
             {"session_date": "2024-01-12", "integration_seconds": 90.0,
-             "frame_count": 1, "filters_used": ["H-alpha"]},
+             "frame_count": 1, "filters_used": ["H-alpha"],
+             "median_hfr": None, "median_eccentricity": None},
         ],
         "matched_sessions": None,
         "total_sessions": None,
@@ -272,6 +276,38 @@ async def test_full_response_parity(seeded_db):
     assert len(data["targets"]) == 3
     for t in data["targets"]:
         assert t == EXPECTED_TARGETS[t["target_id"]], t["target_id"]
+
+
+@pytest.mark.asyncio
+async def test_session_summary_includes_quality_medians(seeded_db):
+    """Each session in a target's `sessions` list now carries per-session
+    median_hfr and median_eccentricity (sharpness + roundness), computed over
+    that session's frame metrics ignoring nulls. Sessions with no frame metrics
+    report None for both."""
+    data = await _get("?sort_by=integration&sort_dir=desc")
+    m31 = _by_id(data, str(TID_M31))
+
+    sessions = {s["session_date"]: s for s in m31["sessions"]}
+
+    # New keys must be present on every session.
+    for s in m31["sessions"]:
+        assert "median_hfr" in s
+        assert "median_eccentricity" in s
+        assert s["median_hfr"] is None or isinstance(s["median_hfr"], float)
+        assert s["median_eccentricity"] is None or isinstance(s["median_eccentricity"], float)
+
+    # 2024-01-10: hfr median([2.0, 2.2, 2.1]) = 2.1; ecc median([0.40, 0.42, 0.44]) = 0.42
+    assert sessions["2024-01-10"]["median_hfr"] == pytest.approx(2.1)
+    assert sessions["2024-01-10"]["median_eccentricity"] == pytest.approx(0.42)
+
+    # 2024-01-12: single frame hfr 5.0, ecc 0.70.
+    assert sessions["2024-01-12"]["median_hfr"] == pytest.approx(5.0)
+    assert sessions["2024-01-12"]["median_eccentricity"] == pytest.approx(0.70)
+
+    # Targets whose frames carry no metrics report None (no crash).
+    ngc = _by_id(data, "obj:NGC 7000")
+    assert ngc["sessions"][0]["median_hfr"] is None
+    assert ngc["sessions"][0]["median_eccentricity"] is None
 
 
 @pytest.mark.asyncio
@@ -441,6 +477,8 @@ async def test_empty_object_header_collapses_to_uncategorized(seeded_edge_db):
     assert len(uncat["sessions"]) == 1
     assert uncat["sessions"][0]["session_date"] == "2024-02-01"
     assert uncat["sessions"][0]["frame_count"] == 1
+    assert uncat["sessions"][0]["median_hfr"] is None
+    assert uncat["sessions"][0]["median_eccentricity"] is None
     # The empty-string OBJECT must not surface as an alias.
     assert uncat["aliases"] == []
 
