@@ -11,6 +11,7 @@ import { isFieldVisible, isColumnVisible } from "../utils/displaySettings";
 import InlineEditCell from "./InlineEditCell";
 import { formatTime as formatTimeUtil, timezoneLabel } from "../utils/dateTime";
 import { ClickableFilePath } from "./ClickableFilePath";
+import HelpPopover from "./HelpPopover";
 
 import { formatIntegration } from "../utils/format";
 import { showToast } from "./Toast";
@@ -1100,6 +1101,14 @@ const SessionAccordionCard: Component<{
                               This rig overall
                             </button>
                           </div>
+                          <HelpPopover title="Per-Frame Data grading" label="About per-frame grading">
+                            <p>Each frame is graded by how far its metrics deviate from a typical baseline, not against a fixed threshold.</p>
+                            <p><strong>Compare to</strong> picks the baseline. <em>This session</em> compares each frame to the other frames captured the same night. <em>This rig overall</em> compares to this target's long-run average for the same telescope, camera, and filter.</p>
+                            <p>Deviation is measured in robust sigma units (median absolute deviation from the median), the same approach PixInsight SubframeSelector uses. It stays reliable on small sessions.</p>
+                            <p>Color shows the verdict, in both directions: green means clearly better than typical, no color means normal, amber means moderately worse (watch), red means far worse (likely reject).</p>
+                            <p>Signal-related metrics (star count, background ADU, guiding) are always compared within the same night because they drift with sky conditions, regardless of the toggle.</p>
+                            <p>Grading is advisory only. No frames are deleted or hidden.</p>
+                          </HelpPopover>
                         </div>
                         <Show when={qualitySummary().scored > 0}>
                           <div class="flex items-center gap-2 text-theme-text-secondary">
