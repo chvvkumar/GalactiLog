@@ -1,7 +1,6 @@
 import { Component, Show, For, createMemo } from "solid-js";
 import { A, useNavigate } from "@solidjs/router";
 import type { TargetAggregation } from "../types";
-import type { TargetAnomaly } from "./TargetTable";
 import { useCatalog } from "../store/catalog";
 import { useSettingsContext } from "./SettingsProvider";
 import { isColumnVisible } from "../utils/displaySettings";
@@ -13,7 +12,6 @@ import { api } from "../api/client";
 
 const TargetRow: Component<{
   target: TargetAggregation;
-  anomaly?: TargetAnomaly | null;
 }> = (props) => {
   const { expandedTargets, toggleExpanded } = useCatalog();
   const navigate = useNavigate();
@@ -25,23 +23,6 @@ const TargetRow: Component<{
 
   const displayName = () =>
     props.target.aliases[0] || props.target.primary_name;
-
-  // Small unobtrusive anomaly dot. warning -> watch, error -> reject; neutral
-  // and better targets carry no `anomaly` and render nothing.
-  const AnomalyDot: Component = () => (
-    <Show when={props.anomaly}>
-      {(a) => (
-        <span
-          class={`inline-block w-2 h-2 rounded-full flex-shrink-0 ${
-            a().band === "reject" ? "bg-theme-error" : "bg-theme-warning"
-          }`}
-          title={a().title}
-          aria-label={a().title}
-          onClick={(e) => e.stopPropagation()}
-        />
-      )}
-    </Show>
-  );
 
   const lastSession = createMemo(() => {
     const sorted = [...props.target.sessions].sort(
@@ -63,7 +44,6 @@ const TargetRow: Component<{
             : "text-theme-text-primary"
         }`}>
           <span class="inline-flex items-center gap-1.5">
-            <AnomalyDot />
             {displayName()}
             {props.target.mosaic_id && (
               <A href={`/mosaics/${props.target.mosaic_id}`} class="text-theme-accent" title={`Mosaic: ${props.target.mosaic_name}`} onClick={(e) => e.stopPropagation()}>
@@ -144,7 +124,6 @@ const TargetRow: Component<{
                   ? "text-theme-text-tertiary italic"
                   : "text-theme-text-primary"
               }`}>
-                <AnomalyDot />
                 {displayName()}
                 {props.target.mosaic_id && (
                   <A href={`/mosaics/${props.target.mosaic_id}`} class="text-theme-accent" title={`Mosaic: ${props.target.mosaic_name}`} onClick={(e) => e.stopPropagation()}>

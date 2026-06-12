@@ -1,80 +1,11 @@
 import { Component, For, Show, createMemo } from "solid-js";
-import type { TargetAggregation, SessionSummary } from "../types";
+import type { TargetAggregation } from "../types";
 import TargetRow from "./TargetRow";
 import ColumnPicker from "./ColumnPicker";
 import { useSettingsContext } from "./SettingsProvider";
 import { isColumnVisible } from "../utils/displaySettings";
 import { timezoneLabel } from "../utils/dateTime";
 import { useDashboardFilters, type SortKey } from "./DashboardFilterProvider";
-import {
-  type MetricBaseline,
-  type QualityBand,
-  madZ,
-  bandForZ,
-} from "../utils/frameQuality";
-
-// Anomaly badge metadata attached to a target row. `null` band -> render nothing.
-export interface TargetAnomaly {
-  band: QualityBand;
-  title: string;
-}
-
-function median(xs: number[]): number {
-  const s = [...xs].sort((a, b) => a - b);
-  const m = Math.floor(s.length / 2);
-  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
-}
-
-// Build a robust MAD baseline from the per-session medians supplied. The
-// median-of-medians and MAD give a filter-agnostic reference for the metric
-// across every session currently shown on the dashboard.
-function baselineFrom(values: (number | null)[]): MetricBaseline {
-  const xs = values.filter((v): v is number => v != null && Number.isFinite(v));
-  if (xs.length === 0) return { median: null, mad: null, n: 0 };
-  const med = median(xs);
-  const mad = median(xs.map((x) => Math.abs(x - med)));
-  return { median: med, mad, n: xs.length };
-}
-
-// Pick the session used to characterize a target's recent quality: the most
-// recent session that carries at least one quality median (sharpness or
-// roundness). Falls back to the newest session, or null when there are none.
-function recentQualitySession(t: TargetAggregation): SessionSummary | null {
-  const sorted = [...t.sessions].sort((a, b) => b.session_date.localeCompare(a.session_date));
-  for (const s of sorted) {
-    if (s.median_hfr != null || s.median_eccentricity != null) return s;
-  }
-  return sorted[0] ?? null;
-}
-
-const BAND_RANK: Record<QualityBand, number> = { better: 0, neutral: 1, watch: 2, reject: 3 };
-
-// Evaluate a target's recent session against the dashboard-wide baselines.
-// Both HFR and eccentricity are higher-is-worse; the badge takes the worse of
-// the two bands. Returns null for neutral/better (no badge rendered).
-function anomalyFor(
-  t: TargetAggregation,
-  hfrRef: MetricBaseline,
-  eccRef: MetricBaseline,
-): TargetAnomaly | null {
-  const s = recentQualitySession(t);
-  if (!s) return null;
-
-  const zHfr = madZ(s.median_hfr, hfrRef);
-  const zEcc = madZ(s.median_eccentricity, eccRef);
-  const bHfr = bandForZ(zHfr);
-  const bEcc = bandForZ(zEcc);
-
-  const worst: QualityBand = BAND_RANK[bHfr] >= BAND_RANK[bEcc] ? bHfr : bEcc;
-  if (worst !== "watch" && worst !== "reject") return null;
-
-  const parts: string[] = [];
-  if (zHfr != null && bHfr === worst) parts.push(`HFR ${zHfr.toFixed(1)}σ above typical`);
-  if (zEcc != null && bEcc === worst) parts.push(`eccentricity ${zEcc.toFixed(1)}σ above typical`);
-  const detail = parts.length ? parts.join(", ") : "elevated relative to other sessions";
-  const verb = worst === "reject" ? "stands out sharply" : "to watch";
-  return { band: worst, title: `Recent session ${verb}: ${detail}` };
-}
 
 function getLastSession(t: TargetAggregation): string {
   if (t.sessions.length === 0) return "";
@@ -106,28 +37,6 @@ const TargetTable: Component<{ targets: TargetAggregation[] }> = (props) => {
       return dir === "asc" ? cmp : -cmp;
     });
     return sorted;
-  });
-
-  // Dashboard-wide quality reference: median-of-session-medians + MAD for HFR
-  // and eccentricity across every target currently shown. Both are roughly
-  // filter-agnostic, unlike star count / ADU / SNR which SessionSummary mixes
-  // across filters. madZ self-guards when n < MIN_GROUP, so a sparse page
-  // yields no badges rather than noise.
-  const qualityRefs = createMemo(() => {
-    const hfr: (number | null)[] = [];
-    const ecc: (number | null)[] = [];
-    for (const t of props.targets) {
-      for (const s of t.sessions) {
-        hfr.push(s.median_hfr);
-        ecc.push(s.median_eccentricity);
-      }
-    }
-    return { hfr: baselineFrom(hfr), ecc: baselineFrom(ecc) };
-  });
-
-  const anomalyFn = createMemo(() => {
-    const refs = qualityRefs();
-    return (t: TargetAggregation) => anomalyFor(t, refs.hfr, refs.ecc);
   });
 
   const arrow = (key: SortKey) => {
@@ -216,7 +125,7 @@ const TargetTable: Component<{ targets: TargetAggregation[] }> = (props) => {
       <tbody>
         <For each={sortedTargets()}>
           {(target) => (
-            <TargetRow target={target} anomaly={anomalyFn()(target)} />
+            <TargetRow target={target} />
           )}
         </For>
       </tbody>
