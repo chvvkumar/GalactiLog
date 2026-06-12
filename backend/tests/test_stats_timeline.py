@@ -132,6 +132,111 @@ def _make_async_redis_cm():
     return _cm
 
 
+def _make_perf_row(tel, cam, filt, hfr_vals, ecc_vals, fwhm_vals):
+    """Mimic a row from _query_equipment_perf with array_agg columns."""
+    import statistics
+    row = MagicMock()
+    row.telescope = tel
+    row.camera = cam
+    row.filter_used = filt
+    row.frame_count = len(hfr_vals)
+    row.total_seconds = 300.0 * len(hfr_vals)
+    row.med_hfr = statistics.median(hfr_vals) if hfr_vals else None
+    row.best_hfr = min(hfr_vals) if hfr_vals else None
+    row.med_ecc = statistics.median(ecc_vals) if ecc_vals else None
+    row.med_fwhm = statistics.median(fwhm_vals) if fwhm_vals else None
+    row.hfr_vals = hfr_vals
+    row.ecc_vals = ecc_vals
+    row.fwhm_vals = fwhm_vals
+    return row
+
+
+def _make_perf_result(rows):
+    r = MagicMock()
+    r.all.return_value = rows
+    r.one.return_value = (0,)
+    r.first.return_value = None
+    r.scalar_one.return_value = 0
+    r.scalar_one_or_none.return_value = None
+    return r
+
+
+def _make_async_session_cm_with_perf(perf_rows):
+    _results = [
+        _make_overview_result(),
+        _make_default_result(),
+        _make_default_result(),
+        _make_perf_result(perf_rows),  # 3 _query_equipment_perf
+        _make_default_result(),
+        _make_default_result(),
+        _make_default_result(),
+        _make_default_result(),
+        _make_default_result(),
+        _make_default_result(),
+        _make_quality_result(),
+        _make_bucket_result(),
+        _make_default_result(),
+        _make_default_result(),
+    ]
+    _call_count = [0]
+
+    @asynccontextmanager
+    async def _cm():
+        idx = _call_count[0]
+        _call_count[0] += 1
+        result = _results[idx] if idx < len(_results) else _make_default_result()
+        session = AsyncMock()
+        session.execute = AsyncMock(return_value=result)
+        yield session
+    return _cm
+
+
+@pytest.mark.asyncio
+async def test_equipment_combo_has_mad_fields():
+    """equipment_performance combos expose mad_hfr/mad_eccentricity/mad_fwhm."""
+    session = _make_mock_session_for_stats()
+    user = _make_admin_user()
+
+    perf_rows = [
+        _make_perf_row(
+            "Esprit 150", "ASI2600MM", "Ha",
+            hfr_vals=[2.0, 2.4, 2.2, 2.1],
+            ecc_vals=[0.30, 0.40, 0.35, 0.32],
+            fwhm_vals=[3.0, 3.4, 3.2, 3.1],
+        ),
+    ]
+
+    async def override_session():
+        yield session
+
+    async def override_user():
+        return user
+
+    app.dependency_overrides[get_session] = override_session
+    app.dependency_overrides[get_current_user] = override_user
+
+    try:
+        with patch("app.api.stats.async_session", side_effect=_make_async_session_cm_with_perf(perf_rows)), \
+             patch("app.api.stats.async_redis", side_effect=_make_async_redis_cm()), \
+             patch("app.api.stats._extract_site_coords", new=AsyncMock(return_value=None)):
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://test") as client:
+                resp = await client.get("/api/stats")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["equipment_performance"]) >= 1
+        combo = data["equipment_performance"][0]
+        assert "mad_hfr" in combo
+        assert "mad_eccentricity" in combo
+        assert "mad_fwhm" in combo
+        # median of |x-2.15| for [2.0,2.4,2.2,2.1] -> |.15,.25,.05,.05| -> median 0.10
+        assert combo["mad_hfr"] is not None
+        assert abs(combo["mad_hfr"] - 0.10) < 1e-6
+    finally:
+        app.dependency_overrides.clear()
+
+
 @pytest.mark.asyncio
 async def test_stats_has_timeline_fields():
     """Verify /stats returns all three timeline granularities and site_coords."""

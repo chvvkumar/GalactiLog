@@ -31,6 +31,7 @@ from app.schemas.target import (
     TargetSearchResultFuzzy, ObjectTypeCount, RigDetail,
 )
 from app.schemas.export import ExportResponse, ExportFilterRow, ExportEquipment, ExportCalibration
+from app.services import frame_quality
 
 logger = logging.getLogger(__name__)
 
@@ -1902,6 +1903,70 @@ async def get_session_detail(target_id: str, date: str, session: AsyncSession) -
                 for slug, sd, rl, val in cv_rows
             ]
 
+    # --- Frame-quality baselines (MAD-based, computed on the fly) ---
+    # Group keys use normalized telescope/camera/filter so they match the
+    # frontend `groupKey(frame)` built from the same normalized values.
+    def _baseline_frame(tel, cam, filt, hfr, fwhm_v, ecc, stars, adu_med, guide):
+        return {
+            "telescope": normalize_equipment(tel, tel_map),
+            "camera": normalize_equipment(cam, cam_map),
+            "filter_used": normalize_filter(filt, filter_map),
+            "median_hfr": hfr,
+            "fwhm": fwhm_v,
+            "eccentricity": ecc,
+            "detected_stars": stars,
+            "adu_median": adu_med,
+            "guiding_rms_arcsec": guide,
+        }
+
+    session_frame_dicts = [
+        _baseline_frame(
+            img.telescope, img.camera, img.filter_used,
+            img.median_hfr, img.fwhm, img.eccentricity,
+            img.detected_stars, img.adu_median, img.guiding_rms_arcsec,
+        )
+        for img in images
+    ]
+    session_baselines = frame_quality.group_baselines(session_frame_dicts)
+
+    # Cross-session frames for this target (same predicate as the session query,
+    # minus the session_date filter). Select only the columns the baseline needs.
+    metric_cols = (
+        Image.telescope, Image.camera, Image.filter_used,
+        Image.median_hfr, Image.fwhm, Image.eccentricity,
+        Image.detected_stars, Image.adu_median, Image.guiding_rms_arcsec,
+    )
+    if target_id == "obj:__uncategorized__":
+        target_frames_q = select(*metric_cols).where(
+            Image.resolved_target_id.is_(None),
+            or_(
+                ~Image.raw_headers.has_key("OBJECT"),
+                Image.raw_headers["OBJECT"].astext == "",
+                Image.raw_headers["OBJECT"].is_(None),
+            ),
+        )
+    elif target_id.startswith("obj:"):
+        target_frames_q = select(*metric_cols).where(
+            Image.raw_headers["OBJECT"].astext == target_id[4:],
+            Image.image_type == "LIGHT",
+        )
+    else:
+        target_frames_q = select(*metric_cols).where(
+            Image.resolved_target_id == tid,
+            Image.image_type == "LIGHT",
+        )
+    target_frame_rows = (await session.execute(target_frames_q)).all()
+    target_frame_dicts = [_baseline_frame(*row) for row in target_frame_rows]
+    target_baselines = frame_quality.group_baselines(target_frame_dicts)
+
+    # Catalog-wide frames (all LIGHT frames) for the sparse-group fallback.
+    catalog_frames_q = select(*metric_cols).where(Image.image_type == "LIGHT")
+    catalog_frame_rows = (await session.execute(catalog_frames_q)).all()
+    catalog_frame_dicts = [_baseline_frame(*row) for row in catalog_frame_rows]
+    catalog_baselines = frame_quality.group_baselines(catalog_frame_dicts)
+
+    rig_baselines = frame_quality.apply_fallback(target_baselines, catalog_baselines)
+
     return SessionDetailResponse(
         target_name=target_name,
         session_date=date,
@@ -1945,4 +2010,6 @@ async def get_session_detail(target_id: str, date: str, session: AsyncSession) -
         notes=session_note,
         rigs=rig_details,
         custom_values=custom_values_list,
+        session_baselines=session_baselines,
+        rig_baselines=rig_baselines,
     )

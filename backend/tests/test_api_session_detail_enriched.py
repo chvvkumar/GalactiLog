@@ -110,10 +110,17 @@ async def test_session_detail_has_new_fields():
     mock_cv_result = MagicMock()
     mock_cv_result.all.return_value = []
 
+    # target cross-session frames + catalog-wide frames for baselines; .all()
+    mock_target_frames_result = MagicMock()
+    mock_target_frames_result.all.return_value = []
+    mock_catalog_frames_result = MagicMock()
+    mock_catalog_frames_result.all.return_value = []
+
     mock_session.execute = AsyncMock(
         side_effect=[
             mock_img_result, mock_avg_result, mock_alias_result,
             mock_all_hfr_result, mock_note_result, mock_cv_result,
+            mock_target_frames_result, mock_catalog_frames_result,
         ]
     )
 
@@ -199,10 +206,17 @@ async def test_session_detail_hfr_outlier_insight():
     mock_cv_result = MagicMock()
     mock_cv_result.all.return_value = []
 
+    # target cross-session frames + catalog-wide frames for baselines; .all()
+    mock_target_frames_result = MagicMock()
+    mock_target_frames_result.all.return_value = []
+    mock_catalog_frames_result = MagicMock()
+    mock_catalog_frames_result.all.return_value = []
+
     mock_session.execute = AsyncMock(
         side_effect=[
             mock_img_result, mock_avg_result, mock_alias_result,
             mock_all_hfr_result, mock_note_result, mock_cv_result,
+            mock_target_frames_result, mock_catalog_frames_result,
         ]
     )
 
