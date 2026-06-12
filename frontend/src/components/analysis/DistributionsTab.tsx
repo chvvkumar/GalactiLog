@@ -114,7 +114,11 @@ const DistributionsTab: Component<Props> = (props) => {
           </select>
         </div>
         <div style={{ height: "450px" }} class="relative">
-          <HistogramChart data={histData.latest} loading={histData.loading} />
+          <HistogramChart
+            data={histData.latest}
+            loading={histData.loading}
+            baselineMedian={histData.latest?.stats?.median ?? null}
+          />
         </div>
         <Show when={histData.latest?.stats}>
           <div class="mt-3">

@@ -1,7 +1,26 @@
-import { Component, createSignal, createResource } from "solid-js";
+import { Component, createSignal, createResource, createMemo } from "solid-js";
 import { api } from "../../api/client";
 import type { SharedFilters } from "../../pages/AnalysisPage";
 import TimeSeriesChart from "./TimeSeriesChart";
+import { MIN_GROUP, type MetricBaseline } from "../../utils/frameQuality";
+
+// Higher-is-better metrics flip z-score polarity so "worse than baseline" stays positive.
+const HIGHER_IS_BETTER = new Set(["detected_stars", "sky_quality"]);
+
+// Robust median + MAD computed over the displayed values, matching the util's
+// definition (MAD = median(|x - median|)). Returns null when too sparse or uniform.
+function baselineFromValues(values: number[]): MetricBaseline | null {
+  const xs = values.filter((v) => v != null && !Number.isNaN(v)).sort((a, b) => a - b);
+  if (xs.length < MIN_GROUP) return null;
+  const med = (arr: number[]): number => {
+    const m = Math.floor(arr.length / 2);
+    return arr.length % 2 ? arr[m] : (arr[m - 1] + arr[m]) / 2;
+  };
+  const median = med(xs);
+  const mad = med(xs.map((v) => Math.abs(v - median)).sort((a, b) => a - b));
+  if (mad === 0) return null;
+  return { median, mad, n: xs.length };
+}
 
 const ALL_METRICS = [
   { value: "humidity", label: "Humidity" },
@@ -48,6 +67,13 @@ const TimeSeriesTab: Component<Props> = (props) => {
     })
   );
 
+  // Baseline computed client-side over the displayed nightly-median points.
+  const baseline = createMemo<MetricBaseline | null>(() => {
+    const pts = data.latest?.points;
+    if (!pts || pts.length === 0) return null;
+    return baselineFromValues(pts.map((p) => p.value));
+  });
+
   const selectClass = "text-sm bg-theme-elevated border border-theme-border rounded px-2.5 py-1.5 text-theme-text-primary";
   const toggleClass = (active: boolean) =>
     `text-sm px-3 py-1.5 rounded-[var(--radius-sm)] transition-colors ${
@@ -76,6 +102,8 @@ const TimeSeriesTab: Component<Props> = (props) => {
           loading={data.loading}
           smoothing={smoothing()}
           metricLabel={ALL_METRICS.find((m) => m.value === metric())?.label}
+          baseline={baseline()}
+          higherIsBetter={HIGHER_IS_BETTER.has(metric())}
         />
       </div>
     </div>
