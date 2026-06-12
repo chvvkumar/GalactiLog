@@ -1,8 +1,14 @@
-import { Component, For, Show, createSignal } from "solid-js";
+import { Component, For, Show, createMemo, createSignal } from "solid-js";
 import type { EquipmentComboMetrics, EquipmentFilterMetrics } from "../types";
 import FilterBadges from "./FilterBadges";
 
 import { formatIntegration } from "../utils/format";
+import {
+  madZ,
+  bandForZ,
+  bandToCellClass,
+  type MetricBaseline,
+} from "../utils/frameQuality";
 
 function formatMetric(val: number | null, suffix = ""): string {
   if (val === null || val === undefined) return "\u2014";
@@ -11,6 +17,53 @@ function formatMetric(val: number | null, suffix = ""): string {
 
 function metricClass(val: number | null): string {
   return val !== null ? "text-theme-text-primary" : "text-theme-text-secondary";
+}
+
+// Catalog-wide reference for the combo-median tables: a MetricBaseline built from
+// the combo medians across every combo in the list (median of the combo medians;
+// mad = median(|x - median|); n = count of combos with a non-null value).
+interface ComboBaselines {
+  median_hfr: MetricBaseline;
+  median_eccentricity: MetricBaseline;
+  median_fwhm: MetricBaseline;
+}
+
+function median(values: number[]): number | null {
+  if (values.length === 0) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
+}
+
+function baselineOf(values: (number | null)[]): MetricBaseline {
+  const present = values.filter((v): v is number => v !== null && v !== undefined);
+  const med = median(present);
+  const madVal = med === null ? null : median(present.map((v) => Math.abs(v - med)));
+  return { median: med, mad: madVal, n: present.length };
+}
+
+function buildComboBaselines(combos: EquipmentComboMetrics[]): ComboBaselines {
+  return {
+    median_hfr: baselineOf(combos.map((c) => c.median_hfr)),
+    median_eccentricity: baselineOf(combos.map((c) => c.median_eccentricity)),
+    median_fwhm: baselineOf(combos.map((c) => c.median_fwhm)),
+  };
+}
+
+// All three metrics are higher-is-worse. Returns the color class plus a tooltip
+// describing the deviation in sigma; falls back to the neutral default class.
+function deviationCell(
+  val: number | null,
+  base: MetricBaseline,
+  label: string,
+): { class: string; title: string | undefined } {
+  if (val === null || val === undefined) {
+    return { class: "text-theme-text-secondary", title: undefined };
+  }
+  const z = madZ(val, base);
+  const cls = bandToCellClass(bandForZ(z));
+  const title = z === null ? undefined : `${label} ${z.toFixed(1)}\u03c3 vs catalog median`;
+  return { class: cls, title };
 }
 
 const FilterBreakdownRow: Component<{ row: EquipmentFilterMetrics }> = (props) => {
@@ -42,8 +95,11 @@ const FilterBreakdownRow: Component<{ row: EquipmentFilterMetrics }> = (props) =
   );
 };
 
-const ComboRow: Component<{ combo: EquipmentComboMetrics }> = (props) => {
+const ComboRow: Component<{ combo: EquipmentComboMetrics; baselines: ComboBaselines }> = (props) => {
   const [expanded, setExpanded] = createSignal(false);
+  const hfrCell = () => deviationCell(props.combo.median_hfr, props.baselines.median_hfr, "HFR");
+  const eccCell = () => deviationCell(props.combo.median_eccentricity, props.baselines.median_eccentricity, "Ecc");
+  const fwhmCell = () => deviationCell(props.combo.median_fwhm, props.baselines.median_fwhm, "FWHM");
   const dist = () => {
     const d: Record<string, number> = {};
     for (const f of props.combo.filter_breakdown) {
@@ -88,16 +144,16 @@ const ComboRow: Component<{ combo: EquipmentComboMetrics }> = (props) => {
         <td class="text-right text-theme-text-secondary py-1.5 px-2 tabular-nums">
           {formatIntegration(props.combo.total_integration_seconds)}
         </td>
-        <td class={`text-right py-1.5 px-2 tabular-nums ${metricClass(props.combo.median_hfr)}`}>
+        <td class={`text-right py-1.5 px-2 tabular-nums ${hfrCell().class}`} title={hfrCell().title}>
           {formatMetric(props.combo.median_hfr)}
         </td>
         <td class={`text-right py-1.5 px-2 tabular-nums ${metricClass(props.combo.best_hfr)}`}>
           {formatMetric(props.combo.best_hfr)}
         </td>
-        <td class={`text-right py-1.5 px-2 tabular-nums ${metricClass(props.combo.median_eccentricity)}`}>
+        <td class={`text-right py-1.5 px-2 tabular-nums ${eccCell().class}`} title={eccCell().title}>
           {formatMetric(props.combo.median_eccentricity)}
         </td>
-        <td class={`text-right py-1.5 px-2 tabular-nums ${metricClass(props.combo.median_fwhm)}`}>
+        <td class={`text-right py-1.5 px-2 tabular-nums ${fwhmCell().class}`} title={fwhmCell().title}>
           {formatMetric(props.combo.median_fwhm, "\u2033")}
         </td>
         <td class="py-1.5 px-2">
@@ -139,6 +195,7 @@ const ComboRow: Component<{ combo: EquipmentComboMetrics }> = (props) => {
 };
 
 const EquipmentPerformance: Component<{ combos: EquipmentComboMetrics[] }> = (props) => {
+  const baselines = createMemo(() => buildComboBaselines(props.combos));
   return (
     <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-4">
       <h3 class="text-theme-text-primary font-medium text-sm mb-3">Equipment Performance</h3>
@@ -162,7 +219,7 @@ const EquipmentPerformance: Component<{ combos: EquipmentComboMetrics[] }> = (pr
           </thead>
           <tbody>
             <For each={props.combos}>
-              {(combo) => <ComboRow combo={combo} />}
+              {(combo) => <ComboRow combo={combo} baselines={baselines()} />}
             </For>
           </tbody>
         </table>
