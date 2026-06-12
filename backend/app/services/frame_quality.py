@@ -92,3 +92,35 @@ def group_baselines(frames):
             }
         out[key] = metric_stats
     return out
+
+
+def apply_fallback(target_baselines, catalog_baselines):
+    """Substitute catalog-wide stats where a target group's metric is too sparse.
+
+    Per group, per metric: if the target stat's ``n < MIN_GROUP`` and a matching
+    catalog stat exists, use the catalog stat; otherwise keep the target stat.
+    Groups present only in the catalog are added as-is. The inputs are not
+    mutated.
+    """
+    out: dict[str, dict] = {}
+
+    for key, target_metrics in target_baselines.items():
+        catalog_metrics = catalog_baselines.get(key, {})
+        merged: dict[str, dict] = {}
+        for metric, target_stat in target_metrics.items():
+            catalog_stat = catalog_metrics.get(metric)
+            if (
+                target_stat.get("n", 0) < MIN_GROUP
+                and catalog_stat is not None
+            ):
+                merged[metric] = dict(catalog_stat)
+            else:
+                merged[metric] = dict(target_stat)
+        out[key] = merged
+
+    # Groups only present catalog-wide carry over unchanged.
+    for key, catalog_metrics in catalog_baselines.items():
+        if key not in out:
+            out[key] = {m: dict(s) for m, s in catalog_metrics.items()}
+
+    return out
