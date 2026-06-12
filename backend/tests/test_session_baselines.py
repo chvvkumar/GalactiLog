@@ -103,19 +103,20 @@ async def test_session_detail_returns_baselines():
     mock_cv_result = MagicMock()
     mock_cv_result.all.return_value = []
 
-    # target cross-session frames -> .all() of column rows
+    # catalog-wide frames -> .all() of column rows
     # columns: telescope, camera, filter_used, median_hfr, fwhm, eccentricity,
     #          detected_stars, adu_median, guiding_rms_arcsec
-    target_frame_rows = [
+    # Includes this target's two frames PLUS frames from OTHER targets/sessions
+    # that share the same telescope+camera+filter, so the catalog-wide rig
+    # baseline count exceeds this session's count.
+    catalog_frame_rows = [
+        # This session's own frames
         ("Esprit 150", "ZWO ASI2600MM", "Ha", 2.0, None, 0.30, None, None, None),
         ("Esprit 150", "ZWO ASI2600MM", "Ha", 2.4, None, 0.40, None, None, None),
-    ]
-    mock_target_frames_result = MagicMock()
-    mock_target_frames_result.all.return_value = target_frame_rows
-
-    # catalog-wide frames -> .all() of column rows
-    catalog_frame_rows = [
+        # Other targets / other sessions, same rig+filter
         ("Esprit 150", "ZWO ASI2600MM", "Ha", 2.1, None, 0.35, None, None, None),
+        ("Esprit 150", "ZWO ASI2600MM", "Ha", 2.2, None, 0.36, None, None, None),
+        ("Esprit 150", "ZWO ASI2600MM", "Ha", 2.3, None, 0.37, None, None, None),
     ]
     mock_catalog_frames_result = MagicMock()
     mock_catalog_frames_result.all.return_value = catalog_frame_rows
@@ -124,7 +125,7 @@ async def test_session_detail_returns_baselines():
         side_effect=[
             mock_img_result, mock_avg_result, mock_alias_result,
             mock_all_hfr_result, mock_note_result, mock_cv_result,
-            mock_target_frames_result, mock_catalog_frames_result,
+            mock_catalog_frames_result,
         ]
     )
 
@@ -153,9 +154,14 @@ async def test_session_detail_returns_baselines():
     assert sb["median_hfr"]["n"] == 2
     assert "mad" in sb["median_hfr"]
 
+    # rig_baselines is now catalog-wide: it includes frames from other
+    # targets / sessions sharing the same telescope+camera+filter, so its
+    # count exceeds the session-only count for the shared group.
     assert key in data["rig_baselines"]
     rb = data["rig_baselines"][key]
     assert "median_hfr" in rb
     assert "median" in rb["median_hfr"]
+    assert rb["median_hfr"]["n"] == 5
+    assert rb["median_hfr"]["n"] > sb["median_hfr"]["n"]
 
     app.dependency_overrides.clear()

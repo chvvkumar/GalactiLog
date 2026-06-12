@@ -44,28 +44,3 @@ def test_group_baselines_null_component_key():
                "detected_stars": None, "adu_median": None, "guiding_rms_arcsec": None}]
     out = group_baselines(frames)
     assert "|C|" in out
-
-
-def test_apply_fallback_substitutes_small_groups():
-    from app.services.frame_quality import apply_fallback
-    target = {"T|C|Ha": {"median_hfr": {"median": 2.0, "mad": 0.1, "n": 3}}}
-    catalog = {"T|C|Ha": {"median_hfr": {"median": 2.5, "mad": 0.3, "n": 50}}}
-    out = apply_fallback(target, catalog)
-    assert out["T|C|Ha"]["median_hfr"]["median"] == 2.5   # n=3 < 8 -> fallback
-    assert out["T|C|Ha"]["median_hfr"]["n"] == 50
-
-
-def test_apply_fallback_keeps_large_groups():
-    from app.services.frame_quality import apply_fallback
-    target = {"T|C|Ha": {"median_hfr": {"median": 2.0, "mad": 0.1, "n": 20}}}
-    catalog = {"T|C|Ha": {"median_hfr": {"median": 2.5, "mad": 0.3, "n": 50}}}
-    out = apply_fallback(target, catalog)
-    assert out["T|C|Ha"]["median_hfr"]["median"] == 2.0
-
-
-def test_apply_fallback_adds_catalog_only_groups():
-    from app.services.frame_quality import apply_fallback
-    target = {}
-    catalog = {"T|C|OIII": {"median_hfr": {"median": 2.5, "mad": 0.3, "n": 50}}}
-    out = apply_fallback(target, catalog)
-    assert out["T|C|OIII"]["median_hfr"]["median"] == 2.5
