@@ -35,6 +35,8 @@ class SessionSummary(BaseModel):
     integration_seconds: float
     frame_count: int
     filters_used: list[str]
+    median_hfr: float | None = None
+    median_eccentricity: float | None = None
 
 
 class FilterMedian(BaseModel):
@@ -233,6 +235,21 @@ class TargetDetailResponse(BaseModel):
     user_defined: bool = False
 
 
+class MetricBaseline(BaseModel):
+    median: float | None = None
+    mad: float | None = None
+    n: int = 0
+
+
+class GroupBaseline(BaseModel):
+    median_hfr: MetricBaseline
+    fwhm: MetricBaseline
+    eccentricity: MetricBaseline
+    detected_stars: MetricBaseline
+    adu_median: MetricBaseline
+    guiding_rms_arcsec: MetricBaseline
+
+
 class SessionDetailResponse(BaseModel):
     target_name: str
     session_date: str
@@ -273,6 +290,8 @@ class SessionDetailResponse(BaseModel):
     notes: str | None = None
     rigs: list[RigDetail] = []
     custom_values: list[dict] | None = None
+    session_baselines: dict[str, GroupBaseline] = {}
+    rig_baselines: dict[str, GroupBaseline] = {}
 
 
 class EquipmentOption(BaseModel):

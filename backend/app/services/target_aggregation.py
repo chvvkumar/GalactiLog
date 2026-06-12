@@ -31,6 +31,7 @@ from app.schemas.target import (
     TargetSearchResultFuzzy, ObjectTypeCount, RigDetail,
 )
 from app.schemas.export import ExportResponse, ExportFilterRow, ExportEquipment, ExportCalibration
+from app.services import frame_quality
 
 logger = logging.getLogger(__name__)
 
@@ -1324,6 +1325,8 @@ async def list_targets_aggregated(
                    i.filter_used,
                    i.camera,
                    i.telescope,
+                   i.median_hfr,
+                   i.eccentricity,
                    CASE WHEN i.session_date IS NULL THEN 'unknown'
                         ELSE CAST(i.session_date AS VARCHAR) END AS session_key
             FROM images i LEFT JOIN targets t ON i.resolved_target_id = t.id
@@ -1339,7 +1342,11 @@ async def list_targets_aggregated(
             SELECT target_key, session_key,
                    sum(exp) AS session_exp,
                    count(*) AS frame_count,
-                   array_agg(DISTINCT filter_used) FILTER (WHERE filter_used IS NOT NULL) AS session_filters
+                   array_agg(DISTINCT filter_used) FILTER (WHERE filter_used IS NOT NULL) AS session_filters,
+                   percentile_cont(0.5) WITHIN GROUP (ORDER BY median_hfr)
+                       FILTER (WHERE median_hfr IS NOT NULL) AS session_median_hfr,
+                   percentile_cont(0.5) WITHIN GROUP (ORDER BY eccentricity)
+                       FILTER (WHERE eccentricity IS NOT NULL) AS session_median_ecc
             FROM frames
             GROUP BY target_key, session_key
         ),
@@ -1367,7 +1374,9 @@ async def list_targets_aggregated(
                        'session_key', session_key,
                        'session_exp', session_exp,
                        'frame_count', frame_count,
-                       'filters', coalesce(session_filters, ARRAY[]::varchar[]))) AS sessions
+                       'filters', coalesce(session_filters, ARRAY[]::varchar[]),
+                       'median_hfr', session_median_hfr,
+                       'median_eccentricity', session_median_ecc)) AS sessions
             FROM per_session
             GROUP BY target_key
         )
@@ -1428,10 +1437,21 @@ async def list_targets_aggregated(
                     "integration_seconds": 0,
                     "frame_count": 0,
                     "filters_set": set(),
+                    "median_hfr": None,
+                    "median_eccentricity": None,
                 }
             s = sessions_detail[tk][date_key]
             s["integration_seconds"] += float(sess["session_exp"])
             s["frame_count"] += int(sess["frame_count"])
+            # Per-session median sharpness/roundness, computed SQL-side over the
+            # session's frames (nulls ignored). Each (target_key, session_key)
+            # appears once per detail row, so a direct set is correct.
+            mh = sess.get("median_hfr")
+            if mh is not None:
+                s["median_hfr"] = float(mh)
+            me = sess.get("median_eccentricity")
+            if me is not None:
+                s["median_eccentricity"] = float(me)
             for raw_filter in (sess.get("filters") or []):
                 f = normalize_filter(raw_filter, filter_map)
                 if f:
@@ -1562,6 +1582,8 @@ async def list_targets_aggregated(
                 integration_seconds=s["integration_seconds"],
                 frame_count=s["frame_count"],
                 filters_used=sorted(s["filters_set"]),
+                median_hfr=s["median_hfr"],
+                median_eccentricity=s["median_eccentricity"],
             )
             for s in sessions_list
         ]
@@ -1902,6 +1924,47 @@ async def get_session_detail(target_id: str, date: str, session: AsyncSession) -
                 for slug, sd, rl, val in cv_rows
             ]
 
+    # --- Frame-quality baselines (MAD-based, computed on the fly) ---
+    # Group keys use normalized telescope/camera/filter so they match the
+    # frontend `groupKey(frame)` built from the same normalized values.
+    def _baseline_frame(tel, cam, filt, hfr, fwhm_v, ecc, stars, adu_med, guide):
+        return {
+            "telescope": normalize_equipment(tel, tel_map),
+            "camera": normalize_equipment(cam, cam_map),
+            "filter_used": normalize_filter(filt, filter_map),
+            "median_hfr": hfr,
+            "fwhm": fwhm_v,
+            "eccentricity": ecc,
+            "detected_stars": stars,
+            "adu_median": adu_med,
+            "guiding_rms_arcsec": guide,
+        }
+
+    session_frame_dicts = [
+        _baseline_frame(
+            img.telescope, img.camera, img.filter_used,
+            img.median_hfr, img.fwhm, img.eccentricity,
+            img.detected_stars, img.adu_median, img.guiding_rms_arcsec,
+        )
+        for img in images
+    ]
+    session_baselines = frame_quality.group_baselines(session_frame_dicts)
+
+    # Catalog-wide frames: every LIGHT frame across all targets and sessions,
+    # grouped by telescope|camera|filter. This is the "This rig overall"
+    # baseline. It is target-independent, which makes the per-frame
+    # "This session / This rig overall" toggle meaningful even for
+    # single-session targets. Select only the columns the baseline needs.
+    metric_cols = (
+        Image.telescope, Image.camera, Image.filter_used,
+        Image.median_hfr, Image.fwhm, Image.eccentricity,
+        Image.detected_stars, Image.adu_median, Image.guiding_rms_arcsec,
+    )
+    catalog_frames_q = select(*metric_cols).where(Image.image_type == "LIGHT")
+    catalog_frame_rows = (await session.execute(catalog_frames_q)).all()
+    catalog_frame_dicts = [_baseline_frame(*row) for row in catalog_frame_rows]
+    rig_baselines = frame_quality.group_baselines(catalog_frame_dicts)
+
     return SessionDetailResponse(
         target_name=target_name,
         session_date=date,
@@ -1945,4 +2008,6 @@ async def get_session_detail(target_id: str, date: str, session: AsyncSession) -
         notes=session_note,
         rigs=rig_details,
         custom_values=custom_values_list,
+        session_baselines=session_baselines,
+        rig_baselines=rig_baselines,
     )

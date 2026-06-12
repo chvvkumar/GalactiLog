@@ -15,6 +15,7 @@ from app.api.deps import get_current_user
 from app.models.user import User
 from app.models import Image, Target
 from app.services.normalization import load_alias_maps, normalize_filter, normalize_equipment
+from app.services import frame_quality
 from sqlalchemy import cast
 from sqlalchemy.types import Date
 
@@ -283,6 +284,14 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
             func.min(hfr_nz).label("best_hfr"),
             func.percentile_cont(0.5).within_group(ecc_nz).label("med_ecc"),
             func.percentile_cont(0.5).within_group(fwhm_nz).label("med_fwhm"),
+            # Raw non-zero metric values per raw group, so MAD can be computed in
+            # Python over the normalized (telescope, camera) combo. Postgres has
+            # no direct MAD aggregate, and the median needed for the absolute
+            # deviation is only known after the normalized regrouping merges
+            # filter sub-rows. NULLs are dropped in post-processing.
+            func.array_agg(hfr_nz).label("hfr_vals"),
+            func.array_agg(ecc_nz).label("ecc_vals"),
+            func.array_agg(fwhm_nz).label("fwhm_vals"),
         ).where(
             Image.image_type == "LIGHT",
             Image.telescope.isnot(None),
@@ -496,6 +505,11 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
                 "filter_rows": {},
                 "raw_telescopes": set(),
                 "raw_cameras": set(),
+                # Raw per-frame metric values across all filter sub-rows, used
+                # to compute a robust MAD over the normalized combo.
+                "raw_hfr": [],
+                "raw_ecc": [],
+                "raw_fwhm": [],
             }
 
         combo_data[key]["raw_telescopes"].add(r.telescope)
@@ -504,6 +518,14 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
         cd = combo_data[key]
         cd["frame_count"] += r.frame_count
         cd["total_seconds"] += float(r.total_seconds)
+
+        # array_agg returns NULLs for zero/absent metrics; drop them.
+        if getattr(r, "hfr_vals", None):
+            cd["raw_hfr"].extend(v for v in r.hfr_vals if v is not None)
+        if getattr(r, "ecc_vals", None):
+            cd["raw_ecc"].extend(v for v in r.ecc_vals if v is not None)
+        if getattr(r, "fwhm_vals", None):
+            cd["raw_fwhm"].extend(v for v in r.fwhm_vals if v is not None)
 
         if r.med_hfr is not None:
             cd["hfr_vals"].append((r.med_hfr, r.frame_count))
@@ -561,6 +583,10 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
     def safe_round(v: float | None) -> float | None:
         return round(float(v), 2) if v is not None else None
 
+    def combo_mad(values: list[float]) -> float | None:
+        m = frame_quality.mad(values)
+        return round(float(m), 3) if m is not None else None
+
     def build_filter_metrics(filter_rows_dict: dict) -> list[EquipmentFilterMetrics]:
         result = []
         for fname, fr in sorted(filter_rows_dict.items(), key=lambda x: x[1]["frame_count"], reverse=True):
@@ -586,6 +612,9 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
             best_hfr=safe_round(cd["best_hfr"]),
             median_eccentricity=weighted_median_approx(cd["ecc_vals"]),
             median_fwhm=weighted_median_approx(cd["fwhm_vals"]),
+            mad_hfr=combo_mad(cd["raw_hfr"]),
+            mad_eccentricity=combo_mad(cd["raw_ecc"]),
+            mad_fwhm=combo_mad(cd["raw_fwhm"]),
             grouped=len(cd["raw_telescopes"]) > 1 or len(cd["raw_cameras"]) > 1,
             filters=sorted(cd["filters"]),
             filter_breakdown=build_filter_metrics(cd["filter_rows"]),

@@ -533,7 +533,11 @@ const ActivityLogTab: Component = () => {
                   </button>
                 </Show>
 
-                <a href={downloadUrl()} class={ACTION_BTN_CLASS}>
+                <a
+                  href={downloadUrl()}
+                  download="galactilog-app.log"
+                  class={ACTION_BTN_CLASS}
+                >
                   Download
                 </a>
               </div>
