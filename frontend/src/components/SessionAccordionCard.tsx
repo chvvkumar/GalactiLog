@@ -466,44 +466,48 @@ const SessionAccordionCard: Component<{
       <tbody>
         <For each={sorted()}>
           {(frame, i) => {
-            const b = baselineFor(frame, telescope, camera);
-            const sb = sessionBaselineFor(frame, telescope, camera);
-            const mode = baselineMode() === "session" ? "session" : "rig";
-            const zHfr = madZ(frame.median_hfr, b?.median_hfr);
-            const zFwhm = madZ(frame.fwhm, b?.fwhm);
-            const zEcc = madZ(frame.eccentricity, b?.eccentricity);
-            const zStars = madZ(frame.detected_stars, sb?.detected_stars, true);
-            const zAdu = madZ(frame.adu_median, sb?.adu_median);
-            const rowClass = scoreToRowClass(frameScore(frame, telescope, camera));
+            // Mode-dependent derivations must be thunks so the JSX attribute
+            // effects re-track baselineMode() when the comparison toggle flips.
+            // <For> does not re-run this body on signal changes, so a plain const
+            // would freeze the color/tooltip at row-creation time.
+            const b = () => baselineFor(frame, telescope, camera);
+            const sb = () => sessionBaselineFor(frame, telescope, camera);
+            const mode = () => (baselineMode() === "session" ? "session" : "rig");
+            const zHfr = () => madZ(frame.median_hfr, b()?.median_hfr);
+            const zFwhm = () => madZ(frame.fwhm, b()?.fwhm);
+            const zEcc = () => madZ(frame.eccentricity, b()?.eccentricity);
+            const zStars = () => madZ(frame.detected_stars, sb()?.detected_stars, true);
+            const zAdu = () => madZ(frame.adu_median, sb()?.adu_median);
+            const rowClass = () => scoreToRowClass(frameScore(frame, telescope, camera));
             return (
-            <tr class={`border-b border-theme-border/30 hover:bg-theme-hover transition-colors duration-100 ${rowClass}`}>
+            <tr class={`border-b border-theme-border/30 hover:bg-theme-hover transition-colors duration-100 ${rowClass()}`}>
               <td class="py-1 px-2 text-theme-text-primary">{formatTimeUtil(frame.timestamp, settingsCtx.timezone(), settingsCtx.use24hTime())}</td>
               <td class="py-1 px-2 text-theme-text-primary text-center">{frame.filter_used ?? "—"}</td>
               <td class="py-1 px-2 text-theme-text-primary text-right tabular-nums">{frame.exposure_time ?? "—"}s</td>
               <Show when={visible("quality", "hfr")}>
                 <td
-                  class={`py-1 px-2 text-right tabular-nums ${bandToCellClass(bandForZ(zHfr))}`}
-                  title={cellTooltip("HFR", frame.median_hfr, zHfr, b?.median_hfr.median, mode, (v) => v.toFixed(2))}
+                  class={`py-1 px-2 text-right tabular-nums ${bandToCellClass(bandForZ(zHfr()))}`}
+                  title={cellTooltip("HFR", frame.median_hfr, zHfr(), b()?.median_hfr.median, mode(), (v) => v.toFixed(2))}
                 >
                   {frame.median_hfr?.toFixed(2) ?? "\u2014"}
                 </td>
               </Show>
               <Show when={visible("quality", "eccentricity")}>
                 <td
-                  class={`py-1 px-2 text-right tabular-nums ${bandToCellClass(bandForZ(zEcc))}`}
-                  title={cellTooltip("Ecc", frame.eccentricity, zEcc, b?.eccentricity.median, mode, (v) => v.toFixed(2))}
+                  class={`py-1 px-2 text-right tabular-nums ${bandToCellClass(bandForZ(zEcc()))}`}
+                  title={cellTooltip("Ecc", frame.eccentricity, zEcc(), b()?.eccentricity.median, mode(), (v) => v.toFixed(2))}
                 >{frame.eccentricity?.toFixed(2) ?? "\u2014"}</td>
               </Show>
               <Show when={visible("quality", "fwhm")}>
                 <td
-                  class={`py-1 px-2 text-right tabular-nums ${bandToCellClass(bandForZ(zFwhm))}`}
-                  title={cellTooltip("FWHM", frame.fwhm, zFwhm, b?.fwhm.median, mode, (v) => v.toFixed(2))}
+                  class={`py-1 px-2 text-right tabular-nums ${bandToCellClass(bandForZ(zFwhm()))}`}
+                  title={cellTooltip("FWHM", frame.fwhm, zFwhm(), b()?.fwhm.median, mode(), (v) => v.toFixed(2))}
                 >{frame.fwhm?.toFixed(2) ?? "\u2014"}</td>
               </Show>
               <Show when={visible("quality", "detected_stars")}>
                 <td
-                  class={`py-1 px-2 text-right tabular-nums ${bandToCellClass(bandForZ(zStars))}`}
-                  title={cellTooltip("Stars", frame.detected_stars, zStars, sb?.detected_stars.median, "session", (v) => v.toFixed(0))}
+                  class={`py-1 px-2 text-right tabular-nums ${bandToCellClass(bandForZ(zStars()))}`}
+                  title={cellTooltip("Stars", frame.detected_stars, zStars(), sb()?.detected_stars.median, "session", (v) => v.toFixed(0))}
                 >{frame.detected_stars ?? "\u2014"}</td>
               </Show>
               <Show when={visible("guiding", "rms_total")}>
@@ -526,8 +530,8 @@ const SessionAccordionCard: Component<{
               </Show>
               <Show when={visible("adu", "median")}>
                 <td
-                  class={`py-1 px-2 text-right tabular-nums ${bandToCellClass(bandForZ(zAdu))}`}
-                  title={cellTooltip("ADU Med", frame.adu_median, zAdu, sb?.adu_median.median, "session", (v) => v.toFixed(2))}
+                  class={`py-1 px-2 text-right tabular-nums ${bandToCellClass(bandForZ(zAdu()))}`}
+                  title={cellTooltip("ADU Med", frame.adu_median, zAdu(), sb()?.adu_median.median, "session", (v) => v.toFixed(2))}
                 >{frame.adu_median?.toFixed(2) ?? "\u2014"}</td>
               </Show>
               <Show when={visible("adu", "stdev")}>
