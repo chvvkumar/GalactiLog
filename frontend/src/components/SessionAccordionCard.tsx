@@ -14,6 +14,15 @@ import { ClickableFilePath } from "./ClickableFilePath";
 
 import { formatIntegration } from "../utils/format";
 import { showToast } from "./Toast";
+import {
+  madZ,
+  bandForZ,
+  combinedScore,
+  bandToCellClass,
+  scoreToRowClass,
+  type GroupBaseline,
+  type QualityBand,
+} from "../utils/frameQuality";
 
 const INSIGHT_STYLES: Record<string, string> = {
   good: "text-theme-success",
@@ -59,6 +68,7 @@ const SessionAccordionCard: Component<{
   const [showSummary, setShowSummary] = createSignal(true);
   const [showInsights, setShowInsights] = createSignal(true);
   const [showFrames, setShowFrames] = createSignal(false);
+  const [baselineMode, setBaselineMode] = createSignal<"session" | "rig">("session");
   const [sortColumn, setSortColumn] = createSignal<keyof FrameRecord>("timestamp");
   const [sortAsc, setSortAsc] = createSignal(true);
   const [csvCopiedRig, setCsvCopiedRig] = createSignal<string | null>(null);
@@ -247,23 +257,113 @@ const SessionAccordionCard: Component<{
     }
   };
 
-  const isHfrOutlier = (frame: FrameRecord, medianHfr?: number | null): boolean => {
-    const med = medianHfr ?? props.detail?.median_hfr;
-    if (!med || !frame.median_hfr) return false;
-    return frame.median_hfr > med * 1.5;
+  // Build the train+filter group key matching the backend: "telescope|camera|filter".
+  // The frame record itself does not carry telescope/camera, so they are supplied
+  // from the rig (multi-rig) or the session equipment (single-rig).
+  const frameGroupKey = (frame: FrameRecord, telescope?: string | null, camera?: string | null): string =>
+    `${telescope ?? ""}|${camera ?? ""}|${frame.filter_used ?? ""}`;
+
+  // Resolve the active baseline group for a frame. The selected mode picks the
+  // sharpness/roundness baselines (session vs rig), but cause-metrics
+  // (adu_median, detected_stars, guiding_rms_arcsec) are ALWAYS session-scoped
+  // because they drift nightly with sky conditions.
+  const baselineFor = (
+    frame: FrameRecord,
+    telescope?: string | null,
+    camera?: string | null,
+  ): GroupBaseline | undefined => {
+    const key = frameGroupKey(frame, telescope, camera);
+    const maps = props.detail;
+    if (!maps) return undefined;
+    return baselineMode() === "session" ? maps.session_baselines[key] : maps.rig_baselines[key];
   };
 
-  const isEccOutlier = (frame: FrameRecord, medianEcc?: number | null): boolean => {
-    const med = medianEcc ?? props.detail?.median_eccentricity;
-    if (!med || !frame.eccentricity) return false;
-    return frame.eccentricity > med * 1.5;
+  const sessionBaselineFor = (
+    frame: FrameRecord,
+    telescope?: string | null,
+    camera?: string | null,
+  ): GroupBaseline | undefined => {
+    const key = frameGroupKey(frame, telescope, camera);
+    return props.detail?.session_baselines[key];
   };
 
-  const isOutlier = (frame: FrameRecord, medianHfr?: number | null, medianEcc?: number | null): boolean => {
-    return isHfrOutlier(frame, medianHfr) || isEccOutlier(frame, medianEcc);
+  // Tooltip text describing a colored cell: value, direction, baseline median,
+  // active mode, and the z to one decimal. Returns "" when the cell is neutral
+  // (no usable baseline), so no misleading tooltip is shown.
+  const cellTooltip = (
+    label: string,
+    value: number | null | undefined,
+    z: number | null,
+    median: number | null | undefined,
+    mode: string,
+    formatter: (v: number) => string,
+  ): string => {
+    if (z == null || value == null || median == null) return "";
+    const direction = z > 0 ? "worse" : "better";
+    return `${label} ${formatter(value)} — ${Math.abs(z).toFixed(1)}σ ${direction} than ${mode} median ${formatter(median)}`;
   };
 
-  const renderFrameTable = (frames: FrameRecord[], medianHfr?: number | null, medianEcc?: number | null) => {
+  // Per-frame combined 0-100 score from signal (stars, higher-is-better),
+  // sharpness (hfr) and roundness (eccentricity) against the active baseline.
+  const frameScore = (
+    frame: FrameRecord,
+    telescope?: string | null,
+    camera?: string | null,
+  ): number | null => {
+    const b = baselineFor(frame, telescope, camera);
+    const sb = sessionBaselineFor(frame, telescope, camera);
+    const zSignal = madZ(frame.detected_stars, sb?.detected_stars, true);
+    const zSharp = madZ(frame.median_hfr, b?.median_hfr);
+    const zRound = madZ(frame.eccentricity, b?.eccentricity);
+    return combinedScore(zSignal, zSharp, zRound);
+  };
+
+  // Resolve the optical train (telescope/camera) for a frame. Multi-rig sessions
+  // carry it on the rig; single-rig falls back to the session equipment.
+  const equipmentForFrame = (frame: FrameRecord): { telescope: string | null; camera: string | null } => {
+    const d = props.detail;
+    if (!d) return { telescope: null, camera: null };
+    if (frame.rig) {
+      const rig = d.rigs.find((r) => r.rig_label === frame.rig);
+      if (rig) return { telescope: rig.telescope, camera: rig.camera };
+    }
+    return { telescope: d.equipment.telescope, camera: d.equipment.camera };
+  };
+
+  // Band the per-frame combined score (mirrors scoreToRowClass thresholds) for
+  // the session distribution strip.
+  const scoreBand = (score: number | null): QualityBand | null => {
+    if (score == null) return null;
+    if (score >= 60) return "better";
+    if (score >= 45) return "neutral";
+    if (score >= 30) return "watch";
+    return "reject";
+  };
+
+  // Session-wide quality distribution + mean score across all frames, recomputed
+  // when the baseline mode flips.
+  const qualitySummary = createMemo(() => {
+    const frames = props.detail?.frames ?? [];
+    let good = 0, watch = 0, reject = 0, scored = 0, sum = 0;
+    for (const frame of frames) {
+      const eq = equipmentForFrame(frame);
+      const score = frameScore(frame, eq.telescope, eq.camera);
+      if (score == null) continue;
+      scored += 1;
+      sum += score;
+      const band = scoreBand(score);
+      if (band === "better" || band === "neutral") good += 1;
+      else if (band === "watch") watch += 1;
+      else if (band === "reject") reject += 1;
+    }
+    return { good, watch, reject, scored, mean: scored > 0 ? sum / scored : null };
+  });
+
+  const renderFrameTable = (
+    frames: FrameRecord[],
+    telescope?: string | null,
+    camera?: string | null,
+  ) => {
     const sorted = createMemo(() => sortedFrames(frames));
     const previewFiles = createMemo(() =>
       sorted().map((f) => ({
@@ -364,24 +464,46 @@ const SessionAccordionCard: Component<{
       </thead>
       <tbody>
         <For each={sorted()}>
-          {(frame, i) => (
-            <tr class={`border-b border-theme-border/30 hover:bg-theme-hover transition-colors duration-100 ${isOutlier(frame, medianHfr, medianEcc) ? "bg-theme-error/20" : ""}`}>
+          {(frame, i) => {
+            const b = baselineFor(frame, telescope, camera);
+            const sb = sessionBaselineFor(frame, telescope, camera);
+            const mode = baselineMode() === "session" ? "session" : "rig";
+            const zHfr = madZ(frame.median_hfr, b?.median_hfr);
+            const zFwhm = madZ(frame.fwhm, b?.fwhm);
+            const zEcc = madZ(frame.eccentricity, b?.eccentricity);
+            const zStars = madZ(frame.detected_stars, sb?.detected_stars, true);
+            const zAdu = madZ(frame.adu_median, sb?.adu_median);
+            const rowClass = scoreToRowClass(frameScore(frame, telescope, camera));
+            return (
+            <tr class={`border-b border-theme-border/30 hover:bg-theme-hover transition-colors duration-100 ${rowClass}`}>
               <td class="py-1 px-2 text-theme-text-primary">{formatTimeUtil(frame.timestamp, settingsCtx.timezone(), settingsCtx.use24hTime())}</td>
               <td class="py-1 px-2 text-theme-text-primary text-center">{frame.filter_used ?? "—"}</td>
               <td class="py-1 px-2 text-theme-text-primary text-right tabular-nums">{frame.exposure_time ?? "—"}s</td>
               <Show when={visible("quality", "hfr")}>
-                <td class={`py-1 px-2 text-right tabular-nums ${isHfrOutlier(frame, medianHfr) ? "text-theme-error" : "text-theme-text-primary"}`}>
+                <td
+                  class={`py-1 px-2 text-right tabular-nums ${bandToCellClass(bandForZ(zHfr))}`}
+                  title={cellTooltip("HFR", frame.median_hfr, zHfr, b?.median_hfr.median, mode, (v) => v.toFixed(2))}
+                >
                   {frame.median_hfr?.toFixed(2) ?? "\u2014"}
                 </td>
               </Show>
               <Show when={visible("quality", "eccentricity")}>
-                <td class={`py-1 px-2 text-right tabular-nums ${isEccOutlier(frame, medianEcc) ? "text-theme-error" : "text-theme-text-primary"}`}>{frame.eccentricity?.toFixed(2) ?? "\u2014"}</td>
+                <td
+                  class={`py-1 px-2 text-right tabular-nums ${bandToCellClass(bandForZ(zEcc))}`}
+                  title={cellTooltip("Ecc", frame.eccentricity, zEcc, b?.eccentricity.median, mode, (v) => v.toFixed(2))}
+                >{frame.eccentricity?.toFixed(2) ?? "\u2014"}</td>
               </Show>
               <Show when={visible("quality", "fwhm")}>
-                <td class="py-1 px-2 text-theme-text-primary text-right tabular-nums">{frame.fwhm?.toFixed(2) ?? "\u2014"}</td>
+                <td
+                  class={`py-1 px-2 text-right tabular-nums ${bandToCellClass(bandForZ(zFwhm))}`}
+                  title={cellTooltip("FWHM", frame.fwhm, zFwhm, b?.fwhm.median, mode, (v) => v.toFixed(2))}
+                >{frame.fwhm?.toFixed(2) ?? "\u2014"}</td>
               </Show>
               <Show when={visible("quality", "detected_stars")}>
-                <td class="py-1 px-2 text-theme-text-primary text-right tabular-nums">{frame.detected_stars ?? "\u2014"}</td>
+                <td
+                  class={`py-1 px-2 text-right tabular-nums ${bandToCellClass(bandForZ(zStars))}`}
+                  title={cellTooltip("Stars", frame.detected_stars, zStars, sb?.detected_stars.median, "session", (v) => v.toFixed(0))}
+                >{frame.detected_stars ?? "\u2014"}</td>
               </Show>
               <Show when={visible("guiding", "rms_total")}>
                 <td class="py-1 px-2 text-theme-text-primary text-right">
@@ -402,7 +524,10 @@ const SessionAccordionCard: Component<{
                 <td class="py-1 px-2 text-theme-text-primary text-right tabular-nums">{frame.adu_mean?.toFixed(2) ?? "\u2014"}</td>
               </Show>
               <Show when={visible("adu", "median")}>
-                <td class="py-1 px-2 text-theme-text-primary text-right tabular-nums">{frame.adu_median?.toFixed(2) ?? "\u2014"}</td>
+                <td
+                  class={`py-1 px-2 text-right tabular-nums ${bandToCellClass(bandForZ(zAdu))}`}
+                  title={cellTooltip("ADU Med", frame.adu_median, zAdu, sb?.adu_median.median, "session", (v) => v.toFixed(2))}
+                >{frame.adu_median?.toFixed(2) ?? "\u2014"}</td>
               </Show>
               <Show when={visible("adu", "stdev")}>
                 <td class="py-1 px-2 text-theme-text-primary text-right tabular-nums">{frame.adu_stdev?.toFixed(2) ?? "\u2014"}</td>
@@ -478,7 +603,8 @@ const SessionAccordionCard: Component<{
                 />
               </td>
             </tr>
-          )}
+            );
+          }}
         </For>
       </tbody>
     </table>
@@ -948,9 +1074,58 @@ const SessionAccordionCard: Component<{
                   <div class={`grid transition-[grid-template-rows] duration-200 ${showFrames() ? "grid-rows-[1fr]" : "grid-rows-[0fr]"}`}>
                     <div class="overflow-hidden">
                       <div class="px-3 pb-3">
+                      {/* Quality grading controls + summary */}
+                      <div class="flex flex-wrap items-center gap-x-4 gap-y-1.5 mb-2 text-tiny">
+                        <div class="flex items-center gap-1.5">
+                          <span class="text-theme-text-tertiary">Compare to:</span>
+                          <div class="inline-flex rounded border border-theme-border overflow-hidden">
+                            <button
+                              class="px-2 py-0.5 transition-colors cursor-pointer"
+                              classList={{
+                                "bg-theme-accent/20 text-theme-accent font-semibold": baselineMode() === "session",
+                                "text-theme-text-tertiary hover:text-theme-text-primary": baselineMode() !== "session",
+                              }}
+                              onClick={() => setBaselineMode("session")}
+                            >
+                              This session
+                            </button>
+                            <button
+                              class="px-2 py-0.5 transition-colors cursor-pointer border-l border-theme-border"
+                              classList={{
+                                "bg-theme-accent/20 text-theme-accent font-semibold": baselineMode() === "rig",
+                                "text-theme-text-tertiary hover:text-theme-text-primary": baselineMode() !== "rig",
+                              }}
+                              onClick={() => setBaselineMode("rig")}
+                            >
+                              This rig overall
+                            </button>
+                          </div>
+                        </div>
+                        <Show when={qualitySummary().scored > 0}>
+                          <div class="flex items-center gap-2 text-theme-text-secondary">
+                            <span class="text-theme-success">{qualitySummary().good} good</span>
+                            <span class="text-theme-text-tertiary">·</span>
+                            <span class="text-theme-warning">{qualitySummary().watch} watch</span>
+                            <span class="text-theme-text-tertiary">·</span>
+                            <span class="text-theme-error">{qualitySummary().reject} reject</span>
+                            <Show when={qualitySummary().mean !== null}>
+                              <span class="text-theme-text-tertiary">·</span>
+                              <span class="text-theme-text-secondary">mean score {qualitySummary().mean!.toFixed(0)}</span>
+                            </Show>
+                          </div>
+                        </Show>
+                      </div>
+                      {/* Legend + advisory */}
+                      <div class="flex flex-wrap items-center gap-x-3 gap-y-0.5 mb-2 text-tiny text-theme-text-tertiary">
+                        <span class="flex items-center gap-1"><span class="text-theme-success">●</span> better</span>
+                        <span class="flex items-center gap-1"><span class="text-theme-text-primary">●</span> neutral</span>
+                        <span class="flex items-center gap-1"><span class="text-theme-warning">●</span> watch</span>
+                        <span class="flex items-center gap-1"><span class="text-theme-error">●</span> reject</span>
+                        <span class="italic">Advisory only; no frames are deleted or hidden.</span>
+                      </div>
                       <Show when={isMultiRig()} fallback={
                         <div class="overflow-x-auto max-h-[600px] overflow-y-auto">
-                          {renderFrameTable(props.detail!.frames, props.detail!.median_hfr, props.detail!.median_eccentricity)}
+                          {renderFrameTable(props.detail!.frames, props.detail!.equipment.telescope, props.detail!.equipment.camera)}
                         </div>
                       }>
                         <For each={props.detail!.rigs}>
@@ -964,7 +1139,7 @@ const SessionAccordionCard: Component<{
                                   <span class="text-tiny text-theme-text-tertiary">{rig.frame_count} frames</span>
                                 </div>
                                 <div class="overflow-x-auto max-h-[600px] overflow-y-auto">
-                                  {renderFrameTable(rig.frames, rig.median_hfr, rig.median_eccentricity)}
+                                  {renderFrameTable(rig.frames, rig.telescope, rig.camera)}
                                 </div>
                               </div>
                             </Show>
