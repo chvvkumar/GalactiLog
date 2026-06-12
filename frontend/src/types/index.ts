@@ -1,3 +1,5 @@
+import type { Baselines } from "../utils/frameQuality";
+
 // === Target Aggregation ===
 
 export interface SessionSummary {
@@ -85,6 +87,8 @@ export interface SessionDetail {
   notes: string | null;
   rigs: RigDetail[];
   custom_values?: CustomColumnValue[] | null;
+  session_baselines: Baselines;
+  rig_baselines: Baselines;
 }
 
 // === Target Detail (Deep Dive Page) ===
@@ -528,6 +532,9 @@ export interface EquipmentComboMetrics {
   best_hfr: number | null;
   median_eccentricity: number | null;
   median_fwhm: number | null;
+  mad_hfr: number | null;
+  mad_eccentricity: number | null;
+  mad_fwhm: number | null;
   grouped: boolean;
   filters: string[];
   filter_breakdown: EquipmentFilterMetrics[];
