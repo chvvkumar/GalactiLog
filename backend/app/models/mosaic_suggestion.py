@@ -20,3 +20,12 @@ class MosaicSuggestion(Base):
     session_dates: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    # Name+position hybrid detection metadata (migration 0010).
+    # confidence: 'high' | 'low'; discovery_source: 'name' | 'position' | 'both'.
+    confidence: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    discovery_source: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    # geometry: {panels: [{target_id,label,ra,dec}], pitches: [arcmin], fov_arcmin}
+    geometry: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # flags: array of human-readable low-confidence reasons.
+    flags: Mapped[list | None] = mapped_column(JSONB, nullable=True)

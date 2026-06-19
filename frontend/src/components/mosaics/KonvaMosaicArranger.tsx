@@ -26,9 +26,28 @@ const DELTA_GREEN = "rgba(34,197,94,0.85)";
 const DELTA_AMBER = "rgba(245,158,11,0.85)";
 const DELTA_RED = "rgba(239,68,68,0.85)";
 
+// ── Preview-mode panel shape ─────────────────────────────────────────────
+// Minimal panel data for rendering candidate tiles for a mosaic that does
+// not yet exist in the DB (e.g. inside a detection-suggestion card). No
+// persisted panel_id; identity is synthesized from target_id + panel_label.
+export interface PreviewPanel {
+  target_id: string;
+  panel_label: string;
+  ra?: number | null;
+  dec?: number | null;
+  thumbnail_url?: string | null;
+  total_integration_seconds?: number | null;
+  rotation?: number | null;
+  flip_h?: boolean | null;
+}
+
+// Panels accepted by the arranger: persisted PanelStats (normal mode) or
+// PreviewPanel candidates (preview mode).
+export type ArrangerPanel = PanelStats | PreviewPanel;
+
 // ── Props ──────────────────────────────────────────────────────────────
 export interface KonvaMosaicArrangerProps {
-  panels: PanelStats[];
+  panels: ArrangerPanel[];
   rotationAngle: number;
   pixelCoords: boolean;
   availableFilters: string[];
@@ -36,7 +55,8 @@ export interface KonvaMosaicArrangerProps {
   onFilterChange: (filter: string) => void;
   filterLoading: boolean;
   thumbnailOverrides: Record<string, string | null> | null;
-  onSave: (
+  // Optional in preview mode: never invoked when previewMode is true.
+  onSave?: (
     panels: Array<{
       panel_id: string;
       grid_row: number;
@@ -46,8 +66,47 @@ export interface KonvaMosaicArrangerProps {
     }>,
     rotationAngle: number,
   ) => void | Promise<void>;
-  onPixelCoordsConverted: () => void;
+  onPixelCoordsConverted?: () => void;
+  // When true: arrangement is held in local state only, no API persistence
+  // (onSave/onPixelCoordsConverted are never called), and panels may omit a
+  // persisted panel_id (identity synthesized from target_id + panel_label).
+  previewMode?: boolean;
 }
+
+// ── Normalized internal panel view ───────────────────────────────────────
+// Bridges PanelStats and PreviewPanel into the fields the arranger uses,
+// so the rest of the component does not branch on the input shape.
+interface NormalizedPanel {
+  panel_id: string; // synthesized in preview mode
+  panel_label: string;
+  thumbnail_url: string | null;
+  total_integration_seconds: number;
+  rotation: number;
+  flip_h: boolean;
+  grid_row: number | null;
+  grid_col: number | null;
+}
+
+// Synthesize a stable local key for a panel that may lack a persisted id.
+const panelKey = (p: ArrangerPanel): string => {
+  const persisted = (p as PanelStats).panel_id;
+  if (persisted) return persisted;
+  return `preview:${(p as PreviewPanel).target_id}:${p.panel_label}`;
+};
+
+const normalizePanel = (p: ArrangerPanel): NormalizedPanel => {
+  const stats = p as PanelStats;
+  return {
+    panel_id: panelKey(p),
+    panel_label: p.panel_label,
+    thumbnail_url: p.thumbnail_url ?? null,
+    total_integration_seconds: stats.total_integration_seconds ?? 0,
+    rotation: p.rotation ?? 0,
+    flip_h: p.flip_h ?? false,
+    grid_row: stats.grid_row ?? null,
+    grid_col: stats.grid_col ?? null,
+  };
+};
 
 // ── Per-tile state tracked alongside Konva nodes ──────────────────────
 interface TileState {
@@ -94,6 +153,8 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
 
   // ── Debounced save ─────────────────────────────────────────────────
   const scheduleSave = () => {
+    // Preview mode keeps arrangement in local state only — never persists.
+    if (props.previewMode || !props.onSave) return;
     clearTimeout(saveTimer);
     saveTimer = setTimeout(async () => {
       setSaving(true);
@@ -105,11 +166,23 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
         flip_h: t.flipH,
       }));
       try {
-        await props.onSave(panelData, globalRotation());
+        await props.onSave!(panelData, globalRotation());
       } finally {
         setSaving(false);
       }
     }, SAVE_DEBOUNCE_MS);
+  };
+
+  // ── Resolve a thumbnail value to a loadable src ────────────────────
+  // Persisted mode: thumbnail_url is a file path -> route through
+  // api.thumbnailUrl. Preview mode: the suggestion may supply an
+  // already-usable URL/path (absolute http or root-relative); use it as-is,
+  // otherwise fall back to the same path normalization.
+  const resolveThumbnailSrc = (url: string): string => {
+    if (props.previewMode && (/^https?:\/\//.test(url) || url.startsWith("/"))) {
+      return url;
+    }
+    return api.thumbnailUrl(url);
   };
 
   // ── Badge text for rotation/flip state ─────────────────────────────
@@ -394,7 +467,7 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
 
   // ── Create a Konva tile group for a panel ──────────────────────────
   const createTileGroup = (
-    panel: PanelStats,
+    panel: NormalizedPanel,
     x: number,
     y: number,
     tileW: number,
@@ -619,7 +692,7 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
         // Keep placeholder
         updateTileTransform(tile);
       };
-      img.src = api.thumbnailUrl(panel.thumbnail_url);
+      img.src = resolveThumbnailSrc(panel.thumbnail_url);
     }
 
     group.add(badgeBg, badgeNode, deltaBg, deltaNode, labelBg, labelNode, integrationBg, integrationNode);
@@ -752,8 +825,10 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
   });
 
   // ── Build/rebuild tiles from panel data ────────────────────────────
-  const buildTiles = (panels: PanelStats[]) => {
+  const buildTiles = (rawPanels: ArrangerPanel[]) => {
     if (!mosaicGroup) return;
+
+    const panels = rawPanels.map(normalizePanel);
 
     // Clear existing
     for (const t of tiles.values()) {
@@ -761,7 +836,9 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
     }
     tiles.clear();
 
-    const isLegacy = !props.pixelCoords;
+    // Preview-mode candidates have no persisted pixel coordinates; always
+    // auto-arrange them in a grid rather than running the legacy conversion.
+    const isLegacy = !props.previewMode && !props.pixelCoords;
     const maxIntegration = Math.max(0, ...panels.map((p) => p.total_integration_seconds));
 
     // Count panels with null coordinates so we can auto-arrange them in a grid
@@ -803,7 +880,7 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
     tileLayer?.batchDraw();
 
     // If legacy, immediately save converted coordinates and notify
-    if (isLegacy && panels.length > 0) {
+    if (isLegacy && panels.length > 0 && props.onSave) {
       const panelData = Array.from(tiles.values()).map((t) => ({
         panel_id: t.panelId,
         grid_row: Math.round(t.y),
@@ -813,8 +890,8 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
       }));
       (async () => {
         try {
-          await props.onSave(panelData, globalRotation());
-          props.onPixelCoordsConverted();
+          await props.onSave!(panelData, globalRotation());
+          props.onPixelCoordsConverted?.();
         } catch (e) {
           console.error("Legacy conversion save failed:", e);
         }
@@ -831,7 +908,7 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
     // Only rebuild if panel set changed (check by panel_id set)
     if (tiles.size > 0) {
       const currentIds = new Set(tiles.keys());
-      const newIds = new Set(panels.map((p) => p.panel_id));
+      const newIds = new Set(panels.map((p) => panelKey(p)));
       const same =
         currentIds.size === newIds.size &&
         [...currentIds].every((id) => newIds.has(id));

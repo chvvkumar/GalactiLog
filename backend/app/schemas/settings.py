@@ -17,6 +17,9 @@ class GeneralSettings(BaseModel):
     content_width: str = "extra-wide"
     mosaic_keywords: list[str] = ["Panel", "P"]
     mosaic_campaign_gap_days: int = 0
+    # Position tolerance for mosaic panel grouping, in arcmin.
+    # 0 = derive adaptively from per-rig FOV (fallback ~12 arcmin).
+    mosaic_position_tolerance_arcmin: float = 0
     observer_latitude: float | None = None
     observer_longitude: float | None = None
     observer_name: str | None = None

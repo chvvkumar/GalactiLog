@@ -21,6 +21,7 @@ from app.schemas.mosaic import (
     MosaicCreate, MosaicUpdate, MosaicPanelCreate, MosaicPanelUpdate,
     MosaicPanelBatchItem, MosaicPanelBatchRequest,
     MosaicSummary, MosaicDetailResponse, PanelStats, MosaicSuggestionResponse,
+    SuggestionPreviewPanel,
     PanelThumbnail,
     PanelSessionsResponse, PanelSessionInfo, SessionStatusUpdate,
     StatusResponse, OkResponse, DetectionResponse, PanelCreateResponse,
@@ -78,6 +79,83 @@ async def get_suggestions(
         tq = select(Target.id, Target.primary_name).where(Target.id.in_(all_ids))
         for tid, tname in (await session.execute(tq)).all():
             name_map[str(tid)] = tname
+
+    def _thumb_url(thumbnail_path: str | None) -> str | None:
+        if not thumbnail_path:
+            return None
+        filename = thumbnail_path.split("/")[-1].split("\\")[-1]
+        return f"/thumbnails/{filename}"
+
+    # Per-target fallback thumbnail in one query (avoid N+1). Reuses the panel
+    # stats scheme: the most recent LIGHT frame with a thumbnail_path becomes
+    # /thumbnails/{filename}. DISTINCT ON keeps one row per target. Used when a
+    # panel has no object_pattern or no pattern-matching frame.
+    thumb_map: dict[str, str] = {}
+    if all_ids:
+        thumb_q = (
+            select(
+                Image.resolved_target_id,
+                Image.thumbnail_path,
+            )
+            .where(
+                Image.resolved_target_id.in_(all_ids),
+                Image.image_type == "LIGHT",
+                Image.thumbnail_path.is_not(None),
+            )
+            .distinct(Image.resolved_target_id)
+            .order_by(Image.resolved_target_id, Image.capture_date.desc())
+        )
+        for tid, thumb_path in (await session.execute(thumb_q)).all():
+            url = _thumb_url(thumb_path)
+            if url:
+                thumb_map[str(tid)] = url
+
+    # Per-(target, object_pattern) thumbnail resolution. Two panels can share one
+    # target_id (SIMBAD merges "Veil Nebula Panel 1"/"Panel 2" into NGC 6960);
+    # the per-target fallback would give both the same image. Resolve each panel
+    # by the same (resolved_target_id + OBJECT ILIKE pattern) frame selection
+    # that mosaic_stats/mosaic_composite use for accepted panels. Collect the
+    # distinct pairs first so each is queried once (LIMIT 1, bounded by panel
+    # count across pending suggestions).
+    def _pattern_for_label(r, label: str) -> str | None:
+        """Object pattern for a panel label, mirroring accept_suggestion."""
+        if r.panel_patterns and label in r.panel_labels:
+            idx = r.panel_labels.index(label)
+            if idx < len(r.panel_patterns):
+                return r.panel_patterns[idx]
+        base = r.base_name or r.suggested_name
+        num = label.split()[-1] if label.startswith("Panel ") else label
+        return f"%{base}%Panel%{num}%"
+
+    pattern_thumb_pairs: set[tuple[str, str]] = set()
+    for r in rows:
+        geometry = r.geometry or {}
+        for gp in geometry.get("panels", []):
+            tid = gp.get("target_id")
+            if tid is None:
+                continue
+            pattern = _pattern_for_label(r, gp.get("label") or "")
+            if pattern:
+                pattern_thumb_pairs.add((str(tid), pattern))
+
+    pattern_thumb_map: dict[tuple[str, str], str] = {}
+    obj_col_thumb = Image.raw_headers["OBJECT"].astext
+    for tid_str, pattern in pattern_thumb_pairs:
+        pq = (
+            select(Image.thumbnail_path)
+            .where(
+                Image.resolved_target_id == tid_str,
+                Image.image_type == "LIGHT",
+                Image.thumbnail_path.is_not(None),
+                obj_col_thumb.ilike(pattern),
+            )
+            .order_by(Image.capture_date.desc())
+            .limit(1)
+        )
+        thumb_path = (await session.execute(pq)).scalars().first()
+        url = _thumb_url(thumb_path)
+        if url:
+            pattern_thumb_map[(tid_str, pattern)] = url
 
     # Build all OBJECT ILIKE patterns across every suggestion+panel,
     # then fetch session summaries in a single query instead of N queries.
@@ -151,6 +229,35 @@ async def get_suggestions(
             filtered_sessions = [s for s in all_sessions if s.date in campaign_dates]
             other_count = len(all_sessions) - len(filtered_sessions)
 
+        # Build preview panels from stored geometry. The frontend arranger
+        # auto-arranges tiles, so grid_row/grid_col are left null here; only
+        # thumbnail_url is resolved (batched above, no per-panel compute).
+        preview_panels: list[SuggestionPreviewPanel] = []
+        geometry = r.geometry or {}
+        for gp in geometry.get("panels", []):
+            tid = gp.get("target_id")
+            if tid is None:
+                continue
+            tid_str = str(tid)
+            label = gp.get("label") or ""
+            pattern = _pattern_for_label(r, label)
+            # Prefer the per-(target, pattern) frame so merged-target panels get
+            # distinct thumbnails; fall back to the per-target latest thumbnail.
+            thumb = None
+            if pattern is not None:
+                thumb = pattern_thumb_map.get((tid_str, pattern))
+            if thumb is None:
+                thumb = thumb_map.get(tid_str)
+            preview_panels.append(SuggestionPreviewPanel(
+                target_id=tid_str,
+                panel_label=label,
+                ra=gp.get("ra"),
+                dec=gp.get("dec"),
+                thumbnail_url=thumb,
+                grid_row=None,
+                grid_col=None,
+            ))
+
         results.append(MosaicSuggestionResponse(
             id=str(r.id),
             suggested_name=r.suggested_name,
@@ -163,6 +270,10 @@ async def get_suggestions(
             session_dates=r.session_dates,
             other_session_count=other_count,
             status=r.status,
+            confidence=r.confidence,
+            discovery_source=r.discovery_source,
+            flags=list(r.flags) if r.flags else [],
+            preview_panels=preview_panels,
         ))
 
     return results

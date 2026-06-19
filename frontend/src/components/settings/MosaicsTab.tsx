@@ -21,6 +21,7 @@ import { formatIntegration } from "../../utils/format";
 import InlineEditCell from "../InlineEditCell";
 import ColumnPicker from "../ColumnPicker";
 import { isColumnVisible } from "../../utils/displaySettings";
+import KonvaMosaicArranger, { type PreviewPanel } from "../mosaics/KonvaMosaicArranger";
 
 export const MosaicsTab: Component = () => {
   const { isAdmin } = useAuth();
@@ -781,9 +782,32 @@ export const MosaicsTab: Component = () => {
                         class="flex-1 flex items-center justify-between text-left hover:bg-theme-base/80 transition-colors"
                       >
                         <div class="flex-1">
-                          <span class="text-theme-text-primary text-sm font-medium">
-                            {s.suggested_name}
-                          </span>
+                          <div class="flex items-center gap-2 flex-wrap">
+                            <span class="text-theme-text-primary text-sm font-medium">
+                              {s.suggested_name}
+                            </span>
+                            <Show when={s.confidence}>
+                              <span
+                                class="text-[10px] uppercase tracking-wide font-medium rounded px-1.5 py-0.5 border"
+                                classList={{
+                                  "bg-theme-success/15 text-theme-success border-theme-success/30": s.confidence === "high",
+                                  "bg-theme-warning/15 text-theme-warning border-theme-warning/30": s.confidence !== "high",
+                                }}
+                                title={s.confidence === "high"
+                                  ? "Name and position agree on these panels"
+                                  : "Single signal or conflicting evidence; review before accepting"}
+                              >
+                                {s.confidence === "high" ? "High confidence" : "Low confidence"}
+                              </span>
+                            </Show>
+                            <Show when={s.discovery_source}>
+                              <span class="text-[10px] text-theme-text-secondary border border-theme-border rounded px-1.5 py-0.5">
+                                {s.discovery_source === "both"
+                                  ? "name + position"
+                                  : s.discovery_source}
+                              </span>
+                            </Show>
+                          </div>
                           <div class="text-xs text-theme-text-secondary mt-0.5">
                             {s.panel_labels.length} panels
                             {" · "}
@@ -830,6 +854,22 @@ export const MosaicsTab: Component = () => {
 
                     <Show when={expandedSuggestion() === s.id}>
                       <div class="border-t border-theme-border">
+                        {/* Low-confidence flags */}
+                        <Show when={s.flags && s.flags.length > 0}>
+                          <div class="mx-3 mt-3 p-2 rounded-[var(--radius-sm)] border border-theme-warning/30 bg-theme-warning/10">
+                            <div class="text-[11px] font-medium text-theme-warning mb-1">
+                              Review notes
+                            </div>
+                            <ul class="list-disc list-inside space-y-0.5">
+                              <For each={s.flags}>
+                                {(flag) => (
+                                  <li class="text-xs text-theme-text-secondary">{flag}</li>
+                                )}
+                              </For>
+                            </ul>
+                          </div>
+                        </Show>
+
                         {/* Target link */}
                         <div class="px-3 pt-3 pb-1">
                           <For each={uniqueTargets()}>
@@ -893,6 +933,41 @@ export const MosaicsTab: Component = () => {
                               </For>
                             </tbody>
                           </table>
+                        </Show>
+
+                        {/* Tile preview */}
+                        <Show when={s.preview_panels && s.preview_panels.length > 0}>
+                          <div class="px-3 py-3 border-t border-theme-border/50">
+                            <div class="text-[11px] font-medium text-theme-text-secondary mb-2">
+                              Tile preview
+                            </div>
+                            <Show
+                              when={s.preview_panels.some((p) => isPanelSelected(s.id, p.panel_label))}
+                              fallback={
+                                <p class="text-xs text-theme-text-secondary">No panels selected.</p>
+                              }
+                            >
+                              <KonvaMosaicArranger
+                                previewMode={true}
+                                panels={s.preview_panels
+                                  .filter((p) => isPanelSelected(s.id, p.panel_label))
+                                  .map((p): PreviewPanel => ({
+                                    target_id: p.target_id,
+                                    panel_label: p.panel_label,
+                                    ra: p.ra,
+                                    dec: p.dec,
+                                    thumbnail_url: p.thumbnail_url,
+                                  }))}
+                                rotationAngle={0}
+                                pixelCoords={false}
+                                availableFilters={[]}
+                                selectedFilter={null}
+                                onFilterChange={() => {}}
+                                filterLoading={false}
+                                thumbnailOverrides={null}
+                              />
+                            </Show>
+                          </div>
                         </Show>
 
                       </div>
