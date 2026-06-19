@@ -46,6 +46,7 @@ router = APIRouter(prefix="/scan", tags=["scan"])
 @router.post("", response_model=ScanQueueResponse)
 async def trigger_scan(
     include_calibration: bool = Query(False, description="Include calibration frames (BIAS, DARK, FLAT)"),
+    force_orphan_cleanup: bool = Query(False, description="Bypass the 50%-missing safety threshold and remove all orphaned records (one-time, for deliberate bulk deletions)"),
     session: AsyncSession = Depends(get_session),
     user: User = Depends(require_admin),
 ):
@@ -77,7 +78,7 @@ async def trigger_scan(
             if state.state in ("scanning", "ingesting"):
                 return {"status": "already_running", **state.to_dict()}
 
-            run_scan.delay(include_calibration=include_calibration)
+            run_scan.delay(include_calibration=include_calibration, force_orphan_cleanup=force_orphan_cleanup)
 
             return {"status": "accepted", "message": "Scan queued - check /scan/status for progress"}
         finally:

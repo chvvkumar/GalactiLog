@@ -83,7 +83,7 @@ export function useScan() {
       return s === "scanning" || s === "ingesting";
     },
 
-    startScan: async (options?: { includeCalibration?: boolean }) => {
+    startScan: async (options?: { includeCalibration?: boolean; forceOrphanCleanup?: boolean }) => {
       setScanError(null);
       setStopping(false);
       // Immediately show scanning state so the UI responds instantly

@@ -10,6 +10,7 @@ import type { ScanFiltersResponse } from "../api/scanFilters";
 import DatabaseOverview from "./DatabaseOverview";
 import CaptureActivity from "./CaptureActivity";
 import ScanControls from "./ScanControls";
+import ConfirmDialog from "./ConfirmDialog";
 import ActivityFeed from "./ActivityFeed";
 import MaintenanceActions from "./MaintenanceActions";
 import ScanFiltersPanel from "./ScanFiltersPanel";
@@ -35,6 +36,9 @@ const ScanManager: Component = () => {
   const { isAdmin } = useAuth();
   const { stats } = useStats();
   const [frameFilter, setFrameFilter] = createSignal<FrameFilter>("all");
+  // One-time force orphan cleanup. Not persisted; resets each render/session.
+  const [forceOrphanCleanup, setForceOrphanCleanup] = createSignal(false);
+  const [forceCleanupConfirmOpen, setForceCleanupConfirmOpen] = createSignal(false);
   const [dbSummary, setDbSummary] = createSignal<import("../types").DbSummary | null>(null);
   const [rebuildState, setRebuildState] = createSignal<RebuildStatus>({
     state: "idle", mode: "", message: "", started_at: null, completed_at: null, details: {},
@@ -132,6 +136,21 @@ const ScanManager: Component = () => {
         showToast("Failed to save setting", "error");
       }
     }
+  };
+
+  // --- Scan trigger ---
+  const runScan = () =>
+    startScan({
+      includeCalibration: frameFilter() === "all",
+      forceOrphanCleanup: forceOrphanCleanup(),
+    });
+
+  const handleStartScan = () => {
+    if (forceOrphanCleanup()) {
+      setForceCleanupConfirmOpen(true);
+      return;
+    }
+    runScan();
   };
 
   // --- Rebuild polling ---
@@ -365,8 +384,10 @@ const ScanManager: Component = () => {
                 stopping={stopping()}
                 rebuildRunning={rebuildState().state === "running"}
                 frameFilter={frameFilter()}
+                forceOrphanCleanup={forceOrphanCleanup()}
                 onFrameFilterChange={setFrameFilter}
-                onStartScan={() => startScan({ includeCalibration: frameFilter() === "all" })}
+                onForceOrphanCleanupChange={setForceOrphanCleanup}
+                onStartScan={handleStartScan}
                 onStopScan={stopScan}
               />
             </div>
@@ -384,6 +405,21 @@ const ScanManager: Component = () => {
           </div>
         </div>
       </div>
+
+      <ConfirmDialog
+        open={forceCleanupConfirmOpen()}
+        title="Force orphan cleanup?"
+        message="This scan removes catalogued records for every file currently missing from disk, with no safety limit. If a storage share is unmounted or unreachable, this will erase a large portion of your catalog. Only continue if you deliberately deleted these files."
+        confirmLabel="Force cleanup"
+        cancelLabel="Cancel"
+        onConfirm={() => {
+          setForceCleanupConfirmOpen(false);
+          runScan();
+          // One-time intent: revert to a normal scan after a confirmed run.
+          setForceOrphanCleanup(false);
+        }}
+        onCancel={() => setForceCleanupConfirmOpen(false)}
+      />
     </div>
   );
 };

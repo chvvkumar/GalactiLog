@@ -8,7 +8,9 @@ const ScanControls: Component<{
   stopping: boolean;
   rebuildRunning: boolean;
   frameFilter: FrameFilter;
+  forceOrphanCleanup: boolean;
   onFrameFilterChange: (filter: FrameFilter) => void;
+  onForceOrphanCleanupChange: (value: boolean) => void;
   onStartScan: () => void;
   onStopScan: () => void;
 }> = (props) => {
@@ -45,6 +47,25 @@ const ScanControls: Component<{
           </span>
         </label>
       </div>
+      <Show when={isAdmin()}>
+        <div class="flex flex-col gap-1 w-full">
+          <label class="flex items-center gap-1.5 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={props.forceOrphanCleanup}
+              onChange={(e) => props.onForceOrphanCleanupChange(e.currentTarget.checked)}
+              disabled={props.isActive}
+              class="accent-astro-accent"
+            />
+            <span class={`text-xs ${props.forceOrphanCleanup ? "text-theme-text-primary" : "text-theme-text-secondary"}`}>
+              Force orphan cleanup
+            </span>
+          </label>
+          <p class="text-xs text-theme-text-tertiary">
+            Remove catalogued records for all files missing from disk, even past the 50% safety limit. Use after deleting files on purpose.
+          </p>
+        </div>
+      </Show>
       <Show when={isAdmin()}>
         <div class="flex gap-2 flex-shrink-0 ml-auto">
           <Show when={props.isActive || props.rebuildRunning}>
