@@ -317,10 +317,13 @@ export const api = {
       `/stats/calendar${year != null ? `?year=${year}` : ""}`
     ),
 
-  triggerScan: (options?: { includeCalibration?: boolean }) => {
+  triggerScan: (options?: { includeCalibration?: boolean; forceOrphanCleanup?: boolean }) => {
     const params = new URLSearchParams();
     if (options?.includeCalibration === false) {
       params.set("include_calibration", "false");
+    }
+    if (options?.forceOrphanCleanup) {
+      params.set("force_orphan_cleanup", "true");
     }
     const qs = params.toString();
     return fetchJson<ScanResult>(`/scan${qs ? `?${qs}` : ""}`, { method: "POST" });
