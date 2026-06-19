@@ -795,34 +795,26 @@ const SessionAccordionCard: Component<{
                   <div class="flex flex-wrap items-center gap-x-4 gap-y-1">
                     <span>
                       <span class="text-theme-text-tertiary">Integration:</span>{" "}
-                      <span class="font-bold text-metric-integration">{formatIntegration(detail().integration_seconds)}</span>
+                      <span class="font-bold text-theme-text-primary">{formatIntegration(detail().integration_seconds)}</span>
                     </span>
                     <span>
                       <span class="text-theme-text-tertiary">Frames:</span>{" "}
-                      <span class="font-bold text-metric-frames">{detail().frame_count}</span>
+                      <span class="font-bold text-theme-text-primary">{detail().frame_count}</span>
                     </span>
                     <span>
                       <span class="text-theme-text-tertiary">Gain / Offset:</span>{" "}
-                      <span class="font-bold text-metric-gain">
+                      <span class="font-bold text-theme-text-primary">
                         {detail().gain !== null ? detail().gain : "—"} / {detail().offset !== null ? detail().offset : "—"}
                       </span>
                     </span>
                     <span>
                       <span class="text-theme-text-tertiary">Time:</span>{" "}
-                      <span class="font-bold text-metric-time">
+                      <span class="font-bold text-theme-text-primary">
                         {detail().first_frame_time ? `${formatTimeUtil(detail().first_frame_time!, settingsCtx.timezone(), settingsCtx.use24hTime())} → ${detail().last_frame_time ? formatTimeUtil(detail().last_frame_time!, settingsCtx.timezone(), settingsCtx.use24hTime()) : ""}` : "—"}
                       </span>
                     </span>
                   </div>
                   <div class="flex flex-wrap gap-1.5 ml-auto flex-shrink-0">
-                    <Show when={!isMultiRig()}>
-                      <button
-                        class="text-tiny px-1.5 py-0.5 border border-theme-border rounded text-theme-text-tertiary hover:text-theme-text-primary hover:border-theme-accent transition-colors cursor-pointer"
-                        onClick={() => copyAstrobinCsv()}
-                      >
-                        {csvCopiedRig() === "__all__" ? "Copied!" : "Astrobin CSV"}
-                      </button>
-                    </Show>
                     <Show when={hasCoords()}>
                       <For each={ninaInstances()}>
                         {(inst) => (
@@ -856,20 +848,19 @@ const SessionAccordionCard: Component<{
                   <div class="flex gap-3 mt-1 items-start">
                     <div class="flex-1 space-y-1">
                       <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-label">
-                        <span><span class="text-theme-text-tertiary">Exp:</span> <span class="font-bold text-metric-gain">{detail().exposure_times.length > 0 ? detail().exposure_times.map(e => e + "s").join(", ") : "—"}</span></span>
-                        <span><span class="text-theme-text-tertiary">HFR:</span> <span class="font-bold text-metric-hfr">{detail().median_hfr?.toFixed(2) ?? "—"}</span></span>
-                        <span><span class="text-theme-text-tertiary">Ecc:</span> <span class="font-bold text-metric-eccentricity">{detail().median_eccentricity?.toFixed(2) ?? "—"}</span></span>
-                        <span><span class="text-theme-text-tertiary">FWHM:</span> <span class="font-bold text-metric-fwhm">{detail().median_fwhm?.toFixed(2) ?? "—"}</span></span>
-                        <span><span class="text-theme-text-tertiary">RMS:</span> <span class="font-bold text-metric-guiding">{detail().median_guiding_rms !== null ? `${detail().median_guiding_rms?.toFixed(2)}"` : "—"}</span></span>
+                        <span><span class="text-theme-text-tertiary">Exp:</span> <span class="font-bold text-theme-text-primary">{detail().exposure_times.length > 0 ? detail().exposure_times.map(e => e + "s").join(", ") : "—"}</span></span>
+                        <span><span class="text-theme-text-tertiary">HFR:</span> <span class="font-bold text-theme-text-primary">{detail().median_hfr?.toFixed(2) ?? "—"}</span></span>
+                        <span><span class="text-theme-text-tertiary">Ecc:</span> <span class="font-bold text-theme-text-primary">{detail().median_eccentricity?.toFixed(2) ?? "—"}</span></span>
+                        <span><span class="text-theme-text-tertiary">FWHM:</span> <span class="font-bold text-theme-text-primary">{detail().median_fwhm?.toFixed(2) ?? "—"}</span></span>
+                        <span><span class="text-theme-text-tertiary">RMS:</span> <span class="font-bold text-theme-text-primary">{detail().median_guiding_rms !== null ? `${detail().median_guiding_rms?.toFixed(2)}"` : "—"}</span></span>
                       </div>
-                      <div class="flex flex-wrap gap-1.5">
-                        <For each={detail().filter_details}>
-                          {(f) => (
-                            <span class="text-tiny px-1.5 py-0.5 rounded bg-theme-hover text-theme-text-secondary">
-                              <b>{f.filter_name}</b> {f.frame_count} · {f.exposure_time ?? "—"}s
-                            </span>
-                          )}
-                        </For>
+                      <div class="flex">
+                        <button
+                          class="px-4 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded text-sm font-medium hover:bg-theme-accent/25 transition-colors"
+                          onClick={() => copyAstrobinCsv()}
+                        >
+                          {csvCopiedRig() === "__all__" ? "Copied!" : "Astrobin CSV"}
+                        </button>
                       </div>
                     </div>
                     <div class="w-[140px] h-[100px] flex-shrink-0 ml-auto rounded overflow-hidden">
@@ -894,10 +885,10 @@ const SessionAccordionCard: Component<{
                             </button>
                           </div>
                           <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-label ml-4">
-                            <span><span class="text-theme-text-tertiary">HFR:</span> <span class="font-bold text-metric-hfr">{rig.median_hfr?.toFixed(2) ?? "—"}</span></span>
-                            <span><span class="text-theme-text-tertiary">Ecc:</span> <span class="font-bold text-metric-eccentricity">{rig.median_eccentricity?.toFixed(2) ?? "—"}</span></span>
-                            <span><span class="text-theme-text-tertiary">FWHM:</span> <span class="font-bold text-metric-fwhm">{rig.median_fwhm?.toFixed(2) ?? "—"}</span></span>
-                            <span><span class="text-theme-text-tertiary">RMS:</span> <span class="font-bold text-metric-guiding">{rig.median_guiding_rms !== null ? `${rig.median_guiding_rms?.toFixed(2)}"` : "—"}</span></span>
+                            <span><span class="text-theme-text-tertiary">HFR:</span> <span class="font-bold text-theme-text-primary">{rig.median_hfr?.toFixed(2) ?? "—"}</span></span>
+                            <span><span class="text-theme-text-tertiary">Ecc:</span> <span class="font-bold text-theme-text-primary">{rig.median_eccentricity?.toFixed(2) ?? "—"}</span></span>
+                            <span><span class="text-theme-text-tertiary">FWHM:</span> <span class="font-bold text-theme-text-primary">{rig.median_fwhm?.toFixed(2) ?? "—"}</span></span>
+                            <span><span class="text-theme-text-tertiary">RMS:</span> <span class="font-bold text-theme-text-primary">{rig.median_guiding_rms !== null ? `${rig.median_guiding_rms?.toFixed(2)}"` : "—"}</span></span>
                           </div>
                           <div class="flex flex-wrap gap-1.5 mt-1 ml-4">
                             <For each={rig.filter_details}>
@@ -947,12 +938,19 @@ const SessionAccordionCard: Component<{
                 </Show>
 
                 {/* Expandable detail table */}
-                <button
-                  class="text-label text-theme-accent hover:text-theme-text-primary transition-colors cursor-pointer mt-2"
-                  onClick={() => setShowDetails((v) => !v)}
-                >
-                  {showDetails() ? "▾ Hide Details" : "▸ Show Details"}
-                </button>
+                <div class="flex items-center gap-1.5 mt-2">
+                  <button
+                    class="text-label text-theme-accent hover:text-theme-text-primary transition-colors cursor-pointer"
+                    onClick={() => setShowDetails((v) => !v)}
+                  >
+                    {showDetails() ? "▾ Hide Details" : "▸ Show Details"}
+                  </button>
+                  <HelpPopover title="Detail table coloring" label="About detail coloring">
+                    <p>HFR and Ecc in this table are colored by how each filter's median this session compares to the rig overall, all frames captured with the same telescope, camera, and filter across your whole catalog, regardless of target.</p>
+                    <p>Deviation is measured in robust sigma units (median absolute deviation from the median). Color shows the verdict in both directions: green means clearly better than typical, no color means normal, amber means moderately worse, red means far worse.</p>
+                    <p>Integration, frame counts, and exposure are not graded.</p>
+                  </HelpPopover>
+                </div>
                 <div class={`grid transition-[grid-template-rows] duration-200 ${showDetails() ? "grid-rows-[1fr]" : "grid-rows-[0fr]"}`}>
                   <div class="overflow-hidden">
                     <div class="mt-3 overflow-x-auto">
@@ -971,22 +969,54 @@ const SessionAccordionCard: Component<{
                         <tbody>
                           <Show when={isMultiRig()} fallback={
                             <For each={detail().filter_details}>
-                              {(f) => (
+                              {(f) => {
+                                // Catalog-wide rig baseline for this single filter group: a clean,
+                                // single-filter baseline, so band coloring is statistically meaningful.
+                                const key = `${detail().equipment.telescope ?? ""}|${detail().equipment.camera ?? ""}|${f.filter_name ?? ""}`;
+                                const baseline = props.detail?.rig_baselines[key];
+                                const zHfr = madZ(f.median_hfr, baseline?.median_hfr);
+                                const zEcc = madZ(f.median_eccentricity, baseline?.eccentricity);
+                                const hfrClass = baseline?.median_hfr && f.median_hfr != null
+                                  ? bandToCellClass(bandForZ(zHfr))
+                                  : "text-theme-text-primary";
+                                const eccClass = baseline?.eccentricity && f.median_eccentricity != null
+                                  ? bandToCellClass(bandForZ(zEcc))
+                                  : "text-theme-text-primary";
+                                return (
                                 <tr class="border-b border-theme-border/50 hover:bg-theme-hover transition-colors duration-100">
                                   <td class="py-1.5 px-2 text-theme-text-primary">{f.filter_name}</td>
                                   <td class="py-1.5 px-2 text-right text-theme-text-primary">{f.frame_count}</td>
                                   <td class="py-1.5 px-2 text-right text-theme-text-secondary">{formatIntegration(f.integration_seconds)}</td>
-                                  <td class="py-1.5 px-2 text-right text-metric-hfr">{f.median_hfr?.toFixed(2) ?? "—"}</td>
-                                  <td class="py-1.5 px-2 text-right text-metric-eccentricity">{f.median_eccentricity?.toFixed(2) ?? "—"}</td>
+                                  <td
+                                    class={`py-1.5 px-2 text-right ${hfrClass}`}
+                                    title={cellTooltip("HFR", f.median_hfr, zHfr, baseline?.median_hfr.median, "rig", (v) => v.toFixed(2))}
+                                  >{f.median_hfr?.toFixed(2) ?? "—"}</td>
+                                  <td
+                                    class={`py-1.5 px-2 text-right ${eccClass}`}
+                                    title={cellTooltip("Ecc", f.median_eccentricity, zEcc, baseline?.eccentricity.median, "rig", (v) => v.toFixed(2))}
+                                  >{f.median_eccentricity?.toFixed(2) ?? "—"}</td>
                                   <td class="py-1.5 px-2 text-right text-theme-text-secondary">{f.exposure_time ?? "—"}s</td>
                                 </tr>
-                              )}
+                                );
+                              }}
                             </For>
                           }>
                             <For each={detail().rigs}>
                               {(rig, index) => (
                                 <For each={rig.filter_details}>
-                                  {(f, fi) => (
+                                  {(f, fi) => {
+                                    // Catalog-wide rig baseline for this single filter group on this rig.
+                                    const key = `${rig.telescope ?? ""}|${rig.camera ?? ""}|${f.filter_name ?? ""}`;
+                                    const baseline = props.detail?.rig_baselines[key];
+                                    const zHfr = madZ(f.median_hfr, baseline?.median_hfr);
+                                    const zEcc = madZ(f.median_eccentricity, baseline?.eccentricity);
+                                    const hfrClass = baseline?.median_hfr && f.median_hfr != null
+                                      ? bandToCellClass(bandForZ(zHfr))
+                                      : "text-theme-text-primary";
+                                    const eccClass = baseline?.eccentricity && f.median_eccentricity != null
+                                      ? bandToCellClass(bandForZ(zEcc))
+                                      : "text-theme-text-primary";
+                                    return (
                                     <tr class={`border-b border-theme-border/50 hover:bg-theme-hover transition-colors duration-100 ${fi() === 0 && index() > 0 ? "border-t-2 border-t-theme-border" : ""}`}>
                                       {fi() === 0 ? (
                                         <td class="py-1.5 px-2 text-theme-text-secondary align-top" rowSpan={rig.filter_details.length}>
@@ -999,11 +1029,18 @@ const SessionAccordionCard: Component<{
                                       <td class="py-1.5 px-2 text-theme-text-primary">{f.filter_name}</td>
                                       <td class="py-1.5 px-2 text-right text-theme-text-primary">{f.frame_count}</td>
                                       <td class="py-1.5 px-2 text-right text-theme-text-secondary">{formatIntegration(f.integration_seconds)}</td>
-                                      <td class="py-1.5 px-2 text-right text-metric-hfr">{f.median_hfr?.toFixed(2) ?? "—"}</td>
-                                      <td class="py-1.5 px-2 text-right text-metric-eccentricity">{f.median_eccentricity?.toFixed(2) ?? "—"}</td>
+                                      <td
+                                        class={`py-1.5 px-2 text-right ${hfrClass}`}
+                                        title={cellTooltip("HFR", f.median_hfr, zHfr, baseline?.median_hfr.median, "rig", (v) => v.toFixed(2))}
+                                      >{f.median_hfr?.toFixed(2) ?? "—"}</td>
+                                      <td
+                                        class={`py-1.5 px-2 text-right ${eccClass}`}
+                                        title={cellTooltip("Ecc", f.median_eccentricity, zEcc, baseline?.eccentricity.median, "rig", (v) => v.toFixed(2))}
+                                      >{f.median_eccentricity?.toFixed(2) ?? "—"}</td>
                                       <td class="py-1.5 px-2 text-right text-theme-text-secondary">{f.exposure_time ?? "—"}s</td>
                                     </tr>
-                                  )}
+                                    );
+                                  }}
                                 </For>
                               )}
                             </For>
