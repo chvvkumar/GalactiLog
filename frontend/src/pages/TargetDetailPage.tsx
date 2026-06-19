@@ -1,4 +1,4 @@
-import { Component, Show, For, createResource, createSignal, createEffect, createMemo, on, onMount } from "solid-js";
+import { Component, Show, For, createResource, createSignal, createEffect, createMemo, on, onMount, onCleanup } from "solid-js";
 import { A, useParams, useSearchParams } from "@solidjs/router";
 import { api } from "../api/client";
 import type { TargetDetailResponse, SessionDetail, TargetSearchResultFuzzy, MergedTargetResponse } from "../types";
@@ -194,6 +194,23 @@ const TargetDetailPage: Component = () => {
   const [showExport, setShowExport] = createSignal(false);
   const [showMerge, setShowMerge] = createSignal(false);
   const [showWbppExport, setShowWbppExport] = createSignal(false);
+  const [actionsMenuOpen, setActionsMenuOpen] = createSignal(false);
+  let actionsMenuRef: HTMLDivElement | undefined;
+  const onActionsMenuDocClick = (e: MouseEvent) => {
+    if (!actionsMenuRef) return;
+    if (!actionsMenuRef.contains(e.target as Node)) setActionsMenuOpen(false);
+  };
+  const onActionsMenuKey = (e: KeyboardEvent) => {
+    if (e.key === "Escape") setActionsMenuOpen(false);
+  };
+  onMount(() => {
+    document.addEventListener("click", onActionsMenuDocClick);
+    document.addEventListener("keydown", onActionsMenuKey);
+  });
+  onCleanup(() => {
+    document.removeEventListener("click", onActionsMenuDocClick);
+    document.removeEventListener("keydown", onActionsMenuKey);
+  });
   const [expandedSessions, setExpandedSessions] = createSignal<Set<string>>(new Set());
   const [sessionCache, setSessionCache] = createSignal<Record<string, SessionDetail>>({});
   const [targetChartExpanded, setTargetChartExpanded] = createSignal(graphSettings().target_chart_expanded);
@@ -568,7 +585,8 @@ const TargetDetailPage: Component = () => {
             <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
               <div>
                 <div>
-                  <div class="flex items-center gap-2">
+                  <div class="flex items-start justify-between gap-3">
+                  <div class="flex items-center gap-2 min-w-0">
                     <Show
                       when={editing()}
                       fallback={
@@ -654,6 +672,67 @@ const TargetDetailPage: Component = () => {
                       </ul>
                     </HelpPopover>
                   </div>
+                  <div class="flex items-center gap-2 shrink-0">
+                    <button
+                      class="px-4 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded text-sm font-medium hover:bg-theme-accent/25 transition-colors"
+                      onClick={() => setShowExport(true)}
+                    >
+                      Export
+                    </button>
+                    <div ref={actionsMenuRef} class="relative inline-flex">
+                      <button
+                        type="button"
+                        aria-label="More actions"
+                        aria-haspopup="menu"
+                        aria-expanded={actionsMenuOpen()}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setActionsMenuOpen((v) => !v);
+                        }}
+                        class="inline-flex items-center justify-center w-8 h-8 rounded border border-theme-border text-theme-text-secondary hover:text-theme-text-primary hover:bg-theme-hover transition-colors cursor-pointer"
+                      >
+                        <span class="text-lg leading-none" aria-hidden="true">&#8943;</span>
+                      </button>
+                      <Show when={actionsMenuOpen()}>
+                        <div
+                          role="menu"
+                          onClick={(e) => e.stopPropagation()}
+                          class="absolute top-full right-0 mt-2 z-50 min-w-[12rem] bg-theme-elevated border border-theme-border rounded-[var(--radius-sm)] shadow-[var(--shadow-lg)] py-1"
+                        >
+                          <Show when={auth.isAdmin()}>
+                            <button
+                              type="button"
+                              role="menuitem"
+                              class="w-full text-left px-3 py-1.5 text-sm text-theme-text-primary hover:bg-theme-hover transition-colors cursor-pointer"
+                              onClick={() => {
+                                setActionsMenuOpen(false);
+                                setShowMerge(true);
+                              }}
+                            >
+                              Merge
+                            </button>
+                          </Show>
+                          <button
+                            type="button"
+                            role="menuitem"
+                            disabled={selectedChartDates().length === 0}
+                            title={selectedChartDates().length === 0 ? "Select one or more sessions first" : undefined}
+                            class="w-full text-left px-3 py-1.5 text-sm text-theme-text-primary hover:bg-theme-hover transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+                            onClick={() => {
+                              if (selectedChartDates().length === 0) return;
+                              setActionsMenuOpen(false);
+                              setShowWbppExport(true);
+                            }}
+                          >
+                            {selectedChartDates().length > 0
+                              ? `WBPP Export (${selectedChartDates().length})`
+                              : "WBPP Export"}
+                          </button>
+                        </div>
+                      </Show>
+                    </div>
+                  </div>
+                  </div>
                   <div class="text-xs text-theme-text-secondary mt-1 flex flex-wrap gap-x-2 gap-y-0.5 items-center">
                     <Show when={detail().object_category || auth.isAdmin()}>
                       <Show
@@ -734,6 +813,10 @@ const TargetDetailPage: Component = () => {
                     <Show when={detail().sac_description || detail().sac_notes}>
                       <span>· {detail().sac_description}{detail().sac_description && detail().sac_notes ? " — " : ""}{detail().sac_notes}</span>
                     </Show>
+                    <span>·</span>
+                    <span>{detail().session_count} sessions</span>
+                    <span class="mx-1.5">·</span>
+                    <span>{detail().first_session_date} → {detail().last_session_date} ({tzLabel()})</span>
                   </div>
                   <Show when={detail().catalog_memberships?.length}>
                     <div class="flex flex-wrap gap-1.5 mt-1">
@@ -809,27 +892,6 @@ const TargetDetailPage: Component = () => {
                     </div>
                     <div class="text-caption text-theme-text-secondary">Filters Used</div>
                   </div>
-                </div>
-                <div class="flex items-center justify-end gap-4">
-                  <div class="text-right text-xs text-theme-text-secondary">
-                    <span>{detail().session_count} sessions</span>
-                    <span class="mx-1.5">·</span>
-                    <span>{detail().first_session_date} → {detail().last_session_date} ({tzLabel()})</span>
-                  </div>
-                  <Show when={auth.isAdmin()}>
-                    <button
-                      class="px-4 py-1.5 bg-yellow-500/10 text-yellow-400 border border-yellow-500/20 rounded text-sm font-medium hover:bg-yellow-500/20 transition-colors shrink-0"
-                      onClick={() => setShowMerge(true)}
-                    >
-                      Merge
-                    </button>
-                  </Show>
-                  <button
-                    class="px-4 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded text-sm font-medium hover:bg-theme-accent/25 transition-colors shrink-0"
-                    onClick={() => setShowExport(true)}
-                  >
-                    Export
-                  </button>
                 </div>
               </div>
             </div>
@@ -1036,12 +1098,6 @@ const TargetDetailPage: Component = () => {
                       : csvLoading()
                         ? "Loading..."
                         : `AstroBin CSV (${selectedChartDates().length})`}
-                  </button>
-                  <button
-                    class="text-tiny px-2 py-0.5 border border-theme-border rounded text-theme-text-tertiary hover:text-theme-text-primary hover:border-theme-accent transition-colors cursor-pointer"
-                    onClick={() => setShowWbppExport(true)}
-                  >
-                    {`Export to WBPP (${selectedChartDates().length})`}
                   </button>
                 </Show>
               </div>

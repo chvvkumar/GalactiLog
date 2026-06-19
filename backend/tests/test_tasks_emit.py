@@ -91,6 +91,121 @@ def test_filename_candidate_failed_event_type_present():
     assert "filename_candidate_failed" in src
 
 
+class _FakeSession:
+    """Sync Session stand-in shared across every `with Session(...)` block.
+
+    Results are routed by how the caller consumes them, not by block order:
+      - `.all()` draws from a shared `all_queue` (the known-paths query, then
+        the orphan-batch query). DELETE statements never call `.all()`.
+      - `.scalar_one_or_none()` always returns None (the user-settings query,
+        which yields empty `general` -> no filters).
+    A query is therefore only handed an `.all()` payload when it actually calls
+    `.all()`, so changing the order in which run_scan opens Session blocks
+    cannot silently misroute results.
+    """
+
+    def __init__(self, all_queue):
+        self._all_queue = all_queue  # shared list, mutated in place
+        self.commit = MagicMock()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def execute(self, *a, **k):
+        res = MagicMock()
+        res.all.side_effect = lambda: self._all_queue.pop(0) if self._all_queue else []
+        res.scalar_one_or_none.return_value = None
+        return res
+
+
+def _drive_run_scan(force, known_paths, disk_paths):
+    """Run run_scan with all I/O mocked; return the captured emit events."""
+    tasks_mod = _bootstrap_real_tasks()
+
+    known_rows = [(p, 100, 1.0) for p in known_paths]
+    orphaned = set(known_paths) - set(disk_paths)
+    orphan_rows = [(i, None) for i, _ in enumerate(sorted(orphaned))]
+
+    emit_calls = []
+
+    def fake_emit_sync(session, *, redis, category, severity, event_type, message, **kw):
+        emit_calls.append({
+            "event_type": event_type, "severity": severity,
+            "message": message, "details": kw.get("details"),
+        })
+
+    # Payloads consumed by `.all()`, in the order those queries run: the
+    # known-paths query, then the orphan-batch query. The user-settings query
+    # uses `.scalar_one_or_none()` and draws nothing from this queue.
+    all_queue = [known_rows, orphan_rows]
+
+    def session_factory(*a, **k):
+        return _FakeSession(all_queue)
+
+    # ScanFilterConfig with no rules => should_include_file() True for everything,
+    # and roots() yields the fits_root once.
+    fake_cfg = MagicMock()
+    fake_cfg.should_include_file.return_value = True
+    fake_cfg.roots.return_value = [tasks_mod.Path("/tmp/test_fits")]
+
+    mock_redis = MagicMock()
+    mock_actx = MagicMock()
+    mock_actx.__enter__ = lambda s, *a: MagicMock()
+    mock_actx.__exit__ = lambda s, *a: None
+
+    with patch.object(tasks_mod, "Session", session_factory), \
+         patch.object(tasks_mod, "_redis", mock_redis), \
+         patch.object(tasks_mod, "_emit_activity_sync", fake_emit_sync), \
+         patch.object(tasks_mod, "_activity_session", lambda: mock_actx), \
+         patch.object(tasks_mod, "clear_cancel_sync"), \
+         patch.object(tasks_mod, "start_scanning_sync"), \
+         patch.object(tasks_mod, "get_skipped_paths_sync", return_value=set()), \
+         patch.object(tasks_mod, "clear_skipped_paths_sync"), \
+         patch.object(tasks_mod, "is_cancel_requested_sync", return_value=False), \
+         patch.object(tasks_mod, "set_discovered_sync"), \
+         patch.object(tasks_mod, "set_idle_sync"), \
+         patch.object(tasks_mod, "check_complete_sync"), \
+         patch.object(tasks_mod, "set_ingesting_sync"), \
+         patch.object(tasks_mod, "generate_reference_thumbnails"), \
+         patch.object(tasks_mod, "detect_duplicate_targets"), \
+         patch.object(tasks_mod, "backfill_dark_hours"), \
+         patch("app.services.scan_filters.ScanFilterConfig.from_settings", return_value=fake_cfg), \
+         patch("app.services.scanner.scan_directory", return_value=([], [], set(disk_paths))):
+        result = tasks_mod.run_scan.run(force_orphan_cleanup=force)
+
+    return result, emit_calls
+
+
+def test_force_orphan_cleanup_bypasses_threshold_and_warns():
+    """A forced full-deletion scan removes all orphans and emits the warning."""
+    known = ["/tmp/test_fits/a.fits", "/tmp/test_fits/b.fits", "/tmp/test_fits/c.fits"]
+    # Empty disk => 100% missing, which the unforced guard would skip.
+    result, emit_calls = _drive_run_scan(force=True, known_paths=known, disk_paths=[])
+
+    assert result["removed"] == 3
+    cleanup = [e for e in emit_calls if e["event_type"] == "orphan_cleanup"]
+    assert len(cleanup) == 1
+    warn = [e for e in emit_calls if e["event_type"] == "orphan_force_warning"]
+    assert len(warn) == 1
+    assert warn[0]["severity"] == "warning"
+    assert warn[0]["details"] == {"removed": 3, "total_known": 3, "forced": True}
+    assert "100% of the catalog" in warn[0]["message"]
+
+
+def test_unforced_full_deletion_skips_cleanup():
+    """Without the force flag a 100%-missing scan skips cleanup and warns."""
+    known = ["/tmp/test_fits/a.fits", "/tmp/test_fits/b.fits", "/tmp/test_fits/c.fits"]
+    result, emit_calls = _drive_run_scan(force=False, known_paths=known, disk_paths=[])
+
+    assert result["removed"] == 0
+    assert not [e for e in emit_calls if e["event_type"] == "orphan_cleanup"]
+    assert not [e for e in emit_calls if e["event_type"] == "orphan_force_warning"]
+    assert [e for e in emit_calls if e["event_type"] == "orphan_warning"]
+
+
 def test_mosaic_detection_complete_emits():
     tasks_mod = _bootstrap_real_tasks()
     detect_mosaic_panels_task = tasks_mod.detect_mosaic_panels_task

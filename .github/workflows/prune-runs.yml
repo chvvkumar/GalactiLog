@@ -1,0 +1,43 @@
+name: Prune old workflow runs
+
+on:
+  schedule:
+    # Weekly, Sundays at 06:00 UTC
+    - cron: "0 6 * * 0"
+  workflow_dispatch:
+    inputs:
+      days:
+        description: Delete workflow runs older than this many days
+        required: false
+        default: "7"
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  prune:
+    name: Delete runs older than N days
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Delete old workflow runs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DAYS: ${{ github.event.inputs.days || '7' }}
+        run: |
+          cutoff=$(date -u -d "-${DAYS} days" +%Y-%m-%d)
+          echo "Deleting workflow runs created before ${cutoff} (older than ${DAYS} days)"
+          ids=$(gh api --paginate \
+            "repos/${GITHUB_REPOSITORY}/actions/runs?created=%3C${cutoff}&per_page=100" \
+            --jq '.workflow_runs[].id')
+          deleted=0
+          failed=0
+          for id in ${ids}; do
+            if gh api -X DELETE "repos/${GITHUB_REPOSITORY}/actions/runs/${id}" >/dev/null 2>&1; then
+              deleted=$((deleted + 1))
+            else
+              failed=$((failed + 1))
+            fi
+          done
+          echo "Deleted ${deleted} runs, ${failed} failures"

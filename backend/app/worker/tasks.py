@@ -63,10 +63,14 @@ def _invalidate_stats_cache():
 
 
 @celery_app.task(bind=True)
-def run_scan(self, include_calibration: bool = True) -> dict:
+def run_scan(self, include_calibration: bool = True, force_orphan_cleanup: bool = False) -> dict:
     """Scan the FITS directory and queue ingest tasks for new files.
 
     Runs entirely inside Celery so the HTTP endpoint returns immediately.
+
+    When ``force_orphan_cleanup`` is True, the 50%-missing safety threshold on
+    orphan cleanup is bypassed so a deliberate bulk deletion is reflected in the
+    catalog. This flag is ephemeral and never set by auto-scans.
     """
     from app.services.scanner import scan_directory
 
@@ -168,9 +172,12 @@ def run_scan(self, include_calibration: bool = True) -> dict:
     }
     orphaned_paths = in_scope_known_paths - all_disk_paths
     removed = 0
-    if orphaned_paths and len(orphaned_paths) < max(1, len(in_scope_known_paths)) * 0.5:
+    _threshold = max(1, len(in_scope_known_paths)) * 0.5
+    _large_removal = len(orphaned_paths) >= _threshold or len(all_disk_paths) == 0
+    if orphaned_paths and (force_orphan_cleanup or len(orphaned_paths) < _threshold):
         # Safety: only clean up if less than 50% of files appear missing
-        # (protects against unmounted shares / unreachable storage)
+        # (protects against unmounted shares / unreachable storage), unless an
+        # admin forced a one-time cleanup to reflect a deliberate bulk deletion.
         with Session(_sync_engine) as session:
             for batch_start in range(0, len(orphaned_paths), 500):
                 batch = list(orphaned_paths)[batch_start:batch_start + 500]
@@ -200,6 +207,26 @@ def run_scan(self, include_calibration: bool = True) -> dict:
                     message=f"Removed {removed} deleted file{'s' if removed != 1 else ''} from catalog",
                     details={"removed": removed}, actor="system",
                 )
+            if force_orphan_cleanup and _large_removal and removed:
+                pct = round(removed / max(1, len(in_scope_known_paths)) * 100)
+                logger.warning(
+                    "Forced orphan cleanup removed %d of %d catalogued files (%d%%)",
+                    removed, len(in_scope_known_paths), pct,
+                )
+                with _activity_session() as _db:
+                    _emit_activity_sync(
+                        _db, redis=_redis, category="scan", severity="warning",
+                        event_type="orphan_force_warning",
+                        message=(
+                            f"Forced orphan cleanup removed {removed} of "
+                            f"{len(in_scope_known_paths)} catalogued file"
+                            f"{'s' if removed != 1 else ''} ({pct}% of the catalog). "
+                            f"If a storage share was unmounted or unreachable, "
+                            f"restore from backup."
+                        ),
+                        details={"removed": removed, "total_known": len(in_scope_known_paths), "forced": True},
+                        actor="system",
+                    )
     elif orphaned_paths:
         logger.warning(
             "Skipped orphan cleanup: %d of %d in-scope files missing (>50%%) - "
