@@ -37,6 +37,11 @@ const INSIGHT_ICONS: Record<string, string> = {
   info: "•",
 };
 
+// Shared style for every "Astrobin CSV" copy button (single-rig + per-rig).
+// Compact size with the accent look, kept in one place so the call sites can't drift.
+const ASTROBIN_BUTTON_CLASS =
+  "text-tiny px-1.5 py-0.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded font-medium hover:bg-theme-accent/25 transition-colors cursor-pointer";
+
 interface VisibleColumns {
   hfr: boolean;
   eccentricity: boolean;
@@ -856,7 +861,7 @@ const SessionAccordionCard: Component<{
                       </div>
                       <div class="flex">
                         <button
-                          class="px-4 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded text-sm font-medium hover:bg-theme-accent/25 transition-colors"
+                          class={ASTROBIN_BUTTON_CLASS}
                           onClick={() => copyAstrobinCsv()}
                         >
                           {csvCopiedRig() === "__all__" ? "Copied!" : "Astrobin CSV"}
@@ -876,28 +881,20 @@ const SessionAccordionCard: Component<{
                           <div class="flex items-center gap-2 mb-1">
                             <span class="w-2 h-2 rounded-full inline-block flex-shrink-0" style={{ "background-color": rigColor(index()) }} />
                             <span class="text-xs font-semibold text-theme-text-primary">{rig.rig_label}</span>
-                            <span class="text-tiny text-theme-text-tertiary">{rig.frame_count} fr · {formatIntegration(rig.integration_seconds)}</span>
+                            <span class="text-tiny text-theme-text-tertiary">{rig.frame_count} fr</span>
                             <button
-                              class="text-tiny px-1.5 py-0.5 border border-theme-border rounded text-theme-text-tertiary hover:text-theme-text-primary hover:border-theme-accent transition-colors cursor-pointer"
+                              class={ASTROBIN_BUTTON_CLASS}
                               onClick={() => copyAstrobinCsv(rig.rig_label)}
                             >
                               {csvCopiedRig() === rig.rig_label ? "Copied!" : "Astrobin CSV"}
                             </button>
                           </div>
                           <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-label ml-4">
+                            <span><span class="text-theme-text-tertiary">Integration:</span> <span class="font-bold text-theme-text-primary">{formatIntegration(rig.integration_seconds)}</span></span>
                             <span><span class="text-theme-text-tertiary">HFR:</span> <span class="font-bold text-theme-text-primary">{rig.median_hfr?.toFixed(2) ?? "—"}</span></span>
                             <span><span class="text-theme-text-tertiary">Ecc:</span> <span class="font-bold text-theme-text-primary">{rig.median_eccentricity?.toFixed(2) ?? "—"}</span></span>
                             <span><span class="text-theme-text-tertiary">FWHM:</span> <span class="font-bold text-theme-text-primary">{rig.median_fwhm?.toFixed(2) ?? "—"}</span></span>
                             <span><span class="text-theme-text-tertiary">RMS:</span> <span class="font-bold text-theme-text-primary">{rig.median_guiding_rms !== null ? `${rig.median_guiding_rms?.toFixed(2)}"` : "—"}</span></span>
-                          </div>
-                          <div class="flex flex-wrap gap-1.5 mt-1 ml-4">
-                            <For each={rig.filter_details}>
-                              {(f) => (
-                                <span class="text-tiny px-1.5 py-0.5 rounded bg-theme-hover text-theme-text-secondary">
-                                  <b>{f.filter_name}</b> {f.frame_count} · {f.exposure_time ?? "—"}s
-                                </span>
-                              )}
-                            </For>
                           </div>
                           {/* Rig-level custom columns */}
                           <Show when={(settingsCtx.customColumns() ?? []).filter(c => c.applies_to === "rig").length > 0}>
