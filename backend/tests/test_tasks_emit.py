@@ -233,3 +233,59 @@ def test_mosaic_detection_complete_emits():
     evs = [e for e in emit_calls if e["event_type"] == "mosaic_detection_complete"]
     assert len(evs) == 1
     assert evs[0]["details"]["candidates"] == 7
+
+
+def test_detection_task_passes_campaign_gap_days_from_settings():
+    """The scan-triggered task must read mosaic_campaign_gap_days from settings
+    and pass it to detect_mosaic_panels, matching the manual /detect endpoint."""
+    import contextlib
+    from unittest.mock import AsyncMock
+
+    tasks_mod = _bootstrap_real_tasks()
+    detect_mosaic_panels_task = tasks_mod.detect_mosaic_panels_task
+
+    # Fake async session: get(UserSettings, ...) returns general with gap=7.
+    settings_row = MagicMock()
+    settings_row.general = {"mosaic_campaign_gap_days": 7}
+
+    fake_session = AsyncMock()
+    fake_session.get = AsyncMock(return_value=settings_row)
+    fake_session.commit = AsyncMock()
+
+    @contextlib.asynccontextmanager
+    async def _session_cm():
+        yield fake_session
+
+    def _sessionmaker(*a, **k):
+        return lambda: _session_cm()
+
+    fake_engine = MagicMock()
+    fake_engine.dispose = AsyncMock()
+
+    captured = {}
+
+    async def fake_detect(session, gap_days=0):
+        captured["gap_days"] = gap_days
+        return 3
+
+    import app.services.mosaic_detection as md
+
+    mock_redis = MagicMock()
+    mock_redis.set.return_value = True
+    mock_redis.delete = MagicMock()
+
+    mctx = MagicMock()
+    mctx.__enter__ = lambda s, *a: MagicMock()
+    mctx.__exit__ = lambda s, *a: None
+
+    with patch.object(tasks_mod, "_redis", mock_redis), \
+         patch.object(tasks_mod, "_emit_activity_sync", lambda *a, **k: None), \
+         patch.object(tasks_mod, "_activity_session", lambda: mctx), \
+         patch.object(md, "detect_mosaic_panels", fake_detect), \
+         patch("sqlalchemy.ext.asyncio.create_async_engine", return_value=fake_engine), \
+         patch("sqlalchemy.ext.asyncio.async_sessionmaker", _sessionmaker):
+        result = detect_mosaic_panels_task.run()
+
+    assert result["status"] == "complete"
+    assert result["new_suggestions"] == 3
+    assert captured["gap_days"] == 7
