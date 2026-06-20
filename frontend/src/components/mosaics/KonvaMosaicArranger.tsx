@@ -494,19 +494,19 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
       draggable: true,
     });
 
-    // Selection border (hidden by default). A bright accent outline plus a
-    // soft glow makes the active tile unmistakable against the dark canvas.
+    // Selection border (hidden by default). A thin accent outline with a faint
+    // glow marks the active tile without overwhelming the canvas.
     const borderRect = new Konva.Rect({
       x: -4,
       y: -4,
       width: tileW + 8,
       height: tileH + 8,
       stroke: SELECTION_COLOR,
-      strokeWidth: 4,
+      strokeWidth: 2,
       cornerRadius: 4,
       shadowColor: SELECTION_COLOR,
-      shadowBlur: 12,
-      shadowOpacity: 0.9,
+      shadowBlur: 3,
+      shadowOpacity: 0.3,
       visible: false,
       listening: false,
     });
