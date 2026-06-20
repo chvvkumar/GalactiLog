@@ -1,6 +1,6 @@
 import { Component, For, Show, createEffect, createMemo, createSignal, onMount } from "solid-js";
 import { useNavigate } from "@solidjs/router";
-import { api } from "../../api/client";
+import { api, ApiError } from "../../api/client";
 import { showToast, dismissToast } from "../Toast";
 import { useAuth } from "../AuthProvider";
 import { useSettingsContext } from "../SettingsProvider";
@@ -72,6 +72,9 @@ export const MosaicsTab: Component = () => {
 
   // Delete confirmation
   const [confirmDeleteId, setConfirmDeleteId] = createSignal<string | null>(null);
+
+  // Dismiss confirmation (suggestions)
+  const [confirmDismissId, setConfirmDismissId] = createSignal<string | null>(null);
 
   // Collapse state — keywords and suggestions default collapsed, persisted in localStorage
   const [keywordsCollapsed, setKeywordsCollapsed] = createSignal(
@@ -246,6 +249,16 @@ export const MosaicsTab: Component = () => {
     return selectedPanels()[suggestionId]?.has(label) ?? true;
   };
 
+  // Totals reflecting only the currently selected panels of a suggestion.
+  // When all panels are selected, this matches the full suggestion totals.
+  const selectedTotals = (s: MosaicSuggestionResponse) => {
+    const selectedSessions = s.sessions.filter((r) => isPanelSelected(s.id, r.panel_label));
+    const panels = new Set(selectedSessions.map((r) => r.panel_label)).size;
+    const frames = selectedSessions.reduce((a, r) => a + r.frames, 0);
+    const integration = selectedSessions.reduce((a, r) => a + r.integration_seconds, 0);
+    return { panels, frames, integration };
+  };
+
   // Suggestions
   const handleAccept = async (s: MosaicSuggestionResponse) => {
     if (acceptingId()) return; // prevent concurrent accepts
@@ -267,8 +280,15 @@ export const MosaicsTab: Component = () => {
       ]);
       setSuggestions(newSuggestions);
       setMosaics(newMosaics);
-    } catch {
-      showToast("Failed to accept suggestion", "error");
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 409) {
+        // Server already returns a specific detail (e.g. name already exists)
+        showToast(err.message, "error");
+      } else if (err instanceof ApiError) {
+        showToast(`Failed to accept suggestion: ${err.message}`, "error");
+      } else {
+        showToast("Failed to accept suggestion", "error");
+      }
     } finally {
       setAcceptingId(null);
     }
@@ -277,6 +297,7 @@ export const MosaicsTab: Component = () => {
   const handleDismiss = async (s: MosaicSuggestionResponse) => {
     try {
       await api.dismissMosaicSuggestion(s.id);
+      setConfirmDismissId(null);
       setExpandedSuggestion(null);
       setSuggestions((prev) => prev.filter((x) => x.id !== s.id));
     } catch {
@@ -346,6 +367,7 @@ export const MosaicsTab: Component = () => {
     setBulkAction("accepting");
     setBulkProgress({ done: 0, total: items.length });
     let succeeded = 0;
+    const failures: { name: string; reason: string }[] = [];
     for (const s of items) {
       try {
         const panelSel = selectedPanels()[s.id];
@@ -359,8 +381,9 @@ export const MosaicsTab: Component = () => {
           next.delete(s.id);
           return next;
         });
-      } catch {
-        // Skip failures, continue with next
+      } catch (err) {
+        const reason = err instanceof ApiError ? err.message : "Unknown error";
+        failures.push({ name: s.suggested_name, reason });
       }
     }
     try {
@@ -372,7 +395,15 @@ export const MosaicsTab: Component = () => {
       setMosaics(newMosaics);
     } catch {}
     setBulkAction(null);
-    showToast(`Accepted ${succeeded} of ${items.length} suggestion(s)`);
+    if (failures.length > 0) {
+      const detail = failures.map((f) => `${f.name} (${f.reason})`).join("; ");
+      showToast(
+        `Accepted ${succeeded} of ${items.length}. ${failures.length} failed: ${detail}`,
+        "error",
+      );
+    } else {
+      showToast(`Accepted ${succeeded} of ${items.length} suggestion(s)`);
+    }
   };
 
   const handleBulkDismiss = async () => {
@@ -739,8 +770,8 @@ export const MosaicsTab: Component = () => {
             <For each={filteredSuggestions()}>
               {(s) => {
                 const uniqueTargets = () => [...new Set(s.target_ids)];
-                const totalFrames = () => s.sessions.reduce((a, r) => a + r.frames, 0);
-                const totalInt = () => s.sessions.reduce((a, r) => a + r.integration_seconds, 0);
+                // Header summary reflects the currently selected panel subset
+                const totals = () => selectedTotals(s);
 
                 type SortKey = "panel_label" | "object_name" | "date" | "filter_used" | "frames" | "integration_seconds";
                 const [sortKey, setSortKey] = createSignal<SortKey>("panel_label");
@@ -809,13 +840,13 @@ export const MosaicsTab: Component = () => {
                             </Show>
                           </div>
                           <div class="text-xs text-theme-text-secondary mt-0.5">
-                            {s.panel_labels.length} panels
+                            {totals().panels} panels
                             {" · "}
-                            <span classList={{ "text-theme-warning": totalFrames() === 0 }}>
-                              {totalFrames()} frames
+                            <span classList={{ "text-theme-warning": totals().frames === 0 }}>
+                              {totals().frames} frames
                             </span>
                             {" · "}
-                            {formatIntegration(totalInt())}
+                            {formatIntegration(totals().integration)}
                             <Show when={(s.other_session_count ?? 0) > 0}>
                               {" · "}
                               <span class="text-amber-400">
@@ -829,25 +860,56 @@ export const MosaicsTab: Component = () => {
                         </span>
                       </button>
                       <Show when={isAdmin()}>
-                        <div class="flex gap-2 ml-3 shrink-0">
-                          <button
-                            onClick={(e) => { e.stopPropagation(); handleAccept(s); }}
-                            disabled={!!acceptingId() || !!bulkAction()}
-                            class="px-4 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded text-sm font-medium hover:bg-theme-accent/25 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        <div class="flex items-center gap-2 ml-3 shrink-0">
+                          {(() => {
+                            const sel = selectedPanels()[s.id];
+                            const count = sel?.size ?? s.panel_labels.length;
+                            const noneSelected = !!sel && sel.size === 0;
+                            return (
+                              <button
+                                onClick={(e) => { e.stopPropagation(); handleAccept(s); }}
+                                disabled={!!acceptingId() || !!bulkAction() || noneSelected}
+                                title={noneSelected ? "Select at least one panel to accept" : undefined}
+                                class="px-4 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded text-sm font-medium hover:bg-theme-accent/25 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                              >
+                                {acceptingId() === s.id ? "Accepting..." : "Accept"}
+                                {count < s.panel_labels.length ? ` (${count}/${s.panel_labels.length})` : ""}
+                              </button>
+                            );
+                          })()}
+                          <Show
+                            when={confirmDismissId() === s.id}
+                            fallback={
+                              <button
+                                onClick={(e) => { e.stopPropagation(); setConfirmDismissId(s.id); }}
+                                disabled={!!bulkAction()}
+                                class="px-2.5 py-1.5 text-sm border border-theme-border text-theme-text-secondary rounded-[var(--radius-sm)] hover:text-theme-text-primary transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                              >
+                                Dismiss
+                              </button>
+                            }
                           >
-                            {acceptingId() === s.id ? "Accepting..." : "Accept"}{(() => {
-                              const sel = selectedPanels()[s.id];
-                              const count = sel?.size ?? s.panel_labels.length;
-                              return count < s.panel_labels.length ? ` (${count}/${s.panel_labels.length})` : "";
-                            })()}
-                          </button>
-                          <button
-                            onClick={(e) => { e.stopPropagation(); handleDismiss(s); }}
-                            disabled={!!bulkAction()}
-                            class="px-2.5 py-1.5 text-sm border border-theme-border text-theme-text-secondary rounded-[var(--radius-sm)] hover:text-theme-text-primary transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                          >
-                            Dismiss
-                          </button>
+                            <div class="flex items-center gap-2">
+                              <span
+                                class="text-xs text-theme-text-secondary"
+                                title="Dismissals are not permanent: re-running detection can resurface this suggestion."
+                              >
+                                Dismiss?
+                              </span>
+                              <button
+                                onClick={(e) => { e.stopPropagation(); handleDismiss(s); }}
+                                class="px-2.5 py-1.5 text-sm border border-theme-border text-theme-text-secondary rounded-[var(--radius-sm)] hover:text-theme-danger hover:border-theme-danger transition-colors"
+                              >
+                                Confirm
+                              </button>
+                              <button
+                                onClick={(e) => { e.stopPropagation(); setConfirmDismissId(null); }}
+                                class="px-2.5 py-1.5 text-sm border border-theme-border text-theme-text-secondary rounded-[var(--radius-sm)] hover:text-theme-text-primary transition-colors"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </Show>
                         </div>
                       </Show>
                     </div>

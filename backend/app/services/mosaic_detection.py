@@ -659,6 +659,24 @@ def _unique_name(name: str, used: set[str]) -> str:
     return chosen
 
 
+def compute_dedup_signature(
+    base_name: str, target_ids, panel_labels: list[str]
+) -> str:
+    """Stable signature identifying a suggestion's panel set.
+
+    Composed of ``base_name | sorted(target_ids) | sorted(panel_labels)``.
+    Order-independent and independent of frame counts, geometry, session dates,
+    and the date-suffixed suggested_name. Duplicate target_ids are retained
+    (a multi-panel-per-target group has the same target id more than once), so
+    sorting preserves multiplicity. Used to suppress re-creating a suggestion a
+    user previously dismissed: a rejected row stores this signature, and a new
+    run skips any group whose signature matches.
+    """
+    tids = sorted(str(t) for t in target_ids)
+    labels = sorted(panel_labels)
+    return "|".join([base_name, ",".join(tids), ",".join(labels)])
+
+
 # ---------------------------------------------------------------------------
 # DB orchestrator
 # ---------------------------------------------------------------------------
@@ -767,6 +785,19 @@ async def detect_mosaic_panels(session: AsyncSession, gap_days: int = 0) -> int:
 
     new_base_names = {g.base_name for g in groups}
 
+    # Durable dismissals: load the dedup signatures of rejected (dismissed)
+    # suggestions BEFORE clearing pending. Any regenerated group whose signature
+    # matches is skipped so a dismissed suggestion does not resurface. If the
+    # panel set materially changes (different target set or panel_labels) the
+    # signature differs and the suggestion may resurface (acceptable default).
+    rejected_q = select(MosaicSuggestion.dedup_signature).where(
+        MosaicSuggestion.status == "rejected",
+        MosaicSuggestion.dedup_signature.is_not(None),
+    )
+    rejected_signatures = {
+        r[0] for r in (await session.execute(rejected_q)).all() if r[0]
+    }
+
     # Detection is idempotent: clear ALL pending suggestions before regenerating.
     # This drops stale rows from prior runs AND legacy rows from the old code
     # (which have NULL base_name/geometry and would otherwise coexist as
@@ -829,7 +860,9 @@ async def detect_mosaic_panels(session: AsyncSession, gap_days: int = 0) -> int:
         if len(clusters) <= 1:
             count += _add_suggestion(
                 session, g, raw_id, panel_patterns, sess_dates,
-                suggested_name=_unique_name(g.base_name, used_names),
+                suggested_name=g.base_name,
+                used_names=used_names,
+                rejected_signatures=rejected_signatures,
             )
         else:
             for cluster_dates in clusters:
@@ -851,8 +884,10 @@ async def detect_mosaic_panels(session: AsyncSession, gap_days: int = 0) -> int:
                     session, g, raw_id,
                     [panel_patterns[i] for i in idxs],
                     campaign_sess,
-                    suggested_name=_unique_name(f"{g.base_name} {suffix}", used_names),
+                    suggested_name=f"{g.base_name} {suffix}",
                     subset_idxs=idxs,
+                    used_names=used_names,
+                    rejected_signatures=rejected_signatures,
                 )
 
     await session.commit()
@@ -867,8 +902,15 @@ def _add_suggestion(
     sess_dates: dict[str, list[str]],
     suggested_name: str,
     subset_idxs: list[int] | None = None,
+    used_names: set[str] | None = None,
+    rejected_signatures: set[str] | None = None,
 ) -> int:
-    """Create and add one MosaicSuggestion. Returns 1."""
+    """Create and add one MosaicSuggestion.
+
+    Returns 1 if created, 0 if skipped because its dedup signature matches a
+    dismissed (rejected) suggestion. ``suggested_name`` is uniquified against
+    ``used_names`` only when the suggestion is actually created.
+    """
     if subset_idxs is None:
         target_ids = [raw_id[tid] for tid in group.target_ids]
         panel_labels = list(group.panel_labels)
@@ -888,6 +930,13 @@ def _add_suggestion(
         else:
             geometry = None
 
+    signature = compute_dedup_signature(group.base_name, target_ids, panel_labels)
+    if rejected_signatures and signature in rejected_signatures:
+        return 0  # user dismissed this exact panel set; do not resurface it
+
+    if used_names is not None:
+        suggested_name = _unique_name(suggested_name, used_names)
+
     suggestion = MosaicSuggestion(
         suggested_name=suggested_name,
         base_name=group.base_name,
@@ -899,6 +948,7 @@ def _add_suggestion(
         discovery_source=group.discovery_source,
         geometry=geometry,
         flags=list(group.flags),
+        dedup_signature=signature,
     )
     session.add(suggestion)
     return 1

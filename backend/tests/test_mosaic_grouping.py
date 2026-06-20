@@ -525,3 +525,62 @@ def test_single_target_one_notoken_object_spread_no_candidate():
     ]
     groups = group_panels(targets, keywords=["Panel", "P"], tolerance_arcmin=12.0)
     assert groups == []
+
+
+# ---------------------------------------------------------------------------
+# Dedup signature for durable dismissals
+# ---------------------------------------------------------------------------
+
+def test_dedup_signature_is_order_independent():
+    """Signature is stable regardless of target_id / panel_label ordering."""
+    from app.services.mosaic_detection import compute_dedup_signature
+
+    sig_a = compute_dedup_signature(
+        "Heart Nebula", ["t1", "t2"], ["Panel 1", "Panel 2"]
+    )
+    sig_b = compute_dedup_signature(
+        "Heart Nebula", ["t2", "t1"], ["Panel 2", "Panel 1"]
+    )
+    assert sig_a == sig_b
+
+
+def test_dedup_signature_changes_with_panel_labels():
+    from app.services.mosaic_detection import compute_dedup_signature
+
+    base = compute_dedup_signature("Foo", ["t1", "t2"], ["Panel 1", "Panel 2"])
+    more = compute_dedup_signature(
+        "Foo", ["t1", "t2", "t3"], ["Panel 1", "Panel 2", "Panel 3"]
+    )
+    assert base != more
+
+
+def test_dedup_signature_changes_with_target_set():
+    from app.services.mosaic_detection import compute_dedup_signature
+
+    a = compute_dedup_signature("Foo", ["t1", "t2"], ["Panel 1", "Panel 2"])
+    b = compute_dedup_signature("Foo", ["t1", "t3"], ["Panel 1", "Panel 2"])
+    assert a != b
+
+
+def test_dedup_signature_ignores_ordering_only():
+    """Signature depends only on base_name + target set + panel labels, so two
+    runs of the same group (regardless of date-suffixed name) match."""
+    from app.services.mosaic_detection import compute_dedup_signature
+
+    a = compute_dedup_signature("Foo", ["t1", "t2"], ["Panel 1", "Panel 2"])
+    b = compute_dedup_signature("Foo", ["t2", "t1"], ["Panel 2", "Panel 1"])
+    assert a == b
+
+
+def test_dedup_signature_preserves_duplicate_target_ids():
+    """Multi-panel-per-target: duplicate target_ids are retained (the Veil
+    case has one target id appearing twice)."""
+    from app.services.mosaic_detection import compute_dedup_signature
+
+    dup = compute_dedup_signature(
+        "Veil Nebula", ["t1", "t1"], ["Panel 1", "Panel 2"]
+    )
+    single = compute_dedup_signature(
+        "Veil Nebula", ["t1"], ["Panel 1", "Panel 2"]
+    )
+    assert dup != single

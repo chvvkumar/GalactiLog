@@ -196,7 +196,21 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
   // ── Update selection highlight on a tile ───────────────────────────
   const updateSelectionVisual = (tile: TileState, selected: boolean) => {
     tile.borderRect.visible(selected);
+    tile.borderRect.moveToTop();
     tileLayer?.batchDraw();
+  };
+
+  // ── Select a tile (or clear when null), updating all visuals ────────
+  // Central entry point so click, tap, pointerdown and right-click all
+  // converge on one selection path. Single selection only.
+  const selectTile = (tile: TileState | null) => {
+    const prevId = selectedId();
+    if (prevId && (!tile || prevId !== tile.panelId)) {
+      const prevTile = tiles.get(prevId);
+      if (prevTile) updateSelectionVisual(prevTile, false);
+    }
+    setSelectedId(tile ? tile.panelId : null);
+    if (tile) updateSelectionVisual(tile, true);
   };
 
   // ── Draw background grid ──────────────────────────────────────────
@@ -480,14 +494,19 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
       draggable: true,
     });
 
-    // Selection border (hidden by default)
+    // Selection border (hidden by default). A bright accent outline plus a
+    // soft glow makes the active tile unmistakable against the dark canvas.
     const borderRect = new Konva.Rect({
-      x: -3,
-      y: -3,
-      width: tileW + 6,
-      height: tileH + 6,
+      x: -4,
+      y: -4,
+      width: tileW + 8,
+      height: tileH + 8,
       stroke: SELECTION_COLOR,
-      strokeWidth: 3,
+      strokeWidth: 4,
+      cornerRadius: 4,
+      shadowColor: SELECTION_COLOR,
+      shadowBlur: 12,
+      shadowOpacity: 0.9,
       visible: false,
       listening: false,
     });
@@ -654,8 +673,8 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
         tile.height = scaledH;
 
         // Resize the group and dependent nodes
-        borderRect.width(scaledW + 6);
-        borderRect.height(scaledH + 6);
+        borderRect.width(scaledW + 8);
+        borderRect.height(scaledH + 8);
         labelNode.y(scaledH - 22);
         labelBg.y(scaledH - 22);
         integrationNode.x(scaledW - integrationNode.width() - 4);
@@ -701,14 +720,37 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
     // Apply initial transform
     updateTileTransform(tile);
 
-    // ── Drag events ────────────────────────────────────────────────
+    // ── Selection + drag events ────────────────────────────────────
+    // Tracks whether a real drag happened between pointerdown and pointerup
+    // so we can distinguish a click (select / toggle) from a drag (reposition
+    // only). Selecting on pointerdown is robust even if a stray sub-threshold
+    // movement would otherwise suppress Konva's synthetic "click" event.
+    let pointerMoved = false;
+    let wasSelectedOnDown = false;
+
+    group.on("mousedown touchstart", (e) => {
+      // Right-click is handled by contextmenu; ignore it here.
+      if ((e.evt as MouseEvent).button === 2) return;
+      e.cancelBubble = true;
+      pointerMoved = false;
+      wasSelectedOnDown = selectedId() === tile.panelId;
+      // Select immediately so the toolbar enables even if no click fires.
+      selectTile(tile);
+      group.moveToTop();
+      tile.borderRect.moveToTop();
+      mosaicGroup?.getLayer()?.batchDraw();
+    });
+
     group.on("dragstart", () => {
+      pointerMoved = true;
       stage?.draggable(false);
       group.moveToTop();
+      tile.borderRect.moveToTop();
       mosaicGroup?.getLayer()?.batchDraw();
     });
 
     group.on("dragmove", () => {
+      pointerMoved = true;
       group.x(snapVal(group.x()));
       group.y(snapVal(group.y()));
     });
@@ -720,34 +762,27 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
       scheduleSave();
     });
 
+    // ── Click / tap: toggle selection off when re-clicking the same tile
+    // without dragging. Initial selection already happened on pointerdown.
+    group.on("click tap", (e) => {
+      e.cancelBubble = true;
+      if (pointerMoved) return; // a drag, not a click — keep selection as-is
+      // Re-clicking a tile that was already selected before this gesture
+      // toggles it off; otherwise pointerdown already selected it.
+      if (wasSelectedOnDown) {
+        selectTile(null);
+        mosaicGroup?.getLayer()?.batchDraw();
+      }
+    });
+
     // ── Right-click to select + rotate CW ────────────────────────
     group.on("contextmenu", (e) => {
       e.evt.preventDefault();
       e.cancelBubble = true;
-      const prev = selectedId();
-      if (prev && prev !== tile.panelId) {
-        const prevTile = tiles.get(prev);
-        if (prevTile) updateSelectionVisual(prevTile, false);
-      }
-      setSelectedId(tile.panelId);
-      updateSelectionVisual(tile, true);
+      selectTile(tile);
       tile.rotation = (tile.rotation + 90) % 360;
       updateTileTransform(tile);
       scheduleSave();
-    });
-
-    // ── Click to select ────────────────────────────────────────────
-    group.on("click tap", (e) => {
-      e.cancelBubble = true;
-      const prev = selectedId();
-      if (prev && prev !== tile.panelId) {
-        const prevTile = tiles.get(prev);
-        if (prevTile) updateSelectionVisual(prevTile, false);
-      }
-      setSelectedId(tile.panelId);
-      updateSelectionVisual(tile, true);
-      group.moveToTop();
-      mosaicGroup?.getLayer()?.batchDraw();
     });
 
     return tile;
@@ -774,12 +809,8 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
     // ── Click on empty space to deselect ───────────────────────────
     stage.on("click tap", (e) => {
       if (e.target === stage) {
-        const prev = selectedId();
-        if (prev) {
-          const prevTile = tiles.get(prev);
-          if (prevTile) updateSelectionVisual(prevTile, false);
-        }
-        setSelectedId(null);
+        selectTile(null);
+        tileLayer?.batchDraw();
       }
     });
 
@@ -874,6 +905,15 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
       const tile = createTileGroup(panel, px, py, tileW, tileH, maxIntegration);
       tiles.set(panel.panel_id, tile);
       mosaicGroup.add(tile.group);
+    }
+
+    // Reconcile selection across a rebuild: keep it if the tile still exists,
+    // otherwise clear so the toolbar does not stay enabled for a gone tile.
+    const sel = selectedId();
+    if (sel && tiles.has(sel)) {
+      updateSelectionVisual(tiles.get(sel)!, true);
+    } else if (sel) {
+      setSelectedId(null);
     }
 
     applyGlobalRotation();
@@ -1006,8 +1046,8 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
 
           tile.width = scaledW;
           tile.height = scaledH;
-          tile.borderRect.width(scaledW + 6);
-          tile.borderRect.height(scaledH + 6);
+          tile.borderRect.width(scaledW + 8);
+          tile.borderRect.height(scaledH + 8);
           tile.labelNode.y(scaledH - 22);
           tile.labelBg.y(scaledH - 22);
           tile.integrationNode.x(scaledW - tile.integrationNode.width() - 4);
@@ -1087,11 +1127,21 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
       {/* Toolbar */}
       <div class="flex flex-wrap items-center gap-2 bg-theme-elevated rounded px-3 py-2 text-sm text-theme-text">
         {/* Tile operations */}
+        <Show
+          when={selectedId()}
+          fallback={
+            <span class="text-xs text-theme-text-secondary italic">
+              Click a tile to select it, then Rotate / Flip
+            </span>
+          }
+        >
+          <span class="text-xs text-blue-400">Tile selected</span>
+        </Show>
         <button
           class="px-2 py-1 rounded bg-theme-surface hover:bg-theme-hover disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           disabled={!selectedId()}
           onClick={rotateSelectedCW}
-          title="Rotate selected tile 90 CW"
+          title="Rotate selected tile 90 CW (or right-click a tile)"
         >
           Rotate CW
         </button>

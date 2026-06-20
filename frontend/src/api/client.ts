@@ -803,6 +803,16 @@ export const api = {
   deleteMosaic: (id: string) =>
     fetchJson<{ status: string }>(`/mosaics/${id}`, { method: "DELETE" }),
 
+  // Fetch the composite mosaic JPEG as a blob (auth-aware, with token refresh).
+  getMosaicCompositeBlob: async (id: string, filter?: string | null): Promise<Blob> => {
+    const qs = filter ? `?filter=${encodeURIComponent(filter)}` : "";
+    const resp = await fetchWithRefresh(`/mosaics/${id}/composite${qs}`, { method: "GET" });
+    if (!resp.ok) {
+      throw await extractApiError(resp, "Failed to generate composite");
+    }
+    return resp.blob();
+  },
+
   addMosaicPanel: (mosaicId: string, targetId: string, label: string, objectPattern?: string | null) =>
     fetchJson<{ status: string; panel_id: string }>(`/mosaics/${mosaicId}/panels`, {
       method: "POST",
