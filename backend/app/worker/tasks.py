@@ -1699,7 +1699,12 @@ def detect_mosaic_panels_task(parent_activity_id: int | None = None):
             engine = create_async_engine(settings.database_url, pool_pre_ping=True)
             async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
             async with async_session() as session:
-                count = await detect_mosaic_panels(session)
+                # Use the campaign-split setting so scan-triggered detection
+                # produces the same suggestions as the manual /detect endpoint.
+                settings_row = await session.get(UserSettings, SETTINGS_ROW_ID)
+                general = settings_row.general if settings_row else {}
+                gap_days = general.get("mosaic_campaign_gap_days", 0)
+                count = await detect_mosaic_panels(session, gap_days=gap_days)
                 await session.commit()
             await engine.dispose()
             return count

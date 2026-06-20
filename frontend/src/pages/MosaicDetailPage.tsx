@@ -1,5 +1,5 @@
-import { Component, Show, For, createResource, createSignal, createMemo, createEffect } from "solid-js";
-import { A, useParams } from "@solidjs/router";
+import { Component, Show, For, createResource, createSignal, createMemo, createEffect, onMount, onCleanup } from "solid-js";
+import { A, useParams, useNavigate } from "@solidjs/router";
 import { api } from "../api/client";
 import type { PanelStats } from "../types";
 import { formatIntegration, contentWidthClass } from "../utils/format";
@@ -9,12 +9,109 @@ import { showToast } from "../components/Toast";
 import InlineEditCell from "../components/InlineEditCell";
 import { isColumnVisible } from "../utils/displaySettings";
 import KonvaMosaicArranger from "../components/mosaics/KonvaMosaicArranger";
+import MosaicCompositeModal from "../components/mosaics/MosaicCompositeModal";
 import ConfirmDialog from "../components/ConfirmDialog";
+import { getErrorMessage } from "../utils/errors";
 
 const MosaicDetailPage: Component = () => {
   const ctx = useSettingsContext();
   const params = useParams<{ mosaicId: string }>();
+  const navigate = useNavigate();
   const [mosaic, { refetch }] = createResource(() => params.mosaicId, (id) => api.getMosaicDetail(id));
+
+  // Title-row actions: composite, rename, delete, export.
+  const [showComposite, setShowComposite] = createSignal(false);
+  const [editingName, setEditingName] = createSignal(false);
+  const [editName, setEditName] = createSignal("");
+  const [savingName, setSavingName] = createSignal(false);
+  const [actionsMenuOpen, setActionsMenuOpen] = createSignal(false);
+  const [deleteConfirm, setDeleteConfirm] = createSignal(false);
+  let actionsMenuRef: HTMLDivElement | undefined;
+  const onActionsMenuDocClick = (e: MouseEvent) => {
+    if (!actionsMenuRef) return;
+    if (!actionsMenuRef.contains(e.target as Node)) setActionsMenuOpen(false);
+  };
+  const onActionsMenuKey = (e: KeyboardEvent) => {
+    if (e.key === "Escape") setActionsMenuOpen(false);
+  };
+  onMount(() => {
+    document.addEventListener("click", onActionsMenuDocClick);
+    document.addEventListener("keydown", onActionsMenuKey);
+  });
+  onCleanup(() => {
+    document.removeEventListener("click", onActionsMenuDocClick);
+    document.removeEventListener("keydown", onActionsMenuKey);
+  });
+
+  const handleRename = async () => {
+    const data = mosaic();
+    if (!data) return;
+    const name = editName().trim();
+    if (!name) {
+      showToast("Name cannot be empty", "error");
+      return;
+    }
+    if (name === data.name) {
+      setEditingName(false);
+      return;
+    }
+    setSavingName(true);
+    try {
+      await api.updateMosaic(params.mosaicId, { name });
+      setEditingName(false);
+      await refetch();
+    } catch (e: unknown) {
+      showToast(getErrorMessage(e, "Rename failed"), "error", 5000);
+    } finally {
+      setSavingName(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    const data = mosaic();
+    setDeleteConfirm(false);
+    if (!data) return;
+    try {
+      await api.deleteMosaic(params.mosaicId);
+      showToast(`Deleted mosaic "${data.name}"`);
+      navigate("/mosaics");
+    } catch (e: unknown) {
+      showToast(getErrorMessage(e, "Failed to delete mosaic"), "error", 5000);
+    }
+  };
+
+  // Client-side CSV of the mosaic's panels built from already-loaded detail
+  // data. No backend round-trip needed.
+  const handleExportCsv = () => {
+    const data = mosaic();
+    if (!data) return;
+    const esc = (v: string | number) => {
+      const s = String(v);
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const headers = ["panel_label", "target_name", "frames", "integration_seconds", "filters"];
+    const lines = [headers.join(",")];
+    const panels = [...data.panels].sort((a, b) => a.sort_order - b.sort_order);
+    for (const p of panels) {
+      const filters = Object.entries(p.filter_distribution)
+        .map(([f, n]) => `${f}: ${n}`)
+        .join("; ");
+      lines.push([
+        esc(p.panel_label),
+        esc(p.target_name),
+        esc(p.total_frames),
+        esc(Math.round(p.total_integration_seconds)),
+        esc(filters),
+      ].join(","));
+    }
+    const blob = new Blob([lines.join("\n")], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${data.name.replace(/[^a-zA-Z0-9]/g, "_")}_panels.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   type SortKey = "panel" | "target" | "integration" | "frames" | "session";
   type SortDir = "asc" | "desc";
@@ -125,9 +222,62 @@ const MosaicDetailPage: Component = () => {
           <div class="rounded-[var(--radius-md)] bg-theme-surface border border-theme-border p-4 space-y-6">
             {/* Header */}
             <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
-              <div class="flex items-center justify-between">
-                <div class="flex items-center gap-2">
-                  <h2 class="text-sm font-semibold text-theme-text-primary">{data().name}</h2>
+              <div class="flex items-start justify-between gap-3">
+                <div class="flex items-center gap-2 min-w-0">
+                  <Show
+                    when={editingName()}
+                    fallback={
+                      <>
+                        <h2 class="text-sm font-semibold text-theme-text-primary truncate">{data().name}</h2>
+                        <button
+                          class="text-theme-text-tertiary hover:text-theme-text-primary transition-colors text-base leading-none"
+                          title="Rename mosaic"
+                          aria-label="Rename mosaic"
+                          disabled={savingName()}
+                          onClick={() => {
+                            setEditName(data().name);
+                            setEditingName(true);
+                          }}
+                        >
+                          &#9998;
+                        </button>
+                        <Show when={savingName()}>
+                          <span class="text-xs text-theme-text-secondary">Saving...</span>
+                        </Show>
+                      </>
+                    }
+                  >
+                    <input
+                      type="text"
+                      class="text-sm font-semibold bg-transparent border-b border-theme-accent text-theme-text-primary focus:outline-none min-w-0 flex-1"
+                      value={editName()}
+                      onInput={(e) => setEditName(e.currentTarget.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") handleRename();
+                        if (e.key === "Escape") setEditingName(false);
+                      }}
+                      ref={(el) => { setTimeout(() => el?.focus(), 0); }}
+                      disabled={savingName()}
+                    />
+                    <button
+                      class="text-theme-text-tertiary hover:text-green-400 transition-colors text-base leading-none"
+                      title="Save"
+                      aria-label="Save name"
+                      onClick={handleRename}
+                      disabled={savingName()}
+                    >
+                      &#10003;
+                    </button>
+                    <button
+                      class="text-theme-text-tertiary hover:text-theme-danger transition-colors text-base leading-none"
+                      title="Cancel"
+                      aria-label="Cancel rename"
+                      onClick={() => setEditingName(false)}
+                      disabled={savingName()}
+                    >
+                      &#10005;
+                    </button>
+                  </Show>
                   <HelpPopover>
                     <p class="text-sm text-theme-text-secondary">
                       The Mosaic Detail page shows all panels belonging to this mosaic project along with their individual and combined statistics.
@@ -135,11 +285,12 @@ const MosaicDetailPage: Component = () => {
                     <ul class="list-disc list-inside space-y-1 text-sm text-theme-text-secondary">
                       <li>The <strong class="text-theme-text-primary">panel table</strong> lists each panel's target, integration time, frame count, and last session date. Click column headers to sort.</li>
                       <li>Click a panel's target name to navigate to its full Target Detail page.</li>
+                      <li>Use <strong class="text-theme-text-primary">Composite</strong> to generate the combined mosaic image for the selected filter.</li>
                       <li>Use <strong class="text-theme-text-primary">Notes</strong> to record project-level information like imaging goals, completion status, or processing notes.</li>
                     </ul>
                   </HelpPopover>
                 </div>
-                <div class="flex items-center gap-4">
+                <div class="flex items-center gap-4 shrink-0">
                   <For each={mosaicCustomColumns()}>
                     {(col) => (
                       <Show when={isColumnVisible(ctx.columnVisibility(), "mosaic_table", "custom", col.slug)}>
@@ -161,6 +312,59 @@ const MosaicDetailPage: Component = () => {
                       </Show>
                     )}
                   </For>
+                  <div class="flex items-center gap-2">
+                    <button
+                      class="px-4 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded text-sm font-medium hover:bg-theme-accent/25 transition-colors"
+                      onClick={() => setShowComposite(true)}
+                    >
+                      Composite
+                    </button>
+                    <div ref={actionsMenuRef} class="relative inline-flex">
+                      <button
+                        type="button"
+                        aria-label="More actions"
+                        aria-haspopup="menu"
+                        aria-expanded={actionsMenuOpen()}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setActionsMenuOpen((v) => !v);
+                        }}
+                        class="inline-flex items-center justify-center w-8 h-8 rounded border border-theme-border text-theme-text-secondary hover:text-theme-text-primary hover:bg-theme-hover transition-colors cursor-pointer"
+                      >
+                        <span class="text-lg leading-none" aria-hidden="true">&#8943;</span>
+                      </button>
+                      <Show when={actionsMenuOpen()}>
+                        <div
+                          role="menu"
+                          onClick={(e) => e.stopPropagation()}
+                          class="absolute top-full right-0 mt-2 z-50 min-w-[12rem] bg-theme-elevated border border-theme-border rounded-[var(--radius-sm)] shadow-[var(--shadow-lg)] py-1"
+                        >
+                          <button
+                            type="button"
+                            role="menuitem"
+                            class="w-full text-left px-3 py-1.5 text-sm text-theme-text-primary hover:bg-theme-hover transition-colors cursor-pointer"
+                            onClick={() => {
+                              setActionsMenuOpen(false);
+                              handleExportCsv();
+                            }}
+                          >
+                            Export panels (CSV)
+                          </button>
+                          <button
+                            type="button"
+                            role="menuitem"
+                            class="w-full text-left px-3 py-1.5 text-sm text-theme-danger hover:bg-theme-hover transition-colors cursor-pointer"
+                            onClick={() => {
+                              setActionsMenuOpen(false);
+                              setDeleteConfirm(true);
+                            }}
+                          >
+                            Delete mosaic
+                          </button>
+                        </div>
+                      </Show>
+                    </div>
+                  </div>
                 </div>
               </div>
               <div class="flex gap-4 text-xs text-theme-text-secondary">
@@ -237,7 +441,13 @@ const MosaicDetailPage: Component = () => {
                   <h2 class="text-sm font-semibold text-theme-text-primary">Panels</h2>
                   <HelpPopover>
                     <p class="text-sm text-theme-text-secondary">
-                      Visual arrangement of the mosaic's constituent panels. Drag to reposition, use the rotate and flip controls to orient each panel, and drop panels onto a grid.
+                      Visual arrangement of the mosaic's constituent panels. Drag to reposition and drop a panel onto another to swap them.
+                    </p>
+                    <p class="text-sm text-theme-text-secondary">
+                      Click a tile to select it (a highlighted outline marks the active tile), then use the <strong class="text-theme-text-primary">Rotate CW</strong> and <strong class="text-theme-text-primary">Flip H</strong> buttons to orient it. Right-clicking a tile rotates it directly. Click empty canvas or the same tile again to deselect.
+                    </p>
+                    <p class="text-sm text-theme-text-secondary">
+                      With a tile selected, lower the <strong class="text-theme-text-primary">Tile opacity</strong> slider to fade it and see the panels underneath while aligning. This is a visual aid only and is not saved.
                     </p>
                     <p class="text-sm text-theme-text-secondary">
                       Each tile shows total integration time (bottom-right) and, for panels below the maximum, a color-coded deficit (top-right) indicating how much more time is needed to match the leading panel. Green means within 20% of the max, amber within 60%, and red below that.
@@ -515,6 +725,24 @@ const MosaicDetailPage: Component = () => {
         }}
         onCancel={() => setDeletePanelConfirm(null)}
       />
+
+      <ConfirmDialog
+        open={deleteConfirm()}
+        title="Delete mosaic"
+        message={`Delete mosaic "${mosaic()?.name ?? ""}"? This removes the mosaic and its panel layout. The underlying targets and frames are not affected. This cannot be undone.`}
+        confirmLabel="Delete"
+        onConfirm={handleDelete}
+        onCancel={() => setDeleteConfirm(false)}
+      />
+
+      <Show when={showComposite() && mosaic()}>
+        <MosaicCompositeModal
+          mosaicId={params.mosaicId}
+          mosaicName={mosaic()!.name}
+          filter={selectedFilter()}
+          onClose={() => setShowComposite(false)}
+        />
+      </Show>
     </div>
   );
 };
