@@ -148,6 +148,9 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
   const [saving, setSaving] = createSignal(false);
   const [showOverlays, setShowOverlays] = createSignal(true);
   const [containerHeight, setContainerHeight] = createSignal(600);
+  // Session-only visual aid: fade the SELECTED tile so overlapping panels
+  // below show through while aligning. Never persisted. 1.0 = no effect.
+  const [selectedOpacity, setSelectedOpacity] = createSignal(1.0);
 
   let saveTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -193,10 +196,30 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
     return parts.join(" ");
   };
 
+  // ── Apply content opacity to a tile (image + overlays, NOT the border) ──
+  // Used as a move/align aid: a faded selected tile reveals neighbors below.
+  // The selection outline stays at full opacity so the tile remains marked.
+  const applyTileOpacity = (tile: TileState, opacity: number) => {
+    tile.imageNode.opacity(opacity);
+    tile.labelNode.opacity(opacity);
+    tile.labelBg.opacity(opacity);
+    tile.badgeNode.opacity(opacity);
+    tile.badgeBg.opacity(opacity);
+    tile.integrationNode.opacity(opacity);
+    tile.integrationBg.opacity(opacity);
+    tile.deltaNode.opacity(opacity);
+    tile.deltaBg.opacity(opacity);
+    const noData = noDataNodes.get(tile.panelId);
+    if (noData) noData.opacity(opacity);
+    // borderRect intentionally left at full opacity.
+  };
+
   // ── Update selection highlight on a tile ───────────────────────────
   const updateSelectionVisual = (tile: TileState, selected: boolean) => {
     tile.borderRect.visible(selected);
     tile.borderRect.moveToTop();
+    // Apply the faded opacity only while selected; full opacity otherwise.
+    applyTileOpacity(tile, selected ? selectedOpacity() : 1.0);
     tileLayer?.batchDraw();
   };
 
@@ -1031,6 +1054,8 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
         tile.integrationBg.moveToTop();
         tile.integrationNode.moveToTop();
         tile.borderRect.moveToTop();
+        // Re-apply the move/align fade if this swapped tile is the selected one.
+        if (selectedId() === panelId) applyTileOpacity(tile, selectedOpacity());
         updateTileTransform(tile);
       } else {
         // Load new thumbnail
@@ -1079,12 +1104,25 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
           tile.integrationBg.moveToTop();
           tile.integrationNode.moveToTop();
           tile.borderRect.moveToTop();
+          // Re-apply the move/align fade if this swapped tile is the selected one.
+          if (selectedId() === panelId) applyTileOpacity(tile, selectedOpacity());
           updateTileTransform(tile);
           tileLayer?.batchDraw();
         };
         img.src = url;
       }
     }
+    tileLayer?.batchDraw();
+  });
+
+  // ── Live-apply selected-tile opacity when the slider changes ───────
+  createEffect(() => {
+    const op = selectedOpacity();
+    const id = selectedId();
+    if (!id) return;
+    const tile = tiles.get(id);
+    if (!tile) return;
+    applyTileOpacity(tile, op);
     tileLayer?.batchDraw();
   });
 
@@ -1215,6 +1253,28 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
         >
           Reset All
         </button>
+
+        <div class="w-px h-5 bg-theme-border" />
+
+        {/* Selected-tile opacity (visual move/align aid, not saved) */}
+        <label
+          class="flex items-center gap-2 text-xs"
+          classList={{ "opacity-40": !selectedId() }}
+          title="Fade the selected tile so overlapping panels show through (visual aid only, not saved)"
+        >
+          <span class="text-theme-text-secondary">Tile opacity</span>
+          <input
+            type="range"
+            min={20}
+            max={100}
+            step={5}
+            value={Math.round(selectedOpacity() * 100)}
+            onInput={(e) => setSelectedOpacity(parseInt(e.currentTarget.value, 10) / 100)}
+            disabled={!selectedId()}
+            class="w-24 accent-blue-500 disabled:cursor-not-allowed"
+          />
+          <span class="tabular-nums w-9 text-center">{Math.round(selectedOpacity() * 100)}%</span>
+        </label>
 
         <div class="w-px h-5 bg-theme-border" />
 

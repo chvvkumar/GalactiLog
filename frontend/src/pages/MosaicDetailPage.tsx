@@ -447,6 +447,9 @@ const MosaicDetailPage: Component = () => {
                       Click a tile to select it (a highlighted outline marks the active tile), then use the <strong class="text-theme-text-primary">Rotate CW</strong> and <strong class="text-theme-text-primary">Flip H</strong> buttons to orient it. Right-clicking a tile rotates it directly. Click empty canvas or the same tile again to deselect.
                     </p>
                     <p class="text-sm text-theme-text-secondary">
+                      With a tile selected, lower the <strong class="text-theme-text-primary">Tile opacity</strong> slider to fade it and see the panels underneath while aligning. This is a visual aid only and is not saved.
+                    </p>
+                    <p class="text-sm text-theme-text-secondary">
                       Each tile shows total integration time (bottom-right) and, for panels below the maximum, a color-coded deficit (top-right) indicating how much more time is needed to match the leading panel. Green means within 20% of the max, amber within 60%, and red below that.
                     </p>
                     <p class="text-sm text-theme-text-secondary">
