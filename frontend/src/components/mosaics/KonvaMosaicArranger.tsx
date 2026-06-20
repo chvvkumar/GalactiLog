@@ -5,7 +5,7 @@ import type { PanelStats } from "../../types";
 import { formatIntegration } from "../../utils/format";
 
 // ── Constants ──────────────────────────────────────────────────────────
-const SNAP = 5;
+const SNAP = 1; // drag snap step in px (1 = fine, near-free placement)
 const GRID_VISUAL_SPACING = 40;
 const TILE_SIZE = 300; // default tile size when thumbnail dimensions unknown
 const LEGACY_CELL_PX = 320;
