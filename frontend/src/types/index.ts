@@ -973,16 +973,32 @@ export interface SuggestionPanelSession {
   filter_used: string | null;
 }
 
+export interface SuggestionPreviewPanel {
+  target_id: string;
+  panel_label: string;
+  ra: number | null;
+  dec: number | null;
+  thumbnail_url: string | null;
+  grid_row: number | null;
+  grid_col: number | null;
+}
+
 export interface MosaicSuggestionResponse {
   id: string;
   suggested_name: string;
+  base_name?: string | null;
   target_ids: string[];
   panel_labels: string[];
+  panel_patterns?: string[] | null;
   target_names: Record<string, string>;
   sessions: SuggestionPanelSession[];
   session_dates?: Record<string, string[]> | null;
   other_session_count?: number;
   status: string;
+  confidence: string | null;
+  discovery_source: string | null;
+  flags: string[];
+  preview_panels: SuggestionPreviewPanel[];
 }
 
 export interface PanelSessionFilter {

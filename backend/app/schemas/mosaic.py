@@ -156,6 +156,16 @@ class PanelCreateResponse(BaseModel):
     panel_id: str
 
 
+class SuggestionPreviewPanel(BaseModel):
+    target_id: str
+    panel_label: str
+    ra: float | None = None
+    dec: float | None = None
+    thumbnail_url: str | None = None
+    grid_row: int | None = None
+    grid_col: int | None = None
+
+
 class MosaicSuggestionResponse(BaseModel):
     id: str
     suggested_name: str
@@ -168,3 +178,7 @@ class MosaicSuggestionResponse(BaseModel):
     session_dates: dict[str, list[str]] | None = None
     other_session_count: int = 0
     status: str
+    confidence: str | None = None
+    discovery_source: str | None = None
+    flags: list[str] = []
+    preview_panels: list[SuggestionPreviewPanel] = []

@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import String, DateTime, func
+from sqlalchemy import String, DateTime, func, Index
 from sqlalchemy.dialects.postgresql import UUID, ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -20,3 +20,21 @@ class MosaicSuggestion(Base):
     session_dates: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    # Name+position hybrid detection metadata (migration 0010).
+    # confidence: 'high' | 'low'; discovery_source: 'name' | 'position' | 'both'.
+    confidence: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    discovery_source: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    # geometry: {panels: [{target_id,label,ra,dec}], pitches: [arcmin], fov_arcmin}
+    geometry: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # flags: array of human-readable low-confidence reasons.
+    flags: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+
+    # Stable signature of the panel set (migration 0011): base_name + sorted
+    # target_ids + sorted panel_labels. Used to keep dismissed (rejected)
+    # suggestions from resurfacing across re-detection runs.
+    dedup_signature: Mapped[str | None] = mapped_column(String(512), nullable=True)
+
+    __table_args__ = (
+        Index("ix_mosaic_suggestions_dedup_signature", "dedup_signature"),
+    )

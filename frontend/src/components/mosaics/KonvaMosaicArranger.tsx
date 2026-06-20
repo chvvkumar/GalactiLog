@@ -5,7 +5,7 @@ import type { PanelStats } from "../../types";
 import { formatIntegration } from "../../utils/format";
 
 // ── Constants ──────────────────────────────────────────────────────────
-const SNAP = 5;
+const SNAP = 1; // drag snap step in px (1 = fine, near-free placement)
 const GRID_VISUAL_SPACING = 40;
 const TILE_SIZE = 300; // default tile size when thumbnail dimensions unknown
 const LEGACY_CELL_PX = 320;
@@ -26,9 +26,28 @@ const DELTA_GREEN = "rgba(34,197,94,0.85)";
 const DELTA_AMBER = "rgba(245,158,11,0.85)";
 const DELTA_RED = "rgba(239,68,68,0.85)";
 
+// ── Preview-mode panel shape ─────────────────────────────────────────────
+// Minimal panel data for rendering candidate tiles for a mosaic that does
+// not yet exist in the DB (e.g. inside a detection-suggestion card). No
+// persisted panel_id; identity is synthesized from target_id + panel_label.
+export interface PreviewPanel {
+  target_id: string;
+  panel_label: string;
+  ra?: number | null;
+  dec?: number | null;
+  thumbnail_url?: string | null;
+  total_integration_seconds?: number | null;
+  rotation?: number | null;
+  flip_h?: boolean | null;
+}
+
+// Panels accepted by the arranger: persisted PanelStats (normal mode) or
+// PreviewPanel candidates (preview mode).
+export type ArrangerPanel = PanelStats | PreviewPanel;
+
 // ── Props ──────────────────────────────────────────────────────────────
 export interface KonvaMosaicArrangerProps {
-  panels: PanelStats[];
+  panels: ArrangerPanel[];
   rotationAngle: number;
   pixelCoords: boolean;
   availableFilters: string[];
@@ -36,7 +55,8 @@ export interface KonvaMosaicArrangerProps {
   onFilterChange: (filter: string) => void;
   filterLoading: boolean;
   thumbnailOverrides: Record<string, string | null> | null;
-  onSave: (
+  // Optional in preview mode: never invoked when previewMode is true.
+  onSave?: (
     panels: Array<{
       panel_id: string;
       grid_row: number;
@@ -46,8 +66,47 @@ export interface KonvaMosaicArrangerProps {
     }>,
     rotationAngle: number,
   ) => void | Promise<void>;
-  onPixelCoordsConverted: () => void;
+  onPixelCoordsConverted?: () => void;
+  // When true: arrangement is held in local state only, no API persistence
+  // (onSave/onPixelCoordsConverted are never called), and panels may omit a
+  // persisted panel_id (identity synthesized from target_id + panel_label).
+  previewMode?: boolean;
 }
+
+// ── Normalized internal panel view ───────────────────────────────────────
+// Bridges PanelStats and PreviewPanel into the fields the arranger uses,
+// so the rest of the component does not branch on the input shape.
+interface NormalizedPanel {
+  panel_id: string; // synthesized in preview mode
+  panel_label: string;
+  thumbnail_url: string | null;
+  total_integration_seconds: number;
+  rotation: number;
+  flip_h: boolean;
+  grid_row: number | null;
+  grid_col: number | null;
+}
+
+// Synthesize a stable local key for a panel that may lack a persisted id.
+const panelKey = (p: ArrangerPanel): string => {
+  const persisted = (p as PanelStats).panel_id;
+  if (persisted) return persisted;
+  return `preview:${(p as PreviewPanel).target_id}:${p.panel_label}`;
+};
+
+const normalizePanel = (p: ArrangerPanel): NormalizedPanel => {
+  const stats = p as PanelStats;
+  return {
+    panel_id: panelKey(p),
+    panel_label: p.panel_label,
+    thumbnail_url: p.thumbnail_url ?? null,
+    total_integration_seconds: stats.total_integration_seconds ?? 0,
+    rotation: p.rotation ?? 0,
+    flip_h: p.flip_h ?? false,
+    grid_row: stats.grid_row ?? null,
+    grid_col: stats.grid_col ?? null,
+  };
+};
 
 // ── Per-tile state tracked alongside Konva nodes ──────────────────────
 interface TileState {
@@ -89,11 +148,16 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
   const [saving, setSaving] = createSignal(false);
   const [showOverlays, setShowOverlays] = createSignal(true);
   const [containerHeight, setContainerHeight] = createSignal(600);
+  // Session-only visual aid: fade the SELECTED tile so overlapping panels
+  // below show through while aligning. Never persisted. 1.0 = no effect.
+  const [selectedOpacity, setSelectedOpacity] = createSignal(1.0);
 
   let saveTimer: ReturnType<typeof setTimeout> | undefined;
 
   // ── Debounced save ─────────────────────────────────────────────────
   const scheduleSave = () => {
+    // Preview mode keeps arrangement in local state only — never persists.
+    if (props.previewMode || !props.onSave) return;
     clearTimeout(saveTimer);
     saveTimer = setTimeout(async () => {
       setSaving(true);
@@ -105,11 +169,23 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
         flip_h: t.flipH,
       }));
       try {
-        await props.onSave(panelData, globalRotation());
+        await props.onSave!(panelData, globalRotation());
       } finally {
         setSaving(false);
       }
     }, SAVE_DEBOUNCE_MS);
+  };
+
+  // ── Resolve a thumbnail value to a loadable src ────────────────────
+  // Persisted mode: thumbnail_url is a file path -> route through
+  // api.thumbnailUrl. Preview mode: the suggestion may supply an
+  // already-usable URL/path (absolute http or root-relative); use it as-is,
+  // otherwise fall back to the same path normalization.
+  const resolveThumbnailSrc = (url: string): string => {
+    if (props.previewMode && (/^https?:\/\//.test(url) || url.startsWith("/"))) {
+      return url;
+    }
+    return api.thumbnailUrl(url);
   };
 
   // ── Badge text for rotation/flip state ─────────────────────────────
@@ -120,10 +196,44 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
     return parts.join(" ");
   };
 
+  // ── Apply content opacity to a tile (image + overlays, NOT the border) ──
+  // Used as a move/align aid: a faded selected tile reveals neighbors below.
+  // The selection outline stays at full opacity so the tile remains marked.
+  const applyTileOpacity = (tile: TileState, opacity: number) => {
+    tile.imageNode.opacity(opacity);
+    tile.labelNode.opacity(opacity);
+    tile.labelBg.opacity(opacity);
+    tile.badgeNode.opacity(opacity);
+    tile.badgeBg.opacity(opacity);
+    tile.integrationNode.opacity(opacity);
+    tile.integrationBg.opacity(opacity);
+    tile.deltaNode.opacity(opacity);
+    tile.deltaBg.opacity(opacity);
+    const noData = noDataNodes.get(tile.panelId);
+    if (noData) noData.opacity(opacity);
+    // borderRect intentionally left at full opacity.
+  };
+
   // ── Update selection highlight on a tile ───────────────────────────
   const updateSelectionVisual = (tile: TileState, selected: boolean) => {
     tile.borderRect.visible(selected);
+    tile.borderRect.moveToTop();
+    // Apply the faded opacity only while selected; full opacity otherwise.
+    applyTileOpacity(tile, selected ? selectedOpacity() : 1.0);
     tileLayer?.batchDraw();
+  };
+
+  // ── Select a tile (or clear when null), updating all visuals ────────
+  // Central entry point so click, tap, pointerdown and right-click all
+  // converge on one selection path. Single selection only.
+  const selectTile = (tile: TileState | null) => {
+    const prevId = selectedId();
+    if (prevId && (!tile || prevId !== tile.panelId)) {
+      const prevTile = tiles.get(prevId);
+      if (prevTile) updateSelectionVisual(prevTile, false);
+    }
+    setSelectedId(tile ? tile.panelId : null);
+    if (tile) updateSelectionVisual(tile, true);
   };
 
   // ── Draw background grid ──────────────────────────────────────────
@@ -394,7 +504,7 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
 
   // ── Create a Konva tile group for a panel ──────────────────────────
   const createTileGroup = (
-    panel: PanelStats,
+    panel: NormalizedPanel,
     x: number,
     y: number,
     tileW: number,
@@ -407,14 +517,19 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
       draggable: true,
     });
 
-    // Selection border (hidden by default)
+    // Selection border (hidden by default). A thin accent outline with a faint
+    // glow marks the active tile without overwhelming the canvas.
     const borderRect = new Konva.Rect({
-      x: -3,
-      y: -3,
-      width: tileW + 6,
-      height: tileH + 6,
+      x: -4,
+      y: -4,
+      width: tileW + 8,
+      height: tileH + 8,
       stroke: SELECTION_COLOR,
-      strokeWidth: 3,
+      strokeWidth: 2,
+      cornerRadius: 4,
+      shadowColor: SELECTION_COLOR,
+      shadowBlur: 3,
+      shadowOpacity: 0.3,
       visible: false,
       listening: false,
     });
@@ -581,8 +696,8 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
         tile.height = scaledH;
 
         // Resize the group and dependent nodes
-        borderRect.width(scaledW + 6);
-        borderRect.height(scaledH + 6);
+        borderRect.width(scaledW + 8);
+        borderRect.height(scaledH + 8);
         labelNode.y(scaledH - 22);
         labelBg.y(scaledH - 22);
         integrationNode.x(scaledW - integrationNode.width() - 4);
@@ -619,7 +734,7 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
         // Keep placeholder
         updateTileTransform(tile);
       };
-      img.src = api.thumbnailUrl(panel.thumbnail_url);
+      img.src = resolveThumbnailSrc(panel.thumbnail_url);
     }
 
     group.add(badgeBg, badgeNode, deltaBg, deltaNode, labelBg, labelNode, integrationBg, integrationNode);
@@ -628,14 +743,37 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
     // Apply initial transform
     updateTileTransform(tile);
 
-    // ── Drag events ────────────────────────────────────────────────
+    // ── Selection + drag events ────────────────────────────────────
+    // Tracks whether a real drag happened between pointerdown and pointerup
+    // so we can distinguish a click (select / toggle) from a drag (reposition
+    // only). Selecting on pointerdown is robust even if a stray sub-threshold
+    // movement would otherwise suppress Konva's synthetic "click" event.
+    let pointerMoved = false;
+    let wasSelectedOnDown = false;
+
+    group.on("mousedown touchstart", (e) => {
+      // Right-click is handled by contextmenu; ignore it here.
+      if ((e.evt as MouseEvent).button === 2) return;
+      e.cancelBubble = true;
+      pointerMoved = false;
+      wasSelectedOnDown = selectedId() === tile.panelId;
+      // Select immediately so the toolbar enables even if no click fires.
+      selectTile(tile);
+      group.moveToTop();
+      tile.borderRect.moveToTop();
+      mosaicGroup?.getLayer()?.batchDraw();
+    });
+
     group.on("dragstart", () => {
+      pointerMoved = true;
       stage?.draggable(false);
       group.moveToTop();
+      tile.borderRect.moveToTop();
       mosaicGroup?.getLayer()?.batchDraw();
     });
 
     group.on("dragmove", () => {
+      pointerMoved = true;
       group.x(snapVal(group.x()));
       group.y(snapVal(group.y()));
     });
@@ -647,34 +785,27 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
       scheduleSave();
     });
 
+    // ── Click / tap: toggle selection off when re-clicking the same tile
+    // without dragging. Initial selection already happened on pointerdown.
+    group.on("click tap", (e) => {
+      e.cancelBubble = true;
+      if (pointerMoved) return; // a drag, not a click — keep selection as-is
+      // Re-clicking a tile that was already selected before this gesture
+      // toggles it off; otherwise pointerdown already selected it.
+      if (wasSelectedOnDown) {
+        selectTile(null);
+        mosaicGroup?.getLayer()?.batchDraw();
+      }
+    });
+
     // ── Right-click to select + rotate CW ────────────────────────
     group.on("contextmenu", (e) => {
       e.evt.preventDefault();
       e.cancelBubble = true;
-      const prev = selectedId();
-      if (prev && prev !== tile.panelId) {
-        const prevTile = tiles.get(prev);
-        if (prevTile) updateSelectionVisual(prevTile, false);
-      }
-      setSelectedId(tile.panelId);
-      updateSelectionVisual(tile, true);
+      selectTile(tile);
       tile.rotation = (tile.rotation + 90) % 360;
       updateTileTransform(tile);
       scheduleSave();
-    });
-
-    // ── Click to select ────────────────────────────────────────────
-    group.on("click tap", (e) => {
-      e.cancelBubble = true;
-      const prev = selectedId();
-      if (prev && prev !== tile.panelId) {
-        const prevTile = tiles.get(prev);
-        if (prevTile) updateSelectionVisual(prevTile, false);
-      }
-      setSelectedId(tile.panelId);
-      updateSelectionVisual(tile, true);
-      group.moveToTop();
-      mosaicGroup?.getLayer()?.batchDraw();
     });
 
     return tile;
@@ -701,12 +832,8 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
     // ── Click on empty space to deselect ───────────────────────────
     stage.on("click tap", (e) => {
       if (e.target === stage) {
-        const prev = selectedId();
-        if (prev) {
-          const prevTile = tiles.get(prev);
-          if (prevTile) updateSelectionVisual(prevTile, false);
-        }
-        setSelectedId(null);
+        selectTile(null);
+        tileLayer?.batchDraw();
       }
     });
 
@@ -752,8 +879,10 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
   });
 
   // ── Build/rebuild tiles from panel data ────────────────────────────
-  const buildTiles = (panels: PanelStats[]) => {
+  const buildTiles = (rawPanels: ArrangerPanel[]) => {
     if (!mosaicGroup) return;
+
+    const panels = rawPanels.map(normalizePanel);
 
     // Clear existing
     for (const t of tiles.values()) {
@@ -761,7 +890,9 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
     }
     tiles.clear();
 
-    const isLegacy = !props.pixelCoords;
+    // Preview-mode candidates have no persisted pixel coordinates; always
+    // auto-arrange them in a grid rather than running the legacy conversion.
+    const isLegacy = !props.previewMode && !props.pixelCoords;
     const maxIntegration = Math.max(0, ...panels.map((p) => p.total_integration_seconds));
 
     // Count panels with null coordinates so we can auto-arrange them in a grid
@@ -799,11 +930,20 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
       mosaicGroup.add(tile.group);
     }
 
+    // Reconcile selection across a rebuild: keep it if the tile still exists,
+    // otherwise clear so the toolbar does not stay enabled for a gone tile.
+    const sel = selectedId();
+    if (sel && tiles.has(sel)) {
+      updateSelectionVisual(tiles.get(sel)!, true);
+    } else if (sel) {
+      setSelectedId(null);
+    }
+
     applyGlobalRotation();
     tileLayer?.batchDraw();
 
     // If legacy, immediately save converted coordinates and notify
-    if (isLegacy && panels.length > 0) {
+    if (isLegacy && panels.length > 0 && props.onSave) {
       const panelData = Array.from(tiles.values()).map((t) => ({
         panel_id: t.panelId,
         grid_row: Math.round(t.y),
@@ -813,8 +953,8 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
       }));
       (async () => {
         try {
-          await props.onSave(panelData, globalRotation());
-          props.onPixelCoordsConverted();
+          await props.onSave!(panelData, globalRotation());
+          props.onPixelCoordsConverted?.();
         } catch (e) {
           console.error("Legacy conversion save failed:", e);
         }
@@ -831,7 +971,7 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
     // Only rebuild if panel set changed (check by panel_id set)
     if (tiles.size > 0) {
       const currentIds = new Set(tiles.keys());
-      const newIds = new Set(panels.map((p) => p.panel_id));
+      const newIds = new Set(panels.map((p) => panelKey(p)));
       const same =
         currentIds.size === newIds.size &&
         [...currentIds].every((id) => newIds.has(id));
@@ -914,6 +1054,8 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
         tile.integrationBg.moveToTop();
         tile.integrationNode.moveToTop();
         tile.borderRect.moveToTop();
+        // Re-apply the move/align fade if this swapped tile is the selected one.
+        if (selectedId() === panelId) applyTileOpacity(tile, selectedOpacity());
         updateTileTransform(tile);
       } else {
         // Load new thumbnail
@@ -929,8 +1071,8 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
 
           tile.width = scaledW;
           tile.height = scaledH;
-          tile.borderRect.width(scaledW + 6);
-          tile.borderRect.height(scaledH + 6);
+          tile.borderRect.width(scaledW + 8);
+          tile.borderRect.height(scaledH + 8);
           tile.labelNode.y(scaledH - 22);
           tile.labelBg.y(scaledH - 22);
           tile.integrationNode.x(scaledW - tile.integrationNode.width() - 4);
@@ -962,12 +1104,25 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
           tile.integrationBg.moveToTop();
           tile.integrationNode.moveToTop();
           tile.borderRect.moveToTop();
+          // Re-apply the move/align fade if this swapped tile is the selected one.
+          if (selectedId() === panelId) applyTileOpacity(tile, selectedOpacity());
           updateTileTransform(tile);
           tileLayer?.batchDraw();
         };
         img.src = url;
       }
     }
+    tileLayer?.batchDraw();
+  });
+
+  // ── Live-apply selected-tile opacity when the slider changes ───────
+  createEffect(() => {
+    const op = selectedOpacity();
+    const id = selectedId();
+    if (!id) return;
+    const tile = tiles.get(id);
+    if (!tile) return;
+    applyTileOpacity(tile, op);
     tileLayer?.batchDraw();
   });
 
@@ -1010,11 +1165,21 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
       {/* Toolbar */}
       <div class="flex flex-wrap items-center gap-2 bg-theme-elevated rounded px-3 py-2 text-sm text-theme-text">
         {/* Tile operations */}
+        <Show
+          when={selectedId()}
+          fallback={
+            <span class="text-xs text-theme-text-secondary italic">
+              Click a tile to select it, then Rotate / Flip
+            </span>
+          }
+        >
+          <span class="text-xs text-blue-400">Tile selected</span>
+        </Show>
         <button
           class="px-2 py-1 rounded bg-theme-surface hover:bg-theme-hover disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           disabled={!selectedId()}
           onClick={rotateSelectedCW}
-          title="Rotate selected tile 90 CW"
+          title="Rotate selected tile 90 CW (or right-click a tile)"
         >
           Rotate CW
         </button>
@@ -1088,6 +1253,28 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
         >
           Reset All
         </button>
+
+        <div class="w-px h-5 bg-theme-border" />
+
+        {/* Selected-tile opacity (visual move/align aid, not saved) */}
+        <label
+          class="flex items-center gap-2 text-xs"
+          classList={{ "opacity-40": !selectedId() }}
+          title="Fade the selected tile so overlapping panels show through (visual aid only, not saved)"
+        >
+          <span class="text-theme-text-secondary">Tile opacity</span>
+          <input
+            type="range"
+            min={20}
+            max={100}
+            step={5}
+            value={Math.round(selectedOpacity() * 100)}
+            onInput={(e) => setSelectedOpacity(parseInt(e.currentTarget.value, 10) / 100)}
+            disabled={!selectedId()}
+            class="w-24 accent-blue-500 disabled:cursor-not-allowed"
+          />
+          <span class="tabular-nums w-9 text-center">{Math.round(selectedOpacity() * 100)}%</span>
+        </label>
 
         <div class="w-px h-5 bg-theme-border" />
 
