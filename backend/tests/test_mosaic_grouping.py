@@ -166,6 +166,53 @@ def test_strip_panel_token():
 
 
 # ---------------------------------------------------------------------------
+# Stored panel_pattern must be unambiguous between sibling panels (item 3)
+# ---------------------------------------------------------------------------
+
+def _ordered_ilike_match(pattern: str, text: str) -> bool:
+    """Emulate SQL ILIKE for a '%a%b%c%' pattern: ordered, case-insensitive
+    substring sequence (the api matcher does ordered matching)."""
+    import re as _re
+    parts = [p for p in pattern.split("%") if p != ""]
+    regex = ".*".join(_re.escape(p) for p in parts)
+    return _re.search(regex, text, _re.IGNORECASE) is not None
+
+
+def test_panel_pattern_includes_keyword_token():
+    from app.services.mosaic_detection import build_panel_pattern
+    # Keyword candidate carries the matched keyword token.
+    assert build_panel_pattern("Sh2 119", "Panel", "1") == "%Sh2 119%Panel%1%"
+
+
+def test_panel_pattern_disambiguates_sibling_panels_with_digit_base():
+    """The stored pattern for 'Sh2 119 Panel 1' must NOT match the OBJECT of
+    'Sh2 119 Panel 2', and vice versa (base contains digits)."""
+    from app.services.mosaic_detection import build_panel_pattern
+    obj1 = "Sh2 119 Panel 1"
+    obj2 = "Sh2 119 Panel 2"
+    pat1 = build_panel_pattern("Sh2 119", "Panel", "1")
+    pat2 = build_panel_pattern("Sh2 119", "Panel", "2")
+    assert _ordered_ilike_match(pat1, obj1)
+    assert not _ordered_ilike_match(pat1, obj2)
+    assert _ordered_ilike_match(pat2, obj2)
+    assert not _ordered_ilike_match(pat2, obj1)
+
+
+def test_panel_pattern_tile_disambiguates():
+    """Tile-pattern candidates (R-C) get a pattern that uniquely identifies the
+    OBJECT and does not match a sibling tile."""
+    from app.services.mosaic_detection import build_panel_pattern
+    obj1 = "IC1805_1-1"
+    obj2 = "IC1805_1-2"
+    pat1 = build_panel_pattern("IC1805", None, "1-1")
+    pat2 = build_panel_pattern("IC1805", None, "1-2")
+    assert _ordered_ilike_match(pat1, obj1)
+    assert not _ordered_ilike_match(pat1, obj2)
+    assert _ordered_ilike_match(pat2, obj2)
+    assert not _ordered_ilike_match(pat2, obj1)
+
+
+# ---------------------------------------------------------------------------
 # Stage 1+2+3: full grouping via group_panels
 # ---------------------------------------------------------------------------
 

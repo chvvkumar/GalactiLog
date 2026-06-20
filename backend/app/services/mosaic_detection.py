@@ -151,10 +151,33 @@ _TILE_RE = re.compile(r"^(.+?)[\s_-]+(\d+-\d+)\s*$")
 
 def _keyword_regex(keywords: list[str]) -> re.Pattern:
     kw_pattern = "|".join(re.escape(k) for k in keywords)
+    # Capture the keyword token itself (group 2) so the stored panel_pattern can
+    # include it for unambiguous matching.
     return re.compile(
-        rf"^(.+?)\s*[-_\s]?\s*(?:{kw_pattern})\s*[-_\s]?\s*(\d+)\s*$",
+        rf"^(.+?)\s*[-_\s]?\s*({kw_pattern})\s*[-_\s]?\s*(\d+)\s*$",
         re.IGNORECASE,
     )
+
+
+def match_panel_token_full(
+    name: str, keywords: list[str]
+) -> tuple[str, str, str | None] | None:
+    """Return (base_name, panel_number, keyword) if name carries a token.
+
+    ``keyword`` is the matched keyword (e.g. "Panel"/"P") for keyword matches,
+    or None for tile-pattern (_R-C) matches. Tries the keyword pattern first,
+    then the tile pattern. Returns None when there is no panel token.
+    """
+    if not name:
+        return None
+    if keywords:
+        m = _keyword_regex(keywords).match(name)
+        if m:
+            return m.group(1).strip(), m.group(3), m.group(2)
+    m = _TILE_RE.match(name)
+    if m:
+        return m.group(1).strip(), m.group(2), None
+    return None
 
 
 def match_panel_token(name: str, keywords: list[str]) -> tuple[str, str] | None:
@@ -163,22 +186,30 @@ def match_panel_token(name: str, keywords: list[str]) -> tuple[str, str] | None:
     Tries the keyword pattern (Panel N / P N) first, then the _R-C tile
     pattern. Returns None when the name has no panel token (never-absorb).
     """
-    if not name:
+    result = match_panel_token_full(name, keywords)
+    if result is None:
         return None
-    if keywords:
-        m = _keyword_regex(keywords).match(name)
-        if m:
-            return m.group(1).strip(), m.group(2)
-    m = _TILE_RE.match(name)
-    if m:
-        return m.group(1).strip(), m.group(2)
-    return None
+    base, num, _kw = result
+    return base, num
 
 
 def strip_panel_token(name: str, keywords: list[str]) -> str | None:
     """Return the stripped base name, or None if no panel token present."""
     result = match_panel_token(name, keywords)
     return result[0] if result else None
+
+
+def build_panel_pattern(base_name: str, keyword: str | None, num: str) -> str:
+    """Build an ILIKE pattern that uniquely identifies a panel's OBJECT.
+
+    Keyword candidates include the matched keyword token so the pattern does not
+    match a sibling panel of the same base (important when the base itself
+    contains digits, e.g. "Sh2 119"). Tile candidates carry the R-C token, which
+    is already unique within the base.
+    """
+    if keyword:
+        return f"%{base_name}%{keyword}%{num}%"
+    return f"%{base_name}%{num}%"
 
 
 # ---------------------------------------------------------------------------
@@ -193,6 +224,7 @@ class PanelCandidate:
     label: str
     center: TargetCenter | None
     fov_arcmin: float | None
+    keyword: str | None = None  # matched keyword token (None for tile pattern)
 
 
 @dataclass
@@ -205,6 +237,7 @@ class PanelGroup:
     discovery_source: str      # 'name' | 'position' | 'both'
     flags: list[str] = field(default_factory=list)
     geometry: dict | None = None
+    panel_keywords: list[str | None] = field(default_factory=list)
 
 
 def _build_candidates(targets: list[dict], keywords: list[str]) -> list[PanelCandidate]:
@@ -232,10 +265,10 @@ def _build_candidates(targets: list[dict], keywords: list[str]) -> list[PanelCan
         # within one target does not produce duplicate labels.
         seen: set[tuple[str, str]] = set()
         for name in t.get("object_names", []):
-            match = match_panel_token(name, keywords)
+            match = match_panel_token_full(name, keywords)
             if not match:
                 continue  # never-absorb: no token => not a panel candidate
-            base, num = match
+            base, num, keyword = match
             key = (base.upper(), num)
             if key in seen:
                 continue
@@ -251,6 +284,7 @@ def _build_candidates(targets: list[dict], keywords: list[str]) -> list[PanelCan
                     label=_panel_label(num),
                     center=center,
                     fov_arcmin=fov,
+                    keyword=keyword,
                 )
             )
     return candidates
@@ -425,6 +459,7 @@ def _finalize_group(
         discovery_source=source,
         flags=flags,
         geometry=_geometry(candidates),
+        panel_keywords=[c.keyword for c in candidates],
     )
 
 
@@ -607,6 +642,23 @@ def _date_range_suffix(dates: list[str]) -> str:
     return f"({fmt_first} - {fmt_last})"
 
 
+def _unique_name(name: str, used: set[str]) -> str:
+    """Return ``name`` (or a deterministic ' (#n)' variant) not already in
+    ``used``, and record the chosen name. Prevents two suggestions in one run
+    from sharing a suggested_name, which would collide on the unique mosaic name
+    when both are accepted.
+    """
+    if name not in used:
+        used.add(name)
+        return name
+    n = 2
+    while f"{name} (#{n})" in used:
+        n += 1
+    chosen = f"{name} (#{n})"
+    used.add(chosen)
+    return chosen
+
+
 # ---------------------------------------------------------------------------
 # DB orchestrator
 # ---------------------------------------------------------------------------
@@ -715,17 +767,13 @@ async def detect_mosaic_panels(session: AsyncSession, gap_days: int = 0) -> int:
 
     new_base_names = {g.base_name for g in groups}
 
-    # Replace stale pending suggestions for these base names.
-    if new_base_names:
-        stale_q = select(MosaicSuggestion.id).where(
-            MosaicSuggestion.status == "pending",
-            MosaicSuggestion.base_name.in_(new_base_names),
-        )
-        stale_ids = [r[0] for r in (await session.execute(stale_q)).all()]
-        if stale_ids:
-            await session.execute(
-                delete(MosaicSuggestion).where(MosaicSuggestion.id.in_(stale_ids))
-            )
+    # Detection is idempotent: clear ALL pending suggestions before regenerating.
+    # This drops stale rows from prior runs AND legacy rows from the old code
+    # (which have NULL base_name/geometry and would otherwise coexist as
+    # no-preview duplicates). Rejected/dismissed and accepted rows are untouched.
+    await session.execute(
+        delete(MosaicSuggestion).where(MosaicSuggestion.status == "pending")
+    )
 
     # Skip base names already represented by an existing mosaic.
     existing_mosaic_q = select(Mosaic.name)
@@ -741,14 +789,19 @@ async def detect_mosaic_panels(session: AsyncSession, gap_days: int = 0) -> int:
                 break
 
     count = 0
+    used_names: set[str] = set()
     for g in groups:
         if g.base_name in accepted_bases:
             continue
 
         # Collect session dates per panel via the OBJECT header pattern, so the
         # campaign (gap_days) split and the suggestion card session view work.
+        # Include the matched keyword token so a panel's pattern does not match a
+        # sibling panel's OBJECT (ambiguous for bases containing digits).
+        keywords_per_panel = g.panel_keywords or [None] * len(g.panel_numbers)
         panel_patterns = [
-            f"%{g.base_name}%{num}%" for num in g.panel_numbers
+            build_panel_pattern(g.base_name, kw, num)
+            for kw, num in zip(keywords_per_panel, g.panel_numbers)
         ]
         sess_dates: dict[str, list[str]] = {}
         all_dates: list[str] = []
@@ -776,7 +829,7 @@ async def detect_mosaic_panels(session: AsyncSession, gap_days: int = 0) -> int:
         if len(clusters) <= 1:
             count += _add_suggestion(
                 session, g, raw_id, panel_patterns, sess_dates,
-                suggested_name=g.base_name,
+                suggested_name=_unique_name(g.base_name, used_names),
             )
         else:
             for cluster_dates in clusters:
@@ -798,7 +851,7 @@ async def detect_mosaic_panels(session: AsyncSession, gap_days: int = 0) -> int:
                     session, g, raw_id,
                     [panel_patterns[i] for i in idxs],
                     campaign_sess,
-                    suggested_name=f"{g.base_name} {suffix}",
+                    suggested_name=_unique_name(f"{g.base_name} {suffix}", used_names),
                     subset_idxs=idxs,
                 )
 

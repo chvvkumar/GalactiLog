@@ -38,6 +38,30 @@ from app.services.mosaic_stats import (
 router = APIRouter(prefix="/mosaics", tags=["mosaics"])
 
 
+def _ilike_pattern_matches(pattern: str, value: str) -> bool:
+    """Match an SQL ILIKE pattern against a value with the SAME semantics SQL
+    uses: '%' is an ordered, possibly-empty gap and '_' a single char. Literal
+    segments must appear in order and contiguously (no reordering).
+
+    A naive "split on % and check each segment is a substring" test is wrong:
+    for "%Sh2 119%1%" the segments are ["sh2 119", "1"], and "Sh2 119 Panel 2"
+    contains both ("1" lives inside "119"), so it would falsely match Panel 1.
+    Translating to an anchored regex preserves order and avoids that.
+    """
+    if value is None:
+        return False
+    regex_parts = []
+    for ch in pattern:
+        if ch == "%":
+            regex_parts.append(".*")
+        elif ch == "_":
+            regex_parts.append(".")
+        else:
+            regex_parts.append(re.escape(ch))
+    regex = "^" + "".join(regex_parts) + "$"
+    return re.match(regex, value, re.IGNORECASE | re.DOTALL) is not None
+
+
 @router.post("/detect", response_model=DetectionResponse)
 async def trigger_detection(
     session: AsyncSession = Depends(get_session),
@@ -200,12 +224,10 @@ async def get_suggestions(
         # Distribute each result row back to the suggestions whose pattern matches
         for row in all_session_rows:
             obj_val = row.obj or ""
-            obj_lower = obj_val.lower()
             for pattern, mappings in pattern_map.items():
-                # Convert SQL ILIKE pattern to simple substring check
-                # Patterns are like %name%num% - check each segment between %
-                segments = [s for s in pattern.lower().split("%") if s]
-                if all(seg in obj_lower for seg in segments):
+                # Match the ILIKE pattern with ordered, contiguous semantics so
+                # "%Sh2 119%1%" hits "Sh2 119 Panel 1" but NOT "...Panel 2".
+                if _ilike_pattern_matches(pattern, obj_val):
                     for row_idx, label in mappings:
                         session_rows_by_idx[row_idx].append(SuggestionPanelSession(
                             panel_label=label,
@@ -291,6 +313,21 @@ async def accept_suggestion(
         raise HTTPException(404, "Suggestion not found or already resolved")
 
     selected = set(body.selected_panels) if body.selected_panels is not None else None
+
+    # Guard against a duplicate mosaic name BEFORE inserting. A stale bulk
+    # "accept all" can have a sibling suggestion that already created this
+    # mosaic; without this pre-check the flush raises a UniqueViolationError on
+    # mosaics_name_key and surfaces as an unhandled 500. Pre-checking keeps the
+    # session usable (no failed flush to roll back). Case-insensitive to mirror
+    # the existing-mosaic-name handling in get_suggestions.
+    existing = (await session.execute(
+        select(Mosaic).where(func.upper(Mosaic.name) == suggestion.suggested_name.upper())
+    )).scalar_one_or_none()
+    if existing:
+        raise HTTPException(
+            status_code=409,
+            detail=f"A mosaic named '{suggestion.suggested_name}' already exists",
+        )
 
     # Create the mosaic
     mosaic = Mosaic(name=suggestion.suggested_name)

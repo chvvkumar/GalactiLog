@@ -312,6 +312,151 @@ async def test_get_suggestions_shared_target_panels_get_distinct_thumbnails(view
         app.dependency_overrides.clear()
 
 
+def test_ilike_pattern_matcher_is_ordered_and_contiguous():
+    """The ILIKE->regex matcher respects segment ORDER, unlike a naive
+    unordered substring check. Regression for the Sh2 119 cross-mapping bug."""
+    from app.api.mosaics import _ilike_pattern_matches
+
+    # Token-less legacy pattern: "%Sh2 119%1%" must NOT match "Sh2 119 Panel 2"
+    # even though "1" appears inside "119".
+    assert _ilike_pattern_matches("%Sh2 119%1%", "Sh2 119 Panel 1")
+    assert not _ilike_pattern_matches("%Sh2 119%1%", "Sh2 119 Panel 2")
+    assert _ilike_pattern_matches("%Sh2 119%2%", "Sh2 119 Panel 2")
+    assert not _ilike_pattern_matches("%Sh2 119%2%", "Sh2 119 Panel 1")
+
+    # Token pattern (detection now stores %base%Panel%num%).
+    assert _ilike_pattern_matches("%Sh2 119%Panel%1%", "Sh2 119 Panel 1")
+    assert not _ilike_pattern_matches("%Sh2 119%Panel%1%", "Sh2 119 Panel 2")
+
+    # Case-insensitive, and order matters.
+    assert _ilike_pattern_matches("%veil%1%", "Veil Nebula Panel 1")
+    assert not _ilike_pattern_matches("%1%veil%", "Veil Nebula Panel 1")
+
+
+@pytest.mark.asyncio
+async def test_get_suggestions_distributes_sessions_to_correct_panel(viewer_user):
+    """Each OBJECT's sessions go to exactly ONE panel, not every panel.
+    Reproduces the Sh2 119 cross-mapping where 'Panel 2' leaked into Panel 1."""
+    suggestion_id = uuid.uuid4()
+    target_id = uuid.uuid4()
+
+    suggestion = MagicMock()
+    suggestion.id = suggestion_id
+    suggestion.suggested_name = "Sh2 119"
+    suggestion.base_name = "Sh2 119"
+    suggestion.target_ids = [target_id, target_id]
+    suggestion.panel_labels = ["Panel 1", "Panel 2"]
+    # Legacy token-less patterns (the bug case).
+    suggestion.panel_patterns = ["%Sh2 119%1%", "%Sh2 119%2%"]
+    suggestion.session_dates = None
+    suggestion.status = "pending"
+    suggestion.confidence = "high"
+    suggestion.discovery_source = "name"
+    suggestion.flags = []
+    suggestion.geometry = {"panels": []}  # no preview panels -> no pattern thumb queries
+
+    pending_result = MagicMock()
+    pending_result.scalars.return_value.all.return_value = [suggestion]
+
+    mosaic_names_result = MagicMock()
+    mosaic_names_result.all.return_value = []
+
+    target_names_result = MagicMock()
+    target_names_result.all.return_value = [(target_id, "Sh2 119")]
+
+    thumb_result = MagicMock()
+    thumb_result.all.return_value = []
+
+    # Session summary rows: one OBJECT per panel.
+    def _mk_row(obj, night, frames, integration, filt):
+        r = MagicMock()
+        r.obj = obj
+        r.night = night
+        r.frames = frames
+        r.integration = integration
+        r.filter_used = filt
+        return r
+
+    sessions_result = MagicMock()
+    sessions_result.all.return_value = [
+        _mk_row("Sh2 119 Panel 1", "2025-01-01", 10, 600.0, "Ha"),
+        _mk_row("Sh2 119 Panel 2", "2025-01-02", 12, 720.0, "Ha"),
+    ]
+
+    # geometry has no panels, so no per-(target,pattern) thumb queries run.
+    mock_session = AsyncMock()
+    mock_session.execute = AsyncMock(side_effect=[
+        pending_result,
+        mosaic_names_result,
+        target_names_result,
+        thumb_result,
+        sessions_result,
+    ])
+
+    _override_session(mock_session)
+    app.dependency_overrides[get_current_user] = lambda: viewer_user
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            resp = await client.get("/api/mosaics/suggestions")
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+        assert len(data) == 1
+        sessions = data[0]["sessions"]
+        # Each OBJECT maps to its single correct panel, not both.
+        by_object = {(s["object_name"], s["panel_label"]) for s in sessions}
+        assert ("Sh2 119 Panel 1", "Panel 1") in by_object
+        assert ("Sh2 119 Panel 2", "Panel 2") in by_object
+        assert ("Sh2 119 Panel 1", "Panel 2") not in by_object
+        assert ("Sh2 119 Panel 2", "Panel 1") not in by_object
+        # Exactly two session entries total (no duplication across panels).
+        assert len(sessions) == 2
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_accept_suggestion_duplicate_name_returns_409(admin_user):
+    """Accepting a suggestion whose name already exists returns 409, not a 500
+    IntegrityError, and never inserts a partial/duplicate mosaic."""
+    suggestion_id = uuid.uuid4()
+
+    suggestion = MagicMock()
+    suggestion.id = suggestion_id
+    suggestion.suggested_name = "Veil Nebula"
+    suggestion.status = "pending"
+
+    existing_mosaic = MagicMock()
+    existing_mosaic.name = "Veil Nebula"
+
+    dup_result = MagicMock()
+    dup_result.scalar_one_or_none.return_value = existing_mosaic
+
+    mock_session = AsyncMock()
+    mock_session.get = AsyncMock(return_value=suggestion)
+    mock_session.execute = AsyncMock(return_value=dup_result)
+    mock_session.add = MagicMock()
+    mock_session.flush = AsyncMock()
+    mock_session.commit = AsyncMock()
+
+    _override_session(mock_session)
+    app.dependency_overrides[require_admin] = lambda: admin_user
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            resp = await client.post(f"/api/mosaics/suggestions/{suggestion_id}/accept")
+        assert resp.status_code == 409, resp.text
+        assert "already exists" in resp.json()["detail"]
+        # No mosaic insert/flush/commit should have happened.
+        mock_session.add.assert_not_called()
+        mock_session.flush.assert_not_called()
+        mock_session.commit.assert_not_called()
+    finally:
+        app.dependency_overrides.clear()
+
+
 @pytest.mark.asyncio
 async def test_add_panel_mosaic_not_found_returns_404(admin_user):
     mock_session = AsyncMock()
