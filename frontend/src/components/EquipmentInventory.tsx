@@ -4,7 +4,17 @@ import { formatIntegration } from "../utils/format";
 
 const EquipmentTable: Component<{ title: string; items: EquipmentItem[] }> = (props) => (
   <div>
-    <table class="w-full text-xs">
+    <table class="w-full text-xs table-fixed">
+      <colgroup>
+        <col class="w-[24%]" />
+        <col class="w-[10.857%]" />
+        <col class="w-[10.857%]" />
+        <col class="w-[10.857%]" />
+        <col class="w-[10.857%]" />
+        <col class="w-[10.857%]" />
+        <col class="w-[10.857%]" />
+        <col class="w-[10.857%]" />
+      </colgroup>
       <thead>
         <tr class="border-b border-theme-border">
           <th class="text-left text-theme-text-secondary font-normal py-1 pr-4">{props.title}</th>
