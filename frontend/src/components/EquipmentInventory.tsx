@@ -1,5 +1,6 @@
 import { Component, For, Show } from "solid-js";
 import type { EquipmentItem } from "../types";
+import { formatIntegration } from "../utils/format";
 
 const EquipmentTable: Component<{ title: string; items: EquipmentItem[] }> = (props) => (
   <div>
@@ -7,7 +8,13 @@ const EquipmentTable: Component<{ title: string; items: EquipmentItem[] }> = (pr
       <thead>
         <tr class="border-b border-theme-border">
           <th class="text-left text-theme-text-secondary font-normal py-1 pr-4">{props.title}</th>
-          <th class="text-right text-theme-text-secondary font-normal py-1">Frames</th>
+          <th class="text-right text-theme-text-secondary font-normal py-1 pr-4">Frames</th>
+          <th class="text-right text-theme-text-secondary font-normal py-1 pr-4">Nights</th>
+          <th class="text-right text-theme-text-secondary font-normal py-1 pr-4">Targets</th>
+          <th class="text-right text-theme-text-secondary font-normal py-1 pr-4">Avg Session</th>
+          <th class="text-right text-theme-text-secondary font-normal py-1 pr-4">Integration</th>
+          <th class="text-right text-theme-text-secondary font-normal py-1 pr-4">Med FWHM</th>
+          <th class="text-right text-theme-text-secondary font-normal py-1">Guiding</th>
         </tr>
       </thead>
       <tbody>
@@ -19,7 +26,13 @@ const EquipmentTable: Component<{ title: string; items: EquipmentItem[] }> = (pr
                 <span class="text-theme-text-secondary text-tiny ml-1 cursor-help" title="Grouped: multiple equipment aliases are combined under this name">&#x29C9;</span>
               </Show>
             </td>
-            <td class="text-right text-theme-text-secondary py-1 whitespace-nowrap">{item.frame_count.toLocaleString()}</td>
+            <td class="text-right text-theme-text-secondary py-1 pr-4 whitespace-nowrap">{item.frame_count.toLocaleString()}</td>
+            <td class="text-right text-theme-text-secondary py-1 pr-4 whitespace-nowrap">{item.nights.toLocaleString()}</td>
+            <td class="text-right text-theme-text-secondary py-1 pr-4 whitespace-nowrap">{item.target_count.toLocaleString()}</td>
+            <td class="text-right text-theme-text-secondary py-1 pr-4 whitespace-nowrap">{item.avg_session_seconds !== null ? formatIntegration(item.avg_session_seconds) : "—"}</td>
+            <td class="text-right text-theme-text-secondary py-1 pr-4 whitespace-nowrap">{formatIntegration(item.integration_seconds)}</td>
+            <td class="text-right text-theme-text-secondary py-1 pr-4 whitespace-nowrap">{item.median_fwhm !== null ? item.median_fwhm.toFixed(2) + "″" : "—"}</td>
+            <td class="text-right text-theme-text-secondary py-1 whitespace-nowrap">{item.median_guiding_rms !== null ? item.median_guiding_rms.toFixed(2) + "″" : "—"}</td>
           </tr>
         )}</For>
       </tbody>

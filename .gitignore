@@ -11,6 +11,9 @@ build/
 node_modules/
 frontend/dist/
 
+# Vite dependency pre-bundling cache (frontend dev server)
+frontend/.vite/
+
 # Environment
 .env
 .env.local
