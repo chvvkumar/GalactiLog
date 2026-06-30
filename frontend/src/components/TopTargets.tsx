@@ -10,16 +10,20 @@ const TopTargets: Component<{ targets: TopTarget[] }> = (props) => {
       <h3 class="text-theme-text-primary font-medium text-sm">Top Targets</h3>
       <For each={props.targets.slice(0, 10)}>
         {(target, i) => (
-          <div class="flex items-center gap-2 text-xs">
-            <span class="w-4 text-theme-text-secondary text-right">{i() + 1}</span>
-            <span class="w-24 text-theme-text-primary truncate">{target.name}</span>
-            <div class="flex-1 bg-theme-base rounded-full h-3 overflow-hidden">
-              <div
-                class="bg-theme-accent h-3 rounded-full"
-                style={{ width: `${(target.integration_seconds / maxVal()) * 100}%` }}
-              />
+          <div class="flex flex-col gap-1 text-xs">
+            <div class="flex items-baseline gap-2">
+              <span class="w-4 text-theme-text-secondary text-right">{i() + 1}</span>
+              <span class="text-theme-text-primary" title={target.name}>{target.name}</span>
             </div>
-            <span class="w-16 text-right text-theme-text-secondary">{formatIntegration(target.integration_seconds)}</span>
+            <div class="flex items-center gap-2 pl-6">
+              <div class="flex-1 bg-theme-base rounded-full h-3 overflow-hidden">
+                <div
+                  class="bg-theme-accent h-3 rounded-full"
+                  style={{ width: `${(target.integration_seconds / maxVal()) * 100}%` }}
+                />
+              </div>
+              <span class="w-16 text-right text-theme-text-secondary">{formatIntegration(target.integration_seconds)}</span>
+            </div>
           </div>
         )}
       </For>
