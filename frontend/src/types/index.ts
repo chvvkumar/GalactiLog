@@ -489,6 +489,10 @@ export interface EquipmentItem {
   integration_seconds: number;
   avg_session_seconds: number | null;
   grouped: boolean;
+  nights: number;
+  target_count: number;
+  median_fwhm: number | null;
+  median_guiding_rms: number | null;
 }
 
 export interface TimelineEntry {

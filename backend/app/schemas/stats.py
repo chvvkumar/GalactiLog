@@ -18,6 +18,10 @@ class EquipmentItem(BaseModel):
     integration_seconds: float = 0
     avg_session_seconds: float | None = None
     grouped: bool = False
+    nights: int = 0
+    target_count: int = 0
+    median_fwhm: float | None = None
+    median_guiding_rms: float | None = None
 
 
 class EquipmentStats(BaseModel):

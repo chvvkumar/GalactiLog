@@ -262,6 +262,9 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
             func.count(Image.id),
             func.coalesce(func.sum(Image.exposure_time), 0),
             func.array_agg(func.distinct(Image.session_date)),
+            func.array_agg(func.distinct(Image.resolved_target_id)),
+            func.percentile_cont(0.5).within_group(func.nullif(Image.fwhm, 0)).label("med_fwhm"),
+            func.percentile_cont(0.5).within_group(func.nullif(Image.guiding_rms_arcsec, 0)).label("med_guide"),
         ).where(
             Image.camera.isnot(None)
         ).group_by(Image.camera).order_by(func.count(Image.id).desc())
@@ -274,6 +277,9 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
             func.count(Image.id),
             func.coalesce(func.sum(Image.exposure_time), 0),
             func.array_agg(func.distinct(Image.session_date)),
+            func.array_agg(func.distinct(Image.resolved_target_id)),
+            func.percentile_cont(0.5).within_group(func.nullif(Image.fwhm, 0)).label("med_fwhm"),
+            func.percentile_cont(0.5).within_group(func.nullif(Image.guiding_rms_arcsec, 0)).label("med_guide"),
         ).where(
             Image.telescope.isnot(None)
         ).group_by(Image.telescope).order_by(func.count(Image.id).desc())
@@ -477,32 +483,50 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
     )
 
     # Equipment - cameras
+    # Rows are positional: r[0]=name, r[1]=count, r[2]=secs, r[3]=session_dates,
+    # r[4]=target_ids, r[5]=med_fwhm (raw group), r[6]=med_guiding_rms (raw group).
     raw_cam_counts: dict[str, int] = {}
     raw_cam_secs: dict[str, float] = {}
     raw_cam_sessions: dict[str, set] = {}
     cam_raw_names: dict[str, set[str]] = {}
+    raw_cam_targets: dict[str, set] = {}
+    raw_cam_fwhm: dict[str, list[tuple[float, int]]] = {}
+    raw_cam_guide: dict[str, list[tuple[float, int]]] = {}
     for r in cam_rows:
         canonical = normalize_equipment(r[0], cam_map) or r[0]
         raw_cam_counts[canonical] = raw_cam_counts.get(canonical, 0) + r[1]
         raw_cam_secs[canonical] = raw_cam_secs.get(canonical, 0) + (r[2] or 0)
         raw_cam_sessions.setdefault(canonical, set()).update(d for d in (r[3] or []) if d is not None)
         cam_raw_names.setdefault(canonical, set()).add(r[0])
-    cameras = [EquipmentItem(name=name, frame_count=count, integration_seconds=raw_cam_secs[name], avg_session_seconds=(raw_cam_secs[name] / len(raw_cam_sessions[name])) if raw_cam_sessions[name] else None, grouped=len(cam_raw_names[name]) > 1) for name, count in sorted(raw_cam_counts.items(), key=lambda x: x[1], reverse=True)]
+        raw_cam_targets.setdefault(canonical, set()).update(t for t in (r[4] or []) if t is not None)
+        if r[5] is not None:
+            raw_cam_fwhm.setdefault(canonical, []).append((r[5], r[1]))
+        if r[6] is not None:
+            raw_cam_guide.setdefault(canonical, []).append((r[6], r[1]))
 
     # Equipment - telescopes
     raw_tel_counts: dict[str, int] = {}
     raw_tel_secs: dict[str, float] = {}
     raw_tel_sessions: dict[str, set] = {}
     tel_raw_names: dict[str, set[str]] = {}
+    raw_tel_targets: dict[str, set] = {}
+    raw_tel_fwhm: dict[str, list[tuple[float, int]]] = {}
+    raw_tel_guide: dict[str, list[tuple[float, int]]] = {}
     for r in tel_rows:
         canonical = normalize_equipment(r[0], tel_map) or r[0]
         raw_tel_counts[canonical] = raw_tel_counts.get(canonical, 0) + r[1]
         raw_tel_secs[canonical] = raw_tel_secs.get(canonical, 0) + (r[2] or 0)
         raw_tel_sessions.setdefault(canonical, set()).update(d for d in (r[3] or []) if d is not None)
         tel_raw_names.setdefault(canonical, set()).add(r[0])
-    telescopes = [EquipmentItem(name=name, frame_count=count, integration_seconds=raw_tel_secs[name], avg_session_seconds=(raw_tel_secs[name] / len(raw_tel_sessions[name])) if raw_tel_sessions[name] else None, grouped=len(tel_raw_names[name]) > 1) for name, count in sorted(raw_tel_counts.items(), key=lambda x: x[1], reverse=True)]
+        raw_tel_targets.setdefault(canonical, set()).update(t for t in (r[4] or []) if t is not None)
+        if r[5] is not None:
+            raw_tel_fwhm.setdefault(canonical, []).append((r[5], r[1]))
+        if r[6] is not None:
+            raw_tel_guide.setdefault(canonical, []).append((r[6], r[1]))
 
-    equipment = EquipmentStats(cameras=cameras, telescopes=telescopes)
+    # EquipmentItem lists (and EquipmentStats) are built after the
+    # weighted_median_approx helper is defined below, since the new median_fwhm /
+    # median_guiding_rms fields depend on it.
 
     # Equipment Performance - aggregate by normalized telescope+camera
     combo_data: dict[tuple[str, str], dict] = {}
@@ -601,6 +625,40 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
             if running >= half:
                 return round(float(val), 2)
         return round(float(vals_sorted[-1][0]), 2)
+
+    # Build equipment lists now that weighted_median_approx exists. nights is the
+    # count of distinct session_date; target_count the distinct resolved targets;
+    # median_fwhm / median_guiding_rms the frame-weighted median of the raw-group
+    # medians via weighted_median_approx (consistent with the rest of stats).
+    cameras = [
+        EquipmentItem(
+            name=name,
+            frame_count=count,
+            integration_seconds=raw_cam_secs[name],
+            avg_session_seconds=(raw_cam_secs[name] / len(raw_cam_sessions[name])) if raw_cam_sessions[name] else None,
+            grouped=len(cam_raw_names[name]) > 1,
+            nights=len(raw_cam_sessions[name]),
+            target_count=len(raw_cam_targets.get(name, set())),
+            median_fwhm=weighted_median_approx(raw_cam_fwhm.get(name, [])),
+            median_guiding_rms=weighted_median_approx(raw_cam_guide.get(name, [])),
+        )
+        for name, count in sorted(raw_cam_counts.items(), key=lambda x: x[1], reverse=True)
+    ]
+    telescopes = [
+        EquipmentItem(
+            name=name,
+            frame_count=count,
+            integration_seconds=raw_tel_secs[name],
+            avg_session_seconds=(raw_tel_secs[name] / len(raw_tel_sessions[name])) if raw_tel_sessions[name] else None,
+            grouped=len(tel_raw_names[name]) > 1,
+            nights=len(raw_tel_sessions[name]),
+            target_count=len(raw_tel_targets.get(name, set())),
+            median_fwhm=weighted_median_approx(raw_tel_fwhm.get(name, [])),
+            median_guiding_rms=weighted_median_approx(raw_tel_guide.get(name, [])),
+        )
+        for name, count in sorted(raw_tel_counts.items(), key=lambda x: x[1], reverse=True)
+    ]
+    equipment = EquipmentStats(cameras=cameras, telescopes=telescopes)
 
     def safe_round(v: float | None) -> float | None:
         return round(float(v), 2) if v is not None else None
