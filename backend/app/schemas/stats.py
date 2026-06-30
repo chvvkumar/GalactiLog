@@ -15,6 +15,8 @@ class OverviewStats(BaseModel):
 class EquipmentItem(BaseModel):
     name: str
     frame_count: int
+    integration_seconds: float = 0
+    avg_session_seconds: float | None = None
     grouped: bool = False
 
 
@@ -83,6 +85,7 @@ class EquipmentComboMetrics(BaseModel):
     camera: str
     frame_count: int
     total_integration_seconds: float
+    avg_session_seconds: float | None = None
     median_hfr: float | None
     best_hfr: float | None
     median_eccentricity: float | None

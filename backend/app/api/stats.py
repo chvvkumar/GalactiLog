@@ -257,14 +257,24 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
             return (await s.execute(q)).one()
 
     async def _query_cameras():
-        q = select(Image.camera, func.count(Image.id)).where(
+        q = select(
+            Image.camera,
+            func.count(Image.id),
+            func.coalesce(func.sum(Image.exposure_time), 0),
+            func.array_agg(func.distinct(Image.session_date)),
+        ).where(
             Image.camera.isnot(None)
         ).group_by(Image.camera).order_by(func.count(Image.id).desc())
         async with async_session() as s:
             return (await s.execute(q)).all()
 
     async def _query_telescopes():
-        q = select(Image.telescope, func.count(Image.id)).where(
+        q = select(
+            Image.telescope,
+            func.count(Image.id),
+            func.coalesce(func.sum(Image.exposure_time), 0),
+            func.array_agg(func.distinct(Image.session_date)),
+        ).where(
             Image.telescope.isnot(None)
         ).group_by(Image.telescope).order_by(func.count(Image.id).desc())
         async with async_session() as s:
@@ -280,6 +290,7 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
             Image.filter_used,
             func.count(Image.id).label("frame_count"),
             func.coalesce(func.sum(Image.exposure_time), 0).label("total_seconds"),
+            func.array_agg(func.distinct(Image.session_date)).label("session_dates"),
             func.percentile_cont(0.5).within_group(hfr_nz).label("med_hfr"),
             func.min(hfr_nz).label("best_hfr"),
             func.percentile_cont(0.5).within_group(ecc_nz).label("med_ecc"),
@@ -467,21 +478,29 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
 
     # Equipment - cameras
     raw_cam_counts: dict[str, int] = {}
+    raw_cam_secs: dict[str, float] = {}
+    raw_cam_sessions: dict[str, set] = {}
     cam_raw_names: dict[str, set[str]] = {}
     for r in cam_rows:
         canonical = normalize_equipment(r[0], cam_map) or r[0]
         raw_cam_counts[canonical] = raw_cam_counts.get(canonical, 0) + r[1]
+        raw_cam_secs[canonical] = raw_cam_secs.get(canonical, 0) + (r[2] or 0)
+        raw_cam_sessions.setdefault(canonical, set()).update(d for d in (r[3] or []) if d is not None)
         cam_raw_names.setdefault(canonical, set()).add(r[0])
-    cameras = [EquipmentItem(name=name, frame_count=count, grouped=len(cam_raw_names[name]) > 1) for name, count in sorted(raw_cam_counts.items(), key=lambda x: x[1], reverse=True)]
+    cameras = [EquipmentItem(name=name, frame_count=count, integration_seconds=raw_cam_secs[name], avg_session_seconds=(raw_cam_secs[name] / len(raw_cam_sessions[name])) if raw_cam_sessions[name] else None, grouped=len(cam_raw_names[name]) > 1) for name, count in sorted(raw_cam_counts.items(), key=lambda x: x[1], reverse=True)]
 
     # Equipment - telescopes
     raw_tel_counts: dict[str, int] = {}
+    raw_tel_secs: dict[str, float] = {}
+    raw_tel_sessions: dict[str, set] = {}
     tel_raw_names: dict[str, set[str]] = {}
     for r in tel_rows:
         canonical = normalize_equipment(r[0], tel_map) or r[0]
         raw_tel_counts[canonical] = raw_tel_counts.get(canonical, 0) + r[1]
+        raw_tel_secs[canonical] = raw_tel_secs.get(canonical, 0) + (r[2] or 0)
+        raw_tel_sessions.setdefault(canonical, set()).update(d for d in (r[3] or []) if d is not None)
         tel_raw_names.setdefault(canonical, set()).add(r[0])
-    telescopes = [EquipmentItem(name=name, frame_count=count, grouped=len(tel_raw_names[name]) > 1) for name, count in sorted(raw_tel_counts.items(), key=lambda x: x[1], reverse=True)]
+    telescopes = [EquipmentItem(name=name, frame_count=count, integration_seconds=raw_tel_secs[name], avg_session_seconds=(raw_tel_secs[name] / len(raw_tel_sessions[name])) if raw_tel_sessions[name] else None, grouped=len(tel_raw_names[name]) > 1) for name, count in sorted(raw_tel_counts.items(), key=lambda x: x[1], reverse=True)]
 
     equipment = EquipmentStats(cameras=cameras, telescopes=telescopes)
 
@@ -497,6 +516,7 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
             combo_data[key] = {
                 "frame_count": 0,
                 "total_seconds": 0.0,
+                "sessions": set(),
                 "hfr_vals": [],
                 "ecc_vals": [],
                 "fwhm_vals": [],
@@ -518,6 +538,8 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
         cd = combo_data[key]
         cd["frame_count"] += r.frame_count
         cd["total_seconds"] += float(r.total_seconds)
+        if getattr(r, "session_dates", None):
+            cd["sessions"].update(d for d in r.session_dates if d is not None)
 
         # array_agg returns NULLs for zero/absent metrics; drop them.
         if getattr(r, "hfr_vals", None):
@@ -608,6 +630,7 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
             camera=cam,
             frame_count=cd["frame_count"],
             total_integration_seconds=cd["total_seconds"],
+            avg_session_seconds=(cd["total_seconds"] / len(cd["sessions"])) if cd["sessions"] else None,
             median_hfr=weighted_median_approx(cd["hfr_vals"]),
             best_hfr=safe_round(cd["best_hfr"]),
             median_eccentricity=weighted_median_approx(cd["ecc_vals"]),

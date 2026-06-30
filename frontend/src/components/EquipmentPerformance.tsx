@@ -141,6 +141,11 @@ const ComboRow: Component<{ combo: EquipmentComboMetrics; baselines: ComboBaseli
         <td class="text-right text-theme-text-secondary py-1.5 px-2 tabular-nums">
           {props.combo.frame_count.toLocaleString()}
         </td>
+        <td class={`text-right py-1.5 px-2 tabular-nums ${metricClass(props.combo.avg_session_seconds)}`}>
+          {props.combo.avg_session_seconds !== null && props.combo.avg_session_seconds !== undefined
+            ? formatIntegration(props.combo.avg_session_seconds)
+            : "—"}
+        </td>
         <td class="text-right text-theme-text-secondary py-1.5 px-2 tabular-nums">
           {formatIntegration(props.combo.total_integration_seconds)}
         </td>
@@ -163,7 +168,7 @@ const ComboRow: Component<{ combo: EquipmentComboMetrics; baselines: ComboBaseli
         </td>
       </tr>
       <tr class={`bg-theme-surface-alt`}>
-        <td colspan="8" class="p-0">
+        <td colspan="9" class="p-0">
           <div class={`grid transition-[grid-template-rows] duration-200 ${expanded() ? "grid-rows-[1fr]" : "grid-rows-[0fr]"}`}>
             <div class="overflow-hidden">
               <div class="overflow-x-auto">
@@ -204,11 +209,12 @@ const EquipmentPerformance: Component<{ combos: EquipmentComboMetrics[] }> = (pr
         fallback={<p class="text-theme-text-secondary text-xs">No equipment data available</p>}
       >
         <div class="overflow-x-auto">
-        <table class="w-full text-xs min-w-[600px]">
+        <table class="w-full text-xs min-w-[680px]">
           <thead>
             <tr class="border-b border-theme-border">
               <th class="text-left text-theme-text-secondary font-normal py-1 px-2 text-tiny uppercase tracking-wide">Equipment</th>
               <th class="text-right text-theme-text-secondary font-normal py-1 px-2 text-tiny uppercase tracking-wide">Frames</th>
+              <th class="text-right text-theme-text-secondary font-normal py-1 px-2 text-tiny uppercase tracking-wide">Avg Session</th>
               <th class="text-right text-theme-text-secondary font-normal py-1 px-2 text-tiny uppercase tracking-wide">Integration</th>
               <th class="text-right text-theme-text-secondary font-normal py-1 px-2 text-tiny uppercase tracking-wide">Med HFR</th>
               <th class="text-right text-theme-text-secondary font-normal py-1 px-2 text-tiny uppercase tracking-wide">Best HFR</th>

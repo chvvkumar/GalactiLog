@@ -486,6 +486,8 @@ export interface FilenameCandidateResponse {
 export interface EquipmentItem {
   name: string;
   frame_count: number;
+  integration_seconds: number;
+  avg_session_seconds: number | null;
   grouped: boolean;
 }
 
@@ -530,6 +532,7 @@ export interface EquipmentComboMetrics {
   camera: string;
   frame_count: number;
   total_integration_seconds: number;
+  avg_session_seconds: number | null;
   median_hfr: number | null;
   best_hfr: number | null;
   median_eccentricity: number | null;
