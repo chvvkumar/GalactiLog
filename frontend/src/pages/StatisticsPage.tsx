@@ -67,14 +67,18 @@ const StatisticsPage: Component = () => {
                 <h2 class="text-sm font-semibold text-theme-text-primary">Breakdowns</h2>
                 <HelpPopover>
                   <p class="text-sm text-theme-text-secondary">
-                    Three breakdown cards. Filter Usage shows integration time per filter. Equipment Inventory lists telescopes, cameras, and filters seen across the catalog. Top Targets lists the targets with the most integration time. Example: confirm that Ha dominates your narrowband hours.
+                    Three breakdown cards. Equipment Inventory lists telescopes, cameras, and filters seen across the catalog. Below it, Filter Usage shows integration time per filter and Top Targets lists the targets with the most integration time. Example: confirm that Ha dominates your narrowband hours.
                   </p>
                 </HelpPopover>
               </div>
-              <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 [&>*]:border [&>*]:border-theme-border [&>*]:rounded-[var(--radius-md)] [&>*]:shadow-[var(--shadow-sm)]">
-                <FilterUsageChart usage={data().filter_usage} />
-                <EquipmentInventory cameras={data().equipment.cameras} telescopes={data().equipment.telescopes} />
-                <TopTargets targets={data().top_targets} />
+              <div class="space-y-4">
+                <div class="[&>*]:border [&>*]:border-theme-border [&>*]:rounded-[var(--radius-md)] [&>*]:shadow-[var(--shadow-sm)]">
+                  <EquipmentInventory cameras={data().equipment.cameras} telescopes={data().equipment.telescopes} />
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 [&>*]:border [&>*]:border-theme-border [&>*]:rounded-[var(--radius-md)] [&>*]:shadow-[var(--shadow-sm)]">
+                  <FilterUsageChart usage={data().filter_usage} />
+                  <TopTargets targets={data().top_targets} />
+                </div>
               </div>
             </section>
 
