@@ -1,4 +1,4 @@
-import { Component, JSX, createContext, createEffect, createMemo, createSignal, untrack, useContext } from "solid-js";
+import { Component, JSX, createContext, createMemo, createSignal, useContext } from "solid-js";
 import { useSearchParams } from "@solidjs/router";
 import { createResource } from "solid-js";
 import { api } from "../api/client";
@@ -172,18 +172,16 @@ const DashboardFilterProvider: Component<{ children: JSX.Element }> = (props) =>
     return isNaN(p) || p < 1 ? 1 : p;
   });
 
-  const [initializedPageSize, setInitializedPageSize] = createSignal(false);
-  const [stablePageSize, setStablePageSize] = createSignal(25);
-
-  createEffect(() => {
-    const s = settingsCtx.settings();
-    if (s && !untrack(initializedPageSize)) {
-      setStablePageSize(s.general.default_page_size ?? 25);
-      setInitializedPageSize(true);
-    }
-  });
-
-  const currentPageSize = () => stablePageSize();
+  // Page size: an explicit user choice takes precedence; otherwise derive from the saved
+  // default. This is a lazy memo, NOT a Suspense-deferred createEffect: when this provider
+  // mounts while settings are still pending under a suspended boundary (cold login, issue
+  // #264), an init effect would be held by Suspense and never flip the gate, deadlocking the
+  // dashboard on "Loading...". A memo recomputes on read once settings resolve, so the first
+  // /api/targets fetch still uses the correct saved page size without an effect.
+  const [userPageSize, setUserPageSize] = createSignal<number | null>(null);
+  const currentPageSize = createMemo(
+    () => userPageSize() ?? settingsCtx.settings()?.general.default_page_size ?? 25,
+  );
 
   // Resource key combines filters + pagination + sort so changes to any trigger a refetch
   const hasCustomColumns = createMemo(() => {
@@ -197,15 +195,12 @@ const DashboardFilterProvider: Component<{ children: JSX.Element }> = (props) =>
   // flip pageSize / includeCustom, cancelling (net::ERR_ABORTED) and re-issuing the request.
   // createResource skips fetching while its source returns null/undefined/false, so by
   // returning null here until both resources are ready we guarantee exactly one request
-  // for the default view, at the correct saved page size.
-  const settingsReady = createMemo(() => {
-    // settings() resolves to a value once loaded; initializedPageSize confirms the saved
-    // default_page_size has been applied to stablePageSize before the first fetch.
-    const settingsLoaded = settingsCtx.settings() !== undefined && initializedPageSize();
-    // customColumns() resolves to an array (possibly empty) once loaded; undefined = pending.
-    const customColumnsLoaded = settingsCtx.customColumns() !== undefined;
-    return settingsLoaded && customColumnsLoaded;
-  });
+  // for the default view, at the correct saved page size. currentPageSize derives from
+  // settings() directly, so once settings resolve the memo below flips and the first fetch
+  // already carries the saved page size.
+  const settingsReady = createMemo(() =>
+    settingsCtx.settings() !== undefined && settingsCtx.customColumns() !== undefined,
+  );
 
   const fetchKey = createMemo(() => {
     if (!settingsReady()) return null;
@@ -246,7 +241,7 @@ const DashboardFilterProvider: Component<{ children: JSX.Element }> = (props) =>
   };
 
   const setPageSize = (size: number) => {
-    setStablePageSize(size);
+    setUserPageSize(size);
     const current = settingsCtx.settings()?.general;
     if (current) {
       settingsCtx.saveGeneral({ ...current, default_page_size: size });
