@@ -7,6 +7,7 @@ a summary string. Register new migrations in MIGRATIONS with the next version nu
 import logging
 from typing import Callable
 
+from celery.exceptions import SoftTimeLimitExceeded
 from sqlalchemy import or_, select, text
 from sqlalchemy.orm import Session
 
@@ -22,6 +23,15 @@ logger = logging.getLogger(__name__)
 # Current data version - bump this and add a migration function when
 # code changes affect how stored target data is derived.
 DATA_VERSION = 12
+
+# Migrations whose per-target loops make external network calls (VizieR, Gaia,
+# SAC, HyperLEDA) with pacing sleeps commit their work every this many queried
+# targets. On a large catalog such a loop can exceed the Celery time limit and
+# be interrupted; committing in chunks makes the completed enrichment durable so
+# the next run resumes from where it stopped (the per-target enrichers skip
+# already-enriched targets) instead of rolling the whole version back and
+# replaying it every boot (AUD-035).
+_MIGRATION_COMMIT_CHUNK = 25
 
 
 def _migrate_v1_fix_catalog_designations(session: Session) -> str:
@@ -167,6 +177,8 @@ def _migrate_v4_vizier_and_common_names(session: Session) -> str:
         if enrich_target_from_vizier(session, target):
             vizier_enriched += 1
         vizier_queried += 1
+        if vizier_queried % _MIGRATION_COMMIT_CHUNK == 0:
+            session.commit()  # persist partial enrichment so a timeout resumes cheaply
         time.sleep(0.3)
 
     session.flush()
@@ -262,6 +274,8 @@ def _migrate_v6_clear_negative_cache_and_reenrich(session: Session) -> str:
         if enrich_target_from_vizier(session, target):
             vizier_enriched += 1
         vizier_queried += 1
+        if vizier_queried % _MIGRATION_COMMIT_CHUNK == 0:
+            session.commit()  # persist partial enrichment so a timeout resumes cheaply
         time.sleep(0.3)
     session.flush()
 
@@ -328,6 +342,7 @@ def _migrate_v8_tier1_and_catalogs(session: Session) -> str:
         time.sleep(0.5)
 
         if (i + 1) % 10 == 0:
+            session.commit()  # persist partial enrichment so a timeout resumes cheaply
             logger.info("Enrichment progress: %d/%d targets", i + 1, len(targets))
 
     session.flush()
@@ -459,6 +474,13 @@ def _migrate_v11_hyperleda_galaxies(session: Session) -> str:
         try:
             if enrich_target_from_hyperleda(session, target):
                 enriched += 1
+        except SoftTimeLimitExceeded:
+            # The Celery soft-limit signal can land inside the HyperLEDA HTTP
+            # call. It must propagate to run_data_migrations so the runner can
+            # roll back the uncommitted tail and emit the data_upgrade_paused
+            # event; swallowing it here would let the task run on to the hard
+            # kill with no terminal state written (AUD-035).
+            raise
         except Exception as exc:  # noqa: BLE001
             logger.warning(
                 "HyperLEDA enrichment failed for %s: %s",
@@ -470,6 +492,8 @@ def _migrate_v11_hyperleda_galaxies(session: Session) -> str:
         # Skip the sleep for non-galaxies and cache hits, which make no call.
         if will_query:
             queried += 1
+            if queried % _MIGRATION_COMMIT_CHUNK == 0:
+                session.commit()  # persist partial enrichment so a timeout resumes cheaply
             time.sleep(0.5)
 
     session.flush()

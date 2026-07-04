@@ -176,6 +176,12 @@ async def reset_scan(r: aioredis.Redis) -> None:
     await r.delete(SCAN_PROGRESS_KEY)
     await r.delete(SCAN_FAILED_KEY)
     await r.delete(SCAN_CANCEL_KEY)
+    # Also clear any stuck rebuild/reference-thumbnail state so a rebuild that
+    # was hard-killed mid-run (leaving REBUILD_KEY at "running" with no TTL) has
+    # a recovery path from the UI instead of requiring a manual Redis edit
+    # (AUD-003).
+    await r.delete(REBUILD_KEY)
+    await r.delete(REBUILD_PROGRESS_KEY)
 
 
 async def get_activity(r: aioredis.Redis) -> list[dict]:
@@ -458,7 +464,17 @@ def set_cancelled_sync(r: sync_redis.Redis) -> None:
 # ── Rebuild status (Quick Fix / Full Rebuild) ────────────────────────────
 
 REBUILD_KEY = "rebuild:status"
+REBUILD_PROGRESS_KEY = "rebuild:last_progress"
 REBUILD_EXPIRE = 3600  # 1 hour
+# Rebuild-family maintenance tasks (Full Rebuild, Retry Unresolved, reference
+# thumbnails) are legitimately long-running, so a short started_at-based timeout
+# like get_scan_state uses would flag a healthy run as stalled. Instead they
+# write REBUILD_PROGRESS_KEY on every incremental progress update, and a run is
+# considered stalled only after this generous no-progress window elapses. This
+# is the backstop for a worker that is hard-killed (SIGKILL/OOM) without the
+# SoftTimeLimitExceeded handler getting a chance to write a terminal state
+# (AUD-003).
+REBUILD_STALE_TIMEOUT = 900  # 15 minutes with no progress → consider stuck
 
 
 @dataclass
@@ -500,7 +516,22 @@ def _parse_rebuild(data: dict | None) -> RebuildStatus:
 
 async def get_rebuild_state(r: aioredis.Redis) -> RebuildStatus:
     data = await r.hgetall(REBUILD_KEY)
-    return _parse_rebuild(data)
+    snap = _parse_rebuild(data)
+    # Detect a stuck rebuild: state is still "running" but no incremental
+    # progress has been written for REBUILD_STALE_TIMEOUT seconds. This covers
+    # the case where the worker was hard-killed before the SoftTimeLimitExceeded
+    # handler could persist a terminal state, so the status hash would otherwise
+    # read "running" forever with no TTL (AUD-003).
+    if snap.state == "running":
+        last_progress = await r.get(REBUILD_PROGRESS_KEY)
+        reference = None
+        if last_progress:
+            reference = float(last_progress)
+        elif snap.started_at:
+            reference = snap.started_at
+        if reference is not None and (time.time() - reference) > REBUILD_STALE_TIMEOUT:
+            snap.state = "stalled"
+    return snap
 
 
 def set_rebuild_running_sync(r: sync_redis.Redis, mode: str, message: str) -> None:
@@ -513,10 +544,15 @@ def set_rebuild_running_sync(r: sync_redis.Redis, mode: str, message: str) -> No
         "details": "{}",
     })
     r.persist(REBUILD_KEY)
+    r.set(REBUILD_PROGRESS_KEY, str(time.time()))
 
 
 def set_rebuild_progress_sync(r: sync_redis.Redis, message: str) -> None:
     r.hset(REBUILD_KEY, "message", message)
+    # Heartbeat for stale detection: every incremental progress write bumps the
+    # last-progress marker so get_rebuild_state can tell a slow-but-alive run
+    # from a hard-killed one (AUD-003).
+    r.set(REBUILD_PROGRESS_KEY, str(time.time()))
 
 
 def set_rebuild_complete_sync(r: sync_redis.Redis, message: str, details: dict) -> None:
@@ -528,6 +564,7 @@ def set_rebuild_complete_sync(r: sync_redis.Redis, message: str, details: dict) 
         "details": json.dumps(details),
     })
     r.expire(REBUILD_KEY, REBUILD_EXPIRE)
+    r.delete(REBUILD_PROGRESS_KEY)
 
 
 def set_rebuild_cancelled_sync(
@@ -543,4 +580,5 @@ def set_rebuild_cancelled_sync(
         "details": json.dumps(details or {}),
     })
     r.expire(REBUILD_KEY, EXPIRE_AFTER_COMPLETE)
+    r.delete(REBUILD_PROGRESS_KEY)
     clear_cancel_sync(r)

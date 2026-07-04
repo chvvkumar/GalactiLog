@@ -4,6 +4,7 @@ from datetime import datetime
 from pathlib import Path
 
 import fitsio
+from celery.exceptions import SoftTimeLimitExceeded
 from sqlalchemy import create_engine, func, select, text, update as sa_update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -1216,48 +1217,75 @@ def rebuild_targets(self) -> dict:
 
     resolved = 0
     failed = 0
+    processed = 0
+    timed_out = False
 
-    # Phase 3: Resolve each and link images
-    for i, (obj_name, img_count) in enumerate(object_names):
-        if is_cancel_requested_sync(_redis):
-            details = {"resolved": resolved, "failed": failed, "total": total, "processed": i}
-            set_rebuild_cancelled_sync(
-                _redis,
-                f"Cancelled after {i}/{total} names ({resolved} resolved, {failed} failed)",
-                details,
-            )
-            with _activity_session() as _db:
-                _emit_activity_sync(
-                    _db, redis=_redis, category="rebuild", severity="info",
-                    event_type="rebuild_cancelled",
-                    message=f"Full Rebuild cancelled after {i}/{total} names",
-                    details=details, actor="system",
+    # Phase 3: Resolve each and link images. Each resolved name is committed on
+    # its own (below), so partial progress already persists across a kill; the
+    # SoftTimeLimitExceeded guard just makes sure REBUILD_KEY lands in a terminal
+    # state instead of being stranded at "running" (AUD-003).
+    try:
+        for i, (obj_name, img_count) in enumerate(object_names):
+            if is_cancel_requested_sync(_redis):
+                details = {"resolved": resolved, "failed": failed, "total": total, "processed": i}
+                set_rebuild_cancelled_sync(
+                    _redis,
+                    f"Cancelled after {i}/{total} names ({resolved} resolved, {failed} failed)",
+                    details,
                 )
-            logger.info("rebuild_targets: cancelled after %d/%d", i, total)
-            return {"status": "cancelled", **details}
+                with _activity_session() as _db:
+                    _emit_activity_sync(
+                        _db, redis=_redis, category="rebuild", severity="info",
+                        event_type="rebuild_cancelled",
+                        message=f"Full Rebuild cancelled after {i}/{total} names",
+                        details=details, actor="system",
+                    )
+                logger.info("rebuild_targets: cancelled after %d/%d", i, total)
+                return {"status": "cancelled", **details}
 
-        with Session(_sync_engine) as session:
-            target_id = resolve_target(obj_name, session, redis=_redis)
-
-        if target_id:
             with Session(_sync_engine) as session:
-                session.execute(text("""
-                    UPDATE images
-                    SET resolved_target_id = :tid
-                    WHERE resolved_target_id IS NULL
-                      AND raw_headers->>'OBJECT' = :obj_name
-                """), {"tid": target_id, "obj_name": obj_name})
-                session.commit()
-            resolved += 1
-            logger.info("rebuild_targets: %s -> %s (%d images)", obj_name, target_id, img_count)
-        else:
-            failed += 1
-            logger.info("rebuild_targets: FAILED %s (%d images)", obj_name, img_count)
+                target_id = resolve_target(obj_name, session, redis=_redis)
 
-        if (i + 1) % 5 == 0 or i + 1 == total:
-            set_rebuild_progress_sync(_redis, f"Resolving {i + 1}/{total} object names...")
+            if target_id:
+                with Session(_sync_engine) as session:
+                    session.execute(text("""
+                        UPDATE images
+                        SET resolved_target_id = :tid
+                        WHERE resolved_target_id IS NULL
+                          AND raw_headers->>'OBJECT' = :obj_name
+                    """), {"tid": target_id, "obj_name": obj_name})
+                    session.commit()
+                resolved += 1
+                logger.info("rebuild_targets: %s -> %s (%d images)", obj_name, target_id, img_count)
+            else:
+                failed += 1
+                logger.info("rebuild_targets: FAILED %s (%d images)", obj_name, img_count)
 
-        time.sleep(0.3)  # Rate limit SIMBAD
+            processed = i + 1
+            if (i + 1) % 5 == 0 or i + 1 == total:
+                set_rebuild_progress_sync(_redis, f"Resolving {i + 1}/{total} object names...")
+
+            time.sleep(0.3)  # Rate limit SIMBAD
+    except SoftTimeLimitExceeded:
+        timed_out = True
+
+    if timed_out:
+        details = {"resolved": resolved, "failed": failed, "total": total, "processed": processed}
+        set_rebuild_complete_sync(
+            _redis,
+            f"Full Rebuild paused at the time limit after {processed}/{total} names "
+            f"({resolved} resolved, {failed} failed)",
+            details,
+        )
+        with _activity_session() as _db:
+            _emit_activity_sync(
+                _db, redis=_redis, category="rebuild", severity="warning",
+                event_type="rebuild_complete",
+                message=f"Full Rebuild paused at time limit after {processed}/{total} names",
+                details=details, actor="system",
+            )
+        logger.warning("rebuild_targets: timed out after %d/%d names", processed, total)
+        return {"status": "timeout", **details}
 
     # Phase 4: Queue post-rebuild tasks
     detect_duplicate_targets.apply_async(countdown=10)
@@ -1328,47 +1356,75 @@ def retry_unresolved(self) -> dict:
 
     resolved = 0
     failed = 0
+    processed = 0
+    timed_out = False
 
-    # Phase 3: Resolve each and link images
-    for i, (obj_name, img_count) in enumerate(object_names):
-        if is_cancel_requested_sync(_redis):
-            details = {"resolved": resolved, "failed": failed, "total": total, "processed": i}
-            set_rebuild_cancelled_sync(
-                _redis,
-                f"Cancelled after {i}/{total} names ({resolved} resolved, {failed} still unresolved)",
-                details,
-            )
-            with _activity_session() as _db:
-                _emit_activity_sync(
-                    _db, redis=_redis, category="rebuild", severity="info",
-                    event_type="rebuild_cancelled",
-                    message=f"Retry Unresolved cancelled after {i}/{total} names",
-                    details=details, actor="system",
+    # Phase 3: Resolve each and link images. Only unresolved names are queried
+    # and each success is committed immediately, so a killed run resumes
+    # naturally (the next run re-selects whatever is still unresolved). The
+    # SoftTimeLimitExceeded guard just ensures a terminal REBUILD_KEY state
+    # instead of a stuck "running" (AUD-003).
+    try:
+        for i, (obj_name, img_count) in enumerate(object_names):
+            if is_cancel_requested_sync(_redis):
+                details = {"resolved": resolved, "failed": failed, "total": total, "processed": i}
+                set_rebuild_cancelled_sync(
+                    _redis,
+                    f"Cancelled after {i}/{total} names ({resolved} resolved, {failed} still unresolved)",
+                    details,
                 )
-            logger.info("retry_unresolved: cancelled after %d/%d", i, total)
-            return {"status": "cancelled", **details}
+                with _activity_session() as _db:
+                    _emit_activity_sync(
+                        _db, redis=_redis, category="rebuild", severity="info",
+                        event_type="rebuild_cancelled",
+                        message=f"Retry Unresolved cancelled after {i}/{total} names",
+                        details=details, actor="system",
+                    )
+                logger.info("retry_unresolved: cancelled after %d/%d", i, total)
+                return {"status": "cancelled", **details}
 
-        with Session(_sync_engine) as session:
-            target_id = resolve_target(obj_name, session, redis=_redis)
-
-        if target_id:
             with Session(_sync_engine) as session:
-                session.execute(text("""
-                    UPDATE images
-                    SET resolved_target_id = :tid
-                    WHERE resolved_target_id IS NULL
-                      AND raw_headers->>'OBJECT' = :obj_name
-                """), {"tid": target_id, "obj_name": obj_name})
-                session.commit()
-            resolved += 1
-            logger.info("retry_unresolved: %s -> %s (%d images)", obj_name, target_id, img_count)
-        else:
-            failed += 1
+                target_id = resolve_target(obj_name, session, redis=_redis)
 
-        if (i + 1) % 5 == 0 or i + 1 == total:
-            set_rebuild_progress_sync(_redis, f"Retrying {i + 1}/{total} unresolved names...")
+            if target_id:
+                with Session(_sync_engine) as session:
+                    session.execute(text("""
+                        UPDATE images
+                        SET resolved_target_id = :tid
+                        WHERE resolved_target_id IS NULL
+                          AND raw_headers->>'OBJECT' = :obj_name
+                    """), {"tid": target_id, "obj_name": obj_name})
+                    session.commit()
+                resolved += 1
+                logger.info("retry_unresolved: %s -> %s (%d images)", obj_name, target_id, img_count)
+            else:
+                failed += 1
 
-        time.sleep(0.3)  # Rate limit external services
+            processed = i + 1
+            if (i + 1) % 5 == 0 or i + 1 == total:
+                set_rebuild_progress_sync(_redis, f"Retrying {i + 1}/{total} unresolved names...")
+
+            time.sleep(0.3)  # Rate limit external services
+    except SoftTimeLimitExceeded:
+        timed_out = True
+
+    if timed_out:
+        details = {"resolved": resolved, "failed": failed, "total": total, "processed": processed}
+        set_rebuild_complete_sync(
+            _redis,
+            f"Retry Unresolved paused at the time limit after {processed}/{total} names "
+            f"({resolved} resolved, {failed} still unresolved)",
+            details,
+        )
+        with _activity_session() as _db:
+            _emit_activity_sync(
+                _db, redis=_redis, category="rebuild", severity="warning",
+                event_type="rebuild_complete",
+                message=f"Retry Unresolved paused at time limit after {processed}/{total} names",
+                details=details, actor="system",
+            )
+        logger.warning("retry_unresolved: timed out after %d/%d names", processed, total)
+        return {"status": "timeout", **details}
 
     details = {"resolved": resolved, "failed": failed, "total": total}
     set_rebuild_complete_sync(
@@ -1869,6 +1925,32 @@ def run_data_migrations(self, from_version: int) -> dict:
                     session.commit()
                     results.append(f"v{ver}: {summary}")
                     logger.info("data_migrations: v%d complete - %s", ver, summary)
+                except SoftTimeLimitExceeded:
+                    # The task hit its (generous) time limit mid-migration.
+                    # Long per-target migration loops commit their work in
+                    # chunks, so that partial progress is already durable; only
+                    # the uncommitted tail is rolled back here. The version is
+                    # deliberately NOT stamped, so the entrypoint re-dispatches
+                    # this same migration on the next boot -- but because the
+                    # per-target enrichers skip already-enriched targets, the
+                    # replay is cheap and each run advances further until it
+                    # finally completes (AUD-035). A terminal activity event is
+                    # always written so this is never a silent loop.
+                    session.rollback()
+                    msg = (
+                        f"Data upgrade v{ver} ({desc}) paused at the task time "
+                        f"limit; committed progress is preserved and it will "
+                        f"resume on the next restart."
+                    )
+                    logger.warning("data_migrations: %s", msg)
+                    with _activity_session() as _db:
+                        _emit_activity_sync(
+                            _db, redis=_redis, category="migration", severity="warning",
+                            event_type="data_upgrade_paused",
+                            message=msg,
+                            details={"version": ver}, actor="system",
+                        )
+                    return {"status": "timeout", "version": ver}
                 except Exception as e:
                     session.rollback()
                     error_msg = f"Data upgrade failed at v{ver} ({desc}): {e}"
@@ -2123,7 +2205,16 @@ def generate_reference_thumbnails(self, force: bool = False, parent_activity_id:
     set_rebuild_running_sync(_redis, "ref_thumbnails", "Finding targets needing thumbnails...")
     output_dir = Path(settings.thumbnails_path) / "reference"
 
+    # Commit fetched thumbnails in small chunks so a run that is killed
+    # mid-loop (time limit, worker restart) persists the thumbnails it already
+    # fetched instead of rolling back the whole batch. Each subsequent run then
+    # re-queries only targets still missing a thumbnail and continues from
+    # there, rather than starting over (AUD-003). expire_on_commit is disabled
+    # so the pre-loaded target objects stay usable across those chunk commits
+    # without a reload round-trip per remaining target.
+    COMMIT_CHUNK = 10
     with Session(_sync_engine) as session:
+        session.expire_on_commit = False
         q = select(Target).where(
             Target.merged_into_id.is_(None),
             Target.ra.isnot(None),
@@ -2139,19 +2230,29 @@ def generate_reference_thumbnails(self, force: bool = False, parent_activity_id:
         )
         fetched = 0
         cancelled = False
-        for i, target in enumerate(targets):
-            if is_cancel_requested_sync(_redis):
-                cancelled = True
-                break
-            path = fetch_reference_thumbnail(target, output_dir)
-            if path:
-                target.reference_thumbnail_path = path
-                fetched += 1
-            if (i + 1) % 5 == 0 or i + 1 == total:
-                set_rebuild_progress_sync(
-                    _redis, f"Reference thumbnails: {i + 1}/{total} ({fetched} fetched)"
-                )
-            time.sleep(1.0)  # Rate limit
+        timed_out = False
+        try:
+            for i, target in enumerate(targets):
+                if is_cancel_requested_sync(_redis):
+                    cancelled = True
+                    break
+                path = fetch_reference_thumbnail(target, output_dir)
+                if path:
+                    target.reference_thumbnail_path = path
+                    fetched += 1
+                if (i + 1) % COMMIT_CHUNK == 0:
+                    session.commit()  # persist partial progress
+                if (i + 1) % 5 == 0 or i + 1 == total:
+                    set_rebuild_progress_sync(
+                        _redis, f"Reference thumbnails: {i + 1}/{total} ({fetched} fetched)"
+                    )
+                time.sleep(1.0)  # Rate limit
+        except SoftTimeLimitExceeded:
+            # Hit the (generous) task time limit. Persist what we have and fall
+            # through to write a terminal "complete" state so REBUILD_KEY is
+            # never left stuck at "running"; the remaining targets are picked up
+            # on the next run because they still have no thumbnail path.
+            timed_out = True
         session.commit()
 
     if cancelled:
@@ -2170,15 +2271,21 @@ def generate_reference_thumbnails(self, force: bool = False, parent_activity_id:
         return {"status": "cancelled", **stats}
 
     _invalidate_stats_cache()
-    stats = {"fetched": fetched, "total": total}
-    set_rebuild_complete_sync(
-        _redis, f"Fetched {fetched}/{total} reference thumbnails", stats
-    )
+    stats = {"fetched": fetched, "total": total, "timed_out": timed_out}
+    if timed_out:
+        message = (
+            f"Fetched {fetched}/{total} reference thumbnails "
+            "(paused at the time limit; the rest continue on the next scan)"
+        )
+    else:
+        message = f"Fetched {fetched}/{total} reference thumbnails"
+    set_rebuild_complete_sync(_redis, message, stats)
     with _activity_session() as _db:
         _emit_activity_sync(
             _db, redis=_redis, category="thumbnail", severity="info",
             event_type="ref_thumbnails_complete",
-            message=f"Reference Thumbnails: fetched {fetched}/{total}",
+            message=f"Reference Thumbnails: fetched {fetched}/{total}"
+                    + (" (paused at time limit)" if timed_out else ""),
             details=stats, actor="system",
             parent_id=parent_activity_id,
         )

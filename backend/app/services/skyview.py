@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import httpx
+from celery.exceptions import SoftTimeLimitExceeded
 
 if TYPE_CHECKING:
     from app.models.target import Target
@@ -58,6 +59,12 @@ def fetch_reference_thumbnail(
             resp.raise_for_status()
         filepath.write_bytes(resp.content)
         return filename
+    except SoftTimeLimitExceeded:
+        # The Celery soft-limit signal can land while blocked in the HTTP call.
+        # It must propagate to generate_reference_thumbnails so the task writes
+        # its terminal "complete" state instead of being swallowed here as a
+        # fetch failure and later dying at the hard limit (AUD-003).
+        raise
     except Exception:
         logger.warning("Failed to fetch SkyView thumbnail for target %s", target.id, exc_info=True)
         return None
