@@ -433,6 +433,7 @@ def _do_ingest(fits_path: str, include_calibration: bool = True) -> dict:
                 telescope=meta.get("telescope"),
                 camera=meta.get("camera"),
                 median_hfr=meta.get("median_hfr"),
+                median_fwhm=meta.get("median_fwhm"),
                 eccentricity=meta.get("eccentricity"),
                 raw_headers=meta.get("raw_headers", {}),
                 # CSV metrics (N.I.N.A. Session Metadata)
@@ -598,7 +599,20 @@ def reingest_changed_file(self, fits_path: str, include_calibration: bool = True
     logger.info("Re-ingesting changed file: %s", path.name)
 
     try:
-        # Delete existing record
+        # AUD-029: validate the file is readable BEFORE deleting the existing
+        # catalog row. A file that is mid-write/truncated at the moment the
+        # size-change was detected raises here (ValueError/OSError). If we
+        # deleted first and then failed, an unrecoverable error would leave the
+        # frame with no catalog row until a later scan re-detected it. Reading
+        # the header/metadata is the failable I/O, so do it up front and bail
+        # without touching the DB or thumbnail when it fails.
+        if path.suffix.lower() == ".xisf":
+            extract_xisf_metadata(path)
+        else:
+            fitsio.read_header(str(path), ext=0)
+
+        # File is intact - now safe to delete the old record + thumbnail and
+        # re-run the full ingest pipeline.
         with Session(_sync_engine) as session:
             existing = session.execute(
                 select(Image).where(Image.file_path == fits_path)

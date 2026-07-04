@@ -34,6 +34,10 @@ class Image(Base):
 
     # Quality metrics
     median_hfr: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # FWHM parsed from FITS/XISF headers (FWHM/MEANFWHM keywords). Kept separate
+    # from median_hfr because HFR and FWHM are different metrics on different
+    # scales, and separate from the CSV-sourced `fwhm` column below.
+    median_fwhm: Mapped[float | None] = mapped_column(Float, nullable=True)
     eccentricity: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     # --- CSV metrics (N.I.N.A. ImageMetaData) ---

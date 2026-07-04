@@ -1,4 +1,5 @@
 import logging
+import math
 import os
 import re
 from pathlib import Path
@@ -153,6 +154,27 @@ def _parse_hfr_from_filename(filename: str) -> float | None:
     return None
 
 
+def _eccentricity_from_header(header) -> float | None:
+    """Return eccentricity, reading ECCENTRICITY directly or deriving from ELLIPTICITY.
+
+    Eccentricity (e) and ellipticity (1 - b/a) are different quantities that must
+    not be stored interchangeably. For an ellipse with axis ratio b/a,
+    e = sqrt(1 - (b/a)^2) = sqrt(1 - (1 - ellipticity)^2). Prefer a native
+    ECCENTRICITY keyword; only convert ELLIPTICITY when eccentricity is absent.
+    """
+    ecc = _first_float(header, "ECCENTRICITY")
+    if ecc is not None:
+        return ecc
+    ellip = _first_float(header, "ELLIPTICITY")
+    if ellip is None:
+        return None
+    axis_ratio = 1.0 - ellip
+    val = 1.0 - axis_ratio * axis_ratio
+    if val < 0:
+        return None
+    return math.sqrt(val)
+
+
 def extract_metadata(fits_path: Path, header=None) -> dict[str, Any]:
     """Extract structured metadata and raw headers from a FITS file.
 
@@ -174,21 +196,28 @@ def extract_metadata(fits_path: Path, header=None) -> dict[str, Any]:
         try:
             capture_date = datetime.fromisoformat(date_obs)
         except ValueError:
-            pass
+            logger.warning(
+                "Unparseable DATE-OBS %r in %s; frame will be excluded from "
+                "timeline/calendar/session analytics",
+                date_obs, fits_path,
+            )
 
     metadata = {
         "file_path": str(fits_path),
         "file_name": fits_path.name,
         "object_name": header.get("OBJECT"),
-        "exposure_time": header.get("EXPTIME"),
+        "exposure_time": _first_float(header, "EXPTIME", "EXPOSURE"),
         "filter_used": header.get("FILTER"),
         "sensor_temp": header.get("CCD-TEMP"),
         "camera_gain": int(header.get("GAIN")) if header.get("GAIN") is not None else None,
         "image_type": header.get("IMAGETYP"),
         "telescope": header.get("TELESCOP"),
         "camera": header.get("INSTRUME"),
-        "median_hfr": _first_float(header, "HFR", "MEANFWHM", "FWHM") or _parse_hfr_from_filename(fits_path.name),
-        "eccentricity": _first_float(header, "ECCENTRICITY", "ELLIPTICITY"),
+        # HFR-family keywords only. FWHM/MEANFWHM are a different metric on a
+        # different scale and go to median_fwhm, never median_hfr.
+        "median_hfr": _first_float(header, "HFR") or _parse_hfr_from_filename(fits_path.name),
+        "median_fwhm": _first_float(header, "MEANFWHM", "FWHM"),
+        "eccentricity": _eccentricity_from_header(header),
         "capture_date": capture_date,
         "raw_headers": raw_headers,
     }

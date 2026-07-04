@@ -7,6 +7,8 @@ is used only for pixel data reading in thumbnail generation.
 
 XISF Spec: https://pixinsight.com/doc/docs/XISF-1.0-spec/XISF-1.0-spec.html
 """
+import logging
+import math
 import re
 import struct
 import xml.etree.ElementTree as ET
@@ -19,6 +21,8 @@ from PIL import Image as PILImage
 
 from app.services.csv_metadata import get_csv_metrics
 from app.services.stretch import normalize_to_unit, resize_array, stretch_channel
+
+logger = logging.getLogger(__name__)
 
 XISF_SIGNATURE = b"XISF0100"
 XISF_NS = "http://www.pixinsight.com/xisf"
@@ -93,14 +97,39 @@ def _first_float(*values) -> float | None:
     return None
 
 
-def _parse_capture_date(date_str: str | None) -> datetime | None:
+def _parse_capture_date(date_str: str | None, path: Path | None = None) -> datetime | None:
     """Parse a date string from FITS keyword or XISF TimePoint."""
     if not date_str:
         return None
     try:
         return datetime.fromisoformat(date_str)
     except ValueError:
+        logger.warning(
+            "Unparseable DATE-OBS %r in %s; frame will be excluded from "
+            "timeline/calendar/session analytics",
+            date_str, path,
+        )
         return None
+
+
+def _eccentricity_from_values(ecc_raw, ellip_raw) -> float | None:
+    """Return eccentricity, reading ECCENTRICITY directly or deriving from ELLIPTICITY.
+
+    Mirrors scanner._eccentricity_from_header: ellipticity (1 - b/a) is a
+    different quantity from eccentricity (e). Convert only when eccentricity is
+    absent, via e = sqrt(1 - (1 - ellipticity)^2).
+    """
+    ecc = _first_float(ecc_raw)
+    if ecc is not None:
+        return ecc
+    ellip = _first_float(ellip_raw)
+    if ellip is None:
+        return None
+    axis_ratio = 1.0 - ellip
+    val = 1.0 - axis_ratio * axis_ratio
+    if val < 0:
+        return None
+    return math.sqrt(val)
 
 
 def extract_xisf_metadata(xisf_path: Path) -> dict[str, Any]:
@@ -151,18 +180,21 @@ def extract_xisf_metadata(xisf_path: Path) -> dict[str, Any]:
         except (ValueError, TypeError):
             pass
 
-    # HFR from headers or filename
-    hfr = _first_float(merged.get("HFR"), merged.get("MEANFWHM"), merged.get("FWHM"))
+    # HFR from HFR-family headers or filename only. FWHM/MEANFWHM are a
+    # different metric on a different scale and are stored in median_fwhm.
+    hfr = _first_float(merged.get("HFR"))
     if hfr is None:
         m = _HFR_PATTERN.search(xisf_path.name)
         if m:
             hfr = float(m.group(1))
 
+    fwhm = _first_float(merged.get("MEANFWHM"), merged.get("FWHM"))
+
     metadata = {
         "file_path": str(xisf_path),
         "file_name": xisf_path.name,
         "object_name": merged.get("OBJECT"),
-        "exposure_time": _first_float(merged.get("EXPTIME")),
+        "exposure_time": _first_float(merged.get("EXPTIME"), merged.get("EXPOSURE")),
         "filter_used": merged.get("FILTER"),
         "sensor_temp": _first_float(merged.get("CCD-TEMP")),
         "camera_gain": camera_gain,
@@ -170,10 +202,11 @@ def extract_xisf_metadata(xisf_path: Path) -> dict[str, Any]:
         "telescope": merged.get("TELESCOP"),
         "camera": merged.get("INSTRUME"),
         "median_hfr": hfr,
-        "eccentricity": _first_float(
+        "median_fwhm": fwhm,
+        "eccentricity": _eccentricity_from_values(
             merged.get("ECCENTRICITY"), merged.get("ELLIPTICITY")
         ),
-        "capture_date": _parse_capture_date(merged.get("DATE-OBS")),
+        "capture_date": _parse_capture_date(merged.get("DATE-OBS"), xisf_path),
         "raw_headers": raw_headers,
     }
 

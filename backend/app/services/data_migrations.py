@@ -7,7 +7,7 @@ a summary string. Register new migrations in MIGRATIONS with the next version nu
 import logging
 from typing import Callable
 
-from sqlalchemy import select, text
+from sqlalchemy import or_, select, text
 from sqlalchemy.orm import Session
 
 from app.models.app_metadata import AppMetadata
@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 # Current data version - bump this and add a migration function when
 # code changes affect how stored target data is derived.
-DATA_VERSION = 11
+DATA_VERSION = 12
 
 
 def _migrate_v1_fix_catalog_designations(session: Session) -> str:
@@ -476,6 +476,105 @@ def _migrate_v11_hyperleda_galaxies(session: Session) -> str:
     return f"HyperLEDA: {enriched} galaxies enriched ({queried} network queries)"
 
 
+def _migrate_v12_exposure_and_metric_split(session: Session) -> str:
+    """Backfill exposure_time and split mislabeled FWHM out of median_hfr.
+
+    Re-derives image-level values from raw_headers after two scanner fixes:
+
+    AUD-001: files carrying only the standard FITS `EXPOSURE` keyword (not
+    `EXPTIME`) previously stored exposure_time = NULL, silently zeroing their
+    integration in every aggregation. Backfill from raw_headers (EXPTIME first,
+    then EXPOSURE) wherever exposure_time is still NULL.
+
+    AUD-007: the scanner previously routed FWHM/MEANFWHM header values into the
+    median_hfr column, conflating two different metrics. Move those mislabeled
+    values into the new median_fwhm column. raw_headers is the ground truth for
+    which source keyword produced each stored value: a row whose headers carry
+    no HFR key but do carry MEANFWHM/FWHM, and whose stored median_hfr equals
+    that FWHM value, was populated from FWHM and is reclassified. Rows whose
+    median_hfr came from a real HFR keyword, the filename, or CSV enrichment
+    (value will not match the header FWHM) are left untouched.
+    """
+    from app.models import Image
+
+    def _to_float(val) -> float | None:
+        if val is None:
+            return None
+        try:
+            return float(val)
+        except (ValueError, TypeError):
+            return None
+
+    # --- AUD-001: backfill NULL exposure_time from raw_headers ---
+    exposure_rows = session.execute(
+        select(Image.id, Image.raw_headers).where(
+            Image.exposure_time.is_(None),
+            or_(
+                Image.raw_headers.has_key("EXPTIME"),   # noqa: W601 (JSONB ?)
+                Image.raw_headers.has_key("EXPOSURE"),  # noqa: W601
+            ),
+        )
+    ).all()
+
+    exposure_updates: list[dict] = []
+    for img_id, headers in exposure_rows:
+        if not headers:
+            continue
+        val = _to_float(headers.get("EXPTIME"))
+        if val is None:
+            val = _to_float(headers.get("EXPOSURE"))
+        if val is not None:
+            exposure_updates.append({"id": img_id, "exposure_time": val})
+
+    if exposure_updates:
+        session.bulk_update_mappings(Image, exposure_updates)
+        session.flush()
+
+    # --- AUD-007: reclassify FWHM values mislabeled as median_hfr ---
+    hfr_rows = session.execute(
+        select(Image.id, Image.median_hfr, Image.raw_headers).where(
+            Image.median_hfr.isnot(None),
+            Image.median_fwhm.is_(None),
+            ~Image.raw_headers.has_key("HFR"),          # noqa: W601
+            or_(
+                Image.raw_headers.has_key("MEANFWHM"),  # noqa: W601
+                Image.raw_headers.has_key("FWHM"),      # noqa: W601
+            ),
+        )
+    ).all()
+
+    metric_updates: list[dict] = []
+    for img_id, median_hfr, headers in hfr_rows:
+        if not headers or median_hfr is None:
+            continue
+        # Mirror the old scanner priority: MEANFWHM first, then FWHM.
+        fwhm_val = _to_float(headers.get("MEANFWHM"))
+        if fwhm_val is None:
+            fwhm_val = _to_float(headers.get("FWHM"))
+        if fwhm_val is None:
+            continue
+        # Only reclassify when the stored median_hfr actually came from that
+        # FWHM value. A mismatch means the value was a real HFR (CSV/filename),
+        # so leave it alone.
+        if abs(median_hfr - fwhm_val) <= 1e-6:
+            metric_updates.append({
+                "id": img_id,
+                "median_fwhm": fwhm_val,
+                "median_hfr": None,
+            })
+
+    if metric_updates:
+        session.bulk_update_mappings(Image, metric_updates)
+        session.flush()
+
+    parts = []
+    if exposure_updates:
+        parts.append(f"{len(exposure_updates)} exposures backfilled from raw_headers")
+    if metric_updates:
+        parts.append(f"{len(metric_updates)} FWHM values moved from median_hfr to median_fwhm")
+    return "; ".join(parts) if parts else "No changes needed"
+
+
 # Registry: version number -> (description, migration function)
 # Version numbers must be sequential starting from 1.
 MIGRATIONS: dict[int, tuple[str, Callable[[Session], str]]] = {
@@ -490,6 +589,7 @@ MIGRATIONS: dict[int, tuple[str, Callable[[Session], str]]] = {
     9: ("Stellarium common name cache refresh", _migrate_v9_stellarium_names),
     10: ("Re-enrich targets from OpenNGC (Messier lookup fix)", _migrate_v10_openngc_messier_common_names),
     11: ("Backfill HyperLEDA morphological type and inclination for galaxies", _migrate_v11_hyperleda_galaxies),
+    12: ("Backfill exposure_time from EXPOSURE keyword and split FWHM out of median_hfr", _migrate_v12_exposure_and_metric_split),
 }
 
 

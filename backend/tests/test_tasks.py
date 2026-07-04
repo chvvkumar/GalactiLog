@@ -319,3 +319,62 @@ class TestDetectDuplicatesPass2JoinQuery:
         assert winner_id == 1
         assert winner_name == "Target A"
         assert winner_count == 10
+
+
+# ---------------------------------------------------------------------------
+# AUD-029: reingest_changed_file validates the file before deleting the row
+# ---------------------------------------------------------------------------
+
+class TestReingestValidatesBeforeDelete:
+    """A truncated/corrupt file must NOT delete the existing catalog row."""
+
+    def test_corrupt_file_does_not_delete_existing_row(self):
+        tasks_mod = _bootstrap_tasks()
+
+        bad_fitsio = MagicMock()
+        bad_fitsio.read_header.side_effect = ValueError("SIMPLE card")
+        mock_session_cls = MagicMock()
+        mock_do_ingest = MagicMock()
+
+        with patch.object(tasks_mod, "fitsio", bad_fitsio), \
+             patch.object(tasks_mod, "Session", mock_session_cls), \
+             patch.object(tasks_mod, "_do_ingest", mock_do_ingest), \
+             patch.object(tasks_mod, "_redis", MagicMock()), \
+             patch.object(tasks_mod, "increment_failed_sync", MagicMock()):
+            result = tasks_mod.reingest_changed_file.apply(
+                args=["/fits/data/truncated.fits", True]
+            ).result
+
+        # The validation read failed, so:
+        assert result["status"] == "failed"
+        # The DB session was never opened -> the old row was never deleted.
+        mock_session_cls.assert_not_called()
+        # And the ingest pipeline was never entered.
+        mock_do_ingest.assert_not_called()
+
+    def test_valid_file_proceeds_to_ingest(self):
+        tasks_mod = _bootstrap_tasks()
+
+        ok_fitsio = MagicMock()
+        ok_fitsio.read_header.return_value = MagicMock()  # readable header
+
+        # Session context manager yields a session with no existing row.
+        session_ctx = MagicMock()
+        session_ctx.__enter__ = MagicMock(return_value=session_ctx)
+        session_ctx.__exit__ = MagicMock(return_value=False)
+        exec_result = MagicMock()
+        exec_result.scalar_one_or_none.return_value = None
+        session_ctx.execute = MagicMock(return_value=exec_result)
+
+        mock_do_ingest = MagicMock(return_value={"file": "x", "status": "ok"})
+
+        with patch.object(tasks_mod, "fitsio", ok_fitsio), \
+             patch.object(tasks_mod, "Session", return_value=session_ctx), \
+             patch.object(tasks_mod, "_do_ingest", mock_do_ingest), \
+             patch.object(tasks_mod, "_redis", MagicMock()):
+            result = tasks_mod.reingest_changed_file.apply(
+                args=["/fits/data/valid.fits", True]
+            ).result
+
+        assert result["status"] == "ok"
+        mock_do_ingest.assert_called_once()

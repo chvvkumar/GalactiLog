@@ -141,6 +141,92 @@ class TestExtractXisfMetadata:
         assert meta["median_hfr"] == 1.56
 
 
+HEADER_EXPOSURE_KEYWORD = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<xisf version="1.0" xmlns="http://www.pixinsight.com/xisf">
+  <Image geometry="1024:768:1" sampleFormat="UInt16" imageType="Light"
+         location="attachment:4096:1572864">
+    <FITSKeyword name="OBJECT" value="'M 31'" comment=""/>
+    <FITSKeyword name="EXPOSURE" value="240.0" comment="Exposure (legacy keyword)"/>
+    <FITSKeyword name="IMAGETYP" value="'Light'" comment=""/>
+  </Image>
+</xisf>"""
+
+HEADER_FWHM_NO_HFR = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<xisf version="1.0" xmlns="http://www.pixinsight.com/xisf">
+  <Image geometry="1024:768:1" sampleFormat="UInt16" imageType="Light"
+         location="attachment:4096:1572864">
+    <FITSKeyword name="OBJECT" value="'M 31'" comment=""/>
+    <FITSKeyword name="EXPTIME" value="300.0" comment=""/>
+    <FITSKeyword name="MEANFWHM" value="3.2" comment="Mean FWHM"/>
+    <FITSKeyword name="ELLIPTICITY" value="0.19" comment="Ellipticity"/>
+    <FITSKeyword name="IMAGETYP" value="'Light'" comment=""/>
+  </Image>
+</xisf>"""
+
+HEADER_BAD_DATE = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<xisf version="1.0" xmlns="http://www.pixinsight.com/xisf">
+  <Image geometry="1024:768:1" sampleFormat="UInt16" imageType="Light"
+         location="attachment:4096:1572864">
+    <FITSKeyword name="OBJECT" value="'M 31'" comment=""/>
+    <FITSKeyword name="EXPTIME" value="300.0" comment=""/>
+    <FITSKeyword name="DATE-OBS" value="'15/06/2025 not-iso'" comment=""/>
+    <FITSKeyword name="IMAGETYP" value="'Light'" comment=""/>
+  </Image>
+</xisf>"""
+
+
+class TestXisfMetricSeparation:
+    """AUD-001 / AUD-007 / AUD-020 fixes on the XISF path."""
+
+    def test_exposure_keyword_fallback(self, tmp_path):
+        """XISF carrying EXPOSURE (not EXPTIME) yields a non-null exposure_time."""
+        xisf_file = tmp_path / "legacy_exposure.xisf"
+        xisf_file.write_bytes(_make_xisf_bytes(HEADER_EXPOSURE_KEYWORD))
+
+        meta = extract_xisf_metadata(xisf_file)
+
+        assert meta["exposure_time"] == 240.0
+
+    def test_fwhm_only_populates_median_fwhm_not_hfr(self, tmp_path):
+        """A FWHM-only XISF gets median_hfr = None and median_fwhm populated."""
+        xisf_file = tmp_path / "fwhm_only.xisf"
+        xisf_file.write_bytes(_make_xisf_bytes(HEADER_FWHM_NO_HFR))
+
+        meta = extract_xisf_metadata(xisf_file)
+
+        assert meta["median_hfr"] is None
+        assert meta["median_fwhm"] == 3.2
+
+    def test_ellipticity_converted_to_eccentricity(self, tmp_path):
+        """ELLIPTICITY is converted, not stored raw."""
+        import math
+        xisf_file = tmp_path / "ellip.xisf"
+        xisf_file.write_bytes(_make_xisf_bytes(HEADER_FWHM_NO_HFR))
+
+        meta = extract_xisf_metadata(xisf_file)
+
+        expected = math.sqrt(1.0 - (1.0 - 0.19) ** 2)
+        assert meta["eccentricity"] == pytest.approx(expected)
+        assert meta["eccentricity"] != 0.19
+
+    def test_unparseable_date_obs_logs_warning(self, tmp_path, caplog):
+        """A malformed DATE-OBS logs a warning and leaves capture_date None."""
+        xisf_file = tmp_path / "bad_date.xisf"
+        xisf_file.write_bytes(_make_xisf_bytes(HEADER_BAD_DATE))
+
+        with caplog.at_level("WARNING"):
+            meta = extract_xisf_metadata(xisf_file)
+
+        assert meta["capture_date"] is None
+        assert any(
+            "DATE-OBS" in rec.message and "bad_date.xisf" in rec.message
+            for rec in caplog.records
+        )
+
+
 from app.services.scanner import SUPPORTED_EXTENSIONS
 
 
