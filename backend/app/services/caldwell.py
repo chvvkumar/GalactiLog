@@ -7,7 +7,9 @@ from pathlib import Path
 from sqlalchemy.orm import Session
 
 from app.models.caldwell_catalog import CaldwellEntry
-from app.services.catalog_base import load_catalog_csv, match_ngc_catalog
+from app.services.catalog_base import (
+    load_catalog_csv, match_ngc_catalog, match_ngc_catalog_for_target,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -57,4 +59,20 @@ def match_caldwell_targets(session: Session) -> int:
         },
         label="Caldwell",
         logger=logger,
+    )
+
+
+def match_caldwell_for_target(session: Session, target) -> int:
+    """Match Caldwell entries to a single target. Returns matches created."""
+    return match_ngc_catalog_for_target(
+        session,
+        target,
+        model=CaldwellEntry,
+        catalog_name="caldwell",
+        ngc_field="ngc_ic_id",
+        get_catalog_number=lambda entry: entry.catalog_id,
+        build_metadata=lambda entry: {
+            "caldwell_number": int(entry.catalog_id[1:]),  # Strip 'C' prefix
+            "ngc_ic": entry.ngc_ic_id,
+        },
     )

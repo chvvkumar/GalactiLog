@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 # Current data version - bump this and add a migration function when
 # code changes affect how stored target data is derived.
-DATA_VERSION = 12
+DATA_VERSION = 13
 
 # Migrations whose per-target loops make external network calls (VizieR, Gaia,
 # SAC, HyperLEDA) with pacing sleeps commit their work every this many queried
@@ -599,6 +599,90 @@ def _migrate_v12_exposure_and_metric_split(session: Session) -> str:
     return "; ".join(parts) if parts else "No changes needed"
 
 
+def _migrate_v13_enrich_created_targets(session: Session) -> str:
+    """Backfill the per-target enrichment gaps for targets created since v11.
+
+    A target ingested after the last data migration ran only got OpenNGC/VizieR/
+    SAC enrichment; it never received the coordinate-based constellation
+    fallback, catalog memberships, cluster-gated Gaia distance, or galaxy-gated
+    HyperLEDA morphology that migration-time targets got (AUD-006). Prod evidence
+    shows 7 of 32 galaxy targets missing hubble_t_type and 95 non-user targets
+    with zero catalog memberships, so post-migration creations are demonstrably
+    missing enrichment.
+
+    Reuses the exact same per-target logic (enrich_new_target) that the new
+    async follow-up task runs, so a migration-time target and a freshly ingested
+    one converge. Every step is idempotent, so this migration is safe to replay:
+    the per-target enrichers skip already-enriched fields and the membership
+    upserts are conflict-updates. Commits every _MIGRATION_COMMIT_CHUNK network
+    queries so a timeout resumes cheaply, and re-raises SoftTimeLimitExceeded so
+    the runner can write a terminal state (AUD-035).
+    """
+    import time
+    from app.models import Target
+    from app.services.catalog_membership import load_all_catalogs
+    from app.services.target_enrichment import enrich_new_target
+
+    # Ensure the static catalogs are loaded so per-target membership matching
+    # has data to match against (idempotent upserts).
+    load_all_catalogs(session)
+    session.flush()
+
+    targets = session.execute(
+        select(Target).where(Target.merged_into_id.is_(None))
+    ).scalars().all()
+
+    const_added = 0
+    membership_added = 0
+    gaia_added = 0
+    hyperleda_added = 0
+    queried = 0
+    for target in targets:
+        if getattr(target, "user_defined", False):
+            continue
+
+        try:
+            res = enrich_new_target(session, target)
+        except SoftTimeLimitExceeded:
+            # Propagate so run_data_migrations rolls back the uncommitted tail
+            # and emits data_upgrade_paused instead of hitting the hard kill.
+            raise
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "v13 enrichment failed for %s: %s",
+                target.catalog_id or target.primary_name, exc,
+            )
+            continue
+
+        const_added += 1 if res["constellation"] else 0
+        membership_added += res["memberships"]
+        gaia_added += 1 if res["gaia"] else 0
+        hyperleda_added += 1 if res["hyperleda"] else 0
+
+        # Pace + chunk-commit only when a real network query was made, matching
+        # the v8/v11 loops (non-galaxies, non-clusters, and cache hits are free).
+        if res["queried_network"]:
+            queried += 1
+            if queried % _MIGRATION_COMMIT_CHUNK == 0:
+                session.commit()  # persist partial enrichment so a timeout resumes cheaply
+            time.sleep(0.5)
+
+    session.flush()
+
+    parts = []
+    if const_added:
+        parts.append(f"{const_added} constellations computed")
+    if membership_added:
+        parts.append(f"{membership_added} catalog memberships matched")
+    if gaia_added:
+        parts.append(f"Gaia: {gaia_added} clusters got distances")
+    if hyperleda_added:
+        parts.append(f"HyperLEDA: {hyperleda_added} galaxies enriched")
+    if queried:
+        parts.append(f"{queried} network queries")
+    return "; ".join(parts) if parts else "No changes needed"
+
+
 # Registry: version number -> (description, migration function)
 # Version numbers must be sequential starting from 1.
 MIGRATIONS: dict[int, tuple[str, Callable[[Session], str]]] = {
@@ -614,6 +698,7 @@ MIGRATIONS: dict[int, tuple[str, Callable[[Session], str]]] = {
     10: ("Re-enrich targets from OpenNGC (Messier lookup fix)", _migrate_v10_openngc_messier_common_names),
     11: ("Backfill HyperLEDA morphological type and inclination for galaxies", _migrate_v11_hyperleda_galaxies),
     12: ("Backfill exposure_time from EXPOSURE keyword and split FWHM out of median_hfr", _migrate_v12_exposure_and_metric_split),
+    13: ("Backfill per-target enrichment (constellation, memberships, Gaia, HyperLEDA) for targets created since v11", _migrate_v13_enrich_created_targets),
 }
 
 

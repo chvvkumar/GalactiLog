@@ -114,6 +114,24 @@ def match_target_by_identity(
     return target
 
 
+def _dispatch_enrich_new_target(target_id: str) -> None:
+    """Queue the async follow-up enrichment for a newly created target (AUD-006).
+
+    Best-effort: enrichment is a non-critical follow-up (constellation fallback,
+    catalog memberships, Gaia/HyperLEDA), so a broker hiccup must never fail
+    ingest. The task is idempotent and the same gaps are also backfilled by the
+    v13 data migration, so a dropped dispatch self-heals.
+    """
+    try:
+        from app.worker.tasks import enrich_new_target_task
+        enrich_new_target_task.delay(target_id)
+    except Exception:  # noqa: BLE001
+        logger.debug(
+            "Failed to dispatch enrich_new_target_task for %s", target_id,
+            exc_info=True,
+        )
+
+
 def _create_target(
     simbad_result: dict, normalized_name: str, session: Session,
 ) -> str | None:
@@ -166,7 +184,11 @@ def _create_target(
             session.commit()
         enrich_target_from_sac(session, target)
         session.commit()
-        return str(target.id)
+        new_id = str(target.id)
+        # Follow-up enrichment (Gaia/HyperLEDA/memberships/constellation) runs
+        # async so ingest is not blocked on external network latency (AUD-006).
+        _dispatch_enrich_new_target(new_id)
+        return new_id
     except IntegrityError:
         session.rollback()
         # Race: another worker inserted this identity/name. Re-query by the

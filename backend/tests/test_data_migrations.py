@@ -19,6 +19,7 @@ from app.services.data_migrations import (
     get_pending_migrations,
     _migrate_v11_hyperleda_galaxies,
     _migrate_v12_exposure_and_metric_split,
+    _migrate_v13_enrich_created_targets,
 )
 
 
@@ -62,7 +63,13 @@ class TestGetPendingMigrations:
         assert 12 in MIGRATIONS
         desc, func = MIGRATIONS[12]
         assert func is _migrate_v12_exposure_and_metric_split
-        assert DATA_VERSION == 12
+
+    def test_v13_is_enrich_created_targets(self):
+        assert 13 in MIGRATIONS
+        desc, func = MIGRATIONS[13]
+        assert func is _migrate_v13_enrich_created_targets
+        assert "enrichment" in desc.lower()
+        assert DATA_VERSION == 13
 
 
 def _sync_session_factory():

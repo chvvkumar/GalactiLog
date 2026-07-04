@@ -654,6 +654,39 @@ def reingest_changed_file(self, fits_path: str, include_calibration: bool = True
         raise self.retry(exc=exc)
 
 
+@celery_app.task(bind=True, max_retries=3, default_retry_delay=30)
+def enrich_new_target_task(self, target_id: str) -> dict:
+    """Follow-up enrichment for a newly created target (AUD-006).
+
+    Dispatched async from `_create_target` so ingest is never blocked on Gaia/
+    HyperLEDA network latency. Runs the constellation fallback, per-target
+    catalog membership matching, cluster-gated Gaia distance, and galaxy-gated
+    HyperLEDA morphology/inclination. All steps are idempotent, so a retry is
+    safe. Makes at most a few network calls for one target, so the global
+    600s/660s Celery time limit is ample -- no task_annotations override needed.
+    """
+    import uuid as _uuid
+    from app.services.target_enrichment import enrich_new_target
+
+    try:
+        with Session(_sync_engine) as session:
+            target = session.get(Target, _uuid.UUID(str(target_id)))
+            if target is None:
+                logger.info("enrich_new_target_task: target %s not found", target_id)
+                return {"status": "missing", "target_id": str(target_id)}
+            result = enrich_new_target(session, target)
+            session.commit()
+        logger.info("enrich_new_target_task: enriched %s (%s)", target_id, result)
+        return {"status": "ok", "target_id": str(target_id), **result}
+    except SoftTimeLimitExceeded:
+        raise
+    except Exception as exc:
+        logger.warning("enrich_new_target_task failed for %s: %s", target_id, exc)
+        if self.request.retries >= self.max_retries:
+            return {"status": "failed", "target_id": str(target_id), "error": str(exc)}
+        raise self.retry(exc=exc)
+
+
 @celery_app.task(name="regenerate_missing_thumbnails")
 def regenerate_missing_thumbnails() -> dict:
     """Check every image's thumbnail_path and regenerate only those whose

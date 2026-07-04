@@ -205,3 +205,75 @@ def match_abell_targets(session: Session) -> int:
     session.flush()
     logger.info("Matched %d Abell targets", matched)
     return matched
+
+
+def _abell_number_from_name(name: str) -> int | None:
+    """Parse an Abell number from a 'Abell N' or 'ACO N' identifier."""
+    name = name.strip()
+    if name.startswith("Abell "):
+        try:
+            return int(name[6:])
+        except ValueError:
+            return None
+    if name.startswith("ACO "):
+        try:
+            return int(name[4:])
+        except ValueError:
+            return None
+    return None
+
+
+def match_abell_for_target(session: Session, target) -> int:
+    """Match Abell entries to a single target using the same three stages as
+    ``match_abell_targets`` (catalog_id, aliases, coordinate proximity), but
+    scanning only the Abell table, never the targets table. At most one Abell
+    membership is created per target. Idempotent. Returns 1 on match, else 0.
+    """
+    entries = session.execute(select(AbellEntry)).scalars().all()
+
+    abell_by_number: dict[int, AbellEntry] = {}
+    for entry in entries:
+        parts = entry.abell_id.split()
+        if len(parts) == 2:
+            try:
+                abell_by_number[int(parts[1])] = entry
+            except ValueError:
+                pass
+
+    def _record(entry: AbellEntry) -> int:
+        upsert_membership(
+            session,
+            target_id=target.id,
+            catalog_name="abell",
+            catalog_number=entry.abell_id,
+            metadata=_build_abell_metadata(entry),
+        )
+        session.flush()
+        return 1
+
+    # Stage 1: catalog_id starts with "Abell " or "ACO "
+    if target.catalog_id:
+        num = _abell_number_from_name(target.catalog_id)
+        if num is not None and num in abell_by_number:
+            return _record(abell_by_number[num])
+
+    # Stage 2: aliases contain "Abell {num}" or "ACO {num}"
+    for alias in (target.aliases or []):
+        num = _abell_number_from_name(alias)
+        if num is not None and num in abell_by_number:
+            return _record(abell_by_number[num])
+
+    # Stage 3: coordinate proximity for cluster-type targets
+    if (
+        target.ra is not None
+        and target.dec is not None
+        and target.object_type
+        and any(ct in target.object_type for ct in _CLUSTER_TYPES)
+    ):
+        for entry in entries:
+            if entry.ra is None or entry.dec is None:
+                continue
+            if _coord_distance(target.ra, target.dec, entry.ra, entry.dec) <= _COORD_MATCH_DEG:
+                return _record(entry)
+
+    return 0
