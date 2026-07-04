@@ -25,6 +25,16 @@ SCAN_CANCEL_KEY = "scan:cancel"
 SCAN_ACTIVITY_KEY = "scan:activity"
 SCAN_ACTIVITY_MAX = 20
 SCAN_SKIPPED_PATHS_KEY = "scan:skipped_paths"
+# Short-lived marker set inside trigger_scan's lock, between the idle/active
+# check and the `run_scan.delay()` dispatch (AUD-016). Closes the window where
+# a second POST arrives after the dispatch lock is released but before the
+# queued run_scan task is picked up and calls start_scanning_sync - without
+# this, get_scan_state() would still report "idle"/"complete" and a second
+# scan would be dispatched. TTL is generous vs. typical worker pickup latency
+# but short enough not to wedge scan state if the broker/worker never picks
+# the task up at all.
+SCAN_DISPATCHED_KEY = "scan:dispatched"
+SCAN_DISPATCHED_TTL = 60  # seconds
 EXPIRE_AFTER_COMPLETE = 86400  # 24 hours
 STALE_TIMEOUT = 300  # 5 minutes with no progress → consider stuck
 
@@ -95,7 +105,24 @@ async def get_scan_state(r: aioredis.Redis) -> ScanStateSnapshot:
             elapsed = time.time() - float(last_progress)
             if elapsed > STALE_TIMEOUT:
                 snap.state = "stalled"
+    elif await r.exists(SCAN_DISPATCHED_KEY):
+        # A scan was just dispatched (inside trigger_scan's lock) but the
+        # worker hasn't picked it up yet, so scan:state still reads
+        # idle/complete. Report it as active so a second request doesn't
+        # race in and dispatch a duplicate scan (AUD-016).
+        snap.state = "scanning"
     return snap
+
+
+async def mark_scan_dispatched(r: aioredis.Redis) -> None:
+    """Record that a scan was just queued, before the worker has started it.
+
+    Set inside trigger_scan's dispatch lock, immediately before
+    ``run_scan.delay()``. Cleared (implicitly, via TTL) once
+    ``start_scanning_sync`` writes the real "scanning" state, or after
+    ``SCAN_DISPATCHED_TTL`` seconds if the task is never picked up.
+    """
+    await r.set(SCAN_DISPATCHED_KEY, "1", ex=SCAN_DISPATCHED_TTL)
 
 
 async def get_failed_files(r: aioredis.Redis) -> list[dict]:
@@ -205,11 +232,25 @@ def check_complete_sync(r: sync_redis.Redis) -> None:
     data = r.hgetall(SCAN_KEY)
     snap = parse_snapshot(data)
     if snap.state == "ingesting" and snap.total > 0 and (snap.completed + snap.failed) >= snap.total:
+        kind = data.get("kind", "scan")
         r.hset(SCAN_KEY, mapping={
             "state": "complete",
             "completed_at": time.time(),
         })
         r.expire(SCAN_KEY, EXPIRE_AFTER_COMPLETE)
+        if kind != "scan":
+            # Non-scan ingestion (e.g. CSV metrics backfill) reuses this same
+            # progress hash to track its own total/completed/failed counts,
+            # but reaching "complete" here is not a real scan finishing: it
+            # must not emit the scan_complete activity or dispatch the
+            # post-scan maintenance cascade (smart_rebuild, reference
+            # thumbnails, mosaic/duplicate detection, dark-hours backfill).
+            # See AUD-030.
+            try:
+                r.delete("galactilog:stats:cache", "galactilog:fits_keys")
+            except Exception:
+                logger.debug("scan_state: Redis stats cache invalidation failed", exc_info=True)
+            return
         parts = []
         actual_new = max(0, snap.new_files - snap.skipped_calibration)
         if actual_new:
@@ -330,19 +371,37 @@ def start_scanning_sync(r: sync_redis.Redis) -> None:
         "skipped_calibration": 0,
         "started_at": time.time(),
         "completed_at": "",
+        "kind": "scan",
     })
     r.set(SCAN_PROGRESS_KEY, str(time.time()))
     r.persist(SCAN_KEY)
     r.delete(SCAN_FAILED_KEY)
+    r.delete(SCAN_DISPATCHED_KEY)  # real state has taken over from the dispatch marker
 
 
-def set_ingesting_sync(r: sync_redis.Redis, total: int, removed: int = 0, new_files: int = 0, changed_files: int = 0) -> None:
+def set_ingesting_sync(
+    r: sync_redis.Redis,
+    total: int,
+    removed: int = 0,
+    new_files: int = 0,
+    changed_files: int = 0,
+    kind: str = "scan",
+) -> None:
+    """Transition scan:state to "ingesting".
+
+    ``kind`` distinguishes a real directory scan ("scan", the default) from
+    other work that reuses this same progress-tracking hash, such as the CSV
+    metrics backfill ("csv_backfill"). ``check_complete_sync`` reads it back
+    to decide whether reaching "complete" should emit the scan_complete
+    activity and dispatch the post-scan maintenance cascade (AUD-030).
+    """
     r.hset(SCAN_KEY, mapping={
         "state": "ingesting",
         "total": total,
         "removed": removed,
         "new_files": new_files,
         "changed_files": changed_files,
+        "kind": kind,
     })
 
 

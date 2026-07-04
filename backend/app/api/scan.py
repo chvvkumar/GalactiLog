@@ -34,7 +34,7 @@ from app.services.scan_filters import ScanFilterConfig
 from app.services.activity import emit as _emit_activity
 from app.services.scan_state import (
     get_scan_state, get_failed_files, start_scanning, set_ingesting, set_idle, reset_scan,
-    get_rebuild_state, request_cancel,
+    get_rebuild_state, request_cancel, mark_scan_dispatched,
 )
 from app.worker.tasks import regenerate_thumbnail, run_scan, rebuild_targets, smart_rebuild_targets, retry_unresolved, backfill_csv_metrics, generate_reference_thumbnails, purge_and_regenerate_thumbnails, regenerate_missing_thumbnails, backfill_catalog_identity
 
@@ -78,6 +78,12 @@ async def trigger_scan(
             if state.state in ("scanning", "ingesting"):
                 return {"status": "already_running", **state.to_dict()}
 
+            # Mark a scan as dispatched *before* releasing the lock below, so a
+            # second request that acquires the lock right after this one still
+            # sees an active scan even though the queued run_scan task hasn't
+            # been picked up by a worker yet and started_scanning_sync() hasn't
+            # run (AUD-016).
+            await mark_scan_dispatched(r)
             run_scan.delay(include_calibration=include_calibration, force_orphan_cleanup=force_orphan_cleanup)
 
             return {"status": "accepted", "message": "Scan queued - check /scan/status for progress"}
@@ -289,7 +295,7 @@ async def backfill_csv_metrics_endpoint(user: User = Depends(require_admin)):
     """Backfill Image rows with metrics from N.I.N.A. CSV files."""
     async with async_redis() as r:
         state = await get_scan_state(r)
-        if state.state != "idle":
+        if state.state in ("scanning", "ingesting"):
             return {"status": "already_running", "state": state.state}
         backfill_csv_metrics.delay()
         return {"status": "accepted"}

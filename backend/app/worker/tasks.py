@@ -53,6 +53,14 @@ def _activity_session():
 
 _redis = get_sync_redis()
 
+# Guards run_scan against duplicate concurrent execution (AUD-016): a second
+# dispatch (double-click, or auto_scan_tick racing a manual trigger) bails
+# out immediately instead of enumerating the tree twice. TTL covers only the
+# enumeration/dispatch phase of run_scan, not the async ingest tasks it queues,
+# so it self-heals quickly if a worker dies mid-scan.
+SCAN_RUN_LOCK = "scan:run_lock"
+SCAN_RUN_LOCK_TTL = 300  # 5 minutes
+
 
 def _invalidate_stats_cache():
     """Delete the stats cache key from Redis so the next stats request is fresh."""
@@ -72,211 +80,220 @@ def run_scan(self, include_calibration: bool = True, force_orphan_cleanup: bool 
     orphan cleanup is bypassed so a deliberate bulk deletion is reflected in the
     catalog. This flag is ephemeral and never set by auto-scans.
     """
-    from app.services.scanner import scan_directory
-
-    clear_cancel_sync(_redis)
-    start_scanning_sync(_redis)
-
-    # Get known paths and file stats from DB for delta scanning
-    with Session(_sync_engine) as session:
-        result = session.execute(
-            select(Image.file_path, Image.file_size, Image.file_mtime)
+    if not _redis.set(SCAN_RUN_LOCK, "1", nx=True, ex=SCAN_RUN_LOCK_TTL):
+        logger.info(
+            "run_scan: a scan is already running (run lock held), "
+            "skipping duplicate dispatch"
         )
-        rows = result.all()
-        known_paths = {row[0] for row in rows}
-        known_file_stats = {row[0]: (row[1], row[2]) for row in rows}
-
-    # Include previously skipped calibration paths so they aren't re-queued
-    if not include_calibration:
-        known_paths |= get_skipped_paths_sync(_redis)
-    else:
-        # Calibration now included - clear the skip cache so they get ingested
-        clear_skipped_paths_sync(_redis)
-
-    fits_root = Path(settings.fits_data_path)
-
-    # Load scan filters from user settings
-    from app.services.scan_filters import ScanFilterConfig
-    with Session(_sync_engine) as session:
-        us = session.execute(
-            select(UserSettings).where(UserSettings.id == SETTINGS_ROW_ID)
-        ).scalar_one_or_none()
-        general = (us.general if us else {}) or {}
+        return {"status": "skipped", "reason": "already running"}
     try:
-        filter_config = ScanFilterConfig.from_settings(general, fits_root)
-    except ValueError as exc:
-        logger.error("Invalid scan filters, scanning with no filters: %s", exc)
-        filter_config = ScanFilterConfig(include_paths=[], exclude_paths=[], name_rules=[])
+        from app.services.scanner import scan_directory
 
-    # Dispatch ingest tasks as files are discovered (parallel discovery + ingestion)
-    # Calibration filtering is deferred to the ingest phase to avoid opening
-    # every file during discovery (costly on NFS).
-    def _queue_file(path: Path) -> None:
-        ingest_file.delay(str(path), include_calibration=include_calibration)
+        clear_cancel_sync(_redis)
+        start_scanning_sync(_redis)
 
-    def _queue_changed_file(path: Path) -> None:
-        """Re-ingest a known file whose size or mtime changed on disk."""
-        reingest_changed_file.delay(str(path), include_calibration=include_calibration)
-
-    new_files: list[Path] = []
-    changed_files: list[Path] = []
-    all_disk_paths: set[str] = set()
-
-    for scan_root in filter_config.roots(fits_root):
-        if is_cancel_requested_sync(_redis):
-            break
-        nf, cf, paths = scan_directory(
-            scan_root,
-            known_paths=known_paths,
-            known_file_stats=known_file_stats,
-            on_progress=lambda count: set_discovered_sync(_redis, count),
-            is_cancelled=lambda: is_cancel_requested_sync(_redis),
-            on_new_file=_queue_file,
-            on_changed_file=_queue_changed_file,
-            filter_config=filter_config,
-            fits_root=fits_root,
-        )
-        new_files.extend(nf)
-        changed_files.extend(cf)
-        all_disk_paths.update(paths)
-
-    if is_cancel_requested_sync(_redis):
-        set_cancelled_sync(_redis)
-        with _activity_session() as _db:
-            _emit_activity_sync(
-                _db, redis=_redis, category="scan", severity="info",
-                event_type="scan_stopped",
-                message=f"Scan stopped by user ({len(new_files)} files discovered before stop)",
-                details={"discovered": len(new_files)}, actor="system",
-            )
-        return {"status": "cancelled"}
-
-    if changed_files:
-        logger.info("Delta scan: %d changed files queued for re-ingest", len(changed_files))
-        with _activity_session() as _db:
-            _emit_activity_sync(
-                _db, redis=_redis, category="scan", severity="info",
-                event_type="delta_scan",
-                message=f"Delta scan: {len(changed_files)} changed file{'s' if len(changed_files) != 1 else ''} detected and re-queued",
-                details={"changed_files": len(changed_files)}, actor="system",
-            )
-
-    # Detect and remove orphaned DB records (files deleted from disk).
-    # CRITICAL: only consider rows the walker would have actually visited
-    # under the current filter config. When include_paths or excludes narrow
-    # the scan, out-of-scope rows appear "missing from disk" even though the
-    # walker never looked for them. Those must NOT be treated as orphans.
-    in_scope_known_paths = {
-        p for p in known_paths
-        if p and filter_config.should_include_file(Path(p), fits_root)
-    }
-    orphaned_paths = in_scope_known_paths - all_disk_paths
-    removed = 0
-    _threshold = max(1, len(in_scope_known_paths)) * 0.5
-    _large_removal = len(orphaned_paths) >= _threshold or len(all_disk_paths) == 0
-    if orphaned_paths and (force_orphan_cleanup or len(orphaned_paths) < _threshold):
-        # Safety: only clean up if less than 50% of files appear missing
-        # (protects against unmounted shares / unreachable storage), unless an
-        # admin forced a one-time cleanup to reflect a deliberate bulk deletion.
+        # Get known paths and file stats from DB for delta scanning
         with Session(_sync_engine) as session:
-            for batch_start in range(0, len(orphaned_paths), 500):
-                batch = list(orphaned_paths)[batch_start:batch_start + 500]
-                rows = session.execute(
-                    select(Image.id, Image.thumbnail_path).where(
-                        Image.file_path.in_(batch)
-                    )
-                ).all()
-                for img_id, thumb_path in rows:
-                    if thumb_path:
-                        try:
-                            Path(thumb_path).unlink(missing_ok=True)
-                        except OSError:
-                            pass
-                    session.execute(
-                        text("DELETE FROM images WHERE id = :id"),
-                        {"id": img_id},
-                    )
-                    removed += 1
-                session.commit()
-        if removed:
-            logger.info("Removed %d orphaned image records (files deleted from disk)", removed)
+            result = session.execute(
+                select(Image.file_path, Image.file_size, Image.file_mtime)
+            )
+            rows = result.all()
+            known_paths = {row[0] for row in rows}
+            known_file_stats = {row[0]: (row[1], row[2]) for row in rows}
+
+        # Include previously skipped calibration paths so they aren't re-queued
+        if not include_calibration:
+            known_paths |= get_skipped_paths_sync(_redis)
+        else:
+            # Calibration now included - clear the skip cache so they get ingested
+            clear_skipped_paths_sync(_redis)
+
+        fits_root = Path(settings.fits_data_path)
+
+        # Load scan filters from user settings
+        from app.services.scan_filters import ScanFilterConfig
+        with Session(_sync_engine) as session:
+            us = session.execute(
+                select(UserSettings).where(UserSettings.id == SETTINGS_ROW_ID)
+            ).scalar_one_or_none()
+            general = (us.general if us else {}) or {}
+        try:
+            filter_config = ScanFilterConfig.from_settings(general, fits_root)
+        except ValueError as exc:
+            logger.error("Invalid scan filters, scanning with no filters: %s", exc)
+            filter_config = ScanFilterConfig(include_paths=[], exclude_paths=[], name_rules=[])
+
+        # Dispatch ingest tasks as files are discovered (parallel discovery + ingestion)
+        # Calibration filtering is deferred to the ingest phase to avoid opening
+        # every file during discovery (costly on NFS).
+        def _queue_file(path: Path) -> None:
+            ingest_file.delay(str(path), include_calibration=include_calibration)
+
+        def _queue_changed_file(path: Path) -> None:
+            """Re-ingest a known file whose size or mtime changed on disk."""
+            reingest_changed_file.delay(str(path), include_calibration=include_calibration)
+
+        new_files: list[Path] = []
+        changed_files: list[Path] = []
+        all_disk_paths: set[str] = set()
+
+        for scan_root in filter_config.roots(fits_root):
+            if is_cancel_requested_sync(_redis):
+                break
+            nf, cf, paths = scan_directory(
+                scan_root,
+                known_paths=known_paths,
+                known_file_stats=known_file_stats,
+                on_progress=lambda count: set_discovered_sync(_redis, count),
+                is_cancelled=lambda: is_cancel_requested_sync(_redis),
+                on_new_file=_queue_file,
+                on_changed_file=_queue_changed_file,
+                filter_config=filter_config,
+                fits_root=fits_root,
+            )
+            new_files.extend(nf)
+            changed_files.extend(cf)
+            all_disk_paths.update(paths)
+
+        if is_cancel_requested_sync(_redis):
+            set_cancelled_sync(_redis)
             with _activity_session() as _db:
                 _emit_activity_sync(
                     _db, redis=_redis, category="scan", severity="info",
-                    event_type="orphan_cleanup",
-                    message=f"Removed {removed} deleted file{'s' if removed != 1 else ''} from catalog",
-                    details={"removed": removed}, actor="system",
+                    event_type="scan_stopped",
+                    message=f"Scan stopped by user ({len(new_files)} files discovered before stop)",
+                    details={"discovered": len(new_files)}, actor="system",
                 )
-            if force_orphan_cleanup and _large_removal and removed:
-                pct = round(removed / max(1, len(in_scope_known_paths)) * 100)
-                logger.warning(
-                    "Forced orphan cleanup removed %d of %d catalogued files (%d%%)",
-                    removed, len(in_scope_known_paths), pct,
+            return {"status": "cancelled"}
+
+        if changed_files:
+            logger.info("Delta scan: %d changed files queued for re-ingest", len(changed_files))
+            with _activity_session() as _db:
+                _emit_activity_sync(
+                    _db, redis=_redis, category="scan", severity="info",
+                    event_type="delta_scan",
+                    message=f"Delta scan: {len(changed_files)} changed file{'s' if len(changed_files) != 1 else ''} detected and re-queued",
+                    details={"changed_files": len(changed_files)}, actor="system",
                 )
+
+        # Detect and remove orphaned DB records (files deleted from disk).
+        # CRITICAL: only consider rows the walker would have actually visited
+        # under the current filter config. When include_paths or excludes narrow
+        # the scan, out-of-scope rows appear "missing from disk" even though the
+        # walker never looked for them. Those must NOT be treated as orphans.
+        in_scope_known_paths = {
+            p for p in known_paths
+            if p and filter_config.should_include_file(Path(p), fits_root)
+        }
+        orphaned_paths = in_scope_known_paths - all_disk_paths
+        removed = 0
+        _threshold = max(1, len(in_scope_known_paths)) * 0.5
+        _large_removal = len(orphaned_paths) >= _threshold or len(all_disk_paths) == 0
+        if orphaned_paths and (force_orphan_cleanup or len(orphaned_paths) < _threshold):
+            # Safety: only clean up if less than 50% of files appear missing
+            # (protects against unmounted shares / unreachable storage), unless an
+            # admin forced a one-time cleanup to reflect a deliberate bulk deletion.
+            with Session(_sync_engine) as session:
+                for batch_start in range(0, len(orphaned_paths), 500):
+                    batch = list(orphaned_paths)[batch_start:batch_start + 500]
+                    rows = session.execute(
+                        select(Image.id, Image.thumbnail_path).where(
+                            Image.file_path.in_(batch)
+                        )
+                    ).all()
+                    for img_id, thumb_path in rows:
+                        if thumb_path:
+                            try:
+                                Path(thumb_path).unlink(missing_ok=True)
+                            except OSError:
+                                pass
+                        session.execute(
+                            text("DELETE FROM images WHERE id = :id"),
+                            {"id": img_id},
+                        )
+                        removed += 1
+                    session.commit()
+            if removed:
+                logger.info("Removed %d orphaned image records (files deleted from disk)", removed)
                 with _activity_session() as _db:
                     _emit_activity_sync(
-                        _db, redis=_redis, category="scan", severity="warning",
-                        event_type="orphan_force_warning",
-                        message=(
-                            f"Forced orphan cleanup removed {removed} of "
-                            f"{len(in_scope_known_paths)} catalogued file"
-                            f"{'s' if removed != 1 else ''} ({pct}% of the catalog). "
-                            f"If a storage share was unmounted or unreachable, "
-                            f"restore from backup."
-                        ),
-                        details={"removed": removed, "total_known": len(in_scope_known_paths), "forced": True},
-                        actor="system",
+                        _db, redis=_redis, category="scan", severity="info",
+                        event_type="orphan_cleanup",
+                        message=f"Removed {removed} deleted file{'s' if removed != 1 else ''} from catalog",
+                        details={"removed": removed}, actor="system",
                     )
-    elif orphaned_paths:
-        logger.warning(
-            "Skipped orphan cleanup: %d of %d in-scope files missing (>50%%) - "
-            "possible unmounted share or unreachable storage",
-            len(orphaned_paths), len(in_scope_known_paths),
-        )
-        with _activity_session() as _db:
-            _emit_activity_sync(
-                _db, redis=_redis, category="scan", severity="warning",
-                event_type="orphan_warning",
-                message=f"Orphan cleanup skipped: {len(orphaned_paths)} of {len(in_scope_known_paths)} in-scope files missing (>50%) - possible unmounted share",
-                details={"missing": len(orphaned_paths), "total_known": len(in_scope_known_paths)},
-                actor="system",
+                if force_orphan_cleanup and _large_removal and removed:
+                    pct = round(removed / max(1, len(in_scope_known_paths)) * 100)
+                    logger.warning(
+                        "Forced orphan cleanup removed %d of %d catalogued files (%d%%)",
+                        removed, len(in_scope_known_paths), pct,
+                    )
+                    with _activity_session() as _db:
+                        _emit_activity_sync(
+                            _db, redis=_redis, category="scan", severity="warning",
+                            event_type="orphan_force_warning",
+                            message=(
+                                f"Forced orphan cleanup removed {removed} of "
+                                f"{len(in_scope_known_paths)} catalogued file"
+                                f"{'s' if removed != 1 else ''} ({pct}% of the catalog). "
+                                f"If a storage share was unmounted or unreachable, "
+                                f"restore from backup."
+                            ),
+                            details={"removed": removed, "total_known": len(in_scope_known_paths), "forced": True},
+                            actor="system",
+                        )
+        elif orphaned_paths:
+            logger.warning(
+                "Skipped orphan cleanup: %d of %d in-scope files missing (>50%%) - "
+                "possible unmounted share or unreachable storage",
+                len(orphaned_paths), len(in_scope_known_paths),
             )
+            with _activity_session() as _db:
+                _emit_activity_sync(
+                    _db, redis=_redis, category="scan", severity="warning",
+                    event_type="orphan_warning",
+                    message=f"Orphan cleanup skipped: {len(orphaned_paths)} of {len(in_scope_known_paths)} in-scope files missing (>50%) - possible unmounted share",
+                    details={"missing": len(orphaned_paths), "total_known": len(in_scope_known_paths)},
+                    actor="system",
+                )
 
-    total_queued = len(new_files) + len(changed_files)
-    if not total_queued:
-        set_idle_sync(_redis)
-        cataloged = len(known_paths) - removed
-        msg = f"Scan complete: no new files found ({cataloged} already cataloged)"
-        if removed:
-            msg += f", {removed} deleted files purged from catalog"
-        with _activity_session() as _db:
-            scan_activity_id = _emit_activity_sync(
-                _db, redis=_redis, category="scan", severity="info",
-                event_type="scan_complete", message=msg,
-                details={"completed": 0, "failed": 0, "already_known": cataloged, "removed": removed},
-                actor="system",
-            )
-        generate_reference_thumbnails.apply_async(countdown=20, kwargs={"parent_activity_id": scan_activity_id})
-        detect_duplicate_targets.apply_async(countdown=30, kwargs={"parent_activity_id": scan_activity_id})
-        backfill_dark_hours.apply_async(countdown=45, kwargs={"parent_activity_id": scan_activity_id})
-        return {"status": "complete", "new_files_queued": 0, "already_known": cataloged, "removed": removed}
+        total_queued = len(new_files) + len(changed_files)
+        if not total_queued:
+            set_idle_sync(_redis)
+            cataloged = len(known_paths) - removed
+            msg = f"Scan complete: no new files found ({cataloged} already cataloged)"
+            if removed:
+                msg += f", {removed} deleted files purged from catalog"
+            with _activity_session() as _db:
+                scan_activity_id = _emit_activity_sync(
+                    _db, redis=_redis, category="scan", severity="info",
+                    event_type="scan_complete", message=msg,
+                    details={"completed": 0, "failed": 0, "already_known": cataloged, "removed": removed},
+                    actor="system",
+                )
+            generate_reference_thumbnails.apply_async(countdown=20, kwargs={"parent_activity_id": scan_activity_id})
+            detect_duplicate_targets.apply_async(countdown=30, kwargs={"parent_activity_id": scan_activity_id})
+            backfill_dark_hours.apply_async(countdown=45, kwargs={"parent_activity_id": scan_activity_id})
+            return {"status": "complete", "new_files_queued": 0, "already_known": cataloged, "removed": removed}
 
-    # Transition to ingesting with final total - ingest tasks are already running
-    set_ingesting_sync(_redis, total=total_queued, removed=removed, new_files=len(new_files), changed_files=len(changed_files))
-    # Some tasks may have already completed during discovery, check now
-    check_complete_sync(_redis)
+        # Transition to ingesting with final total - ingest tasks are already running
+        set_ingesting_sync(_redis, total=total_queued, removed=removed, new_files=len(new_files), changed_files=len(changed_files))
+        # Some tasks may have already completed during discovery, check now
+        check_complete_sync(_redis)
 
-    # Post-scan tasks (smart_rebuild, detect_mosaic, detect_duplicates, backfill_dark_hours,
-    # generate_reference_thumbnails) are dispatched from check_complete_sync with parent_activity_id.
-    _invalidate_stats_cache()
+        # Post-scan tasks (smart_rebuild, detect_mosaic, detect_duplicates, backfill_dark_hours,
+        # generate_reference_thumbnails) are dispatched from check_complete_sync with parent_activity_id.
+        _invalidate_stats_cache()
 
-    return {
-        "status": "ingesting",
-        "new_files_queued": len(new_files),
-        "changed_files_queued": len(changed_files),
-        "already_known": len(known_paths),
-        "removed": removed,
-    }
+        return {
+            "status": "ingesting",
+            "new_files_queued": len(new_files),
+            "changed_files_queued": len(changed_files),
+            "already_known": len(known_paths),
+            "removed": removed,
+        }
+    finally:
+        _redis.delete(SCAN_RUN_LOCK)
 
 
 @celery_app.task
@@ -1746,7 +1763,12 @@ def backfill_csv_metrics(self):
     """Walk FITS tree and backfill Image rows with CSV metric data."""
     import redis as _redis
 
-    redis_conn = _redis.from_url(settings.redis_url)
+    # decode_responses=True to match every other Redis connection in this
+    # module (app.config.get_sync_redis()) - without it, check_complete_sync's
+    # str-keyed hgetall() lookups below never match this connection's
+    # bytes-keyed results, which would silently defeat the kind="csv_backfill"
+    # cascade-suppression below (AUD-030).
+    redis_conn = _redis.from_url(settings.redis_url, decode_responses=True)
     root = Path(settings.fits_data_path)
 
     # Collect all directories containing ImageMetaData.csv
@@ -1756,7 +1778,7 @@ def backfill_csv_metrics(self):
         set_idle_sync(redis_conn)
         return {"updated": 0, "dirs": 0}
 
-    set_ingesting_sync(redis_conn, total=len(csv_dirs))
+    set_ingesting_sync(redis_conn, total=len(csv_dirs), kind="csv_backfill")
     total_updated = 0
 
     with _sync_engine.connect() as conn:
