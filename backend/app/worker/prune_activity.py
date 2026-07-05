@@ -1,7 +1,6 @@
 """Nightly Celery beat task: prune activity_events rows older than retention window."""
 import logging
 
-from celery.schedules import crontab
 from sqlalchemy import create_engine, select, text
 from sqlalchemy.orm import Session
 

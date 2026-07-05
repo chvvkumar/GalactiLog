@@ -3,7 +3,7 @@ import threading
 import logging
 
 from prometheus_client import Counter, Histogram, Gauge
-from prometheus_client.core import GaugeMetricFamily, CounterMetricFamily, HistogramMetricFamily, REGISTRY
+from prometheus_client.core import CounterMetricFamily, HistogramMetricFamily, REGISTRY
 
 logger = logging.getLogger(__name__)
 

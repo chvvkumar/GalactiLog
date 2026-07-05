@@ -1792,7 +1792,6 @@ def _smart_rebuild_inner(manual: bool = False, parent_activity_id: int | None = 
         if is_cancel_requested_sync(_redis):
             session.commit()
             return _emit_cancelled()
-        from app.models.simbad_cache import SimbadCache
         targets = session.execute(
             select(Target).where(Target.merged_into_id.is_(None))
         ).scalars().all()

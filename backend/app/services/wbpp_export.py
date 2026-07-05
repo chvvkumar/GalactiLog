@@ -4,7 +4,6 @@ Translates container-internal FITS paths to user-machine paths, computes
 per-session folder level candidates, detects contamination, disambiguates
 colliding staging names, and generates copy scripts.
 """
-import posixpath
 import re
 from collections import Counter
 from dataclasses import dataclass, field

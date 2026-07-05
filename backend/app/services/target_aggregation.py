@@ -13,7 +13,6 @@ import uuid
 import statistics
 from collections import defaultdict
 from datetime import date as date_type, datetime
-from pathlib import Path
 
 from fastapi import HTTPException
 from sqlalchemy import select, or_, func, cast, String, text

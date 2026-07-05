@@ -2,10 +2,10 @@ import logging
 import math
 import statistics
 from collections import defaultdict
-from datetime import date as date_type, datetime
+from datetime import date as date_type
 
 from fastapi import APIRouter, Depends, Query, HTTPException
-from sqlalchemy import select, func, cast, Date, distinct
+from sqlalchemy import select, func, distinct
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session

@@ -9,7 +9,6 @@ Docs: https://vizier.cds.unistra.fr/vizier/doc/sesame.htx
 
 import logging
 import xml.etree.ElementTree as ET
-from datetime import datetime
 from typing import Any
 
 import httpx

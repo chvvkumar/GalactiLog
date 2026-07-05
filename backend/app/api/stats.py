@@ -15,8 +15,6 @@ from app.api.deps import get_current_user
 from app.models.user import User
 from app.models import Image, Target
 from app.services.normalization import load_alias_maps, normalize_filter, normalize_equipment
-from sqlalchemy import cast
-from sqlalchemy.types import Date
 
 from app.schemas.stats import (
     StatsResponse, OverviewStats, EquipmentStats, EquipmentItem,

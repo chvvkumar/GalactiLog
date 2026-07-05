@@ -236,7 +236,6 @@ def _migrate_v6_clear_negative_cache_and_reenrich(session: Session) -> str:
     """
     import time
     from app.models import Target
-    from app.models.vizier_cache import VizierCache
     from app.services.constellation import coords_to_constellation
 
     # Step 1: Clear negative cache entries (no size data)
