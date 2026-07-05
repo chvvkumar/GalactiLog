@@ -516,6 +516,120 @@ async def test_null_session_date_does_not_inflate_normal_targets(seeded_db):
     assert m31["matched_sessions"] <= m31["total_sessions"]
 
 
+# ---------------------------------------------------------------------------
+# AUD-013: sort_by=equipment must be a true backend sort, globally ordered
+# across pages (previously it was a client-side sort of the current page
+# only). Separate fixture so the frozen parity baseline stays untouched.
+# The equipment-alphabetical order is deliberately the INVERSE of the
+# integration order: under the old page-local behavior, pagination by the
+# integration fallback would strand the alphabetically-first target on the
+# last page.
+# ---------------------------------------------------------------------------
+TID_EQ_A = uuid.UUID("44444444-4444-4444-8444-444444444444")
+TID_EQ_M = uuid.UUID("55555555-5555-4555-8555-555555555555")
+TID_EQ_Z = uuid.UUID("66666666-6666-4666-8666-666666666666")
+
+
+@pytest_asyncio.fixture
+async def seeded_equipment_sort_db():
+    engine = create_async_engine(TEST_DB_URL, poolclass=None)
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+
+    async with engine.begin() as conn:
+        await conn.execute(text("DELETE FROM images"))
+        await conn.execute(text("DELETE FROM target_catalog_memberships"))
+        await conn.execute(text("DELETE FROM mosaic_panels"))
+        await conn.execute(text("DELETE FROM mosaics"))
+        await conn.execute(text("DELETE FROM targets"))
+        await conn.execute(text("DELETE FROM user_settings"))
+
+    async with Session() as s:
+        s.add(UserSettings(id=SETTINGS_ROW_ID, filters={}, equipment={}))
+
+        d1 = date(2024, 3, 1)
+
+        # Lowest integration, alphabetically FIRST equipment.
+        s.add(Target(id=TID_EQ_A, primary_name="TgtA", aliases=[]))
+        s.add(_img(resolved_target_id=TID_EQ_A, session_date=d1,
+                   capture_date=datetime(2024, 3, 1, 20, 0, tzinfo=timezone.utc),
+                   exposure_time=10.0, filter_used="L",
+                   camera="CamA", telescope="AA-scope",
+                   raw_headers={"OBJECT": "TgtA"}))
+
+        # Mid integration, alphabetically middle equipment.
+        s.add(Target(id=TID_EQ_M, primary_name="TgtM", aliases=[]))
+        s.add(_img(resolved_target_id=TID_EQ_M, session_date=d1,
+                   capture_date=datetime(2024, 3, 1, 21, 0, tzinfo=timezone.utc),
+                   exposure_time=500.0, filter_used="L",
+                   camera="CamM", telescope="MM-scope",
+                   raw_headers={"OBJECT": "TgtM"}))
+
+        # Highest integration, alphabetically LAST equipment.
+        s.add(Target(id=TID_EQ_Z, primary_name="TgtZ", aliases=[]))
+        s.add(_img(resolved_target_id=TID_EQ_Z, session_date=d1,
+                   capture_date=datetime(2024, 3, 1, 22, 0, tzinfo=timezone.utc),
+                   exposure_time=10000.0, filter_used="L",
+                   camera="CamZ", telescope="ZZ-scope",
+                   raw_headers={"OBJECT": "TgtZ"}))
+
+        # Uncategorized group (no OBJECT header): must sort LAST regardless
+        # of direction, even though its equipment string would win an
+        # ordinary alphabetical comparison.
+        s.add(_img(resolved_target_id=None, session_date=d1,
+                   capture_date=datetime(2024, 3, 1, 23, 0, tzinfo=timezone.utc),
+                   exposure_time=50.0, filter_used="L",
+                   camera="A-cam", telescope="A-scope",
+                   raw_headers={}))
+
+        await s.commit()
+
+    invalidate_alias_cache()
+
+    async def _override_session():
+        async with Session() as s:
+            yield s
+
+    def _override_user():
+        u = MagicMock(spec=User)
+        u.id = uuid.uuid4()
+        u.username = "tester"
+        u.role = UserRole.admin
+        u.is_active = True
+        return u
+
+    app.dependency_overrides[get_session] = _override_session
+    app.dependency_overrides[get_current_user] = _override_user
+
+    yield
+
+    app.dependency_overrides.clear()
+    invalidate_alias_cache()
+    await engine.dispose()
+
+
+async def _collect_pages(sort_dir: str, total: int) -> list[str]:
+    """Fetch target_ids one page at a time with page_size=1."""
+    ids: list[str] = []
+    for page in range(1, total + 1):
+        data = await _get(f"?sort_by=equipment&sort_dir={sort_dir}&page_size=1&page={page}")
+        assert data["total_count"] == total
+        assert len(data["targets"]) == 1
+        ids.append(data["targets"][0]["target_id"])
+    return ids
+
+
+@pytest.mark.asyncio
+async def test_equipment_sort_is_global_across_pages(seeded_equipment_sort_db):
+    """AUD-013: with page_size=1, the concatenated order across pages must be
+    globally alphabetized by equipment profile, uncategorized last, in both
+    directions. The old page-local sort would return integration order here."""
+    asc = await _collect_pages("asc", 4)
+    assert asc == [str(TID_EQ_A), str(TID_EQ_M), str(TID_EQ_Z), "obj:__uncategorized__"]
+
+    desc = await _collect_pages("desc", 4)
+    assert desc == [str(TID_EQ_Z), str(TID_EQ_M), str(TID_EQ_A), "obj:__uncategorized__"]
+
+
 @pytest.mark.asyncio
 async def test_search_includes_unresolved_groups(seeded_db):
     """include_unresolved appends unlinked OBJECT-name groups as pseudo entries."""

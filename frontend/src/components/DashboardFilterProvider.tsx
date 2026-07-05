@@ -158,13 +158,9 @@ const DashboardFilterProvider: Component<{ children: JSX.Element }> = (props) =>
     setSearchParams({ page: undefined }, { replace: true });
   };
 
-  // Map frontend sort keys to backend API values
-  const apiSortBy = createMemo(() => {
-    const key = sortKey();
-    // "equipment" has no backend sort - fall back to integration
-    if (key === "equipment") return "integration";
-    return key;
-  });
+  // Map frontend sort keys to backend API values. All sort keys, including
+  // "equipment", are handled server-side (see targets.py sort_by).
+  const apiSortBy = createMemo(() => sortKey());
 
   const currentPage = createMemo(() => {
     const raw = searchParams.page;

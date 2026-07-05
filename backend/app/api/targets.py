@@ -189,7 +189,7 @@ async def list_targets_aggregated(
     airmass_min: float | None = Query(None),
     airmass_max: float | None = Query(None),
     catalog: str | None = Query(None, description="Filter to targets in a specific catalog (e.g. Messier, NGC)"),
-    sort_by: str = Query("integration", pattern="^(integration|lastSession|name)$"),
+    sort_by: str = Query("integration", pattern="^(integration|lastSession|name|equipment)$"),
     sort_dir: str = Query("desc", pattern="^(asc|desc)$"),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=250),

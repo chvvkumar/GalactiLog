@@ -1,4 +1,4 @@
-import { Component, Show, For, createResource, createSignal, createMemo, createEffect, onMount, onCleanup } from "solid-js";
+import { Component, Show, For, createResource, createSignal, createMemo, createEffect, on, onMount, onCleanup } from "solid-js";
 import { A, useParams, useNavigate } from "@solidjs/router";
 import { api } from "../api/client";
 import type { PanelStats } from "../types";
@@ -169,12 +169,14 @@ const MosaicDetailPage: Component = () => {
   const [notesSaving, setNotesSaving] = createSignal(false);
   let notesTimer: ReturnType<typeof setTimeout> | undefined;
 
+  createEffect(on(mosaic, (m) => setNotes(m?.notes ?? "")));
+
   const saveNotes = (text: string) => {
     clearTimeout(notesTimer);
     notesTimer = setTimeout(async () => {
       setNotesSaving(true);
       try {
-        await api.updateMosaic(params.mosaicId, { notes: text || undefined });
+        await api.updateMosaic(params.mosaicId, { notes: text });
       } catch {
         showToast("Failed to save notes", "error", 5000);
       } finally {
@@ -217,7 +219,19 @@ const MosaicDetailPage: Component = () => {
 
       <div class="p-4 space-y-4">
 
-      <Show when={mosaic()} fallback={<div class="text-center text-theme-text-secondary py-8">Loading...</div>}>
+      <Show when={mosaic.error}>
+        <div class="text-center text-theme-error py-8">
+          Failed to load mosaic
+          <button
+            onClick={() => refetch()}
+            class="ml-3 px-3 py-1 text-sm bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded hover:bg-theme-accent/25 transition-colors"
+          >
+            Retry
+          </button>
+        </div>
+      </Show>
+
+      <Show when={mosaic()} fallback={<Show when={mosaic.loading}><div class="text-center text-theme-text-secondary py-8">Loading...</div></Show>}>
         {(data) => (
           <div class="rounded-[var(--radius-md)] bg-theme-surface border border-theme-border p-4 space-y-6">
             {/* Header */}
@@ -393,7 +407,7 @@ const MosaicDetailPage: Component = () => {
               <textarea
                 class="block w-full bg-theme-surface border border-theme-border rounded px-3 py-2 text-sm text-theme-text-primary placeholder-theme-text-secondary resize-y min-h-[50px]"
                 placeholder="Add notes about this mosaic project..."
-                value={notes() || data().notes || ""}
+                value={notes()}
                 onInput={(e) => {
                   const val = e.currentTarget.value;
                   setNotes(val);
