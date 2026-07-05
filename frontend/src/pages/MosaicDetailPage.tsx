@@ -1,4 +1,4 @@
-import { Component, Show, For, createResource, createSignal, createMemo, createEffect, onMount, onCleanup } from "solid-js";
+import { Component, Show, For, createResource, createSignal, createMemo, createEffect } from "solid-js";
 import { A, useParams, useNavigate } from "@solidjs/router";
 import { api } from "../api/client";
 import type { PanelStats } from "../types";
@@ -13,6 +13,8 @@ import MosaicCompositeModal from "../components/mosaics/MosaicCompositeModal";
 import ConfirmDialog from "../components/ConfirmDialog";
 import { getErrorMessage } from "../utils/errors";
 import { useNotesAutosave } from "../lib/useNotesAutosave";
+import ActionsMenu from "../components/ActionsMenu";
+import InlineRename from "../components/InlineRename";
 
 const MosaicDetailPage: Component = () => {
   const ctx = useSettingsContext();
@@ -23,31 +25,13 @@ const MosaicDetailPage: Component = () => {
   // Title-row actions: composite, rename, delete, export.
   const [showComposite, setShowComposite] = createSignal(false);
   const [editingName, setEditingName] = createSignal(false);
-  const [editName, setEditName] = createSignal("");
   const [savingName, setSavingName] = createSignal(false);
-  const [actionsMenuOpen, setActionsMenuOpen] = createSignal(false);
   const [deleteConfirm, setDeleteConfirm] = createSignal(false);
-  let actionsMenuRef: HTMLDivElement | undefined;
-  const onActionsMenuDocClick = (e: MouseEvent) => {
-    if (!actionsMenuRef) return;
-    if (!actionsMenuRef.contains(e.target as Node)) setActionsMenuOpen(false);
-  };
-  const onActionsMenuKey = (e: KeyboardEvent) => {
-    if (e.key === "Escape") setActionsMenuOpen(false);
-  };
-  onMount(() => {
-    document.addEventListener("click", onActionsMenuDocClick);
-    document.addEventListener("keydown", onActionsMenuKey);
-  });
-  onCleanup(() => {
-    document.removeEventListener("click", onActionsMenuDocClick);
-    document.removeEventListener("keydown", onActionsMenuKey);
-  });
 
-  const handleRename = async () => {
+  const handleRename = async (nameInput: string) => {
     const data = mosaic();
     if (!data) return;
-    const name = editName().trim();
+    const name = nameInput.trim();
     if (!name) {
       showToast("Name cannot be empty", "error");
       return;
@@ -237,10 +221,7 @@ const MosaicDetailPage: Component = () => {
                           title="Rename mosaic"
                           aria-label="Rename mosaic"
                           disabled={savingName()}
-                          onClick={() => {
-                            setEditName(data().name);
-                            setEditingName(true);
-                          }}
+                          onClick={() => setEditingName(true)}
                         >
                           &#9998;
                         </button>
@@ -250,36 +231,15 @@ const MosaicDetailPage: Component = () => {
                       </>
                     }
                   >
-                    <input
-                      type="text"
-                      class="text-sm font-semibold bg-transparent border-b border-theme-accent text-theme-text-primary focus:outline-none min-w-0 flex-1"
-                      value={editName()}
-                      onInput={(e) => setEditName(e.currentTarget.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") handleRename();
-                        if (e.key === "Escape") setEditingName(false);
-                      }}
-                      ref={(el) => { setTimeout(() => el?.focus(), 0); }}
-                      disabled={savingName()}
+                    <InlineRename
+                      initialValue={data().name}
+                      onSave={handleRename}
+                      onCancel={() => setEditingName(false)}
+                      saving={savingName()}
+                      inputClass="text-sm font-semibold bg-transparent border-b border-theme-accent text-theme-text-primary focus:outline-none min-w-0 flex-1"
+                      iconSizeClass="text-base leading-none"
+                      cancelHoverClass="hover:text-theme-danger"
                     />
-                    <button
-                      class="text-theme-text-tertiary hover:text-green-400 transition-colors text-base leading-none"
-                      title="Save"
-                      aria-label="Save name"
-                      onClick={handleRename}
-                      disabled={savingName()}
-                    >
-                      &#10003;
-                    </button>
-                    <button
-                      class="text-theme-text-tertiary hover:text-theme-danger transition-colors text-base leading-none"
-                      title="Cancel"
-                      aria-label="Cancel rename"
-                      onClick={() => setEditingName(false)}
-                      disabled={savingName()}
-                    >
-                      &#10005;
-                    </button>
                   </Show>
                   <HelpPopover>
                     <p class="text-sm text-theme-text-secondary">
@@ -322,32 +282,15 @@ const MosaicDetailPage: Component = () => {
                     >
                       Composite
                     </button>
-                    <div ref={actionsMenuRef} class="relative inline-flex">
-                      <button
-                        type="button"
-                        aria-label="More actions"
-                        aria-haspopup="menu"
-                        aria-expanded={actionsMenuOpen()}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setActionsMenuOpen((v) => !v);
-                        }}
-                        class="inline-flex items-center justify-center w-8 h-8 rounded border border-theme-border text-theme-text-secondary hover:text-theme-text-primary hover:bg-theme-hover transition-colors cursor-pointer"
-                      >
-                        <span class="text-lg leading-none" aria-hidden="true">&#8943;</span>
-                      </button>
-                      <Show when={actionsMenuOpen()}>
-                        <div
-                          role="menu"
-                          onClick={(e) => e.stopPropagation()}
-                          class="absolute top-full right-0 mt-2 z-50 min-w-[12rem] bg-theme-elevated border border-theme-border rounded-[var(--radius-sm)] shadow-[var(--shadow-lg)] py-1"
-                        >
+                    <ActionsMenu>
+                      {(close) => (
+                        <>
                           <button
                             type="button"
                             role="menuitem"
                             class="w-full text-left px-3 py-1.5 text-sm text-theme-text-primary hover:bg-theme-hover transition-colors cursor-pointer"
                             onClick={() => {
-                              setActionsMenuOpen(false);
+                              close();
                               handleExportCsv();
                             }}
                           >
@@ -358,15 +301,15 @@ const MosaicDetailPage: Component = () => {
                             role="menuitem"
                             class="w-full text-left px-3 py-1.5 text-sm text-theme-danger hover:bg-theme-hover transition-colors cursor-pointer"
                             onClick={() => {
-                              setActionsMenuOpen(false);
+                              close();
                               setDeleteConfirm(true);
                             }}
                           >
                             Delete mosaic
                           </button>
-                        </div>
-                      </Show>
-                    </div>
+                        </>
+                      )}
+                    </ActionsMenu>
                   </div>
                 </div>
               </div>
@@ -403,9 +346,9 @@ const MosaicDetailPage: Component = () => {
 
             {/* Needs Review Banner */}
             <Show when={mosaic()?.needs_review}>
-              <div class="rounded-[var(--radius-sm)] bg-amber-500/10 border border-amber-500/30 p-4 flex items-center justify-between">
+              <div class="rounded-[var(--radius-sm)] bg-theme-warning/10 border border-theme-warning/30 p-4 flex items-center justify-between">
                 <div>
-                  <p class="text-sm font-medium text-amber-400">Session review required</p>
+                  <p class="text-sm font-medium text-theme-warning">Session review required</p>
                   <p class="text-xs text-theme-text-secondary mt-1">
                     This mosaic was created before session management. Select which sessions to include for each panel.
                   </p>
@@ -436,7 +379,7 @@ const MosaicDetailPage: Component = () => {
                       setIncludingAll(false);
                     }
                   }}
-                  class="px-4 py-2 text-sm bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded-[var(--radius-sm)] hover:bg-amber-500/30 transition-colors whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
+                  class="px-4 py-2 text-sm bg-theme-warning/20 text-theme-warning border border-theme-warning/30 rounded-[var(--radius-sm)] hover:bg-theme-warning/30 transition-colors whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {includingAll() ? "Including..." : "Include All"}
                 </button>
@@ -585,7 +528,7 @@ const MosaicDetailPage: Component = () => {
                             {formatIntegration(panel.total_integration_seconds)} · {panel.total_frames} frames
                           </span>
                           <Show when={(panel.available_session_count ?? 0) > 0}>
-                            <span class="text-xs text-amber-400">
+                            <span class="text-xs text-theme-warning">
                               {panel.available_session_count} available
                             </span>
                           </Show>
@@ -640,7 +583,7 @@ const MosaicDetailPage: Component = () => {
                             <Show when={available().length > 0}>
                               <div class="p-3 space-y-2 border-t border-theme-border/50">
                                 <div class="flex items-center justify-between">
-                                  <div class="text-xs font-medium text-amber-400">Available ({available().length})</div>
+                                  <div class="text-xs font-medium text-theme-warning">Available ({available().length})</div>
                                   <button
                                     onClick={() => handleInclude(available().map((s) => s.session_date))}
                                     class="text-xs text-theme-accent hover:underline"

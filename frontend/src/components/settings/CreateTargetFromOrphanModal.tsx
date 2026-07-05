@@ -69,7 +69,7 @@ const CreateTargetFromOrphanModal: Component<Props> = (props) => {
                   <div class={`text-xs px-2 py-1 rounded ${
                     p().resolved
                       ? "bg-green-500/10 text-green-400 border border-green-500/20"
-                      : "bg-yellow-500/10 text-yellow-400 border border-yellow-500/20"
+                      : "bg-theme-warning/10 text-theme-warning border border-theme-warning/20"
                   }`}>
                     {p().resolved
                       ? `SIMBAD resolved as: ${p().primary_name}`

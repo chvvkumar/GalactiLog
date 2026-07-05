@@ -877,7 +877,7 @@ export const MosaicsTab: Component = () => {
                             {formatIntegration(totals().integration)}
                             <Show when={(s.other_session_count ?? 0) > 0}>
                               {" · "}
-                              <span class="text-amber-400">
+                              <span class="text-theme-warning">
                                 +{s.other_session_count} more sessions
                               </span>
                             </Show>
@@ -1261,7 +1261,7 @@ export const MosaicsTab: Component = () => {
                           </Show>
                           <span class="font-medium">{m.name}</span>
                           <Show when={m.needs_review}>
-                            <span class="text-xs text-amber-400 border border-amber-400/30 rounded px-1.5 py-0.5 whitespace-nowrap">
+                            <span class="text-xs text-theme-warning border border-theme-warning/30 rounded px-1.5 py-0.5 whitespace-nowrap">
                               Needs Review
                             </span>
                           </Show>

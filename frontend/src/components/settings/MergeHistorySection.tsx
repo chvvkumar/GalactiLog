@@ -4,28 +4,18 @@ import { A } from "@solidjs/router";
 import { api } from "../../api/client";
 import { showToast } from "../Toast";
 import { useAuth } from "../AuthProvider";
+import { useSettingsContext } from "../SettingsProvider";
 import type { MergeCandidateResponse } from "../../types";
+import { formatDate } from "../../utils/dateTime";
 
 interface MergeHistorySectionProps {
   candidates: Accessor<MergeCandidateResponse[]>;
   onAction: () => void;
 }
 
-function formatDate(iso: string): string {
-  try {
-    const d = new Date(iso);
-    return d.toLocaleDateString("en-US", {
-      month: "short",
-      day: "numeric",
-      year: "numeric",
-    });
-  } catch {
-    return iso;
-  }
-}
-
 const MergeHistorySection: Component<MergeHistorySectionProps> = (props) => {
   const { isAdmin } = useAuth();
+  const { timezone } = useSettingsContext();
   const [expanded, setExpanded] = createSignal(false);
 
   const handleUndo = async (candidateId: string) => {
@@ -116,7 +106,7 @@ const MergeHistorySection: Component<MergeHistorySectionProps> = (props) => {
                           {/* Date + image count */}
                           <div class="flex items-center gap-2 flex-wrap">
                             <span class="text-xs text-theme-text-secondary">
-                              Merged on {formatDate(mergedDate())}
+                              Merged on {formatDate(mergedDate(), timezone())}
                             </span>
                             <span class="text-xs text-theme-text-secondary">
                               {c.source_image_count} {c.source_image_count === 1 ? "image" : "images"}

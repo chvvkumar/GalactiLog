@@ -13,7 +13,7 @@ import { formatTime as formatTimeUtil, timezoneLabel } from "../utils/dateTime";
 import { ClickableFilePath } from "./ClickableFilePath";
 import HelpPopover from "./HelpPopover";
 
-import { formatIntegration } from "../utils/format";
+import { formatIntegration, formatArcsec } from "../utils/format";
 import { showToast } from "./Toast";
 import {
   madZ,
@@ -507,7 +507,7 @@ const SessionAccordionCard: Component<{
                 <td
                   class={`py-1 px-2 text-right tabular-nums ${bandToCellClass(bandForZ(zFwhm()))}`}
                   title={cellTooltip("FWHM", frame.fwhm, zFwhm(), b()?.fwhm.median, mode(), (v) => v.toFixed(2))}
-                >{frame.fwhm?.toFixed(2) ?? "\u2014"}</td>
+                >{frame.fwhm !== null && frame.fwhm !== undefined ? formatArcsec(frame.fwhm) : "\u2014"}</td>
               </Show>
               <Show when={visible("quality", "detected_stars")}>
                 <td
@@ -517,17 +517,17 @@ const SessionAccordionCard: Component<{
               </Show>
               <Show when={visible("guiding", "rms_total")}>
                 <td class="py-1 px-2 text-theme-text-primary text-right">
-                  {frame.guiding_rms_arcsec !== null ? `${frame.guiding_rms_arcsec?.toFixed(2)}"` : "\u2014"}
+                  {frame.guiding_rms_arcsec !== null ? formatArcsec(frame.guiding_rms_arcsec) : "\u2014"}
                 </td>
               </Show>
               <Show when={visible("guiding", "rms_ra")}>
                 <td class="py-1 px-2 text-theme-text-primary text-right">
-                  {frame.guiding_rms_ra_arcsec !== null ? `${frame.guiding_rms_ra_arcsec?.toFixed(2)}"` : "\u2014"}
+                  {frame.guiding_rms_ra_arcsec !== null ? formatArcsec(frame.guiding_rms_ra_arcsec) : "\u2014"}
                 </td>
               </Show>
               <Show when={visible("guiding", "rms_dec")}>
                 <td class="py-1 px-2 text-theme-text-primary text-right">
-                  {frame.guiding_rms_dec_arcsec !== null ? `${frame.guiding_rms_dec_arcsec?.toFixed(2)}"` : "\u2014"}
+                  {frame.guiding_rms_dec_arcsec !== null ? formatArcsec(frame.guiding_rms_dec_arcsec) : "\u2014"}
                 </td>
               </Show>
               <Show when={visible("adu", "mean")}>
@@ -673,7 +673,7 @@ const SessionAccordionCard: Component<{
         </Show>
         <Show when={props.visibleColumns?.guiding_rms ?? false}>
           <td class="py-3 px-2 text-right text-metric-guiding tabular-nums whitespace-nowrap">
-            {props.session.median_guiding_rms_arcsec !== null ? `${props.session.median_guiding_rms_arcsec?.toFixed(2)}"` : "—"}
+            {props.session.median_guiding_rms_arcsec !== null ? formatArcsec(props.session.median_guiding_rms_arcsec) : "—"}
           </td>
         </Show>
         <For each={(settingsCtx.customColumns() ?? []).filter(c => c.applies_to === "session")}>
@@ -856,8 +856,8 @@ const SessionAccordionCard: Component<{
                         <span><span class="text-theme-text-tertiary">Exp:</span> <span class="font-bold text-theme-text-primary">{detail().exposure_times.length > 0 ? detail().exposure_times.map(e => e + "s").join(", ") : "—"}</span></span>
                         <span><span class="text-theme-text-tertiary">HFR:</span> <span class="font-bold text-theme-text-primary">{detail().median_hfr?.toFixed(2) ?? "—"}</span></span>
                         <span><span class="text-theme-text-tertiary">Ecc:</span> <span class="font-bold text-theme-text-primary">{detail().median_eccentricity?.toFixed(2) ?? "—"}</span></span>
-                        <span><span class="text-theme-text-tertiary">FWHM:</span> <span class="font-bold text-theme-text-primary">{detail().median_fwhm?.toFixed(2) ?? "—"}</span></span>
-                        <span><span class="text-theme-text-tertiary">RMS:</span> <span class="font-bold text-theme-text-primary">{detail().median_guiding_rms !== null ? `${detail().median_guiding_rms?.toFixed(2)}"` : "—"}</span></span>
+                        <span><span class="text-theme-text-tertiary">FWHM:</span> <span class="font-bold text-theme-text-primary">{detail().median_fwhm !== null && detail().median_fwhm !== undefined ? formatArcsec(detail().median_fwhm) : "—"}</span></span>
+                        <span><span class="text-theme-text-tertiary">RMS:</span> <span class="font-bold text-theme-text-primary">{detail().median_guiding_rms !== null ? formatArcsec(detail().median_guiding_rms) : "—"}</span></span>
                       </div>
                       <div class="flex">
                         <button
@@ -893,8 +893,8 @@ const SessionAccordionCard: Component<{
                             <span><span class="text-theme-text-tertiary">Integration:</span> <span class="font-bold text-theme-text-primary">{formatIntegration(rig.integration_seconds)}</span></span>
                             <span><span class="text-theme-text-tertiary">HFR:</span> <span class="font-bold text-theme-text-primary">{rig.median_hfr?.toFixed(2) ?? "—"}</span></span>
                             <span><span class="text-theme-text-tertiary">Ecc:</span> <span class="font-bold text-theme-text-primary">{rig.median_eccentricity?.toFixed(2) ?? "—"}</span></span>
-                            <span><span class="text-theme-text-tertiary">FWHM:</span> <span class="font-bold text-theme-text-primary">{rig.median_fwhm?.toFixed(2) ?? "—"}</span></span>
-                            <span><span class="text-theme-text-tertiary">RMS:</span> <span class="font-bold text-theme-text-primary">{rig.median_guiding_rms !== null ? `${rig.median_guiding_rms?.toFixed(2)}"` : "—"}</span></span>
+                            <span><span class="text-theme-text-tertiary">FWHM:</span> <span class="font-bold text-theme-text-primary">{rig.median_fwhm !== null && rig.median_fwhm !== undefined ? formatArcsec(rig.median_fwhm) : "—"}</span></span>
+                            <span><span class="text-theme-text-tertiary">RMS:</span> <span class="font-bold text-theme-text-primary">{rig.median_guiding_rms !== null ? formatArcsec(rig.median_guiding_rms) : "—"}</span></span>
                           </div>
                           {/* Rig-level custom columns */}
                           <Show when={(settingsCtx.customColumns() ?? []).filter(c => c.applies_to === "rig").length > 0}>

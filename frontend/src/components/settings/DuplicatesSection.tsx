@@ -44,7 +44,7 @@ function methodBadge(candidate: MergeCandidateResponse): BadgeInfo {
       subtitle: pct
         ? `Names are ${pct} similar by text matching`
         : "Names are similar by text matching",
-      colorClasses: "text-yellow-400 bg-yellow-500/10 border border-yellow-500/20",
+      colorClasses: "text-theme-warning bg-theme-warning/10 border border-theme-warning/20",
     };
   }
 

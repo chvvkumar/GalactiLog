@@ -77,7 +77,7 @@ function statusColorClass(status: string): string {
   const sc = parseInt(status, 10);
   if (isNaN(sc)) return "text-theme-text-secondary";
   if (sc >= 500) return "text-red-400";
-  if (sc >= 400) return "text-amber-400";
+  if (sc >= 400) return "text-theme-warning";
   if (sc >= 300) return "text-blue-400";
   return "text-green-400";
 }
@@ -86,12 +86,12 @@ const StatusPill: Component<{ health: Health }> = (props) => {
   const label = () => props.health === "green" ? "Healthy" : props.health === "amber" ? "Degraded" : "Unhealthy";
   const classes = () => {
     if (props.health === "green") return "bg-green-900/40 text-green-300";
-    if (props.health === "amber") return "bg-amber-900/40 text-amber-300";
+    if (props.health === "amber") return "bg-theme-warning/20 text-theme-warning";
     return "bg-red-900/40 text-red-300";
   };
   const dotClass = () => {
     if (props.health === "green") return "bg-green-500";
-    if (props.health === "amber") return "bg-amber-500";
+    if (props.health === "amber") return "bg-theme-warning";
     return "bg-red-500";
   };
   return (
@@ -395,7 +395,7 @@ const DbCard: Component<{ summary: import("../../utils/metricsAggregate").DbSumm
           </div>
           <div class="h-2.5 rounded bg-theme-elevated overflow-hidden">
             <div
-              class={`h-full rounded ${utilPct() >= 90 ? "bg-red-500/60" : utilPct() >= 70 ? "bg-amber-500/60" : "bg-blue-500/60"}`}
+              class={`h-full rounded ${utilPct() >= 90 ? "bg-red-500/60" : utilPct() >= 70 ? "bg-theme-warning/60" : "bg-blue-500/60"}`}
               style={{ width: `${Math.min(100, utilPct())}%` }}
             />
           </div>
@@ -447,7 +447,7 @@ const JobsCard: Component<{ summary: import("../../utils/metricsAggregate").Jobs
           </div>
           <div class="h-2.5 rounded bg-theme-elevated overflow-hidden">
             <div
-              class={`h-full rounded ${utilPct() >= 90 ? "bg-red-500/60" : utilPct() >= 70 ? "bg-amber-500/60" : "bg-blue-500/60"}`}
+              class={`h-full rounded ${utilPct() >= 90 ? "bg-red-500/60" : utilPct() >= 70 ? "bg-theme-warning/60" : "bg-blue-500/60"}`}
               style={{ width: `${Math.min(100, utilPct())}%` }}
             />
           </div>

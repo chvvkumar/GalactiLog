@@ -3,6 +3,8 @@ import { api } from "../../api/client";
 import type { ValidateResponse, RestoreResponse } from "../../api/client";
 import { showToast } from "../Toast";
 import HelpPopover from "../HelpPopover";
+import { useSettingsContext } from "../SettingsProvider";
+import { formatDateTime } from "../../utils/dateTime";
 
 const SECTION_LABELS: Record<string, string> = {
   settings: "Settings",
@@ -17,6 +19,7 @@ const SECTION_LABELS: Record<string, string> = {
 const ALL_SECTIONS = Object.keys(SECTION_LABELS);
 
 export const BackupRestoreTab: Component = () => {
+  const { timezone, use24hTime } = useSettingsContext();
   const [creating, setCreating] = createSignal(false);
 
   // Restore state
@@ -194,7 +197,7 @@ export const BackupRestoreTab: Component = () => {
                 <div>
                   <span class="text-theme-text-secondary">Created: </span>
                   <span class="text-theme-text-primary">
-                    {new Date(validation()!.meta!.exported_at).toLocaleString()}
+                    {formatDateTime(validation()!.meta!.exported_at, timezone(), use24hTime())}
                   </span>
                 </div>
                 <div>

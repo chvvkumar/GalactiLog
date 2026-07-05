@@ -127,13 +127,13 @@ const TargetFeed: Component = () => {
                     <th class="p-3" />
                   </tr></thead>
                   <tbody>
-                    <For each={Array(pageSize())}>{() => <SkeletonRow />}</For>
+                    <For each={Array.from({ length: pageSize() })}>{() => <SkeletonRow />}</For>
                   </tbody>
                 </table>
               </div>
               {/* Mobile skeleton */}
               <div class="md:hidden">
-                <For each={Array(pageSize())}>{() => <SkeletonCard />}</For>
+                <For each={Array.from({ length: pageSize() })}>{() => <SkeletonCard />}</For>
               </div>
             </div>
           </Show>

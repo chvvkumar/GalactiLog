@@ -1,4 +1,4 @@
-import { Component, onMount, onCleanup } from "solid-js";
+import { Component, Show, onMount, onCleanup } from "solid-js";
 import { useSearchParams } from "@solidjs/router";
 import Sidebar from "../components/Sidebar";
 import TargetFeed from "../components/TargetFeed";
@@ -68,20 +68,22 @@ const DashboardPage: Component = () => {
 
         {/* Mobile drawer */}
         <div class={`fixed top-0 left-0 h-full w-72 z-50 bg-theme-base transform transition-transform lg:hidden ${sidebarOpen() ? "translate-x-0" : "-translate-x-full"}`}>
-          <div class="flex items-center justify-between p-4 border-b border-theme-border">
-            <span class="text-sm font-medium text-theme-text-primary">Filters</span>
-            <button
-              onClick={() => setSidebarOpen(false)}
-              class="p-1 text-theme-text-secondary hover:text-theme-text-primary transition-colors"
-              aria-label="Close filters"
-            >
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-                <line x1="6" y1="6" x2="18" y2="18" />
-                <line x1="6" y1="18" x2="18" y2="6" />
-              </svg>
-            </button>
-          </div>
-          <Sidebar />
+          <Show when={sidebarOpen()}>
+            <div class="flex items-center justify-between p-4 border-b border-theme-border">
+              <span class="text-sm font-medium text-theme-text-primary">Filters</span>
+              <button
+                onClick={() => setSidebarOpen(false)}
+                class="p-1 text-theme-text-secondary hover:text-theme-text-primary transition-colors"
+                aria-label="Close filters"
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                  <line x1="6" y1="18" x2="18" y2="6" />
+                </svg>
+              </button>
+            </div>
+            <Sidebar />
+          </Show>
         </div>
 
         <main class={`flex-1 min-h-[calc(100vh-57px)] ${contentWidthClass(contentWidth())}`}>

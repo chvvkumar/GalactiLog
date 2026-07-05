@@ -18,6 +18,8 @@ import {
 import { useAuth } from "../AuthProvider";
 import { showToast } from "../Toast";
 import HelpPopover from "../HelpPopover";
+import { useSettingsContext } from "../SettingsProvider";
+import { formatDateTime } from "../../utils/dateTime";
 
 const LEVELS: AppLogLevel[] = ["debug", "info", "warning", "error", "critical"];
 const CAPTURE_LEVELS: AppLogLevel[] = ["debug", "info", "warning", "error"];
@@ -104,6 +106,7 @@ const LevelBadge: Component<{ level: AppLogLevel }> = (props) => (
 
 const ActivityLogTab: Component = () => {
   const { isAdmin } = useAuth();
+  const { timezone, use24hTime } = useSettingsContext();
 
   // Settings strip state
   const [retentionDays, setRetentionDays] = createSignal(90);
@@ -639,7 +642,7 @@ const ActivityLogTab: Component = () => {
               >
                 <div class="flex gap-2 items-baseline">
                   <span class="text-theme-text-secondary tabular-nums whitespace-nowrap flex-shrink-0">
-                    {new Date(row.timestamp).toLocaleString()}
+                    {formatDateTime(row.timestamp, timezone(), use24hTime())}
                   </span>
                   <LevelBadge level={row.level} />
                   <span class="text-theme-text-secondary flex-shrink-0 w-[3.5rem]">

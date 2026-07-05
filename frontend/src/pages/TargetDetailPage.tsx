@@ -1,4 +1,4 @@
-import { Component, Show, For, createResource, createSignal, createEffect, createMemo, on, onMount, onCleanup } from "solid-js";
+import { Component, Show, For, createResource, createSignal, createEffect, createMemo, on, onMount } from "solid-js";
 import { A, useParams, useSearchParams } from "@solidjs/router";
 import { api } from "../api/client";
 import type { TargetDetailResponse, SessionDetail, TargetSearchResultFuzzy, MergedTargetResponse } from "../types";
@@ -13,7 +13,10 @@ import { useSettingsContext } from "../components/SettingsProvider";
 import { isFieldVisible } from "../utils/displaySettings";
 import { contentWidthClass } from "../utils/format";
 import HelpPopover from "../components/HelpPopover";
-import { timezoneLabel } from "../utils/dateTime";
+import { timezoneLabel, formatDate } from "../utils/dateTime";
+import ActionsMenu from "../components/ActionsMenu";
+import InlineRename from "../components/InlineRename";
+import CollapsibleHeader from "../components/CollapsibleHeader";
 import MergePreviewModal from "../components/MergePreviewModal";
 import { useAuth } from "../components/AuthProvider";
 import { OBJECT_TYPE_OPTIONS } from "../constants/objectTypes";
@@ -109,7 +112,7 @@ const MergeFromDetailFlow: Component<MergeFromDetailFlowProps> = (props) => {
               </p>
             </div>
             <div class="p-4 space-y-3">
-              <div class="text-xs px-2 py-1.5 rounded bg-yellow-500/10 text-yellow-400 border border-yellow-500/20">
+              <div class="text-xs px-2 py-1.5 rounded bg-theme-warning/10 text-theme-warning border border-theme-warning/20">
                 All images and sessions from the selected target will be moved here. You can revert from Settings &gt; Target Merges.
               </div>
               <div>
@@ -139,7 +142,7 @@ const MergeFromDetailFlow: Component<MergeFromDetailFlowProps> = (props) => {
                           <span class="text-xs text-theme-text-secondary ml-2">{t.object_type}</span>
                         </Show>
                         <Show when={t.unresolved}>
-                          <span class="text-xs text-yellow-400 ml-2">
+                          <span class="text-xs text-theme-warning ml-2">
                             Unresolved{t.image_count != null ? ` · ${t.image_count} ${t.image_count === 1 ? "image" : "images"}` : ""}
                           </span>
                         </Show>
@@ -195,23 +198,6 @@ const TargetDetailPage: Component = () => {
   const [showExport, setShowExport] = createSignal(false);
   const [showMerge, setShowMerge] = createSignal(false);
   const [showWbppExport, setShowWbppExport] = createSignal(false);
-  const [actionsMenuOpen, setActionsMenuOpen] = createSignal(false);
-  let actionsMenuRef: HTMLDivElement | undefined;
-  const onActionsMenuDocClick = (e: MouseEvent) => {
-    if (!actionsMenuRef) return;
-    if (!actionsMenuRef.contains(e.target as Node)) setActionsMenuOpen(false);
-  };
-  const onActionsMenuKey = (e: KeyboardEvent) => {
-    if (e.key === "Escape") setActionsMenuOpen(false);
-  };
-  onMount(() => {
-    document.addEventListener("click", onActionsMenuDocClick);
-    document.addEventListener("keydown", onActionsMenuKey);
-  });
-  onCleanup(() => {
-    document.removeEventListener("click", onActionsMenuDocClick);
-    document.removeEventListener("keydown", onActionsMenuKey);
-  });
   const [expandedSessions, setExpandedSessions] = createSignal<Set<string>>(new Set());
   const [sessionCache, setSessionCache] = createSignal<Record<string, SessionDetail>>({});
   const [targetChartExpanded, setTargetChartExpanded] = createSignal(graphSettings().target_chart_expanded);
@@ -235,7 +221,6 @@ const TargetDetailPage: Component = () => {
 
   // Rename/re-resolve signals
   const [editing, setEditing] = createSignal(false);
-  const [editName, setEditName] = createSignal("");
   const [savingIdentity, setSavingIdentity] = createSignal(false);
 
   // Object type edit
@@ -257,10 +242,10 @@ const TargetDetailPage: Component = () => {
     }
   };
 
-  const handleRename = async () => {
+  const handleRename = async (nameInput: string) => {
     const detail = targetDetail();
     if (!detail) return;
-    const name = editName().trim();
+    const name = nameInput.trim();
     if (!name) {
       showToast("Name cannot be empty", "error");
       return;
@@ -589,10 +574,7 @@ const TargetDetailPage: Component = () => {
                               title="Rename target"
                               aria-label="Rename target"
                               disabled={savingIdentity()}
-                              onClick={() => {
-                                setEditName(detail().primary_name);
-                                setEditing(true);
-                              }}
+                              onClick={() => setEditing(true)}
                             >
                               &#9998;
                             </button>
@@ -609,36 +591,13 @@ const TargetDetailPage: Component = () => {
                         </>
                       }
                     >
-                      <input
-                        type="text"
-                        class="text-2xl font-semibold tracking-tight bg-transparent border-b border-theme-accent text-theme-text-primary focus:outline-none min-w-0 flex-1"
-                        value={editName()}
-                        onInput={(e) => setEditName(e.currentTarget.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") handleRename();
-                          if (e.key === "Escape") setEditing(false);
-                        }}
-                        ref={(el) => { setTimeout(() => el?.focus(), 0); }}
-                        disabled={savingIdentity()}
+                      <InlineRename
+                        initialValue={detail().primary_name}
+                        onSave={handleRename}
+                        onCancel={() => setEditing(false)}
+                        saving={savingIdentity()}
+                        inputClass="text-2xl font-semibold tracking-tight bg-transparent border-b border-theme-accent text-theme-text-primary focus:outline-none min-w-0 flex-1"
                       />
-                      <button
-                        class="text-theme-text-tertiary hover:text-green-400 transition-colors text-lg leading-none"
-                        title="Save"
-                        aria-label="Save name"
-                        onClick={handleRename}
-                        disabled={savingIdentity()}
-                      >
-                        &#10003;
-                      </button>
-                      <button
-                        class="text-theme-text-tertiary hover:text-theme-error transition-colors text-lg leading-none"
-                        title="Cancel"
-                        aria-label="Cancel rename"
-                        onClick={() => setEditing(false)}
-                        disabled={savingIdentity()}
-                      >
-                        &#10005;
-                      </button>
                     </Show>
                     <HelpPopover>
                       <p class="text-sm text-theme-text-secondary">
@@ -662,33 +621,16 @@ const TargetDetailPage: Component = () => {
                     >
                       Export
                     </button>
-                    <div ref={actionsMenuRef} class="relative inline-flex">
-                      <button
-                        type="button"
-                        aria-label="More actions"
-                        aria-haspopup="menu"
-                        aria-expanded={actionsMenuOpen()}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setActionsMenuOpen((v) => !v);
-                        }}
-                        class="inline-flex items-center justify-center w-8 h-8 rounded border border-theme-border text-theme-text-secondary hover:text-theme-text-primary hover:bg-theme-hover transition-colors cursor-pointer"
-                      >
-                        <span class="text-lg leading-none" aria-hidden="true">&#8943;</span>
-                      </button>
-                      <Show when={actionsMenuOpen()}>
-                        <div
-                          role="menu"
-                          onClick={(e) => e.stopPropagation()}
-                          class="absolute top-full right-0 mt-2 z-50 min-w-[12rem] bg-theme-elevated border border-theme-border rounded-[var(--radius-sm)] shadow-[var(--shadow-lg)] py-1"
-                        >
+                    <ActionsMenu>
+                      {(close) => (
+                        <>
                           <Show when={auth.isAdmin()}>
                             <button
                               type="button"
                               role="menuitem"
                               class="w-full text-left px-3 py-1.5 text-sm text-theme-text-primary hover:bg-theme-hover transition-colors cursor-pointer"
                               onClick={() => {
-                                setActionsMenuOpen(false);
+                                close();
                                 setShowMerge(true);
                               }}
                             >
@@ -703,7 +645,7 @@ const TargetDetailPage: Component = () => {
                             class="w-full text-left px-3 py-1.5 text-sm text-theme-text-primary hover:bg-theme-hover transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
                             onClick={() => {
                               if (selectedChartDates().length === 0) return;
-                              setActionsMenuOpen(false);
+                              close();
                               setShowWbppExport(true);
                             }}
                           >
@@ -711,9 +653,9 @@ const TargetDetailPage: Component = () => {
                               ? `WBPP Export (${selectedChartDates().length})`
                               : "WBPP Export"}
                           </button>
-                        </div>
-                      </Show>
-                    </div>
+                        </>
+                      )}
+                    </ActionsMenu>
                   </div>
                   </div>
                   <div class="text-xs text-theme-text-secondary mt-1 flex flex-wrap gap-x-2 gap-y-0.5 items-center">
@@ -883,22 +825,12 @@ const TargetDetailPage: Component = () => {
             {/* Merge History */}
             <Show when={mergeHistory()?.length}>
               <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4">
-                <button
-                  class="flex items-center gap-2 py-2 cursor-pointer group"
-                  onClick={() => setMergeHistoryExpanded((v) => !v)}
-                >
-                  <h3 class="text-xs font-semibold uppercase tracking-wider text-theme-text-secondary border-l-2 border-theme-accent pl-2 group-hover:text-theme-text-primary transition-colors">
-                    Merge History
-                    <span class="text-theme-text-tertiary font-normal normal-case tracking-normal ml-2">({mergeHistory()!.length})</span>
-                  </h3>
-                  <svg
-                    class={`w-3.5 h-3.5 transition-transform duration-200 text-theme-text-tertiary ${mergeHistoryExpanded() ? "rotate-180" : ""}`}
-                    viewBox="0 0 20 20"
-                    fill="currentColor"
-                  >
-                    <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
-                  </svg>
-                </button>
+                <CollapsibleHeader
+                  title="Merge History"
+                  expanded={mergeHistoryExpanded}
+                  onToggle={() => setMergeHistoryExpanded((v) => !v)}
+                  suffix={<span class="text-theme-text-tertiary font-normal normal-case tracking-normal ml-2">({mergeHistory()!.length})</span>}
+                />
                 <Show when={mergeHistoryExpanded()}>
                   <div class="mt-2 space-y-2">
                     <For each={mergeHistory()}>
@@ -907,7 +839,7 @@ const TargetDetailPage: Component = () => {
                           <div class="flex-1 min-w-0">
                             <span class="text-theme-text-primary text-sm font-medium">{merged.primary_name}</span>
                             <div class="text-xs text-theme-text-secondary mt-0.5">
-                              Merged on {new Date(merged.merged_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                              Merged on {formatDate(merged.merged_at, timezone())}
                               {" · "}{merged.image_count} {merged.image_count === 1 ? "image" : "images"}
                             </div>
                           </div>
@@ -932,21 +864,11 @@ const TargetDetailPage: Component = () => {
             <Show when={detail().ra != null && detail().dec != null}>
               <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4">
                 <div class="flex items-center gap-2">
-                  <button
-                    class="flex items-center gap-2 py-2 cursor-pointer group"
-                    onClick={() => setSkyViewExpanded((v) => !v)}
-                  >
-                    <h3 class="text-xs font-semibold uppercase tracking-wider text-theme-text-secondary border-l-2 border-theme-accent pl-2 group-hover:text-theme-text-primary transition-colors">
-                      Sky View
-                    </h3>
-                    <svg
-                      class={`w-3.5 h-3.5 transition-transform duration-200 text-theme-text-tertiary ${skyViewExpanded() ? "rotate-180" : ""}`}
-                      viewBox="0 0 20 20"
-                      fill="currentColor"
-                    >
-                      <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
-                    </svg>
-                  </button>
+                  <CollapsibleHeader
+                    title="Sky View"
+                    expanded={skyViewExpanded}
+                    onToggle={() => setSkyViewExpanded((v) => !v)}
+                  />
                   <HelpPopover>
                     <p class="text-sm text-theme-text-secondary">
                       Interactive sky viewer centered on the target. The Aladin panel supports zoom and pan across surveys (DSS2, PanSTARRS, and others), and the reference thumbnail shows the default DSS image for context. Example: switch surveys in Aladin to compare how the target looks in different wavelengths.
@@ -981,29 +903,21 @@ const TargetDetailPage: Component = () => {
             {/* Target Notes */}
             <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4">
               <div class="flex items-center gap-2">
-                <button
-                  class="flex items-center gap-2 py-2 cursor-pointer group"
-                  onClick={() => setNotesExpanded((v) => !v)}
-                >
-                  <h3 class="text-xs font-semibold uppercase tracking-wider text-theme-text-secondary border-l-2 border-theme-accent pl-2 group-hover:text-theme-text-primary transition-colors">
-                    Notes
+                <CollapsibleHeader
+                  title="Notes"
+                  expanded={notesExpanded}
+                  onToggle={() => setNotesExpanded((v) => !v)}
+                  suffix={
                     <Show when={targetNotes()}>
                       <span class="text-theme-text-tertiary font-normal normal-case tracking-normal ml-2">has content</span>
                     </Show>
-                  </h3>
-                  <div class="flex items-center gap-2">
+                  }
+                  trailing={
                     <Show when={notesSaving()}>
                       <span class="text-xs text-theme-text-secondary">Saving...</span>
                     </Show>
-                    <svg
-                      class={`w-3.5 h-3.5 transition-transform duration-200 text-theme-text-tertiary ${notesExpanded() ? "rotate-180" : ""}`}
-                      viewBox="0 0 20 20"
-                      fill="currentColor"
-                    >
-                      <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
-                    </svg>
-                  </div>
-                </button>
+                  }
+                />
                 <HelpPopover>
                   <p class="text-sm text-theme-text-secondary">
                     Free-form notes attached to this target. Notes persist across sessions and are included in exports. Example: record plate solving issues, framing plans, or processing decisions.
@@ -1024,21 +938,11 @@ const TargetDetailPage: Component = () => {
             <Show when={targetDetail()}>
               <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4">
                 <div class="flex items-center gap-2">
-                  <button
-                    class="flex items-center gap-2 py-2 cursor-pointer group"
-                    onClick={toggleTargetChart}
-                  >
-                    <h3 class="text-xs font-semibold uppercase tracking-wider text-theme-text-secondary border-l-2 border-theme-accent pl-2 group-hover:text-theme-text-primary transition-colors">
-                      Graphs
-                    </h3>
-                    <svg
-                      class={`w-3.5 h-3.5 transition-transform duration-200 text-theme-text-tertiary ${targetChartExpanded() ? "rotate-180" : ""}`}
-                      viewBox="0 0 20 20"
-                      fill="currentColor"
-                    >
-                      <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
-                    </svg>
-                  </button>
+                  <CollapsibleHeader
+                    title="Graphs"
+                    expanded={targetChartExpanded}
+                    onToggle={toggleTargetChart}
+                  />
                   <HelpPopover>
                     <p class="text-sm text-theme-text-secondary">
                       Per-frame metric plots (HFR, FWHM, eccentricity, guide RMS, and others) over time. Use the date selector to narrow to a single imaging night or span multiple sessions. Example: spot a degrading HFR trend across a single night to identify focus drift.

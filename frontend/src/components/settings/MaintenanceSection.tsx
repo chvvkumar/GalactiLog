@@ -250,7 +250,7 @@ const MaintenanceSection: Component<MaintenanceSectionProps> = (props) => {
             <div class="flex-1">
               <div class="flex items-center gap-2 mb-1">
                 <p class="text-sm text-theme-text-primary font-medium">Retry Failed Lookups</p>
-                <span class="text-xs px-1.5 py-0.5 rounded bg-yellow-500/15 text-yellow-400 border border-yellow-500/20">
+                <span class="text-xs px-1.5 py-0.5 rounded bg-theme-warning/15 text-theme-warning border border-theme-warning/20">
                   Moderate
                 </span>
               </div>
@@ -299,7 +299,7 @@ const MaintenanceSection: Component<MaintenanceSectionProps> = (props) => {
             <div class="flex-1">
               <div class="flex items-center gap-2 mb-1">
                 <p class="text-sm text-theme-text-primary font-medium">Re-link Catalog Orphans</p>
-                <span class="text-xs px-1.5 py-0.5 rounded bg-yellow-500/15 text-yellow-400 border border-yellow-500/20">
+                <span class="text-xs px-1.5 py-0.5 rounded bg-theme-warning/15 text-theme-warning border border-theme-warning/20">
                   Moderate
                 </span>
               </div>

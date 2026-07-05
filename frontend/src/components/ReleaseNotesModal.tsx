@@ -1,5 +1,7 @@
 import { Component, Show } from "solid-js";
 import Dialog from "./Dialog";
+import { useSettingsContext } from "./SettingsProvider";
+import { formatDateTime as formatDateTimeShared } from "../utils/dateTime";
 
 interface ReleaseInfo {
   tag: string;
@@ -26,21 +28,6 @@ interface LatestRelease {
 function shortSha(sha?: string | null): string {
   if (!sha) return "";
   return sha.slice(0, 7);
-}
-
-function formatDateTime(iso?: string | null): string {
-  if (!iso) return "";
-  try {
-    return new Date(iso).toLocaleString(undefined, {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  } catch {
-    return iso;
-  }
 }
 
 function escapeHtml(text: string): string {
@@ -169,9 +156,11 @@ const ReleaseNotesModal: Component<{
   release: LatestRelease;
   onClose: () => void;
 }> = (props) => {
+  const { timezone, use24hTime } = useSettingsContext();
   const runningShort = () => shortSha(props.release.running_sha) || props.release.running;
   const remoteShort = () => shortSha(props.release.remote_sha);
   const rel = () => props.release.release;
+  const formatDateTime = (iso?: string | null): string => (iso ? formatDateTimeShared(iso, timezone(), use24hTime()) : "");
 
   return (
     <Dialog
