@@ -23,6 +23,16 @@ function setLastSeenTs(ts: string): void {
 
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 
+// Only poll while the tab is visible; a backgrounded tab does not need to
+// surface background-error toasts, and re-checks immediately on return.
+function pollIfVisible(): void {
+  if (document.visibilityState === "visible") void checkErrors();
+}
+
+function onVisibilityChange(): void {
+  if (document.visibilityState === "visible") void checkErrors();
+}
+
 async function checkErrors(): Promise<void> {
   const since = getLastSeenTs();
   try {
@@ -53,8 +63,9 @@ async function checkErrors(): Promise<void> {
 
 export function startErrorToastPoller(): void {
   if (pollTimer) return;
-  checkErrors();
-  pollTimer = setInterval(checkErrors, 10_000);
+  pollIfVisible();
+  pollTimer = setInterval(pollIfVisible, 10_000);
+  document.addEventListener("visibilitychange", onVisibilityChange);
 }
 
 export function stopErrorToastPoller(): void {
@@ -62,4 +73,5 @@ export function stopErrorToastPoller(): void {
     clearInterval(pollTimer);
     pollTimer = null;
   }
+  document.removeEventListener("visibilitychange", onVisibilityChange);
 }

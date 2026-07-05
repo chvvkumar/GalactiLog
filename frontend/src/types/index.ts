@@ -791,6 +791,11 @@ export interface CorrelationResponse {
   x_stats: SummaryStats | null;
   y_stats: SummaryStats | null;
   target_names: Record<string, string>;
+  // Present when the backend downsamples the returned point set. Trend lines and
+  // statistics are still computed over the full set; `sampled_count` points are
+  // returned out of `total_count` total matching frames.
+  total_count?: number;
+  sampled_count?: number;
 }
 
 export interface HistogramBin {

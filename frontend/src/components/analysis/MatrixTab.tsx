@@ -23,12 +23,15 @@ function rToColor(r: number | null): string {
 }
 
 interface Props {
+  active: boolean;
   filters: SharedFilters;
 }
 
 const MatrixTab: Component<Props> = (props) => {
   const dataKey = () =>
-    `matrix-${props.filters.telescope}-${props.filters.camera}-${props.filters.filterUsed}-${props.filters.dateFrom}-${props.filters.dateTo}`;
+    props.active
+      ? `matrix-${props.filters.telescope}-${props.filters.camera}-${props.filters.filterUsed}-${props.filters.dateFrom}-${props.filters.dateTo}`
+      : null;
 
   const [data] = createResource(dataKey, () =>
     api.getMatrix({

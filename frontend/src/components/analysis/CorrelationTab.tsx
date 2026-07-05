@@ -39,6 +39,7 @@ const PRESETS = [
 ];
 
 interface Props {
+  active: boolean;
   filters: SharedFilters;
   navX?: string;
   navY?: string;
@@ -59,8 +60,12 @@ const CorrelationTab: Component<Props> = (props) => {
     }
   });
 
+  // Gate the fetch on tab visibility: hidden tabs return a null source so no
+  // request fires until the tab is revealed.
   const chartKey = () =>
-    `${props.filters.telescope}-${props.filters.camera}-${props.filters.filterUsed}-${props.filters.granularity}-${props.filters.dateFrom}-${props.filters.dateTo}-${customX()}-${customY()}`;
+    props.active
+      ? `${props.filters.telescope}-${props.filters.camera}-${props.filters.filterUsed}-${props.filters.granularity}-${props.filters.dateFrom}-${props.filters.dateTo}-${customX()}-${customY()}`
+      : null;
 
   const [data] = createResource(chartKey, () =>
     api.getCorrelation({
@@ -80,6 +85,20 @@ const CorrelationTab: Component<Props> = (props) => {
     if (!d || !hideOutliers()) return d;
     const pts = d.points.filter((p) => !p.outlier);
     return { ...d, points: pts };
+  };
+
+  // Show a note only when the response reports that its point set was sampled.
+  // Read defensively so the note stays hidden until the backend supplies the
+  // total/sampled counts.
+  const samplingNote = (): string | null => {
+    const d = data.latest as (typeof data.latest & { total?: number; sampled?: number }) | undefined;
+    if (!d) return null;
+    const total = d.total_count ?? d.total;
+    const sampled = d.sampled_count ?? d.sampled;
+    if (typeof total === "number" && typeof sampled === "number" && sampled < total) {
+      return `Showing ${sampled.toLocaleString()} of ${total.toLocaleString()} frames (sampled for display; trend and statistics use all frames)`;
+    }
+    return null;
   };
 
   const exportCsv = () => {
@@ -147,6 +166,10 @@ const CorrelationTab: Component<Props> = (props) => {
           {hideOutliers() ? "Show Outliers" : "Hide Outliers"}
         </button>
       </div>
+
+      <Show when={samplingNote()}>
+        <p class="text-xs text-theme-text-tertiary mb-2">{samplingNote()}</p>
+      </Show>
 
       <div style={{ height: "500px" }} class="relative">
         <CorrelationChart data={filteredData()} loading={data.loading} />
