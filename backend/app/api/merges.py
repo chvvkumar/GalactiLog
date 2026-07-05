@@ -16,10 +16,12 @@ from app.services.simbad import normalize_catalog_id, normalize_object_name
 from app.models.simbad_cache import SimbadCache
 from app.models.sesame_cache import SesameCache
 from app.config import async_redis
+from app.models.merge_manifest import MergeManifest
 from app.services.target_merge import (
     merge_targets as _merge_targets_service,
     merge_preview as _merge_preview_service,
     unmerge_target as _unmerge_target_service,
+    apply_merge_manifest_restore,
 )
 
 router = APIRouter(prefix="/targets", tags=["merges"])
@@ -586,15 +588,32 @@ async def revert_merge_candidate(
 
         if loser:
             loser_names = set([loser.primary_name] + list(loser.aliases or []))
-            for name in loser_names:
-                await session.execute(
-                    update(Image)
-                    .where(
-                        Image.resolved_target_id == winner.id,
-                        Image.raw_headers["OBJECT"].astext == name,
-                    )
-                    .values(resolved_target_id=loser.id)
+            # Prefer the persisted merge manifest for an exact reversal (restores
+            # ALL moved images including filename-resolved ones, plus notes and
+            # custom values). Merges made before manifests existed have none, so
+            # fall back to the legacy OBJECT-header name match (AUD-005).
+            manifest = (await session.execute(
+                select(MergeManifest)
+                .where(
+                    MergeManifest.loser_id == loser.id,
+                    MergeManifest.winner_id == winner.id,
                 )
+                .order_by(MergeManifest.created_at.desc())
+                .limit(1)
+            )).scalars().first()
+            if manifest is not None:
+                await apply_merge_manifest_restore(manifest, loser, winner, session)
+                await session.delete(manifest)
+            else:
+                for name in loser_names:
+                    await session.execute(
+                        update(Image)
+                        .where(
+                            Image.resolved_target_id == winner.id,
+                            Image.raw_headers["OBJECT"].astext == name,
+                        )
+                        .values(resolved_target_id=loser.id)
+                    )
             winner.aliases = [a for a in (winner.aliases or []) if a not in loser_names]
             loser.merged_into_id = None
             loser.merged_at = None

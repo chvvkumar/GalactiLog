@@ -300,6 +300,11 @@ const TargetDetailPage: Component = () => {
       await api.unmergeTarget(merged.id);
       showToast(`Unmerged "${merged.primary_name}"`);
       await Promise.all([refetchMergeHistory(), refetchDetail()]);
+      // Unmerging moves frames off this night, so drop the cache and re-load
+      // any still-expanded session dates to avoid stale expanded cards that
+      // disagree with the refetched summary rows (AUD-012).
+      setSessionCache({});
+      [...expandedSessions()].forEach(loadSessionDetail);
     } catch (e: unknown) {
       showToast(getErrorMessage(e, "Undo merge failed"), "error");
     } finally {
@@ -564,6 +569,12 @@ const TargetDetailPage: Component = () => {
           onMerged={async () => {
             setShowMerge(false);
             await Promise.all([refetchDetail(), refetchMergeHistory()]);
+            // A merge changes which frames belong to a given night, so any
+            // already-expanded session card would keep showing stale cached
+            // data. Clear the cache and re-load every still-expanded date so
+            // the expanded card matches the refetched summary row (AUD-012).
+            setSessionCache({});
+            [...expandedSessions()].forEach(loadSessionDetail);
           }}
         />
       </Show>
