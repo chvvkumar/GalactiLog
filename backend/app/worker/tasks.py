@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.models import Image, Target
+from app.models.data_job import DataJob, DataJobStatus
 from app.models.user_settings import UserSettings, SETTINGS_ROW_ID
 from app.services.csv_metadata import parse_image_metadata_csv, parse_weather_csv
 from app.services.scanner import extract_metadata, CALIBRATION_FRAME_TYPES
@@ -55,6 +56,74 @@ from app.services.activity import emit_sync as _emit_activity_sync
 def _activity_session():
     """Return a context-managed sync Session for activity writes in Celery tasks."""
     return Session(_sync_engine)
+
+
+def _data_migration_job_session():
+    """Return a context-managed sync Session for data_jobs writes.
+
+    Job-row writes always use their own session and commit independently of
+    the migration-work session in run_data_migrations, so a job status update
+    is never rolled back with a failed migration and is visible to concurrent
+    readers (e.g. a future API progress endpoint) the instant it commits,
+    regardless of what happens to the migration-work transaction afterward.
+    """
+    return Session(_sync_engine)
+
+
+def _pickup_data_migration_job(job_key: str, total_steps: int, message: str) -> None:
+    """Mark the data_jobs row for this run as running and seed its progress.
+
+    Upserts on (job_type, job_key) so a run triggered without a prior
+    dispatch-created row (e.g. a task invoked directly, as in tests) still
+    gets a durable record. started_at is only set if not already set, so a
+    resumed run after an interruption keeps its original start time;
+    attempt_count always increments. step/total_steps are (re)seeded here
+    since total_steps is computed once per run and a resumed run needs it
+    recomputed against the fresh get_pending_migrations() count.
+    """
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    with _data_migration_job_session() as db:
+        stmt = pg_insert(DataJob).values(
+            job_type="data_migration",
+            job_key=job_key,
+            status=DataJobStatus.running,
+            started_at=func.now(),
+            attempt_count=1,
+            step=0,
+            total_steps=total_steps,
+            message=message,
+            heartbeat_at=func.now(),
+        ).on_conflict_do_update(
+            index_elements=["job_type", "job_key"],
+            set_={
+                "status": DataJobStatus.running,
+                "started_at": func.coalesce(DataJob.started_at, func.now()),
+                "attempt_count": DataJob.attempt_count + 1,
+                "step": 0,
+                "total_steps": total_steps,
+                "message": message,
+                "heartbeat_at": func.now(),
+            },
+        )
+        db.execute(stmt)
+        db.commit()
+
+
+def _update_data_migration_job(job_key: str, **values) -> None:
+    """Update the data_jobs row for this run; always stamps heartbeat_at.
+
+    Runs in its own session/commit (see _data_migration_job_session), so this
+    never shares a transaction with the migration-work session and is durable
+    the instant it returns.
+    """
+    with _data_migration_job_session() as db:
+        db.execute(
+            sa_update(DataJob)
+            .where(DataJob.job_type == "data_migration", DataJob.job_key == job_key)
+            .values(heartbeat_at=func.now(), **values)
+        )
+        db.commit()
 
 
 _redis = get_sync_redis()
@@ -2050,10 +2119,24 @@ DATA_MIGRATION_LOCK_TTL = 600  # 10 minutes
 
 @celery_app.task(bind=True)
 def run_data_migrations(self, from_version: int) -> dict:
-    """Run pending data migrations dispatched by startup version check."""
+    """Run pending data migrations dispatched by startup version check.
+
+    Maintains a durable data_jobs row (job_type="data_migration",
+    job_key=str(DATA_VERSION), i.e. the target version for this upgrade run)
+    tracking status/progress/errors alongside the migration work. Job-row
+    writes always go through _pickup_data_migration_job /
+    _update_data_migration_job, which use their own session and commit
+    independently of the migration-work session below -- a job-status update
+    is never rolled back with a failed migration, and is durable and visible
+    to concurrent readers immediately. Completion authority for which
+    migrations run stays with app_metadata.data_version via
+    get_pending_migrations; this job row is observability only.
+    """
     from app.services.data_migrations import (
         DATA_VERSION, get_pending_migrations, set_data_version,
     )
+
+    job_key = str(DATA_VERSION)
 
     # Acquire lock to prevent duplicate runs on rapid restarts
     if not _redis.set(DATA_MIGRATION_LOCK, "1", nx=True, ex=DATA_MIGRATION_LOCK_TTL):
@@ -2062,22 +2145,39 @@ def run_data_migrations(self, from_version: int) -> dict:
 
     try:
         pending = get_pending_migrations(from_version)
+        total_steps = len(pending)
+        _pickup_data_migration_job(
+            job_key, total_steps,
+            f"Upgrading v{from_version} -> v{DATA_VERSION} ({total_steps} migrations pending)",
+        )
+
         if not pending:
             logger.info("data_migrations: no pending migrations (v%d is current)", from_version)
+            _update_data_migration_job(
+                job_key, status=DataJobStatus.succeeded, step=0, total_steps=0,
+                message="No pending migrations", finished_at=func.now(),
+            )
             return {"status": "noop"}
 
         logger.info("data_migrations: upgrading v%d -> v%d (%d migrations)",
                     from_version, DATA_VERSION, len(pending))
 
         results = []
+        step = 0
         with Session(_sync_engine) as session:
-            for ver, desc, func in pending:
+            for ver, desc, migrate_fn in pending:
                 logger.info("data_migrations: running v%d - %s", ver, desc)
                 try:
-                    summary = func(session)
+                    summary = migrate_fn(session)
                     set_data_version(session, ver)
                     session.commit()
                     results.append(f"v{ver}: {summary}")
+                    step += 1
+                    _update_data_migration_job(
+                        job_key, step=step, total_steps=total_steps,
+                        message=f"v{ver}: {summary} complete"
+                        + (f"; running v{pending[step][0]}..." if step < total_steps else ""),
+                    )
                     logger.info("data_migrations: v%d complete - %s", ver, summary)
                 except SoftTimeLimitExceeded:
                     # The task hit its (generous) time limit mid-migration.
@@ -2097,6 +2197,10 @@ def run_data_migrations(self, from_version: int) -> dict:
                         f"resume on the next restart."
                     )
                     logger.warning("data_migrations: %s", msg)
+                    _update_data_migration_job(
+                        job_key, status=DataJobStatus.interrupted, step=step,
+                        total_steps=total_steps, message=msg,
+                    )
                     with _activity_session() as _db:
                         _emit_activity_sync(
                             _db, redis=_redis, category="migration", severity="warning",
@@ -2109,6 +2213,11 @@ def run_data_migrations(self, from_version: int) -> dict:
                     session.rollback()
                     error_msg = f"Data upgrade failed at v{ver} ({desc}): {e}"
                     logger.exception("data_migrations: %s", error_msg)
+                    _update_data_migration_job(
+                        job_key, status=DataJobStatus.failed, step=step,
+                        total_steps=total_steps, message=error_msg,
+                        last_error=str(e), finished_at=func.now(),
+                    )
                     with _activity_session() as _db:
                         _emit_activity_sync(
                             _db, redis=_redis, category="migration", severity="error",
@@ -2120,6 +2229,10 @@ def run_data_migrations(self, from_version: int) -> dict:
                     return {"status": "error", "version": ver, "error": str(e)}
 
         summary_msg = "Data upgrade complete: " + "; ".join(results)
+        _update_data_migration_job(
+            job_key, status=DataJobStatus.succeeded, step=total_steps,
+            total_steps=total_steps, message=summary_msg, finished_at=func.now(),
+        )
         with _activity_session() as _db:
             _emit_activity_sync(
                 _db, redis=_redis, category="migration", severity="info",
