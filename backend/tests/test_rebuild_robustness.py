@@ -587,3 +587,81 @@ class TestRebuildProgressEnvelope:
         assert d["total_steps"] == 15
         assert d.get("percent") == pytest.approx(33.3, abs=0.01)
         assert d["message"] == "Retrying 5/15"
+
+    def test_new_run_resets_stale_envelope_from_previous_run(self):
+        """rebuild:status persists REBUILD_EXPIRE seconds after a run, so a
+        new run's running-state write must reset step/total_steps rather than
+        inherit the previous run's completed envelope (e.g. 100% from a prior
+        full rebuild showing during a fresh quick fix)."""
+        from app.services import scan_state
+
+        sync = FakeSyncRedis()
+        # Previous run finished at 100%.
+        scan_state.set_rebuild_running_sync(sync, "full", "starting", task="full")
+        scan_state.set_rebuild_complete_sync(
+            sync, "Resolved 20 targets", {"total": 20},
+            task="full", step=20, total_steps=20,
+        )
+        prior = scan_state._parse_rebuild(sync.hgetall(scan_state.REBUILD_KEY))
+        assert prior.percent == 100.0
+
+        # New run starts: envelope must be reset, not inherited.
+        scan_state.set_rebuild_running_sync(
+            sync, "smart", "Running quick fix...",
+            task="smart", step=0, total_steps=1,
+        )
+        status = scan_state._parse_rebuild(sync.hgetall(scan_state.REBUILD_KEY))
+        assert status.state == "running"
+        assert status.step == 0
+        assert status.total_steps == 1
+        assert status.percent == 0.0
+        assert status.message == "Running quick fix..."
+
+    def test_running_without_task_still_resets_envelope(self):
+        """Even a legacy-style running call (no task kwarg) must not leak the
+        previous run's envelope; task falls back to mode."""
+        from app.services import scan_state
+
+        sync = FakeSyncRedis()
+        scan_state.set_rebuild_complete_sync(
+            sync, "done", {}, task="full", step=10, total_steps=10,
+        )
+        scan_state.set_rebuild_running_sync(sync, "retry", "Clearing caches...")
+        status = scan_state._parse_rebuild(sync.hgetall(scan_state.REBUILD_KEY))
+        assert status.step == 0
+        assert status.total_steps == 0
+        assert status.percent == 0.0
+        h = sync.hgetall(scan_state.REBUILD_KEY)
+        assert h["task"] == "retry"
+
+    def test_message_written_once_per_call(self):
+        """The sync writers must not write message twice (own hset plus
+        set_progress); a single write per call keeps the hash update atomic
+        per field."""
+        from app.services import scan_state
+
+        class CountingRedis(FakeSyncRedis):
+            def __init__(self):
+                super().__init__()
+                self.message_writes = 0
+
+            def hset(self, key, field=None, value=None, mapping=None):
+                if mapping and "message" in mapping:
+                    self.message_writes += 1
+                if field == "message":
+                    self.message_writes += 1
+                super().hset(key, field=field, value=value, mapping=mapping)
+
+        r = CountingRedis()
+        scan_state.set_rebuild_running_sync(r, "full", "starting", task="full")
+        assert r.message_writes == 1
+        r.message_writes = 0
+        scan_state.set_rebuild_progress_sync(
+            r, "Resolving 1/2...", task="full", step=1, total_steps=2,
+        )
+        assert r.message_writes == 1
+        r.message_writes = 0
+        scan_state.set_rebuild_complete_sync(
+            r, "done", {}, task="full", step=2, total_steps=2,
+        )
+        assert r.message_writes == 1

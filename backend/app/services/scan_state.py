@@ -535,15 +535,16 @@ def _parse_rebuild(data: dict | None) -> RebuildStatus:
             completed_at=None, details={}, step=None, total_steps=None, percent=None,
         )
     import json
+    from app.schemas.scan import ProgressEnvelope
 
-    # Derive percent from step/total_steps (never stored directly).
-    # Use ProgressEnvelope.for_progress logic for consistency.
+    # Derive percent from step/total_steps (never stored directly), reusing
+    # the envelope's own derivation so the formula lives in one place.
     step = int(data.get("step", 0) or 0)
     total_steps = int(data.get("total_steps", 0) or 0)
-    if total_steps > 0:
-        percent = round(100 * step / total_steps, 1)
-    else:
-        percent = 0.0
+    percent = ProgressEnvelope.for_progress(
+        task=data.get("task", ""), step=step, total_steps=total_steps,
+        message=data.get("message", ""),
+    ).percent
 
     return RebuildStatus(
         state=data.get("state", "idle"),
@@ -582,28 +583,31 @@ def set_rebuild_running_sync(
     r: sync_redis.Redis, mode: str, message: str,
     task: str | None = None, step: int = 0, total_steps: int = 0,
 ) -> None:
-    """Set rebuild state to running, optionally with progress envelope fields.
+    """Set rebuild state to running and reset the progress envelope.
 
-    If task/step/total_steps are provided, also writes those fields via the
-    structured progress envelope (Phase 3). task should match mode (e.g. "full",
-    "retry", "backfill", "smart", "ref_thumbnails") unless overridden.
+    The envelope fields (task/step/total_steps) are always rewritten here:
+    rebuild:status persists for REBUILD_EXPIRE seconds after a run, so a new
+    run must not inherit the previous run's step/total_steps/percent. task
+    defaults to mode (e.g. "full", "retry", "backfill", "smart",
+    "ref_thumbnails") unless overridden; step/total_steps default to 0 when
+    the run's step count is not yet known. The message is written once, via
+    set_progress.
     """
     from app.services.progress_envelope import set_progress
 
     r.hset(REBUILD_KEY, mapping={
         "state": "running",
         "mode": mode,
-        "message": message,
         "started_at": time.time(),
         "completed_at": "",
         "details": "{}",
     })
     r.persist(REBUILD_KEY)
     r.set(REBUILD_PROGRESS_KEY, str(time.time()))
-
-    # Write envelope fields if task is provided (Phase 3 structured progress).
-    if task is not None:
-        set_progress(r, REBUILD_KEY, task=task, step=step, total_steps=total_steps, message=message)
+    set_progress(
+        r, REBUILD_KEY, task=task if task is not None else mode,
+        step=step, total_steps=total_steps, message=message,
+    )
 
 
 def set_rebuild_progress_sync(
@@ -612,21 +616,21 @@ def set_rebuild_progress_sync(
 ) -> None:
     """Update rebuild message and progress, optionally with envelope fields.
 
-    If task/step/total_steps are provided, also writes those fields via the
-    structured progress envelope (Phase 3). message stays unchanged from its
-    current value for backward compatibility with existing notifications.
+    If task/step/total_steps are provided, the message and the envelope
+    fields are written together via the structured progress envelope
+    (Phase 3); otherwise only the message is updated. The message wording is
+    caller-controlled and stays human-readable for notifications.
     """
     from app.services.progress_envelope import set_progress
 
-    r.hset(REBUILD_KEY, "message", message)
+    if task is not None and step is not None and total_steps is not None:
+        set_progress(r, REBUILD_KEY, task=task, step=step, total_steps=total_steps, message=message)
+    else:
+        r.hset(REBUILD_KEY, "message", message)
     # Heartbeat for stale detection: every incremental progress write bumps the
     # last-progress marker so get_rebuild_state can tell a slow-but-alive run
     # from a hard-killed one (AUD-003).
     r.set(REBUILD_PROGRESS_KEY, str(time.time()))
-
-    # Write envelope fields if task is provided (Phase 3 structured progress).
-    if task is not None and step is not None and total_steps is not None:
-        set_progress(r, REBUILD_KEY, task=task, step=step, total_steps=total_steps, message=message)
 
 
 def set_rebuild_complete_sync(
@@ -636,23 +640,24 @@ def set_rebuild_complete_sync(
     """Complete rebuild, optionally with progress envelope fields at completion.
 
     If task/step/total_steps are provided, marks progress as fully complete
-    (step == total_steps) via the structured progress envelope (Phase 3).
+    (step == total_steps) via the structured progress envelope (Phase 3);
+    the message is then written once, through set_progress.
     """
     from app.services.progress_envelope import set_progress
     import json
 
-    r.hset(REBUILD_KEY, mapping={
+    mapping = {
         "state": "complete",
-        "message": message,
         "completed_at": time.time(),
         "details": json.dumps(details),
-    })
-    r.expire(REBUILD_KEY, REBUILD_EXPIRE)
-    r.delete(REBUILD_PROGRESS_KEY)
-
-    # Write envelope fields at completion if task is provided (Phase 3).
+    }
+    if task is None or step is None or total_steps is None:
+        mapping["message"] = message
+    r.hset(REBUILD_KEY, mapping=mapping)
     if task is not None and step is not None and total_steps is not None:
         set_progress(r, REBUILD_KEY, task=task, step=step, total_steps=total_steps, message=message)
+    r.expire(REBUILD_KEY, REBUILD_EXPIRE)
+    r.delete(REBUILD_PROGRESS_KEY)
 
 
 def set_rebuild_cancelled_sync(

@@ -1420,7 +1420,10 @@ def rebuild_targets(self) -> dict:
     logger.info("rebuild_targets: starting full rebuild")
     # Clear a sticky cancel flag from a prior run so this run isn't killed immediately.
     clear_cancel_sync(_redis)
-    set_rebuild_running_sync(_redis, "full", "Clearing existing targets...")
+    set_rebuild_running_sync(
+        _redis, "full", "Clearing existing targets...",
+        task="full", step=0, total_steps=0,
+    )
 
     # Phase 1: Clear everything except user-defined custom targets, which SIMBAD
     # cannot recreate. Unlink only images NOT attached to a surviving custom
@@ -1576,7 +1579,10 @@ def retry_unresolved(self) -> dict:
     """
     logger.info("retry_unresolved: starting")
     clear_cancel_sync(_redis)
-    set_rebuild_running_sync(_redis, "retry", "Clearing caches...")
+    set_rebuild_running_sync(
+        _redis, "retry", "Clearing caches...",
+        task="retry", step=0, total_steps=0,
+    )
 
     # Phase 1: Clear negative caches so names get a fresh shot
     with Session(_sync_engine) as session:
@@ -1722,7 +1728,10 @@ def backfill_catalog_identity(self) -> dict:
     """
     logger.info("backfill_catalog_identity: starting")
     clear_cancel_sync(_redis)
-    set_rebuild_running_sync(_redis, "backfill", "Repairing SIMBAD cache...")
+    set_rebuild_running_sync(
+        _redis, "backfill", "Repairing SIMBAD cache...",
+        task="backfill", step=0, total_steps=0,
+    )
 
     # Phase 1: corrupted-cache repair.
     with Session(_sync_engine) as session:
@@ -1829,7 +1838,10 @@ def smart_rebuild_targets(self, manual: bool = False, parent_activity_id: int | 
 def _smart_rebuild_inner(manual: bool = False, parent_activity_id: int | None = None) -> dict:
     logger.info("smart_rebuild: starting")
     clear_cancel_sync(_redis)
-    set_rebuild_running_sync(_redis, "smart", "Running quick fix...")
+    set_rebuild_running_sync(
+        _redis, "smart", "Running quick fix...",
+        task="smart", step=0, total_steps=1,
+    )
     stats = {}
 
     def _emit_cancelled(extra: dict | None = None) -> dict:
@@ -2586,7 +2598,10 @@ def generate_reference_thumbnails(self, force: bool = False, parent_activity_id:
     from app.services.skyview import fetch_reference_thumbnail
 
     clear_cancel_sync(_redis)
-    set_rebuild_running_sync(_redis, "ref_thumbnails", "Finding targets needing thumbnails...")
+    set_rebuild_running_sync(
+        _redis, "ref_thumbnails", "Finding targets needing thumbnails...",
+        task="ref_thumbnails", step=0, total_steps=0,
+    )
     output_dir = Path(settings.thumbnails_path) / "reference"
 
     # Commit fetched thumbnails in small chunks so a run that is killed
@@ -2667,7 +2682,7 @@ def generate_reference_thumbnails(self, force: bool = False, parent_activity_id:
         message = f"Fetched {fetched}/{total} reference thumbnails"
     set_rebuild_complete_sync(
         _redis, message, stats,
-        task="ref_thumbnails", step=fetched, total_steps=total,
+        task="ref_thumbnails", step=total, total_steps=total,
     )
     with _activity_session() as _db:
         _emit_activity_sync(
