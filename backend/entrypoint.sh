@@ -360,8 +360,27 @@ if [ "$DATA_RESULT" != "current" ]; then
 import json, time
 import redis
 import os
+from sqlalchemy import create_engine, text
+from app.config import settings
 r = redis.from_url(os.environ.get('GALACTILOG_REDIS_URL', 'redis://redis:6379/0'))
 from app.services.data_migrations import DATA_VERSION
+
+# Register the pending job row before enqueueing so it is visible to the API
+# and operators from the moment the upgrade is scheduled, not only once a
+# worker picks it up. ON CONFLICT DO NOTHING: dispatch never writes
+# status/started_at/attempt_count -- those belong to the worker's pickup
+# step (run_data_migrations), and an existing row (running/succeeded/failed/
+# interrupted from a prior boot) must be left untouched here.
+url = settings.database_url.replace('+asyncpg', '+psycopg2')
+eng = create_engine(url)
+with eng.begin() as conn:
+    conn.execute(text('''
+        INSERT INTO data_jobs (job_type, job_key, status)
+        VALUES ('data_migration', :job_key, 'pending')
+        ON CONFLICT (job_type, job_key) DO NOTHING
+    '''), {'job_key': str(DATA_VERSION)})
+eng.dispose()
+
 entry = {
     'type': 'data_upgrade_started',
     'message': f'Data upgrade v${DATA_RESULT} -> v{DATA_VERSION} starting in background...',
