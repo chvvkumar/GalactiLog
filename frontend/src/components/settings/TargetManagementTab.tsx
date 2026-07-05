@@ -96,7 +96,7 @@ export const TargetManagementTab: Component = () => {
               <Show when={s().duplicates_found > 0}>
                 <div class="text-sm">
                   <span class="text-theme-text-secondary">Duplicates: </span>
-                  <span class="text-yellow-400 font-medium">{s().duplicates_found}</span>
+                  <span class="text-theme-warning font-medium">{s().duplicates_found}</span>
                 </div>
               </Show>
               <Show when={s().unresolved_names > 0}>

@@ -856,7 +856,7 @@ const SessionAccordionCard: Component<{
                         <span><span class="text-theme-text-tertiary">Exp:</span> <span class="font-bold text-theme-text-primary">{detail().exposure_times.length > 0 ? detail().exposure_times.map(e => e + "s").join(", ") : "—"}</span></span>
                         <span><span class="text-theme-text-tertiary">HFR:</span> <span class="font-bold text-theme-text-primary">{detail().median_hfr?.toFixed(2) ?? "—"}</span></span>
                         <span><span class="text-theme-text-tertiary">Ecc:</span> <span class="font-bold text-theme-text-primary">{detail().median_eccentricity?.toFixed(2) ?? "—"}</span></span>
-                        <span><span class="text-theme-text-tertiary">FWHM:</span> <span class="font-bold text-theme-text-primary">{detail().median_fwhm?.toFixed(2) ?? "—"}</span></span>
+                        <span><span class="text-theme-text-tertiary">FWHM:</span> <span class="font-bold text-theme-text-primary">{detail().median_fwhm !== null && detail().median_fwhm !== undefined ? formatArcsec(detail().median_fwhm) : "—"}</span></span>
                         <span><span class="text-theme-text-tertiary">RMS:</span> <span class="font-bold text-theme-text-primary">{detail().median_guiding_rms !== null ? formatArcsec(detail().median_guiding_rms) : "—"}</span></span>
                       </div>
                       <div class="flex">
@@ -893,7 +893,7 @@ const SessionAccordionCard: Component<{
                             <span><span class="text-theme-text-tertiary">Integration:</span> <span class="font-bold text-theme-text-primary">{formatIntegration(rig.integration_seconds)}</span></span>
                             <span><span class="text-theme-text-tertiary">HFR:</span> <span class="font-bold text-theme-text-primary">{rig.median_hfr?.toFixed(2) ?? "—"}</span></span>
                             <span><span class="text-theme-text-tertiary">Ecc:</span> <span class="font-bold text-theme-text-primary">{rig.median_eccentricity?.toFixed(2) ?? "—"}</span></span>
-                            <span><span class="text-theme-text-tertiary">FWHM:</span> <span class="font-bold text-theme-text-primary">{rig.median_fwhm?.toFixed(2) ?? "—"}</span></span>
+                            <span><span class="text-theme-text-tertiary">FWHM:</span> <span class="font-bold text-theme-text-primary">{rig.median_fwhm !== null && rig.median_fwhm !== undefined ? formatArcsec(rig.median_fwhm) : "—"}</span></span>
                             <span><span class="text-theme-text-tertiary">RMS:</span> <span class="font-bold text-theme-text-primary">{rig.median_guiding_rms !== null ? formatArcsec(rig.median_guiding_rms) : "—"}</span></span>
                           </div>
                           {/* Rig-level custom columns */}

@@ -28,7 +28,6 @@ import type {
   AuthUser,
   LoginResponse,
   CustomColumn,
-  CustomColumnValue,
   ColumnVisibility,
   ActivityEvent,
   ActivityQueryParams,
@@ -264,8 +263,19 @@ export const api = {
   logout: () =>
     fetchJson<void>("/auth/logout", { method: "POST" }),
 
+  changePassword: (currentPassword: string, newPassword: string) =>
+    fetchJson<{ status: string }>("/auth/password", {
+      method: "PUT",
+      body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+    }),
+
   getMe: () =>
     fetchJson<AuthUser>("/auth/me"),
+
+  // Single startup call that returns settings, equipment, fits keys, object
+  // types and custom columns together.
+  getBootstrap: () =>
+    fetchJson<import("../types").BootstrapResponse>("/bootstrap"),
 
   getUsers: () =>
     fetchJson<import("../types").UserAccount[]>("/auth/users"),
@@ -464,15 +474,6 @@ export const api = {
   getDbSummary: () =>
     fetchJson<import("../types").DbSummary>("/scan/db-summary"),
 
-  getAutoScan: () =>
-    fetchJson<{ enabled: boolean; interval_minutes: number }>("/scan/autoscan"),
-
-  setAutoScan: (enabled: boolean, interval_minutes: number) =>
-    fetchJson<{ enabled: boolean; interval_minutes: number }>(
-      `/scan/autoscan?enabled=${enabled}&interval_minutes=${interval_minutes}`,
-      { method: "PUT" }
-    ),
-
   thumbnailUrl: (path: string) => {
     const filename = path.split("/").pop();
     return `/thumbnails/${filename}`;
@@ -532,12 +533,6 @@ export const api = {
 
   getMergeCandidates: (status = "pending") =>
     fetchJson<MergeCandidateResponse[]>(`/targets/merge-candidates?status=${status}`),
-
-  getMergeCandidateCount: () =>
-    fetchJson<{ count: number }>("/targets/merge-candidates/count"),
-
-  getMergedTargets: () =>
-    fetchJson<MergedTargetResponse[]>("/targets/merged-targets"),
 
   getMergeHistory: (targetId: string) =>
     fetchJson<MergedTargetResponse[]>(`/targets/${encodeURIComponent(targetId)}/merge-history`),
@@ -822,22 +817,6 @@ export const api = {
       body: JSON.stringify({ target_id: targetId, panel_label: label, object_pattern: objectPattern }),
     }),
 
-  updateMosaicPanel: (
-    mosaicId: string,
-    panelId: string,
-    data: {
-      panel_label?: string;
-      sort_order?: number;
-      grid_row?: number | null;
-      grid_col?: number | null;
-      rotation?: number;
-      flip_h?: boolean;
-    },
-  ) =>
-    fetchJson<{ status: string }>(`/mosaics/${mosaicId}/panels/${panelId}`, {
-      method: "PUT",
-      body: JSON.stringify(data),
-    }),
 
   batchUpdateMosaicPanels: (
     mosaicId: string,
@@ -906,9 +885,6 @@ export const api = {
   deleteCustomColumn: (id: string) =>
     fetchJson<void>(`/custom-columns/${id}`, { method: "DELETE" }),
 
-  getCustomValues: (targetId: string) =>
-    fetchJson<CustomColumnValue[]>(`/custom-columns/values/${targetId}`),
-
   setCustomValue: (body: {
     column_id: string;
     target_id?: string | null;
@@ -930,10 +906,6 @@ export const api = {
       method: "PUT",
       body: JSON.stringify(body),
     }),
-
-  // Planning
-  getNightEphemeris: (date: string) =>
-    fetchJson<import("../types").NightEphemeris>(`/planning/night?date=${date}`),
 
   // Reference thumbnails
   // Fetch the DSS reference thumbnail as a blob (auth-aware, with token refresh).

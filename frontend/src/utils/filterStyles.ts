@@ -27,7 +27,7 @@ export function canonicalFilterCategory(name: string): string | null {
 
 // Single default gray used whenever a filter name has no color-map, alias-map,
 // or canonicalCategory hit (AUD-024).
-export const DEFAULT_FILTER_COLOR = "#666666";
+const DEFAULT_FILTER_COLOR = "#666666";
 
 // Shared filter -> color resolution, used everywhere a filter name needs a
 // display color (badges, charts, toggles) so the same filter always renders

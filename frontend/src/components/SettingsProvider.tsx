@@ -1,5 +1,7 @@
 import { createContext, useContext, createEffect, createSignal, createResource, startTransition, type ParentComponent } from "solid-js";
-import { useSettings, getFilterColorMap, getFilterAliasMap, enableSettingsFetch } from "../store/settings";
+import { useSettings, getFilterColorMap, getFilterAliasMap, enableSettingsFetch, seedSettings } from "../store/settings";
+import { seedEquipment } from "../store/catalog";
+import { seedFilterOptions } from "../store/filterOptions";
 import { useGraphSettings } from "../store/graphSettings";
 import type { SettingsResponse, GeneralSettings, FilterConfig, EquipmentConfig, DisplaySettings, GraphSettings, CustomColumn, ColumnVisibility } from "../types";
 import type { Resource } from "solid-js";
@@ -38,18 +40,45 @@ export const SettingsProvider: ParentComponent = (props) => {
   const store = useSettings();
   const graphStore = useGraphSettings();
   const auth = useAuth();
-  const [customColumns, { refetch: rawRefetchCustomColumns }] = createResource(
-    () => auth.user() !== null,
-    () => api.getCustomColumns(),
+  // Custom columns are gated so bootstrap can seed them without a redundant
+  // fetch; the gate opens once bootstrap resolves (or falls back).
+  const [ccGate, setCCGate] = createSignal(false);
+  let pendingCustomColumnsSeed: CustomColumn[] | null = null;
+  const [customColumns, { refetch: rawRefetchCustomColumns, mutate: mutateCustomColumns }] = createResource(
+    ccGate,
+    async () => {
+      if (pendingCustomColumnsSeed) {
+        const s = pendingCustomColumnsSeed;
+        pendingCustomColumnsSeed = null;
+        return s;
+      }
+      return api.getCustomColumns();
+    },
   );
   const refetchCustomColumns = () => startTransition(() => rawRefetchCustomColumns());
   const [columnVisibility, setColumnVisibility] = createSignal<ColumnVisibility | undefined>(undefined);
 
   graphStore.loadGraphSettings();
 
-  // Enable settings fetch once user is authenticated
+  // One bootstrap request replaces the five separate startup calls (settings,
+  // equipment, fits keys, object types, custom columns), seeding each store.
+  // Individual endpoints remain for later refreshes; on failure, fall back to
+  // fetching each store on demand.
   createEffect(() => {
-    if (auth.user()) enableSettingsFetch();
+    if (!auth.user()) return;
+    api.getBootstrap()
+      .then((b) => {
+        seedSettings(b.settings);
+        seedEquipment(b.equipment);
+        seedFilterOptions(b.fits_keys, b.object_types);
+        pendingCustomColumnsSeed = b.custom_columns;
+        mutateCustomColumns(b.custom_columns);
+        setCCGate(true);
+      })
+      .catch(() => {
+        enableSettingsFetch();
+        setCCGate(true);
+      });
   });
 
   // Load column visibility when user is authenticated

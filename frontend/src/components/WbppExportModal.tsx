@@ -60,7 +60,7 @@ function permClass(p: PermOrNone): string {
   switch (p) {
     case "granted": return "text-green-400";
     case "denied": return "text-theme-error";
-    case "prompt": return "text-yellow-400";
+    case "prompt": return "text-theme-warning";
     default: return "text-theme-text-tertiary";
   }
 }

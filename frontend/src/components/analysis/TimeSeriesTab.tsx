@@ -46,6 +46,7 @@ const ALL_METRICS = [
 ];
 
 interface Props {
+  active: boolean;
   filters: SharedFilters;
 }
 
@@ -54,7 +55,9 @@ const TimeSeriesTab: Component<Props> = (props) => {
   const [smoothing, setSmoothing] = createSignal<"raw" | "ma7" | "ma30">("raw");
 
   const dataKey = () =>
-    `ts-${metric()}-${props.filters.telescope}-${props.filters.camera}-${props.filters.filterUsed}-${props.filters.dateFrom}-${props.filters.dateTo}`;
+    props.active
+      ? `ts-${metric()}-${props.filters.telescope}-${props.filters.camera}-${props.filters.filterUsed}-${props.filters.dateFrom}-${props.filters.dateTo}`
+      : null;
 
   const [data] = createResource(dataKey, () =>
     api.getTimeSeries({

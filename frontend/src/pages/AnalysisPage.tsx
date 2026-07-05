@@ -250,7 +250,7 @@ const AnalysisPage: Component = () => {
                     </ul>
                   </HelpPopover>
                 </div>
-                <CorrelationTab filters={shared()} navX={navX()} navY={navY()} onNavConsumed={() => { setNavX(undefined); setNavY(undefined); }} />
+                <CorrelationTab active={activeTab() === "correlation"} filters={shared()} navX={navX()} navY={navY()} onNavConsumed={() => { setNavX(undefined); setNavY(undefined); }} />
               </div>
             </Suspense>
           </Show>
@@ -271,7 +271,7 @@ const AnalysisPage: Component = () => {
                     </ul>
                   </HelpPopover>
                 </div>
-                <DistributionsTab filters={shared()} />
+                <DistributionsTab active={activeTab() === "distributions"} filters={shared()} />
               </div>
             </Suspense>
           </Show>
@@ -292,7 +292,7 @@ const AnalysisPage: Component = () => {
                     </ul>
                   </HelpPopover>
                 </div>
-                <TimeSeriesTab filters={shared()} />
+                <TimeSeriesTab active={activeTab() === "timeseries"} filters={shared()} />
               </div>
             </Suspense>
           </Show>
@@ -314,7 +314,7 @@ const AnalysisPage: Component = () => {
                     <p class="text-sm text-theme-text-secondary">Click a cell to jump to the Correlation tab pre-filtered to that combination.</p>
                   </HelpPopover>
                 </div>
-                <MatrixTab filters={shared()} />
+                <MatrixTab active={activeTab() === "matrix"} filters={shared()} />
               </div>
             </Suspense>
           </Show>
@@ -335,7 +335,7 @@ const AnalysisPage: Component = () => {
                     </ul>
                   </HelpPopover>
                 </div>
-                <CompareTab filters={shared()} combos={combos()} availableFilters={filters() || []} />
+                <CompareTab active={activeTab() === "compare"} filters={shared()} combos={combos()} availableFilters={filters() || []} />
               </div>
             </Suspense>
           </Show>

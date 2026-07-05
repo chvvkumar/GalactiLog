@@ -2,6 +2,7 @@ import { Component, Show, createSignal, onMount, For } from "solid-js";
 import { api } from "../api/client";
 import { showToast } from "./Toast";
 import Dialog from "./Dialog";
+import { formatIntegration } from "../utils/format";
 
 interface TargetPreview {
   id?: string;
@@ -28,12 +29,6 @@ interface MergePreviewModalProps {
   loserName?: string;
   onClose: () => void;
   onMerged: () => void;
-}
-
-function formatHours(seconds: number): string {
-  const h = seconds / 3600;
-  if (h < 1) return `${Math.round(seconds / 60)}m`;
-  return `${h.toFixed(1)}h`;
 }
 
 const MergePreviewModal: Component<MergePreviewModalProps> = (props) => {
@@ -174,7 +169,7 @@ const MergePreviewModal: Component<MergePreviewModalProps> = (props) => {
                     </div>
                     <div>
                       <span class={labelClass}>Integration</span>
-                      <span class={valueClass}>{formatHours(p().winner.integration_seconds)}</span>
+                      <span class={valueClass}>{formatIntegration(p().winner.integration_seconds)}</span>
                     </div>
                     <Show when={p().winner.aliases.length > 0}>
                       <div>
@@ -237,7 +232,7 @@ const MergePreviewModal: Component<MergePreviewModalProps> = (props) => {
                     </div>
                     <div>
                       <span class={labelClass}>Integration</span>
-                      <span class={valueClass}>{formatHours(p().loser.integration_seconds)}</span>
+                      <span class={valueClass}>{formatIntegration(p().loser.integration_seconds)}</span>
                     </div>
                     <Show when={p().loser.aliases.length > 0}>
                       <div>
@@ -282,7 +277,7 @@ const MergePreviewModal: Component<MergePreviewModalProps> = (props) => {
                   </ul>
                 </div>
 
-                <div class="text-xs px-2 py-1.5 rounded bg-yellow-500/10 text-yellow-400 border border-yellow-500/20">
+                <div class="text-xs px-2 py-1.5 rounded bg-theme-warning/10 text-theme-warning border border-theme-warning/20">
                   This merge can be reverted from Settings &gt; Target Merges.
                 </div>
               </>

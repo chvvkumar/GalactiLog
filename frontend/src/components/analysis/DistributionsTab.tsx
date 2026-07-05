@@ -49,6 +49,7 @@ const GROUP_OPTIONS = [
 ] as const;
 
 interface Props {
+  active: boolean;
   filters: SharedFilters;
 }
 
@@ -59,7 +60,9 @@ const DistributionsTab: Component<Props> = (props) => {
   const [groupBy, setGroupBy] = createSignal<"filter" | "equipment" | "month" | "target">("filter");
 
   const histKey = () =>
-    `hist-${histMetric()}-${props.filters.telescope}-${props.filters.camera}-${props.filters.filterUsed}-${props.filters.granularity}-${props.filters.dateFrom}-${props.filters.dateTo}`;
+    props.active
+      ? `hist-${histMetric()}-${props.filters.telescope}-${props.filters.camera}-${props.filters.filterUsed}-${props.filters.granularity}-${props.filters.dateFrom}-${props.filters.dateTo}`
+      : null;
 
   const [histData] = createResource(histKey, () =>
     api.getDistribution({
@@ -74,7 +77,9 @@ const DistributionsTab: Component<Props> = (props) => {
   );
 
   const boxKey = () =>
-    `box-${boxMetric()}-${groupBy()}-${props.filters.telescope}-${props.filters.camera}-${props.filters.filterUsed}-${props.filters.dateFrom}-${props.filters.dateTo}`;
+    props.active
+      ? `box-${boxMetric()}-${groupBy()}-${props.filters.telescope}-${props.filters.camera}-${props.filters.filterUsed}-${props.filters.dateFrom}-${props.filters.dateTo}`
+      : null;
 
   const [boxData] = createResource(boxKey, () =>
     api.getBoxPlot({

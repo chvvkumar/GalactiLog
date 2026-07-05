@@ -18,6 +18,7 @@ const Y_METRICS = [
 ];
 
 interface Props {
+  active: boolean;
   filters: SharedFilters;
   combos: Array<{ telescope: string; camera: string; label: string; grouped: boolean }>;
   availableFilters: string[];
@@ -32,7 +33,7 @@ const CompareTab: Component<Props> = (props) => {
   const canCompare = () => groupA() !== "" && groupB() !== "" && groupA() !== groupB();
 
   const dataKey = () =>
-    canCompare() ? `compare-${mode()}-${metric()}-${groupA()}-${groupB()}-${props.filters.dateFrom}-${props.filters.dateTo}` : null;
+    props.active && canCompare() ? `compare-${mode()}-${metric()}-${groupA()}-${groupB()}-${props.filters.dateFrom}-${props.filters.dateTo}` : null;
 
   const [data] = createResource(dataKey, (key) => {
     if (!key) return undefined;

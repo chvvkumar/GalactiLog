@@ -1,7 +1,7 @@
 import { Component, For, Show, createEffect, createMemo, createSignal, onMount } from "solid-js";
 import { useNavigate } from "@solidjs/router";
 import { api, ApiError } from "../../api/client";
-import { showToast, dismissToast } from "../Toast";
+import { showToast } from "../Toast";
 import { useAuth } from "../AuthProvider";
 import { useSettingsContext } from "../SettingsProvider";
 import HelpPopover from "../HelpPopover";
@@ -86,11 +86,28 @@ export const MosaicsTab: Component = () => {
   const [mosaicsCollapsed, setMosaicsCollapsed] = createSignal(false);
 
   type MosaicSortKey = "name" | "panels" | "integration" | "frames" | "date_range";
-  const [mosaicSortKey, setMosaicSortKey] = createSignal<MosaicSortKey>("name");
-  const [mosaicSortAsc, setMosaicSortAsc] = createSignal(true);
+  // Mosaics list sort persisted to localStorage (Dashboard pattern).
+  const MOSAIC_LIST_SORT_LS = "mosaics_list_sort";
+  let initialListSort: { key: MosaicSortKey; asc: boolean } = { key: "name", asc: true };
+  try {
+    const stored = localStorage.getItem(MOSAIC_LIST_SORT_LS);
+    if (stored) initialListSort = JSON.parse(stored);
+  } catch { /* ignore corrupt localStorage */ }
+  const [mosaicSortKey, setMosaicSortKey] = createSignal<MosaicSortKey>(initialListSort.key);
+  const [mosaicSortAsc, setMosaicSortAsc] = createSignal(initialListSort.asc);
+  const persistListSort = (key: MosaicSortKey, asc: boolean) => {
+    try { localStorage.setItem(MOSAIC_LIST_SORT_LS, JSON.stringify({ key, asc })); } catch { /* ignore */ }
+  };
   const toggleMosaicSort = (key: MosaicSortKey) => {
-    if (mosaicSortKey() === key) setMosaicSortAsc(!mosaicSortAsc());
-    else { setMosaicSortKey(key); setMosaicSortAsc(true); }
+    if (mosaicSortKey() === key) {
+      const asc = !mosaicSortAsc();
+      setMosaicSortAsc(asc);
+      persistListSort(key, asc);
+    } else {
+      setMosaicSortKey(key);
+      setMosaicSortAsc(true);
+      persistListSort(key, true);
+    }
   };
   const sortedMosaics = createMemo(() => {
     const key = mosaicSortKey();
@@ -148,8 +165,17 @@ export const MosaicsTab: Component = () => {
   const campaignGap = () =>
     settingsCtx.settings()?.general?.mosaic_campaign_gap_days ?? 0;
 
+  // Load lifecycle: skeleton rows while the first fetch is in flight, and an
+  // inline error with Retry if it fails, instead of a timed info toast that
+  // silently swallowed failures.
+  const [loading, setLoading] = createSignal(false);
+  const [loadError, setLoadError] = createSignal(false);
+
   const refresh = async (silent = false) => {
-    if (!silent) showToast("Loading mosaics...", "info", 15000);
+    if (!silent) {
+      setLoading(true);
+      setLoadError(false);
+    }
     try {
       const [s, m] = await Promise.all([
         api.getMosaicSuggestions(),
@@ -159,9 +185,11 @@ export const MosaicsTab: Component = () => {
       cachedMosaics = m;
       setSuggestions(s);
       setMosaics(m);
-      if (!silent) dismissToast();
+      setLoadError(false);
     } catch {
-      if (!silent) dismissToast();
+      if (!silent) setLoadError(true);
+    } finally {
+      if (!silent) setLoading(false);
     }
   };
 
@@ -849,7 +877,7 @@ export const MosaicsTab: Component = () => {
                             {formatIntegration(totals().integration)}
                             <Show when={(s.other_session_count ?? 0) > 0}>
                               {" · "}
-                              <span class="text-amber-400">
+                              <span class="text-theme-warning">
                                 +{s.other_session_count} more sessions
                               </span>
                             </Show>
@@ -1146,7 +1174,32 @@ export const MosaicsTab: Component = () => {
         <Show
           when={mosaics().length > 0}
           fallback={
-            <p class="text-sm text-theme-text-secondary">No mosaics yet.</p>
+            <Show
+              when={loadError()}
+              fallback={
+                <Show
+                  when={loading()}
+                  fallback={<p class="text-sm text-theme-text-secondary">No mosaics yet.</p>}
+                >
+                  <div class="space-y-2">
+                    <For each={Array.from({ length: 4 })}>
+                      {() => (
+                        <div class="flex items-center gap-3 p-3 border border-theme-border rounded-[var(--radius-sm)]">
+                          <div class="h-4 w-40 bg-theme-elevated rounded animate-pulse" />
+                          <div class="h-4 w-16 bg-theme-elevated rounded animate-pulse ml-auto" />
+                          <div class="h-4 w-16 bg-theme-elevated rounded animate-pulse" />
+                        </div>
+                      )}
+                    </For>
+                  </div>
+                </Show>
+              }
+            >
+              <div class="px-3 py-2 rounded border border-theme-error/30 bg-theme-error/10 text-theme-error text-sm flex items-center justify-between">
+                <span>Failed to load mosaics.</span>
+                <button onClick={() => refresh()} class="ml-3 underline hover:no-underline">Retry</button>
+              </div>
+            </Show>
           }
         >
           <table class="w-full text-sm border-collapse">
@@ -1208,7 +1261,7 @@ export const MosaicsTab: Component = () => {
                           </Show>
                           <span class="font-medium">{m.name}</span>
                           <Show when={m.needs_review}>
-                            <span class="text-xs text-amber-400 border border-amber-400/30 rounded px-1.5 py-0.5 whitespace-nowrap">
+                            <span class="text-xs text-theme-warning border border-theme-warning/30 rounded px-1.5 py-0.5 whitespace-nowrap">
                               Needs Review
                             </span>
                           </Show>
@@ -1245,13 +1298,13 @@ export const MosaicsTab: Component = () => {
                                 columnType={col.column_type}
                                 value={m.custom_values?.[col.slug]}
                                 dropdownOptions={col.dropdown_options}
-                                onSave={(val) => {
+                                onSave={(val) =>
                                   api.setCustomValue({
                                     column_id: col.id,
                                     mosaic_id: m.id,
                                     value: val,
-                                  });
-                                }}
+                                  })
+                                }
                               />
                             </td>
                           </Show>

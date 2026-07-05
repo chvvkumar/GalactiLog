@@ -5,7 +5,27 @@ import type { SettingsResponse, GeneralSettings, FilterConfig, EquipmentConfig, 
 const [settingsGate, setSettingsGate] = createSignal(false);
 export function enableSettingsFetch() { setSettingsGate(true); }
 
-const [settingsData, { refetch: refetchSettings }] = createResource(settingsGate, () => api.getSettings());
+// One-shot seed consumed by the resource's first run so that opening the gate
+// after a bootstrap load does not fire a redundant GET /settings. Manual
+// refetches still hit the API.
+let pendingSettingsSeed: SettingsResponse | null = null;
+const [settingsData, { refetch: refetchSettings, mutate: mutateSettings }] = createResource(
+  settingsGate,
+  async () => {
+    if (pendingSettingsSeed) {
+      const s = pendingSettingsSeed;
+      pendingSettingsSeed = null;
+      return s;
+    }
+    return api.getSettings();
+  },
+);
+
+export function seedSettings(data: SettingsResponse) {
+  pendingSettingsSeed = data;
+  mutateSettings(data);
+  setSettingsGate(true);
+}
 
 /** Refetch settings without triggering the Suspense boundary */
 const quietRefetch = () => startTransition(() => refetchSettings());
