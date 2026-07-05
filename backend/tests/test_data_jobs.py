@@ -574,3 +574,118 @@ class TestFreshRunHappyPath:
         assert mid.percent == 50.0
         assert done.percent == 100.0
         assert no_total.percent is None
+
+
+# ---------------------------------------------------------------------------
+# 7: job-row bookkeeping failures must never affect migration outcomes
+# ---------------------------------------------------------------------------
+
+class TestBookkeepingFailuresDoNotAffectOutcome:
+    """Job rows are observability only. A failed bookkeeping write must never
+    block real migration work (pickup) or misreport succeeded work as failed
+    (success-path progress update). Both helpers swallow-and-log their own
+    errors, and the runner's success-path bookkeeping sits outside the
+    migration try/except; these tests force real DB-level failures inside the
+    helpers by breaking _data_migration_job_session, the only session source
+    the job-row helpers use (the migration-work session and _activity_session
+    are separate code paths and stay healthy)."""
+
+    BASE_VERSION = 90500
+    V1 = 90501
+    V2 = 90502
+    JOB_KEY = str(V2)
+
+    @pytest.fixture(autouse=True)
+    def _cleanup(self, db):
+        _cleanup_job_and_metadata(db, [self.JOB_KEY], ["data_version"])
+        yield
+        _cleanup_job_and_metadata(db, [self.JOB_KEY], ["data_version"])
+
+    def _migrations(self):
+        order = []
+
+        def fn_v1(session):
+            order.append(self.V1)
+            return "v1 summary"
+
+        def fn_v2(session):
+            order.append(self.V2)
+            return "v2 summary"
+
+        return {
+            self.V1: ("fake migration v1", fn_v1),
+            self.V2: ("fake migration v2", fn_v2),
+        }, order
+
+    def _patched(self, migrations):
+        return patch.multiple(
+            "app.services.data_migrations", DATA_VERSION=self.V2, MIGRATIONS=migrations,
+        )
+
+    def test_success_path_bookkeeping_failure_does_not_demote_run(self, tasks_mod, db):
+        """Pickup succeeds, then every later job-row write hits a DB error.
+        The run must still complete: both versions committed to app_metadata,
+        no failed job status, and no data_upgrade_failed activity emitted for
+        work that actually succeeded."""
+        from unittest.mock import MagicMock
+
+        migrations, order = self._migrations()
+
+        real_session_factory = tasks_mod._data_migration_job_session
+        call_count = {"n": 0}
+
+        def flaky_job_session():
+            call_count["n"] += 1
+            if call_count["n"] > 1:  # first call = pickup; all later writes fail
+                raise RuntimeError("bookkeeping DB unavailable")
+            return real_session_factory()
+
+        emit_spy = MagicMock()
+
+        with self._patched(migrations), \
+                patch.object(tasks_mod, "_data_migration_job_session", flaky_job_session), \
+                patch.object(tasks_mod, "_emit_activity_sync", emit_spy), \
+                patch.object(tasks_mod.smart_rebuild_targets, "apply_async"), \
+                patch.object(tasks_mod.detect_mosaic_panels_task, "apply_async"):
+            result = tasks_mod.run_data_migrations.run(from_version=self.BASE_VERSION)
+
+        # The run itself completed, all versions ran in order, and the
+        # version pointer (completion authority) advanced to the target.
+        assert result["status"] == "complete"
+        assert order == [self.V1, self.V2]
+        assert _get_data_version(db) == self.V2
+        assert call_count["n"] > 1  # the failing path was actually exercised
+
+        # No failure was reported for succeeded work.
+        emitted_types = [c.kwargs.get("event_type") for c in emit_spy.call_args_list]
+        assert "data_upgrade_failed" not in emitted_types
+        assert "data_upgrade_complete" in emitted_types
+
+        # The job row (written by the successful pickup) was never marked
+        # failed - the broken bookkeeping writes were dropped, not misapplied.
+        row = _get_job_row(db, self.JOB_KEY)
+        assert row is not None
+        assert row["status"] == "running"  # stale, but never "failed"
+        assert row["last_error"] is None
+
+    def test_pickup_failure_does_not_block_migrations(self, tasks_mod, db):
+        """If the pickup upsert itself raises, the run proceeds without any
+        job-row tracking and still migrates to completion."""
+        migrations, order = self._migrations()
+
+        def broken_job_session():
+            raise RuntimeError("data_jobs table unreachable")
+
+        with self._patched(migrations), \
+                patch.object(tasks_mod, "_data_migration_job_session", broken_job_session), \
+                patch.object(tasks_mod.smart_rebuild_targets, "apply_async"), \
+                patch.object(tasks_mod.detect_mosaic_panels_task, "apply_async"):
+            result = tasks_mod.run_data_migrations.run(from_version=self.BASE_VERSION)
+
+        assert result["status"] == "complete"
+        assert order == [self.V1, self.V2]
+        assert _get_data_version(db) == self.V2
+
+        # No job row exists (pickup never landed) - and that must not have
+        # mattered to the migration outcome.
+        assert _get_job_row(db, self.JOB_KEY) is None

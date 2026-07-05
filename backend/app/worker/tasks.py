@@ -80,34 +80,45 @@ def _pickup_data_migration_job(job_key: str, total_steps: int, message: str) -> 
     attempt_count always increments. step/total_steps are (re)seeded here
     since total_steps is computed once per run and a resumed run needs it
     recomputed against the fresh get_pending_migrations() count.
+
+    Best-effort: job rows are observability only, so a failed pickup write
+    must never block the real migration work. Any exception is logged and
+    swallowed here, and the run proceeds without job-row tracking (the
+    subsequent _update_data_migration_job calls are equally best-effort).
     """
     from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-    with _data_migration_job_session() as db:
-        stmt = pg_insert(DataJob).values(
-            job_type="data_migration",
-            job_key=job_key,
-            status=DataJobStatus.running,
-            started_at=func.now(),
-            attempt_count=1,
-            step=0,
-            total_steps=total_steps,
-            message=message,
-            heartbeat_at=func.now(),
-        ).on_conflict_do_update(
-            index_elements=["job_type", "job_key"],
-            set_={
-                "status": DataJobStatus.running,
-                "started_at": func.coalesce(DataJob.started_at, func.now()),
-                "attempt_count": DataJob.attempt_count + 1,
-                "step": 0,
-                "total_steps": total_steps,
-                "message": message,
-                "heartbeat_at": func.now(),
-            },
+    try:
+        with _data_migration_job_session() as db:
+            stmt = pg_insert(DataJob).values(
+                job_type="data_migration",
+                job_key=job_key,
+                status=DataJobStatus.running,
+                started_at=func.now(),
+                attempt_count=1,
+                step=0,
+                total_steps=total_steps,
+                message=message,
+                heartbeat_at=func.now(),
+            ).on_conflict_do_update(
+                index_elements=["job_type", "job_key"],
+                set_={
+                    "status": DataJobStatus.running,
+                    "started_at": func.coalesce(DataJob.started_at, func.now()),
+                    "attempt_count": DataJob.attempt_count + 1,
+                    "step": 0,
+                    "total_steps": total_steps,
+                    "message": message,
+                    "heartbeat_at": func.now(),
+                },
+            )
+            db.execute(stmt)
+            db.commit()
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "data_migrations: could not record job pickup for job_key=%s; "
+            "proceeding without job-row tracking", job_key, exc_info=True,
         )
-        db.execute(stmt)
-        db.commit()
 
 
 def _update_data_migration_job(job_key: str, **values) -> None:
@@ -116,14 +127,26 @@ def _update_data_migration_job(job_key: str, **values) -> None:
     Runs in its own session/commit (see _data_migration_job_session), so this
     never shares a transaction with the migration-work session and is durable
     the instant it returns.
+
+    Best-effort: job rows are observability only, so a failed bookkeeping
+    write must never raise into run_data_migrations - it could otherwise mark
+    a succeeded migration as failed, or abort remaining pending migrations.
+    Any exception is logged and swallowed.
     """
-    with _data_migration_job_session() as db:
-        db.execute(
-            sa_update(DataJob)
-            .where(DataJob.job_type == "data_migration", DataJob.job_key == job_key)
-            .values(heartbeat_at=func.now(), **values)
+    try:
+        with _data_migration_job_session() as db:
+            db.execute(
+                sa_update(DataJob)
+                .where(DataJob.job_type == "data_migration", DataJob.job_key == job_key)
+                .values(heartbeat_at=func.now(), **values)
+            )
+            db.commit()
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "data_migrations: could not update job row for job_key=%s "
+            "(values=%s); migration outcome is unaffected",
+            job_key, sorted(values.keys()), exc_info=True,
         )
-        db.commit()
 
 
 _redis = get_sync_redis()
@@ -2171,14 +2194,6 @@ def run_data_migrations(self, from_version: int) -> dict:
                     summary = migrate_fn(session)
                     set_data_version(session, ver)
                     session.commit()
-                    results.append(f"v{ver}: {summary}")
-                    step += 1
-                    _update_data_migration_job(
-                        job_key, step=step, total_steps=total_steps,
-                        message=f"v{ver}: {summary} complete"
-                        + (f"; running v{pending[step][0]}..." if step < total_steps else ""),
-                    )
-                    logger.info("data_migrations: v%d complete - %s", ver, summary)
                 except SoftTimeLimitExceeded:
                     # The task hit its (generous) time limit mid-migration.
                     # Long per-target migration loops commit their work in
@@ -2227,6 +2242,20 @@ def run_data_migrations(self, from_version: int) -> dict:
                             actor="system",
                         )
                     return {"status": "error", "version": ver, "error": str(e)}
+
+                # v{ver} is committed and version-stamped at this point. The
+                # bookkeeping below sits outside the try/except (and the
+                # helpers swallow their own errors) so a failed observability
+                # write can never demote a succeeded migration to failed or
+                # stop the remaining pending migrations from running.
+                results.append(f"v{ver}: {summary}")
+                step += 1
+                _update_data_migration_job(
+                    job_key, step=step, total_steps=total_steps,
+                    message=f"v{ver}: {summary} complete"
+                    + (f"; running v{pending[step][0]}..." if step < total_steps else ""),
+                )
+                logger.info("data_migrations: v%d complete - %s", ver, summary)
 
         summary_msg = "Data upgrade complete: " + "; ".join(results)
         _update_data_migration_job(
