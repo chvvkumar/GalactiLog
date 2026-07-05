@@ -74,9 +74,19 @@ _imaging_night_fallback_warned = False
 
 
 def _invalidate_stats_cache():
-    """Delete the stats cache key from Redis so the next stats request is fresh."""
+    """Delete cached aggregates from Redis so the next request recomputes them.
+
+    Covers the /stats response, the fits-keys list, and the catalog-wide "this
+    rig overall" frame-quality baselines used by the session-detail endpoint --
+    all of which are derived from the images table and go stale when a scan,
+    rebuild, or ingest changes it.
+    """
     try:
-        _redis.delete("galactilog:stats:cache", "galactilog:fits_keys")
+        _redis.delete(
+            "galactilog:stats:cache",
+            "galactilog:fits_keys",
+            "galactilog:rig_baselines:cache",
+        )
     except Exception:
         logger.debug("_invalidate_stats_cache: Redis delete failed", exc_info=True)
 

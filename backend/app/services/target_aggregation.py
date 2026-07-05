@@ -2003,16 +2003,32 @@ async def get_session_detail(target_id: str, date: str, session: AsyncSession) -
     # grouped by telescope|camera|filter. This is the "This rig overall"
     # baseline. It is target-independent, which makes the per-frame
     # "This session / This rig overall" toggle meaningful even for
-    # single-session targets. Select only the columns the baseline needs.
-    metric_cols = (
-        Image.telescope, Image.camera, Image.filter_used,
-        Image.median_hfr, Image.fwhm, Image.eccentricity,
-        Image.detected_stars, Image.adu_median, Image.guiding_rms_arcsec,
+    # single-session targets.
+    #
+    # This scanned the entire images table on every session-card open, which
+    # dominated the endpoint cost on a large catalog. The result only changes
+    # when the catalog does, so it is cached in Redis and invalidated by the
+    # catalog-mutating Celery tasks (see worker.tasks._invalidate_stats_cache);
+    # the TTL is a backstop for any path that mutates metrics without hitting
+    # that invalidation.
+    from app.services.cache import (
+        cached_json, RIG_BASELINES_CACHE_KEY, RIG_BASELINES_CACHE_TTL,
     )
-    catalog_frames_q = select(*metric_cols).where(Image.image_type == "LIGHT")
-    catalog_frame_rows = (await session.execute(catalog_frames_q)).all()
-    catalog_frame_dicts = [_baseline_frame(*row) for row in catalog_frame_rows]
-    rig_baselines = frame_quality.group_baselines(catalog_frame_dicts)
+
+    async def _compute_rig_baselines():
+        metric_cols = (
+            Image.telescope, Image.camera, Image.filter_used,
+            Image.median_hfr, Image.fwhm, Image.eccentricity,
+            Image.detected_stars, Image.adu_median, Image.guiding_rms_arcsec,
+        )
+        catalog_frames_q = select(*metric_cols).where(Image.image_type == "LIGHT")
+        catalog_frame_rows = (await session.execute(catalog_frames_q)).all()
+        catalog_frame_dicts = [_baseline_frame(*row) for row in catalog_frame_rows]
+        return frame_quality.group_baselines(catalog_frame_dicts)
+
+    rig_baselines = await cached_json(
+        RIG_BASELINES_CACHE_KEY, RIG_BASELINES_CACHE_TTL, _compute_rig_baselines
+    )
 
     return SessionDetailResponse(
         target_name=target_name,
