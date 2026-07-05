@@ -72,6 +72,32 @@ SCAN_RUN_LOCK_TTL = 300  # 5 minutes
 # guard: each worker process warns at most once.
 _imaging_night_fallback_warned = False
 
+# Per-process cache of the GeneralSettings row. _do_ingest read this row (a new
+# Session + query) for EVERY ingested file; a 20k-file scan meant 20k redundant
+# sessions/queries for a value that changes rarely. Cache it in-process with a
+# short TTL (pattern: normalization._alias_cache). The TTL bounds staleness for
+# a setting change made mid-scan without needing an explicit invalidation hook.
+_general_settings_cache: "GeneralSettings | None" = None
+_general_settings_cache_ts: float = 0.0
+_GENERAL_SETTINGS_CACHE_TTL = 30.0
+
+
+def _get_cached_general_settings() -> GeneralSettings:
+    """Return the GeneralSettings row, cached per process with a short TTL."""
+    global _general_settings_cache, _general_settings_cache_ts
+    now = time.monotonic()
+    if (
+        _general_settings_cache is not None
+        and (now - _general_settings_cache_ts) < _GENERAL_SETTINGS_CACHE_TTL
+    ):
+        return _general_settings_cache
+    with Session(_sync_engine) as s:
+        row = s.get(UserSettings, SETTINGS_ROW_ID)
+        general = GeneralSettings(**(row.general if row and row.general else {}))
+    _general_settings_cache = general
+    _general_settings_cache_ts = now
+    return general
+
 
 def _invalidate_stats_cache():
     """Delete cached aggregates from Redis so the next request recomputes them.
@@ -172,6 +198,16 @@ def run_scan(self, include_calibration: bool = True, force_orphan_cleanup: bool 
         changed_files: list[Path] = []
         all_disk_paths: set[str] = set()
 
+        def _on_discovery_progress(count: int) -> None:
+            # Refresh the run lock while the (possibly long, NFS-bound) tree walk
+            # is in progress. The lock's 5-minute TTL otherwise expires under a
+            # slow walk, letting a second scan start concurrently.
+            set_discovered_sync(_redis, count)
+            try:
+                _redis.expire(SCAN_RUN_LOCK, SCAN_RUN_LOCK_TTL)
+            except Exception:
+                logger.debug("run_scan: failed to refresh scan run lock TTL", exc_info=True)
+
         for scan_root in filter_config.roots(fits_root):
             if is_cancel_requested_sync(_redis):
                 break
@@ -179,7 +215,7 @@ def run_scan(self, include_calibration: bool = True, force_orphan_cleanup: bool 
                 scan_root,
                 known_paths=known_paths,
                 known_file_stats=known_file_stats,
-                on_progress=lambda count: set_discovered_sync(_redis, count),
+                on_progress=_on_discovery_progress,
                 is_cancelled=lambda: is_cancel_requested_sync(_redis),
                 on_new_file=_queue_file,
                 on_changed_file=_queue_changed_file,
@@ -474,10 +510,9 @@ def _do_ingest(fits_path: str, include_calibration: bool = True) -> dict:
     raw_hdrs = meta.get("raw_headers", {})
     site_lon = extract_longitude(raw_hdrs)
 
-    # Load imaging night setting (cached per-process via module-level settings row)
-    with Session(_sync_engine) as settings_session:
-        settings_row = settings_session.get(UserSettings, SETTINGS_ROW_ID)
-        general = GeneralSettings(**(settings_row.general if settings_row and settings_row.general else {}))
+    # Load imaging night setting (cached per-process with a short TTL so a 20k
+    # file scan does not open 20k settings sessions).
+    general = _get_cached_general_settings()
 
     effective_lon = site_lon if site_lon is not None else general.observer_longitude
     if general.use_imaging_night and effective_lon is None:
@@ -1989,6 +2024,12 @@ def backfill_csv_metrics(self):
                 increment_completed_sync(redis_conn)
 
             except Exception:
+                # Log the directory and traceback so a CSV that silently fails
+                # to backfill can be diagnosed instead of vanishing.
+                logger.warning(
+                    "backfill_csv_metrics: failed to process CSV directory %s",
+                    csv_dir, exc_info=True,
+                )
                 increment_failed_sync(redis_conn)
                 conn.rollback()
 
@@ -2414,21 +2455,29 @@ def recompute_session_dates(self):
         use_night = general.use_imaging_night
         fallback_warned = False  # AUD-021: one warning per run, not per image
 
-        # Phase 1: Recompute all image session_dates in batches
+        # Phase 1: Recompute all image session_dates in batches.
+        # Keyset pagination (WHERE id > :last ORDER BY id) instead of OFFSET,
+        # which re-scans and discards all prior rows every page (O(N^2/batch)).
+        # Each batch is flushed with a single UPDATE ... FROM (VALUES ...)
+        # statement instead of one UPDATE round-trip per image (~90k on a large
+        # catalog).
         BATCH = 5000
-        offset = 0
+        last_id = None
         total = 0
         while True:
-            rows = session.execute(
+            q = (
                 select(Image.id, Image.capture_date, Image.raw_headers)
                 .where(Image.capture_date.isnot(None))
                 .order_by(Image.id)
-                .offset(offset)
                 .limit(BATCH)
-            ).all()
+            )
+            if last_id is not None:
+                q = q.where(Image.id > last_id)
+            rows = session.execute(q).all()
             if not rows:
                 break
 
+            batch_updates = []
             for img_id, capture_date, raw_headers in rows:
                 site_lon = extract_longitude(raw_headers)
                 effective_lon = site_lon if site_lon is not None else fallback_lon
@@ -2441,15 +2490,27 @@ def recompute_session_dates(self):
                     use_imaging_night=use_night,
                     longitude=effective_lon,
                 )
-                session.execute(
-                    sa_update(Image)
-                    .where(Image.id == img_id)
-                    .values(session_date=new_date)
-                )
+                batch_updates.append((img_id, new_date))
+
+            # Single batched UPDATE for the whole page.
+            value_rows = []
+            params: dict = {}
+            for i, (img_id, new_date) in enumerate(batch_updates):
+                value_rows.append(f"(:id{i}, :d{i})")
+                params[f"id{i}"] = str(img_id)
+                params[f"d{i}"] = new_date
+            session.execute(
+                text(
+                    "UPDATE images AS img SET session_date = data.new_date::date "
+                    "FROM (VALUES " + ",".join(value_rows) + ") AS data(id, new_date) "
+                    "WHERE img.id = data.id::uuid"
+                ),
+                params,
+            )
 
             session.commit()
             total += len(rows)
-            offset += BATCH
+            last_id = rows[-1][0]
             self.update_state(state="PROGRESS", meta={"images_updated": total})
 
         # Phase 2: Re-key SessionNote rows

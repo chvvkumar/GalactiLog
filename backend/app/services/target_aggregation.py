@@ -550,15 +550,30 @@ async def export_target(target_id, sessions: str | None, session: AsyncSession) 
     astrobin_filter_ids = general.get("astrobin_filter_ids", {})
     bortle = general.get("astrobin_bortle")
 
-    # Fetch LIGHT frames for this target
+    # Fetch LIGHT frames for this target. Project only the columns the export
+    # actually reads instead of loading full ORM rows (which pull the large
+    # raw_headers JSONB the export never touches). Pattern mirrors
+    # get_target_detail's _detail_cols projection.
+    _export_cols = (
+        Image.session_date,
+        Image.filter_used,
+        Image.exposure_time,
+        Image.telescope,
+        Image.camera,
+        Image.camera_gain,
+        Image.sensor_temp,
+        Image.fwhm,
+        Image.sky_quality,
+        Image.ambient_temp,
+    )
     q = (
-        select(Image)
+        select(*_export_cols)
         .where(Image.resolved_target_id == target_id)
         .where(Image.image_type == "LIGHT")
         .where(Image.capture_date.is_not(None))
         .order_by(Image.capture_date)
     )
-    images = (await session.execute(q)).scalars().all()
+    images = (await session.execute(q)).all()
 
     # Filter by selected sessions
     selected_dates = None
