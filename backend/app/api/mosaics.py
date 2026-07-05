@@ -24,7 +24,8 @@ from app.schemas.mosaic import (
     SuggestionPreviewPanel,
     PanelThumbnail,
     PanelSessionsResponse, PanelSessionInfo, SessionStatusUpdate,
-    StatusResponse, OkResponse, DetectionResponse, PanelCreateResponse,
+    StatusResponse, OkResponse, PanelCreateResponse,
+    DetectionStartedResponse, DetectionStatusResponse,
 )
 from app.api.deps import get_current_user, require_admin
 from app.services.mosaic_composite import build_mosaic_composite, find_default_filter
@@ -67,19 +68,45 @@ def _ilike_pattern_matches(pattern: str, value: str) -> bool:
     return re.match(regex, value, re.IGNORECASE | re.DOTALL) is not None
 
 
-@router.post("/detect", response_model=DetectionResponse)
+@router.post("/detect", response_model=DetectionStartedResponse, status_code=202)
 async def trigger_detection(
-    session: AsyncSession = Depends(get_session),
     user: User = Depends(require_admin),
 ):
-    from app.services.mosaic_detection import detect_mosaic_panels
+    """Dispatch mosaic panel detection to Celery and return immediately.
 
-    settings = await session.get(UserSettings, SETTINGS_ROW_ID)
-    general = settings.general if settings else {}
-    gap_days = general.get("mosaic_campaign_gap_days", 0)
+    Detection loads the LIGHT-frame headers of the whole catalog and does
+    CPU-bound grouping, so running it inline blocked the event loop and could
+    race the scan-triggered detection task (both delete and re-insert pending
+    suggestions). It now runs in the worker under MOSAIC_DETECT_LOCK, which
+    serializes it against the scan-triggered run. The caller polls
+    ``GET /mosaics/detect/status`` with the returned task id.
+    """
+    from app.worker.tasks import detect_mosaic_panels_task
 
-    count = await detect_mosaic_panels(session, gap_days=gap_days)
-    return {"status": "ok", "new_suggestions": count}
+    task = detect_mosaic_panels_task.delay()
+    return {"status": "started", "task_id": task.id}
+
+
+@router.get("/detect/status", response_model=DetectionStatusResponse)
+async def detection_status(
+    task_id: str,
+    user: User = Depends(get_current_user),
+):
+    """Report the state of a dispatched detection task.
+
+    Returns the Celery task state; once SUCCESS, ``new_suggestions`` carries the
+    count the task found so the UI can refresh its suggestion list.
+    """
+    from app.worker.celery_app import celery_app
+
+    result = celery_app.AsyncResult(task_id)
+    state = result.state
+    new_suggestions: int | None = None
+    if state == "SUCCESS":
+        payload = result.result
+        if isinstance(payload, dict):
+            new_suggestions = payload.get("new_suggestions")
+    return {"state": state, "new_suggestions": new_suggestions}
 
 
 # NOTE: This endpoint MUST be defined BEFORE the /{mosaic_id} routes

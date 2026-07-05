@@ -761,19 +761,30 @@ async def _gather_target_records(session: AsyncSession) -> list[dict]:
     if not target_ids:
         return []
 
-    # Pull LIGHT-frame headers per target. Project only the JSONB header so we
-    # don't load full ORM rows. Headers carry OBJECT / RA / DEC / FOCALLEN etc.
+    # Pull only the header keys detection actually reads, extracted as scalar
+    # columns, instead of shipping the full raw_headers JSONB of every LIGHT
+    # frame (hundreds of MB on a large catalog). Keys used downstream:
+    # OBJECT (panel token), RA/DEC/OBJCTRA/OBJCTDEC (center), FOCALLEN/XPIXSZ/
+    # NAXIS1/NAXIS2 (FOV).
+    _HEADER_KEYS = (
+        "OBJECT", "RA", "DEC", "OBJCTRA", "OBJCTDEC",
+        "FOCALLEN", "XPIXSZ", "NAXIS1", "NAXIS2",
+    )
     rows_q = (
-        select(Image.resolved_target_id, Image.raw_headers)
+        select(
+            Image.resolved_target_id,
+            *(Image.raw_headers[k].astext.label(k) for k in _HEADER_KEYS),
+        )
         .where(
             Image.resolved_target_id.in_(target_ids),
             Image.image_type == "LIGHT",
         )
     )
     by_target_headers: dict = defaultdict(list)
-    for tid, headers in (await session.execute(rows_q)).all():
+    for row in (await session.execute(rows_q)).all():
+        headers = {k: getattr(row, k) for k in _HEADER_KEYS if getattr(row, k) is not None}
         if headers:
-            by_target_headers[tid].append(headers)
+            by_target_headers[row.resolved_target_id].append(headers)
 
     def _first_fov(frame_list: list[dict]) -> float | None:
         for h in frame_list:

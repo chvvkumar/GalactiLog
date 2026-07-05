@@ -1,9 +1,31 @@
 import pytest
+from types import SimpleNamespace
 from app.services.mosaic_detection import cluster_sessions_by_gap
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 from app.models.mosaic_suggestion import MosaicSuggestion
+
+
+# _gather_target_records now selects the needed header keys as scalar columns
+# instead of the whole raw_headers JSONB, so its rows are (resolved_target_id,
+# OBJECT, RA, DEC, OBJCTRA, OBJCTDEC, FOCALLEN, XPIXSZ, NAXIS1, NAXIS2) tuples
+# exposed as labeled attributes. This helper turns the legacy
+# (target_id, header_dict) test fixtures into that row shape.
+_GATHER_HEADER_KEYS = (
+    "OBJECT", "RA", "DEC", "OBJCTRA", "OBJCTDEC",
+    "FOCALLEN", "XPIXSZ", "NAXIS1", "NAXIS2",
+)
+
+
+def _hdr_rows(pairs):
+    return [
+        SimpleNamespace(
+            resolved_target_id=tid,
+            **{k: hdr.get(k) for k in _GATHER_HEADER_KEYS},
+        )
+        for tid, hdr in pairs
+    ]
 
 
 def test_single_cluster_when_gap_small():
@@ -78,12 +100,12 @@ async def test_detect_creates_separate_suggestions_per_campaign():
     # _gather_target_records: (resolved_target_id, raw_headers) rows.
     # Two distinct centers ~1.5 deg apart so positions are distinct.
     headers_result = MagicMock()
-    headers_result.all.return_value = [
+    headers_result.all.return_value = _hdr_rows([
         (t1, {"OBJECT": "Heart Nebula Panel 1", "RA": 38.0, "DEC": 61.0,
               "FOCALLEN": 448, "XPIXSZ": 3.76, "NAXIS1": 4144}),
         (t2, {"OBJECT": "Heart Nebula Panel 2", "RA": 39.5, "DEC": 61.0,
               "FOCALLEN": 448, "XPIXSZ": 3.76, "NAXIS1": 4144}),
-    ]
+    ])
 
     rejected_result = MagicMock()
     rejected_result.all.return_value = []  # no dismissed suggestions
@@ -161,7 +183,7 @@ async def test_detect_single_target_two_panel_objects():
     # Same target id on every row; two distinct OBJECTs ~0.8 deg apart so each
     # OBJECT's robust center is distinct (NOT the target overall median).
     headers_result = MagicMock()
-    headers_result.all.return_value = [
+    headers_result.all.return_value = _hdr_rows([
         (tid, {"OBJECT": "Veil Nebula Panel 1", "RA": 311.0, "DEC": 31.0,
                "FOCALLEN": 448, "XPIXSZ": 3.76, "NAXIS1": 4144}),
         (tid, {"OBJECT": "Veil Nebula Panel 1", "RA": 311.01, "DEC": 31.0,
@@ -170,7 +192,7 @@ async def test_detect_single_target_two_panel_objects():
                "FOCALLEN": 448, "XPIXSZ": 3.76, "NAXIS1": 4144}),
         (tid, {"OBJECT": "Veil Nebula Panel 2", "RA": 311.79, "DEC": 31.0,
                "FOCALLEN": 448, "XPIXSZ": 3.76, "NAXIS1": 4144}),
-    ]
+    ])
 
     rejected_result = MagicMock()
     rejected_result.all.return_value = []
@@ -238,12 +260,12 @@ async def test_detect_clears_all_pending_including_legacy_null_base():
     target_ids_result = MagicMock()
     target_ids_result.all.return_value = [(tid,)]
     headers_result = MagicMock()
-    headers_result.all.return_value = [
+    headers_result.all.return_value = _hdr_rows([
         (tid, {"OBJECT": "Heart Nebula Panel 1", "RA": 38.0, "DEC": 61.0,
                "FOCALLEN": 448, "XPIXSZ": 3.76, "NAXIS1": 4144}),
         (tid, {"OBJECT": "Heart Nebula Panel 2", "RA": 39.5, "DEC": 61.0,
                "FOCALLEN": 448, "XPIXSZ": 3.76, "NAXIS1": 4144}),
-    ]
+    ])
     existing_result = MagicMock()
     existing_result.all.return_value = []
     rejected_result = MagicMock()
@@ -325,12 +347,12 @@ async def test_detect_dedupes_duplicate_suggested_names():
     target_ids_result = MagicMock()
     target_ids_result.all.return_value = [(t1,), (t2,)]
     headers_result = MagicMock()
-    headers_result.all.return_value = [
+    headers_result.all.return_value = _hdr_rows([
         (t1, {"OBJECT": "Foo Panel 1", "RA": 10.0, "DEC": 20.0,
               "FOCALLEN": 448, "XPIXSZ": 3.76, "NAXIS1": 4144}),
         (t2, {"OBJECT": "Foo Panel 2", "RA": 11.5, "DEC": 20.0,
               "FOCALLEN": 448, "XPIXSZ": 3.76, "NAXIS1": 4144}),
-    ]
+    ])
     rejected_result = MagicMock()
     rejected_result.all.return_value = []
     delete_result = MagicMock()
@@ -405,7 +427,7 @@ async def test_detect_skips_dismissed_signature_but_creates_others():
     target_ids_result = MagicMock()
     target_ids_result.all.return_value = [(h1,), (h2,), (w1,), (w2,)]
     headers_result = MagicMock()
-    headers_result.all.return_value = [
+    headers_result.all.return_value = _hdr_rows([
         (h1, {"OBJECT": "Heart Nebula Panel 1", "RA": 38.0, "DEC": 61.0,
               "FOCALLEN": 448, "XPIXSZ": 3.76, "NAXIS1": 4144}),
         (h2, {"OBJECT": "Heart Nebula Panel 2", "RA": 39.5, "DEC": 61.0,
@@ -414,7 +436,7 @@ async def test_detect_skips_dismissed_signature_but_creates_others():
               "FOCALLEN": 448, "XPIXSZ": 3.76, "NAXIS1": 4144}),
         (w2, {"OBJECT": "Wizard Nebula Panel 2", "RA": 351.5, "DEC": 60.0,
               "FOCALLEN": 448, "XPIXSZ": 3.76, "NAXIS1": 4144}),
-    ]
+    ])
     rejected_result = MagicMock()
     # Dismissal covered exactly the dates the regenerated Heart campaign will
     # have (2024-01-01, 2024-01-02), so it stays suppressed (AUD-033: a
@@ -480,12 +502,12 @@ async def test_detect_resurfaces_dismissed_signature_with_genuinely_new_dates():
     target_ids_result = MagicMock()
     target_ids_result.all.return_value = [(h1,), (h2,)]
     headers_result = MagicMock()
-    headers_result.all.return_value = [
+    headers_result.all.return_value = _hdr_rows([
         (h1, {"OBJECT": "Heart Nebula Panel 1", "RA": 38.0, "DEC": 61.0,
               "FOCALLEN": 448, "XPIXSZ": 3.76, "NAXIS1": 4144}),
         (h2, {"OBJECT": "Heart Nebula Panel 2", "RA": 39.5, "DEC": 61.0,
               "FOCALLEN": 448, "XPIXSZ": 3.76, "NAXIS1": 4144}),
-    ]
+    ])
     # Dismissed back in 2024, covering only the 2024 dates.
     rejected_result = MagicMock()
     rejected_result.all.return_value = [
@@ -544,14 +566,14 @@ async def test_detect_resurfaces_when_panel_set_changed():
     target_ids_result = MagicMock()
     target_ids_result.all.return_value = [(h1,), (h2,), (h3,)]
     headers_result = MagicMock()
-    headers_result.all.return_value = [
+    headers_result.all.return_value = _hdr_rows([
         (h1, {"OBJECT": "Heart Nebula Panel 1", "RA": 38.0, "DEC": 61.0,
               "FOCALLEN": 448, "XPIXSZ": 3.76, "NAXIS1": 4144}),
         (h2, {"OBJECT": "Heart Nebula Panel 2", "RA": 39.5, "DEC": 61.0,
               "FOCALLEN": 448, "XPIXSZ": 3.76, "NAXIS1": 4144}),
         (h3, {"OBJECT": "Heart Nebula Panel 3", "RA": 41.0, "DEC": 61.0,
               "FOCALLEN": 448, "XPIXSZ": 3.76, "NAXIS1": 4144}),
-    ]
+    ])
     rejected_result = MagicMock()
     rejected_result.all.return_value = [
         (old_sig, {"Panel 1": ["2024-01-01"], "Panel 2": ["2024-01-02"]}),
@@ -605,12 +627,12 @@ async def test_detect_panel_1_vs_panel_12_no_cross_contamination():
     target_ids_result = MagicMock()
     target_ids_result.all.return_value = [(p1,), (p12,)]
     headers_result = MagicMock()
-    headers_result.all.return_value = [
+    headers_result.all.return_value = _hdr_rows([
         (p1, {"OBJECT": "Veil Nebula Panel 1", "RA": 311.0, "DEC": 31.0,
               "FOCALLEN": 448, "XPIXSZ": 3.76, "NAXIS1": 4144}),
         (p12, {"OBJECT": "Veil Nebula Panel 12", "RA": 312.5, "DEC": 31.0,
                "FOCALLEN": 448, "XPIXSZ": 3.76, "NAXIS1": 4144}),
-    ]
+    ])
     rejected_result = MagicMock()
     rejected_result.all.return_value = []
     delete_result = MagicMock()

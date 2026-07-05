@@ -151,6 +151,24 @@ class DetectionResponse(BaseModel):
     new_suggestions: int
 
 
+class DetectionStartedResponse(BaseModel):
+    """Returned by POST /mosaics/detect (202). Detection now runs in Celery;
+    the caller polls GET /mosaics/detect/status?task_id=... until it finishes."""
+    status: str  # "started"
+    task_id: str
+
+
+class DetectionStatusResponse(BaseModel):
+    """Poll result for a dispatched detection task.
+
+    state mirrors the Celery task state (PENDING while queued, STARTED while
+    running, SUCCESS/FAILURE when finished). new_suggestions is populated only
+    once the task has succeeded.
+    """
+    state: str
+    new_suggestions: int | None = None
+
+
 class PanelCreateResponse(BaseModel):
     status: str
     panel_id: str
