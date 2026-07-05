@@ -112,7 +112,7 @@ function groupHistogram(fam: MetricFamily | undefined): HistoSet[] {
 
 // Compute quantile using Prometheus histogram_quantile with linear interpolation.
 // When the quantile lands in the +Inf bucket, return the upper bound of the previous finite bucket.
-export function histogramQuantile(q: number, buckets: Array<{ le: number; count: number }>): number {
+function histogramQuantile(q: number, buckets: Array<{ le: number; count: number }>): number {
   if (!buckets.length) return 0;
   const sorted = buckets.slice().sort((a, b) => a.le - b.le);
   const total = sorted[sorted.length - 1]?.count ?? 0;

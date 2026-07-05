@@ -3,7 +3,7 @@ import type { ActiveJob, ScanStatus, RebuildStatus } from "../types";
 
 const [celeryJobs, setCeleryJobs] = createSignal<Map<string, ActiveJob>>(new Map());
 
-export function scanStatusToJob(
+function scanStatusToJob(
   s: ScanStatus,
   onStop: () => Promise<void>
 ): ActiveJob | null {
@@ -35,7 +35,7 @@ export function scanStatusToJob(
   };
 }
 
-export function rebuildStatusToJob(r: RebuildStatus): ActiveJob | null {
+function rebuildStatusToJob(r: RebuildStatus): ActiveJob | null {
   if (r.state !== "running") return null;
 
   const startedAt = r.started_at != null ? r.started_at * 1000 : Date.now();

@@ -1,8 +1,8 @@
 import { createSignal } from "solid-js";
 
-export const MIN_WIDTH = 220;
-export const MAX_WIDTH = 480;
-export const DEFAULT_WIDTH = 288;
+const MIN_WIDTH = 220;
+const MAX_WIDTH = 480;
+const DEFAULT_WIDTH = 288;
 export const RAIL_WIDTH = 48;
 
 const WIDTH_KEY = "galactilog.sidebar.width";
