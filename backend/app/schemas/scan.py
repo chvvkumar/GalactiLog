@@ -68,6 +68,29 @@ class ScanResetResponse(BaseModel):
     total: int
 
 
+class ProgressEnvelope(BaseModel):
+    """Structured progress shape from docs/retrofit-roadmap.md Phase 3:
+    {task, step, total_steps, percent, message}.
+
+    ``percent`` is always derived from ``step``/``total_steps`` via
+    ``for_progress`` -- it is never stored as its own Redis field or DB
+    column (see app.services.progress_envelope and the DataJob model
+    docstring, which independently arrived at the same "derived, not
+    stored" intent for Phase 2's data-migration jobs). Scale is 0-100,
+    float, rounded to one decimal place.
+    """
+    task: str
+    step: int
+    total_steps: int
+    percent: float
+    message: str
+
+    @classmethod
+    def for_progress(cls, task: str, step: int, total_steps: int, message: str) -> "ProgressEnvelope":
+        percent = round(100 * step / total_steps, 1) if total_steps > 0 else 0.0
+        return cls(task=task, step=step, total_steps=total_steps, percent=percent, message=message)
+
+
 class RebuildStatusResponse(BaseModel):
     state: str
     mode: str
