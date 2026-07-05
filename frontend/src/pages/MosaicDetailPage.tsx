@@ -12,6 +12,7 @@ import KonvaMosaicArranger from "../components/mosaics/KonvaMosaicArranger";
 import MosaicCompositeModal from "../components/mosaics/MosaicCompositeModal";
 import ConfirmDialog from "../components/ConfirmDialog";
 import { getErrorMessage } from "../utils/errors";
+import { useNotesAutosave } from "../lib/useNotesAutosave";
 
 const MosaicDetailPage: Component = () => {
   const ctx = useSettingsContext();
@@ -115,8 +116,19 @@ const MosaicDetailPage: Component = () => {
 
   type SortKey = "panel" | "target" | "integration" | "frames" | "session";
   type SortDir = "asc" | "desc";
-  const [sortKey, setSortKey] = createSignal<SortKey>("panel");
-  const [sortDir, setSortDir] = createSignal<SortDir>("asc");
+  // Panel sort persisted to localStorage (Dashboard pattern).
+  const PANEL_SORT_LS = "mosaic_panel_sort";
+  let initialPanelSort: { key: SortKey; dir: SortDir } = { key: "panel", dir: "asc" };
+  try {
+    const stored = localStorage.getItem(PANEL_SORT_LS);
+    if (stored) initialPanelSort = JSON.parse(stored);
+  } catch { /* ignore corrupt localStorage */ }
+  const [sortKey, setSortKey] = createSignal<SortKey>(initialPanelSort.key);
+  const [sortDir, setSortDir] = createSignal<SortDir>(initialPanelSort.dir);
+  const persistPanelSort = (key: SortKey, dir: SortDir) => {
+    try { localStorage.setItem(PANEL_SORT_LS, JSON.stringify({ key, dir })); } catch { /* ignore */ }
+  };
+  const [includingAll, setIncludingAll] = createSignal(false);
   const [selectedFilter, setSelectedFilter] = createSignal<string | null>(null);
   const [filterLoading, setFilterLoading] = createSignal(false);
   const [thumbnailOverrides, setThumbnailOverrides] = createSignal<Record<string, string | null> | null>(null);
@@ -131,10 +143,13 @@ const MosaicDetailPage: Component = () => {
 
   const toggleSort = (key: SortKey) => {
     if (sortKey() === key) {
-      setSortDir(d => d === "asc" ? "desc" : "asc");
+      const dir = sortDir() === "asc" ? "desc" : "asc";
+      setSortDir(dir);
+      persistPanelSort(key, dir);
     } else {
       setSortKey(key);
       setSortDir("asc");
+      persistPanelSort(key, "asc");
     }
   };
 
@@ -165,23 +180,11 @@ const MosaicDetailPage: Component = () => {
   const mosaicCustomColumns = () =>
     (ctx.customColumns() ?? []).filter(c => c.applies_to === "mosaic");
 
-  const [notes, setNotes] = createSignal("");
-  const [notesSaving, setNotesSaving] = createSignal(false);
-  let notesTimer: ReturnType<typeof setTimeout> | undefined;
-
-  const saveNotes = (text: string) => {
-    clearTimeout(notesTimer);
-    notesTimer = setTimeout(async () => {
-      setNotesSaving(true);
-      try {
-        await api.updateMosaic(params.mosaicId, { notes: text || undefined });
-      } catch {
-        showToast("Failed to save notes", "error", 5000);
-      } finally {
-        setNotesSaving(false);
-      }
-    }, 1000);
-  };
+  const { notes, onInput: onNotesInput, saving: notesSaving } = useNotesAutosave({
+    serverValue: () => mosaic()?.notes,
+    save: async (text) => { await api.updateMosaic(params.mosaicId, { notes: text || undefined }); },
+    errorLabel: "Failed to save notes",
+  });
 
   // State for the delete-panel confirmation dialog.
   const [deletePanelConfirm, setDeletePanelConfirm] = createSignal<{
@@ -300,13 +303,13 @@ const MosaicDetailPage: Component = () => {
                             columnType={col.column_type}
                             value={data().custom_values?.[col.slug]}
                             dropdownOptions={col.dropdown_options}
-                            onSave={(val) => {
+                            onSave={(val) =>
                               api.setCustomValue({
                                 column_id: col.id,
                                 mosaic_id: params.mosaicId,
                                 value: val,
-                              });
-                            }}
+                              })
+                            }
                           />
                         </div>
                       </Show>
@@ -393,12 +396,8 @@ const MosaicDetailPage: Component = () => {
               <textarea
                 class="block w-full bg-theme-surface border border-theme-border rounded px-3 py-2 text-sm text-theme-text-primary placeholder-theme-text-secondary resize-y min-h-[50px]"
                 placeholder="Add notes about this mosaic project..."
-                value={notes() || data().notes || ""}
-                onInput={(e) => {
-                  const val = e.currentTarget.value;
-                  setNotes(val);
-                  saveNotes(val);
-                }}
+                value={notes()}
+                onInput={(e) => onNotesInput(e.currentTarget.value)}
               />
             </div>
 
@@ -412,24 +411,34 @@ const MosaicDetailPage: Component = () => {
                   </p>
                 </div>
                 <button
+                  disabled={includingAll()}
                   onClick={async () => {
                     const data = mosaic();
-                    if (!data) return;
-                    for (const panel of data.panels) {
-                      const sessions = await api.getPanelSessions(data.id, panel.panel_id);
-                      const available = sessions.sessions
-                        .filter((s) => s.status === "available")
-                        .map((s) => s.session_date);
-                      if (available.length > 0) {
-                        await api.updatePanelSessions(data.id, panel.panel_id, available, []);
-                      }
+                    if (!data || includingAll()) return;
+                    setIncludingAll(true);
+                    try {
+                      await Promise.all(
+                        data.panels.map(async (panel) => {
+                          const sessions = await api.getPanelSessions(data.id, panel.panel_id);
+                          const available = sessions.sessions
+                            .filter((s) => s.status === "available")
+                            .map((s) => s.session_date);
+                          if (available.length > 0) {
+                            await api.updatePanelSessions(data.id, panel.panel_id, available, []);
+                          }
+                        }),
+                      );
+                      refetch();
+                      showToast("All sessions included");
+                    } catch (e: unknown) {
+                      showToast(getErrorMessage(e, "Failed to include all sessions"), "error", 5000);
+                    } finally {
+                      setIncludingAll(false);
                     }
-                    refetch();
-                    showToast("All sessions included");
                   }}
-                  class="px-4 py-2 text-sm bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded-[var(--radius-sm)] hover:bg-amber-500/30 transition-colors whitespace-nowrap"
+                  class="px-4 py-2 text-sm bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded-[var(--radius-sm)] hover:bg-amber-500/30 transition-colors whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  Include All
+                  {includingAll() ? "Including..." : "Include All"}
                 </button>
               </div>
             </Show>
@@ -497,28 +506,39 @@ const MosaicDetailPage: Component = () => {
               </div>
               <For each={mosaic()?.panels ?? []}>
                 {(panel) => {
-                  const [panelSessions, { refetch: refetchSessions }] = createResource(
-                    () => mosaic() ? { mId: mosaic()!.id, pId: panel.panel_id } : null,
-                    (params) => params ? api.getPanelSessions(params.mId, params.pId) : null,
-                  );
+                  // Sessions are fetched lazily and only for the expanded panel.
+                  // Keying on stable primitives (id + panel id + expanded) means a
+                  // mosaic refetch no longer restarts a fetch for every panel.
                   const [expanded, setExpanded] = createSignal(false);
+                  const [panelSessions, { refetch: refetchSessions }] = createResource(
+                    () => expanded() ? { mId: params.mosaicId, pId: panel.panel_id } : null,
+                    (p) => api.getPanelSessions(p.mId, p.pId),
+                  );
                   const included = () => panelSessions()?.sessions.filter((s) => s.status === "included") ?? [];
                   const available = () => panelSessions()?.sessions.filter((s) => s.status === "available") ?? [];
 
                   const handleInclude = async (dates: string[]) => {
                     const data = mosaic();
                     if (!data) return;
-                    await api.updatePanelSessions(data.id, panel.panel_id, dates, []);
-                    refetchSessions();
-                    refetch();
+                    try {
+                      await api.updatePanelSessions(data.id, panel.panel_id, dates, []);
+                      refetchSessions();
+                      refetch();
+                    } catch (e: unknown) {
+                      showToast(getErrorMessage(e, "Failed to include sessions"), "error", 5000);
+                    }
                   };
 
                   const handleExclude = async (dates: string[]) => {
                     const data = mosaic();
                     if (!data) return;
-                    await api.updatePanelSessions(data.id, panel.panel_id, [], dates);
-                    refetchSessions();
-                    refetch();
+                    try {
+                      await api.updatePanelSessions(data.id, panel.panel_id, [], dates);
+                      refetchSessions();
+                      refetch();
+                    } catch (e: unknown) {
+                      showToast(getErrorMessage(e, "Failed to exclude sessions"), "error", 5000);
+                    }
                   };
 
                   const suggestNextLabel = (label: string): string => {

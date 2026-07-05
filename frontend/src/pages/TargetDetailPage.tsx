@@ -20,6 +20,7 @@ import { OBJECT_TYPE_OPTIONS } from "../constants/objectTypes";
 
 import { formatIntegration } from "../utils/format";
 import { getErrorMessage } from "../utils/errors";
+import { useNotesAutosave } from "../lib/useNotesAutosave";
 
 function formatCoord(val: number | null, label: string): string {
   if (val === null) return "";
@@ -226,9 +227,11 @@ const TargetDetailPage: Component = () => {
 
   const [skyViewExpanded, setSkyViewExpanded] = createSignal(false);
   const [notesExpanded, setNotesExpanded] = createSignal(false);
-  const [targetNotes, setTargetNotes] = createSignal<string>("");
-  const [notesSaving, setNotesSaving] = createSignal(false);
-  let notesTimer: ReturnType<typeof setTimeout> | undefined;
+  const { notes: targetNotes, onInput: onNotesInput, saving: notesSaving } = useNotesAutosave({
+    serverValue: () => targetDetail()?.notes,
+    save: async (text) => { await api.updateTargetNotes(params.targetId, text || null); },
+    errorLabel: "Failed to save notes",
+  });
 
   // Rename/re-resolve signals
   const [editing, setEditing] = createSignal(false);
@@ -305,26 +308,6 @@ const TargetDetailPage: Component = () => {
     } finally {
       setUndoingMerge(null);
     }
-  };
-
-  // Initialize notes when data loads
-  createEffect(() => {
-    const detail = targetDetail();
-    if (detail?.notes) setTargetNotes(detail.notes);
-  });
-
-  const saveTargetNotes = (text: string) => {
-    clearTimeout(notesTimer);
-    notesTimer = setTimeout(async () => {
-      setNotesSaving(true);
-      try {
-        await api.updateTargetNotes(params.targetId, text || null);
-      } catch (e: unknown) {
-        showToast(getErrorMessage(e, "Failed to save notes"), "error");
-      } finally {
-        setNotesSaving(false);
-      }
-    }, 1000);
   };
 
   createEffect(
@@ -1032,11 +1015,7 @@ const TargetDetailPage: Component = () => {
                   class="w-full bg-theme-elevated border border-theme-border rounded px-3 py-2 text-sm text-theme-text-primary placeholder-theme-text-secondary resize-y min-h-[60px] mt-2"
                   placeholder="Add notes about this target..."
                   value={targetNotes()}
-                  onInput={(e) => {
-                    const val = e.currentTarget.value;
-                    setTargetNotes(val);
-                    saveTargetNotes(val);
-                  }}
+                  onInput={(e) => onNotesInput(e.currentTarget.value)}
                 />
               </Show>
             </div>
