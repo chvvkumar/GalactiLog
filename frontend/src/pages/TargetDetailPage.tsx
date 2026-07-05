@@ -225,6 +225,29 @@ const TargetDetailPage: Component = () => {
   const [undoingMerge, setUndoingMerge] = createSignal<string | null>(null);
 
   const [skyViewExpanded, setSkyViewExpanded] = createSignal(false);
+
+  // The DSS reference thumbnail is an auth-gated binary, so it is loaded as a
+  // blob via fetchWithRefresh (matching getMosaicCompositeBlob) rather than a
+  // raw <img src>, which would have no 401-refresh path.
+  const [referenceThumbnailUrl] = createResource(
+    () => (skyViewExpanded() && targetDetail()?.reference_thumbnail_path ? params.targetId : null),
+    async (id: string) => {
+      const blob = await api.getReferenceThumbnailBlob(id);
+      return URL.createObjectURL(blob);
+    },
+  );
+  let lastReferenceThumbnailUrl: string | undefined;
+  createEffect(() => {
+    const url = referenceThumbnailUrl();
+    if (lastReferenceThumbnailUrl && lastReferenceThumbnailUrl !== url) {
+      URL.revokeObjectURL(lastReferenceThumbnailUrl);
+    }
+    lastReferenceThumbnailUrl = url;
+  });
+  onCleanup(() => {
+    if (lastReferenceThumbnailUrl) URL.revokeObjectURL(lastReferenceThumbnailUrl);
+  });
+
   const [notesExpanded, setNotesExpanded] = createSignal(false);
   const [targetNotes, setTargetNotes] = createSignal<string>("");
   const [notesSaving, setNotesSaving] = createSignal(false);
@@ -993,12 +1016,13 @@ const TargetDetailPage: Component = () => {
                     <Show when={detail().reference_thumbnail_path}>
                       <div class="w-[40%] min-w-0">
                         <div class="text-xs font-medium text-theme-text-tertiary mb-1">DSS Reference</div>
-                        <img
-                          src={`/api/targets/${detail().target_id}/reference-thumbnail`}
-                          alt="DSS reference"
-                          class="rounded-[var(--radius-sm)] border border-theme-border w-full h-auto"
-                          loading="lazy"
-                        />
+                        <Show when={referenceThumbnailUrl()}>
+                          <img
+                            src={referenceThumbnailUrl()}
+                            alt="DSS reference"
+                            class="rounded-[var(--radius-sm)] border border-theme-border w-full h-auto"
+                          />
+                        </Show>
                       </div>
                     </Show>
                   </div>

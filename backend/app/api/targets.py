@@ -259,21 +259,10 @@ async def get_session_detail(
 
 
 # --- Notes endpoints ---
-
-@router.put("/{target_id}/notes", response_model=StatusResponse)
-async def update_target_notes(
-    target_id: uuid.UUID,
-    body: NotesUpdate,
-    session: AsyncSession = Depends(get_session),
-    user: User = Depends(require_admin),
-):
-    target = await session.get(Target, target_id)
-    if not target:
-        raise HTTPException(404, "Target not found")
-    target.notes = body.notes if body.notes else None
-    await session.commit()
-    return {"status": "ok"}
-
+# update_session_notes is registered before update_target_notes: the target
+# notes route uses a greedy `{target_id:path}` (to admit `obj:` pseudo-target
+# ids), which would otherwise also match `/{id}/sessions/{date}/notes` PUT
+# requests since that path also ends in "/notes".
 
 @router.put("/{target_id}/sessions/{date}/notes", response_model=StatusResponse)
 async def update_session_notes(
@@ -327,4 +316,33 @@ async def update_session_notes(
             session.add(note)
         await session.commit()
 
+    return {"status": "ok"}
+
+
+@router.put("/{target_id:path}/notes", response_model=StatusResponse)
+async def update_target_notes(
+    target_id: str,
+    body: NotesUpdate,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(require_admin),
+):
+    # Resolve target_id (may be UUID or obj:name)
+    resolved_id = None
+    try:
+        resolved_id = uuid.UUID(target_id)
+    except ValueError:
+        if target_id.startswith("obj:"):
+            name = target_id[4:]
+            tq = select(Target.id).where(Target.primary_name == name)
+            row = (await session.execute(tq)).scalar_one_or_none()
+            if row:
+                resolved_id = row
+    if not resolved_id:
+        raise HTTPException(404, "Target not found")
+
+    target = await session.get(Target, resolved_id)
+    if not target:
+        raise HTTPException(404, "Target not found")
+    target.notes = body.notes if body.notes else None
+    await session.commit()
     return {"status": "ok"}

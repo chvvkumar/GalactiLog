@@ -68,6 +68,67 @@ async def test_update_target_notes_admin_allowed(admin_user):
 
 
 @pytest.mark.asyncio
+async def test_update_target_notes_obj_pseudo_target_admin_allowed(admin_user):
+    """AUD-010: notes save for an `obj:<name>` pseudo-target id resolves the
+    name to a real Target row and persists, instead of 404ing/422ing."""
+    from app.models import Target
+
+    resolved_id = uuid.uuid4()
+    target = MagicMock(spec=Target)
+    target.id = resolved_id
+    target.notes = None
+
+    resolve_result = MagicMock()
+    resolve_result.scalar_one_or_none.return_value = resolved_id
+
+    mock_session = AsyncMock()
+    mock_session.execute = AsyncMock(return_value=resolve_result)
+    mock_session.get = AsyncMock(return_value=target)
+    mock_session.commit = AsyncMock()
+
+    _override_session(mock_session)
+    _override_user(admin_user)
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            resp = await client.put(
+                "/api/targets/obj:M31/notes", json={"notes": "faint outer arms"}
+            )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["status"] == "ok"
+        assert target.notes == "faint outer arms"
+        mock_session.get.assert_called_once_with(Target, resolved_id)
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_update_target_notes_unresolvable_obj_returns_404(admin_user):
+    """AUD-010: an `obj:` id with no matching Target.primary_name 404s
+    (rather than the pre-fix 422 from UUID coercion)."""
+    resolve_result = MagicMock()
+    resolve_result.scalar_one_or_none.return_value = None
+
+    mock_session = AsyncMock()
+    mock_session.execute = AsyncMock(return_value=resolve_result)
+    mock_session.commit = AsyncMock()
+
+    _override_session(mock_session)
+    _override_user(admin_user)
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            resp = await client.put(
+                "/api/targets/obj:__does_not_exist__/notes", json={"notes": "x"}
+            )
+        assert resp.status_code == 404
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
 async def test_update_session_notes_viewer_forbidden(viewer_user):
     _override_user(viewer_user)
     try:
