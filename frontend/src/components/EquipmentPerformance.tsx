@@ -2,7 +2,7 @@ import { Component, For, Show, createMemo, createSignal } from "solid-js";
 import type { EquipmentComboMetrics, EquipmentFilterMetrics } from "../types";
 import FilterBadges from "./FilterBadges";
 
-import { formatIntegration } from "../utils/format";
+import { formatIntegration, ARCSEC } from "../utils/format";
 import {
   madZ,
   bandForZ,
@@ -89,7 +89,7 @@ const FilterBreakdownRow: Component<{ row: EquipmentFilterMetrics }> = (props) =
         {formatMetric(props.row.median_eccentricity)}
       </td>
       <td class={`text-right py-1 px-2 tabular-nums ${metricClass(props.row.median_fwhm)}`}>
-        {formatMetric(props.row.median_fwhm, "\u2033")}
+        {formatMetric(props.row.median_fwhm, ARCSEC)}
       </td>
     </tr>
   );
@@ -159,7 +159,7 @@ const ComboRow: Component<{ combo: EquipmentComboMetrics; baselines: ComboBaseli
           {formatMetric(props.combo.median_eccentricity)}
         </td>
         <td class={`text-right py-1.5 px-2 tabular-nums ${fwhmCell().class}`} title={fwhmCell().title}>
-          {formatMetric(props.combo.median_fwhm, "\u2033")}
+          {formatMetric(props.combo.median_fwhm, ARCSEC)}
         </td>
         <td class="py-1.5 px-2">
           <div class="flex justify-end">

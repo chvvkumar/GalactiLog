@@ -25,6 +25,16 @@ SCAN_CANCEL_KEY = "scan:cancel"
 SCAN_ACTIVITY_KEY = "scan:activity"
 SCAN_ACTIVITY_MAX = 20
 SCAN_SKIPPED_PATHS_KEY = "scan:skipped_paths"
+# Short-lived marker set inside trigger_scan's lock, between the idle/active
+# check and the `run_scan.delay()` dispatch (AUD-016). Closes the window where
+# a second POST arrives after the dispatch lock is released but before the
+# queued run_scan task is picked up and calls start_scanning_sync - without
+# this, get_scan_state() would still report "idle"/"complete" and a second
+# scan would be dispatched. TTL is generous vs. typical worker pickup latency
+# but short enough not to wedge scan state if the broker/worker never picks
+# the task up at all.
+SCAN_DISPATCHED_KEY = "scan:dispatched"
+SCAN_DISPATCHED_TTL = 60  # seconds
 EXPIRE_AFTER_COMPLETE = 86400  # 24 hours
 STALE_TIMEOUT = 300  # 5 minutes with no progress → consider stuck
 
@@ -95,7 +105,24 @@ async def get_scan_state(r: aioredis.Redis) -> ScanStateSnapshot:
             elapsed = time.time() - float(last_progress)
             if elapsed > STALE_TIMEOUT:
                 snap.state = "stalled"
+    elif await r.exists(SCAN_DISPATCHED_KEY):
+        # A scan was just dispatched (inside trigger_scan's lock) but the
+        # worker hasn't picked it up yet, so scan:state still reads
+        # idle/complete. Report it as active so a second request doesn't
+        # race in and dispatch a duplicate scan (AUD-016).
+        snap.state = "scanning"
     return snap
+
+
+async def mark_scan_dispatched(r: aioredis.Redis) -> None:
+    """Record that a scan was just queued, before the worker has started it.
+
+    Set inside trigger_scan's dispatch lock, immediately before
+    ``run_scan.delay()``. Cleared (implicitly, via TTL) once
+    ``start_scanning_sync`` writes the real "scanning" state, or after
+    ``SCAN_DISPATCHED_TTL`` seconds if the task is never picked up.
+    """
+    await r.set(SCAN_DISPATCHED_KEY, "1", ex=SCAN_DISPATCHED_TTL)
 
 
 async def get_failed_files(r: aioredis.Redis) -> list[dict]:
@@ -149,6 +176,12 @@ async def reset_scan(r: aioredis.Redis) -> None:
     await r.delete(SCAN_PROGRESS_KEY)
     await r.delete(SCAN_FAILED_KEY)
     await r.delete(SCAN_CANCEL_KEY)
+    # Also clear any stuck rebuild/reference-thumbnail state so a rebuild that
+    # was hard-killed mid-run (leaving REBUILD_KEY at "running" with no TTL) has
+    # a recovery path from the UI instead of requiring a manual Redis edit
+    # (AUD-003).
+    await r.delete(REBUILD_KEY)
+    await r.delete(REBUILD_PROGRESS_KEY)
 
 
 async def get_activity(r: aioredis.Redis) -> list[dict]:
@@ -205,11 +238,25 @@ def check_complete_sync(r: sync_redis.Redis) -> None:
     data = r.hgetall(SCAN_KEY)
     snap = parse_snapshot(data)
     if snap.state == "ingesting" and snap.total > 0 and (snap.completed + snap.failed) >= snap.total:
+        kind = data.get("kind", "scan")
         r.hset(SCAN_KEY, mapping={
             "state": "complete",
             "completed_at": time.time(),
         })
         r.expire(SCAN_KEY, EXPIRE_AFTER_COMPLETE)
+        if kind != "scan":
+            # Non-scan ingestion (e.g. CSV metrics backfill) reuses this same
+            # progress hash to track its own total/completed/failed counts,
+            # but reaching "complete" here is not a real scan finishing: it
+            # must not emit the scan_complete activity or dispatch the
+            # post-scan maintenance cascade (smart_rebuild, reference
+            # thumbnails, mosaic/duplicate detection, dark-hours backfill).
+            # See AUD-030.
+            try:
+                r.delete("galactilog:stats:cache", "galactilog:fits_keys")
+            except Exception:
+                logger.debug("scan_state: Redis stats cache invalidation failed", exc_info=True)
+            return
         parts = []
         actual_new = max(0, snap.new_files - snap.skipped_calibration)
         if actual_new:
@@ -330,19 +377,37 @@ def start_scanning_sync(r: sync_redis.Redis) -> None:
         "skipped_calibration": 0,
         "started_at": time.time(),
         "completed_at": "",
+        "kind": "scan",
     })
     r.set(SCAN_PROGRESS_KEY, str(time.time()))
     r.persist(SCAN_KEY)
     r.delete(SCAN_FAILED_KEY)
+    r.delete(SCAN_DISPATCHED_KEY)  # real state has taken over from the dispatch marker
 
 
-def set_ingesting_sync(r: sync_redis.Redis, total: int, removed: int = 0, new_files: int = 0, changed_files: int = 0) -> None:
+def set_ingesting_sync(
+    r: sync_redis.Redis,
+    total: int,
+    removed: int = 0,
+    new_files: int = 0,
+    changed_files: int = 0,
+    kind: str = "scan",
+) -> None:
+    """Transition scan:state to "ingesting".
+
+    ``kind`` distinguishes a real directory scan ("scan", the default) from
+    other work that reuses this same progress-tracking hash, such as the CSV
+    metrics backfill ("csv_backfill"). ``check_complete_sync`` reads it back
+    to decide whether reaching "complete" should emit the scan_complete
+    activity and dispatch the post-scan maintenance cascade (AUD-030).
+    """
     r.hset(SCAN_KEY, mapping={
         "state": "ingesting",
         "total": total,
         "removed": removed,
         "new_files": new_files,
         "changed_files": changed_files,
+        "kind": kind,
     })
 
 
@@ -399,7 +464,17 @@ def set_cancelled_sync(r: sync_redis.Redis) -> None:
 # ── Rebuild status (Quick Fix / Full Rebuild) ────────────────────────────
 
 REBUILD_KEY = "rebuild:status"
+REBUILD_PROGRESS_KEY = "rebuild:last_progress"
 REBUILD_EXPIRE = 3600  # 1 hour
+# Rebuild-family maintenance tasks (Full Rebuild, Retry Unresolved, reference
+# thumbnails) are legitimately long-running, so a short started_at-based timeout
+# like get_scan_state uses would flag a healthy run as stalled. Instead they
+# write REBUILD_PROGRESS_KEY on every incremental progress update, and a run is
+# considered stalled only after this generous no-progress window elapses. This
+# is the backstop for a worker that is hard-killed (SIGKILL/OOM) without the
+# SoftTimeLimitExceeded handler getting a chance to write a terminal state
+# (AUD-003).
+REBUILD_STALE_TIMEOUT = 900  # 15 minutes with no progress → consider stuck
 
 
 @dataclass
@@ -441,7 +516,22 @@ def _parse_rebuild(data: dict | None) -> RebuildStatus:
 
 async def get_rebuild_state(r: aioredis.Redis) -> RebuildStatus:
     data = await r.hgetall(REBUILD_KEY)
-    return _parse_rebuild(data)
+    snap = _parse_rebuild(data)
+    # Detect a stuck rebuild: state is still "running" but no incremental
+    # progress has been written for REBUILD_STALE_TIMEOUT seconds. This covers
+    # the case where the worker was hard-killed before the SoftTimeLimitExceeded
+    # handler could persist a terminal state, so the status hash would otherwise
+    # read "running" forever with no TTL (AUD-003).
+    if snap.state == "running":
+        last_progress = await r.get(REBUILD_PROGRESS_KEY)
+        reference = None
+        if last_progress:
+            reference = float(last_progress)
+        elif snap.started_at:
+            reference = snap.started_at
+        if reference is not None and (time.time() - reference) > REBUILD_STALE_TIMEOUT:
+            snap.state = "stalled"
+    return snap
 
 
 def set_rebuild_running_sync(r: sync_redis.Redis, mode: str, message: str) -> None:
@@ -454,10 +544,15 @@ def set_rebuild_running_sync(r: sync_redis.Redis, mode: str, message: str) -> No
         "details": "{}",
     })
     r.persist(REBUILD_KEY)
+    r.set(REBUILD_PROGRESS_KEY, str(time.time()))
 
 
 def set_rebuild_progress_sync(r: sync_redis.Redis, message: str) -> None:
     r.hset(REBUILD_KEY, "message", message)
+    # Heartbeat for stale detection: every incremental progress write bumps the
+    # last-progress marker so get_rebuild_state can tell a slow-but-alive run
+    # from a hard-killed one (AUD-003).
+    r.set(REBUILD_PROGRESS_KEY, str(time.time()))
 
 
 def set_rebuild_complete_sync(r: sync_redis.Redis, message: str, details: dict) -> None:
@@ -469,6 +564,7 @@ def set_rebuild_complete_sync(r: sync_redis.Redis, message: str, details: dict) 
         "details": json.dumps(details),
     })
     r.expire(REBUILD_KEY, REBUILD_EXPIRE)
+    r.delete(REBUILD_PROGRESS_KEY)
 
 
 def set_rebuild_cancelled_sync(
@@ -484,4 +580,5 @@ def set_rebuild_cancelled_sync(
         "details": json.dumps(details or {}),
     })
     r.expire(REBUILD_KEY, EXPIRE_AFTER_COMPLETE)
+    r.delete(REBUILD_PROGRESS_KEY)
     clear_cancel_sync(r)

@@ -49,4 +49,16 @@ class Target(Base):
     __table_args__ = (
         Index("ix_targets_aliases", "aliases", postgresql_using="gin"),
         Index("uq_targets_catalog_id_normalized", "catalog_id_normalized", unique=True),
+        Index(
+            "ix_targets_primary_name_trgm",
+            "primary_name",
+            postgresql_using="gin",
+            postgresql_ops={"primary_name": "gin_trgm_ops"},
+        ),
+        Index(
+            "ix_targets_catalog_id_trgm",
+            "catalog_id",
+            postgresql_using="gin",
+            postgresql_ops={"catalog_id": "gin_trgm_ops"},
+        ),
     )

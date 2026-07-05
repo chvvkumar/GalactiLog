@@ -18,7 +18,7 @@ import MergePreviewModal from "../components/MergePreviewModal";
 import { useAuth } from "../components/AuthProvider";
 import { OBJECT_TYPE_OPTIONS } from "../constants/objectTypes";
 
-import { formatIntegration } from "../utils/format";
+import { formatIntegration, formatArcsec } from "../utils/format";
 import { getErrorMessage } from "../utils/errors";
 
 function formatCoord(val: number | null, label: string): string {
@@ -108,7 +108,7 @@ const MergeFromDetailFlow: Component<MergeFromDetailFlowProps> = (props) => {
               </p>
             </div>
             <div class="p-4 space-y-3">
-              <div class="text-xs px-2 py-1.5 rounded bg-yellow-500/10 text-yellow-400 border border-yellow-500/20">
+              <div class="text-xs px-2 py-1.5 rounded bg-theme-warning/10 text-theme-warning border border-theme-warning/20">
                 All images and sessions from the selected target will be moved here. You can revert from Settings &gt; Target Merges.
               </div>
               <div>
@@ -138,7 +138,7 @@ const MergeFromDetailFlow: Component<MergeFromDetailFlowProps> = (props) => {
                           <span class="text-xs text-theme-text-secondary ml-2">{t.object_type}</span>
                         </Show>
                         <Show when={t.unresolved}>
-                          <span class="text-xs text-yellow-400 ml-2">
+                          <span class="text-xs text-theme-warning ml-2">
                             Unresolved{t.image_count != null ? ` · ${t.image_count} ${t.image_count === 1 ? "image" : "images"}` : ""}
                           </span>
                         </Show>
@@ -225,6 +225,29 @@ const TargetDetailPage: Component = () => {
   const [undoingMerge, setUndoingMerge] = createSignal<string | null>(null);
 
   const [skyViewExpanded, setSkyViewExpanded] = createSignal(false);
+
+  // The DSS reference thumbnail is an auth-gated binary, so it is loaded as a
+  // blob via fetchWithRefresh (matching getMosaicCompositeBlob) rather than a
+  // raw <img src>, which would have no 401-refresh path.
+  const [referenceThumbnailUrl] = createResource(
+    () => (skyViewExpanded() && targetDetail()?.reference_thumbnail_path ? params.targetId : null),
+    async (id: string) => {
+      const blob = await api.getReferenceThumbnailBlob(id);
+      return URL.createObjectURL(blob);
+    },
+  );
+  let lastReferenceThumbnailUrl: string | undefined;
+  createEffect(() => {
+    const url = referenceThumbnailUrl();
+    if (lastReferenceThumbnailUrl && lastReferenceThumbnailUrl !== url) {
+      URL.revokeObjectURL(lastReferenceThumbnailUrl);
+    }
+    lastReferenceThumbnailUrl = url;
+  });
+  onCleanup(() => {
+    if (lastReferenceThumbnailUrl) URL.revokeObjectURL(lastReferenceThumbnailUrl);
+  });
+
   const [notesExpanded, setNotesExpanded] = createSignal(false);
   const [targetNotes, setTargetNotes] = createSignal<string>("");
   const [notesSaving, setNotesSaving] = createSignal(false);
@@ -300,6 +323,11 @@ const TargetDetailPage: Component = () => {
       await api.unmergeTarget(merged.id);
       showToast(`Unmerged "${merged.primary_name}"`);
       await Promise.all([refetchMergeHistory(), refetchDetail()]);
+      // Unmerging moves frames off this night, so drop the cache and re-load
+      // any still-expanded session dates to avoid stale expanded cards that
+      // disagree with the refetched summary rows (AUD-012).
+      setSessionCache({});
+      [...expandedSessions()].forEach(loadSessionDetail);
     } catch (e: unknown) {
       showToast(getErrorMessage(e, "Undo merge failed"), "error");
     } finally {
@@ -564,6 +592,12 @@ const TargetDetailPage: Component = () => {
           onMerged={async () => {
             setShowMerge(false);
             await Promise.all([refetchDetail(), refetchMergeHistory()]);
+            // A merge changes which frames belong to a given night, so any
+            // already-expanded session card would keep showing stale cached
+            // data. Clear the cache and re-load every still-expanded date so
+            // the expanded card matches the refetched summary row (AUD-012).
+            setSessionCache({});
+            [...expandedSessions()].forEach(loadSessionDetail);
           }}
         />
       </Show>
@@ -881,7 +915,7 @@ const TargetDetailPage: Component = () => {
                   <Show when={visible("guiding", "rms_total")}>
                     <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-3 text-center">
                       <div class="text-lg font-semibold text-metric-guiding">
-                        {detail().avg_guiding_rms_arcsec !== null ? `${detail().avg_guiding_rms_arcsec?.toFixed(2)}"` : "—"}
+                        {detail().avg_guiding_rms_arcsec !== null ? formatArcsec(detail().avg_guiding_rms_arcsec) : "—"}
                       </div>
                       <div class="text-caption text-theme-text-secondary">Avg Guide RMS</div>
                     </div>
@@ -982,12 +1016,13 @@ const TargetDetailPage: Component = () => {
                     <Show when={detail().reference_thumbnail_path}>
                       <div class="w-[40%] min-w-0">
                         <div class="text-xs font-medium text-theme-text-tertiary mb-1">DSS Reference</div>
-                        <img
-                          src={`/api/targets/${detail().target_id}/reference-thumbnail`}
-                          alt="DSS reference"
-                          class="rounded-[var(--radius-sm)] border border-theme-border w-full h-auto"
-                          loading="lazy"
-                        />
+                        <Show when={referenceThumbnailUrl()}>
+                          <img
+                            src={referenceThumbnailUrl()}
+                            alt="DSS reference"
+                            class="rounded-[var(--radius-sm)] border border-theme-border w-full h-auto"
+                          />
+                        </Show>
                       </div>
                     </Show>
                   </div>

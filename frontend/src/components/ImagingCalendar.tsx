@@ -1,6 +1,7 @@
 import { Component, For, createSignal, createResource, createMemo, Show } from "solid-js";
 import { api } from "../api/client";
 import type { CalendarEntry } from "../types";
+import { parseLocalDateKey } from "../utils/format";
 
 const CELL = 13;
 const GAP = 3;
@@ -87,7 +88,7 @@ const ImagingCalendar: Component = () => {
     const labels: { label: string; col: number }[] = [];
     let lastMonth = "";
     for (let i = 0; i < w.length; i++) {
-      const d = new Date(w[i][0].date);
+      const d = parseLocalDateKey(w[i][0].date);
       const m = d.toLocaleString("en", { month: "short" });
       if (m !== lastMonth) {
         labels.push({ label: m, col: i });

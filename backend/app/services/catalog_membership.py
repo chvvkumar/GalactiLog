@@ -72,6 +72,27 @@ def match_all_memberships(session: Session) -> str:
     return summary
 
 
+def match_target_memberships(session: Session, target) -> int:
+    """Match all static catalogs to a single target.
+
+    Per-target inverse of ``match_all_memberships``: each catalog is scanned for
+    entries matching this one target's identifiers, so ingest never re-scans the
+    whole targets table. Assumes the static catalogs are already loaded. All
+    upserts are idempotent, so this is safe to re-run. Returns total matches.
+    """
+    from app.services.caldwell import match_caldwell_for_target
+    from app.services.herschel400 import match_herschel400_for_target
+    from app.services.arp import match_arp_for_target
+    from app.services.abell import match_abell_for_target
+
+    total = 0
+    total += match_caldwell_for_target(session, target)
+    total += match_herschel400_for_target(session, target)
+    total += match_arp_for_target(session, target)
+    total += match_abell_for_target(session, target)
+    return total
+
+
 def load_catalog_memberships(session: Session) -> str:
     """Load all static catalogs and match memberships."""
     load_summary = load_all_catalogs(session)

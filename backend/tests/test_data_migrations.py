@@ -18,6 +18,8 @@ from app.services.data_migrations import (
     MIGRATIONS,
     get_pending_migrations,
     _migrate_v11_hyperleda_galaxies,
+    _migrate_v12_exposure_and_metric_split,
+    _migrate_v13_enrich_created_targets,
 )
 
 
@@ -56,6 +58,18 @@ class TestGetPendingMigrations:
         desc, func = MIGRATIONS[11]
         assert func is _migrate_v11_hyperleda_galaxies
         assert "hyperleda" in desc.lower()
+
+    def test_v12_is_exposure_and_metric_split(self):
+        assert 12 in MIGRATIONS
+        desc, func = MIGRATIONS[12]
+        assert func is _migrate_v12_exposure_and_metric_split
+
+    def test_v13_is_enrich_created_targets(self):
+        assert 13 in MIGRATIONS
+        desc, func = MIGRATIONS[13]
+        assert func is _migrate_v13_enrich_created_targets
+        assert "enrichment" in desc.lower()
+        assert DATA_VERSION == 13
 
 
 def _sync_session_factory():
@@ -143,6 +157,87 @@ class TestV11HyperledaBackfill:
                 text("DELETE FROM hyperleda_cache WHERE catalog_id = :cid"),
                 {"cid": catalog_id},
             )
+            session.commit()
+            session.close()
+            engine.dispose()
+
+
+class TestV12ExposureAndMetricSplit:
+    """End-to-end backfill of exposure_time and FWHM reclassification (AUD-001/007)."""
+
+    def test_backfills_exposure_and_splits_fwhm(self):
+        from sqlalchemy import text
+        from app.models import Image
+
+        Session, engine = _sync_session_factory()
+        session = Session()
+
+        # Unique file paths so the rows are isolated from any existing data.
+        tag = uuid.uuid4().hex[:8]
+        p_exposure = f"/fits/{tag}/exposure_only.fits"
+        p_fwhm = f"/fits/{tag}/fwhm_mislabeled.fits"
+        p_real_hfr = f"/fits/{tag}/real_hfr.fits"
+        p_exptime = f"/fits/{tag}/has_exptime.fits"
+        ids = {}
+        try:
+            # Row 1: EXPOSURE-only header, exposure_time NULL (the AUD-001 bug).
+            r1 = Image(
+                file_path=p_exposure, file_name="exposure_only.fits",
+                exposure_time=None,
+                raw_headers={"EXPOSURE": 180.0, "OBJECT": "M31"},
+            )
+            # Row 2: FWHM stored in median_hfr, no HFR keyword (the AUD-007 bug).
+            r2 = Image(
+                file_path=p_fwhm, file_name="fwhm_mislabeled.fits",
+                exposure_time=300.0, median_hfr=3.4, median_fwhm=None,
+                raw_headers={"FWHM": 3.4, "OBJECT": "M31"},
+            )
+            # Row 3: genuine HFR -- must be left untouched.
+            r3 = Image(
+                file_path=p_real_hfr, file_name="real_hfr.fits",
+                exposure_time=300.0, median_hfr=1.9, median_fwhm=None,
+                raw_headers={"HFR": 1.9, "FWHM": 3.6, "OBJECT": "M31"},
+            )
+            # Row 4: already has exposure_time via EXPTIME -- unchanged.
+            r4 = Image(
+                file_path=p_exptime, file_name="has_exptime.fits",
+                exposure_time=120.0,
+                raw_headers={"EXPTIME": 120.0, "OBJECT": "M31"},
+            )
+            session.add_all([r1, r2, r3, r4])
+            session.commit()
+            for r in (r1, r2, r3, r4):
+                ids[r.file_path] = r.id
+
+            summary = _migrate_v12_exposure_and_metric_split(session)
+            session.commit()
+
+            # Row 1: exposure backfilled from EXPOSURE.
+            got1 = session.get(Image, ids[p_exposure])
+            assert got1.exposure_time == pytest.approx(180.0)
+
+            # Row 2: value moved from median_hfr to median_fwhm.
+            got2 = session.get(Image, ids[p_fwhm])
+            assert got2.median_hfr is None
+            assert got2.median_fwhm == pytest.approx(3.4)
+
+            # Row 3: genuine HFR untouched.
+            got3 = session.get(Image, ids[p_real_hfr])
+            assert got3.median_hfr == pytest.approx(1.9)
+            assert got3.median_fwhm is None
+
+            # Row 4: exposure unchanged.
+            got4 = session.get(Image, ids[p_exptime])
+            assert got4.exposure_time == pytest.approx(120.0)
+
+            assert "exposures backfilled" in summary
+            assert "FWHM values moved" in summary
+        finally:
+            session.rollback()
+            for fp in (p_exposure, p_fwhm, p_real_hfr, p_exptime):
+                session.execute(
+                    text("DELETE FROM images WHERE file_path = :fp"), {"fp": fp}
+                )
             session.commit()
             session.close()
             engine.dispose()

@@ -7,7 +7,12 @@ class OverviewStats(BaseModel):
     total_frames: int
     all_frames: int
     disk_usage_bytes: int
-    session_count: int
+    # Distinct (imaging night, telescope, camera) combinations -- NOT distinct
+    # imaging nights. A night shot with two rigs counts as two rig-sessions
+    # here. Every other "session" surface in the app (the calendar, target
+    # detail, the paginated target aggregation) counts distinct nights
+    # instead; do not conflate the two. See AUD-019.
+    rig_session_count: int
     first_capture_date: str | None
     last_capture_date: str | None
 

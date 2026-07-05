@@ -206,6 +206,83 @@ def test_unforced_full_deletion_skips_cleanup():
     assert [e for e in emit_calls if e["event_type"] == "orphan_warning"]
 
 
+def test_run_scan_skips_when_run_lock_already_held():
+    """AUD-016: a second run_scan execution must bail out immediately instead
+    of enumerating the tree twice when SCAN_RUN_LOCK is already held (e.g. a
+    duplicate dispatch racing with an in-flight run_scan)."""
+    tasks_mod = _bootstrap_real_tasks()
+
+    mock_redis = MagicMock()
+    mock_redis.set.return_value = False  # SET NX fails: lock already held
+
+    with patch.object(tasks_mod, "_redis", mock_redis), \
+         patch.object(tasks_mod, "start_scanning_sync") as mock_start, \
+         patch.object(tasks_mod, "Session") as mock_session_cls:
+        result = tasks_mod.run_scan.run()
+
+    assert result == {"status": "skipped", "reason": "already running"}
+    mock_redis.set.assert_called_once_with(
+        tasks_mod.SCAN_RUN_LOCK, "1", nx=True, ex=tasks_mod.SCAN_RUN_LOCK_TTL
+    )
+    mock_start.assert_not_called()
+    mock_session_cls.assert_not_called()
+    # Never acquired the lock, so it must not release someone else's lock.
+    mock_redis.delete.assert_not_called()
+
+
+def test_run_scan_releases_run_lock_after_completing():
+    """run_scan releases SCAN_RUN_LOCK via `finally` once it finishes, so a
+    subsequent scan (or a retried dispatch) is not blocked forever."""
+    tasks_mod = _bootstrap_real_tasks()
+
+    class _EmptySession:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def execute(self, *a, **k):
+            res = MagicMock()
+            res.all.return_value = []
+            res.scalar_one_or_none.return_value = None
+            return res
+
+    mock_redis = MagicMock()
+    mock_redis.set.return_value = True  # SCAN_RUN_LOCK acquired
+
+    mock_actx = MagicMock()
+    mock_actx.__enter__ = lambda s, *a: MagicMock()
+    mock_actx.__exit__ = lambda s, *a: None
+
+    fake_cfg = MagicMock()
+    fake_cfg.should_include_file.return_value = True
+    fake_cfg.roots.return_value = [tasks_mod.Path("/tmp/test_fits")]
+
+    with patch.object(tasks_mod, "Session", lambda *a, **k: _EmptySession()), \
+         patch.object(tasks_mod, "_redis", mock_redis), \
+         patch.object(tasks_mod, "_activity_session", lambda: mock_actx), \
+         patch.object(tasks_mod, "clear_cancel_sync"), \
+         patch.object(tasks_mod, "start_scanning_sync"), \
+         patch.object(tasks_mod, "get_skipped_paths_sync", return_value=set()), \
+         patch.object(tasks_mod, "clear_skipped_paths_sync"), \
+         patch.object(tasks_mod, "is_cancel_requested_sync", return_value=False), \
+         patch.object(tasks_mod, "set_discovered_sync"), \
+         patch.object(tasks_mod, "set_idle_sync"), \
+         patch.object(tasks_mod, "generate_reference_thumbnails"), \
+         patch.object(tasks_mod, "detect_duplicate_targets"), \
+         patch.object(tasks_mod, "backfill_dark_hours"), \
+         patch("app.services.scan_filters.ScanFilterConfig.from_settings", return_value=fake_cfg), \
+         patch("app.services.scanner.scan_directory", return_value=([], [], set())):
+        result = tasks_mod.run_scan.run()
+
+    assert result["status"] == "complete"
+    mock_redis.set.assert_any_call(
+        tasks_mod.SCAN_RUN_LOCK, "1", nx=True, ex=tasks_mod.SCAN_RUN_LOCK_TTL
+    )
+    mock_redis.delete.assert_any_call(tasks_mod.SCAN_RUN_LOCK)
+
+
 def test_mosaic_detection_complete_emits():
     tasks_mod = _bootstrap_real_tasks()
     detect_mosaic_panels_task = tasks_mod.detect_mosaic_panels_task

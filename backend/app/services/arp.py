@@ -10,7 +10,9 @@ from sqlalchemy.orm import Session
 from app.models.arp_catalog import ArpEntry
 from app.services.openngc import normalize_ngc_name
 from app.services.catalog_membership import upsert_membership
-from app.services.catalog_base import load_catalog_csv, find_target_by_ngc
+from app.services.catalog_base import (
+    load_catalog_csv, find_target_by_ngc, target_ngc_identifiers,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -86,4 +88,53 @@ def match_arp_targets(session: Session) -> int:
 
     session.flush()
     logger.info("Matched %d Arp targets", matched)
+    return matched
+
+
+def _parse_arp_number(arp_id: str) -> int | None:
+    """Parse the numeric Arp number from an arp_id like 'Arp 77'."""
+    parts = arp_id.split()
+    if len(parts) == 2:
+        try:
+            return int(parts[1])
+        except ValueError:
+            return None
+    return None
+
+
+def match_arp_for_target(session: Session, target) -> int:
+    """Match Arp entries to a single target. Returns matches created.
+
+    Per-target inverse of ``match_arp_targets``: iterates the small Arp table
+    (not the targets table) and upserts a membership for every entry whose
+    NGC/IC id list contains one of the target's identifiers. Idempotent.
+    """
+    identifiers = target_ngc_identifiers(target)
+    if not identifiers:
+        return 0
+
+    entries = session.execute(select(ArpEntry)).scalars().all()
+    matched = 0
+    for entry in entries:
+        if not entry.ngc_ic_ids:
+            continue
+
+        ids = [s.strip() for s in entry.ngc_ic_ids.split(",") if s.strip()]
+        if not any(normalize_ngc_name(i) in identifiers for i in ids):
+            continue
+
+        arp_number = _parse_arp_number(entry.arp_id)
+        metadata = {"peculiarity_class": entry.peculiarity_class}
+        if arp_number is not None:
+            metadata["arp_number"] = arp_number
+        upsert_membership(
+            session,
+            target_id=target.id,
+            catalog_name="arp",
+            catalog_number=entry.arp_id,
+            metadata=metadata,
+        )
+        matched += 1
+
+    session.flush()
     return matched

@@ -555,7 +555,10 @@ export interface OverviewStats {
   total_frames: number;
   all_frames: number;
   disk_usage_bytes: number;
-  session_count: number;
+  // Distinct (imaging night, telescope, camera) combinations -- NOT distinct
+  // imaging nights. See the rig_session_count comment in stats.py; other
+  // "session" counts across the app (calendar, target detail) count nights.
+  rig_session_count: number;
   first_capture_date: string | null;
   last_capture_date: string | null;
 }

@@ -16,11 +16,14 @@ from app.services.simbad import normalize_catalog_id, normalize_object_name
 from app.models.simbad_cache import SimbadCache
 from app.models.sesame_cache import SesameCache
 from app.config import async_redis
+from app.models.merge_manifest import MergeManifest
 from app.services.target_merge import (
     merge_targets as _merge_targets_service,
     merge_preview as _merge_preview_service,
     unmerge_target as _unmerge_target_service,
+    apply_merge_manifest_restore,
 )
+from app.services.cache import invalidate_stats_and_analysis_cache
 
 router = APIRouter(prefix="/targets", tags=["merges"])
 
@@ -349,6 +352,11 @@ async def orphan_create(
             detail=f'Name already in use by "{name}"',
         )
 
+    # Resolving previously-unresolved frames onto a new target changes the
+    # stats overview target/frame figures; invalidate the same caches as the
+    # merge paths (AUD-034).
+    await invalidate_stats_and_analysis_cache()
+
     if not body.user_defined:
         _enrich_new_target(target.id)
 
@@ -443,6 +451,11 @@ async def create_custom_target(
             status_code=409,
             detail=f'Name already in use by "{name}"',
         )
+
+    # Retro-linking orphan images onto the new target changes the stats
+    # overview target/frame figures; invalidate the same caches as the merge
+    # paths (AUD-034).
+    await invalidate_stats_and_analysis_cache()
 
     if not body.user_defined:
         _enrich_new_target(target.id)
@@ -586,15 +599,32 @@ async def revert_merge_candidate(
 
         if loser:
             loser_names = set([loser.primary_name] + list(loser.aliases or []))
-            for name in loser_names:
-                await session.execute(
-                    update(Image)
-                    .where(
-                        Image.resolved_target_id == winner.id,
-                        Image.raw_headers["OBJECT"].astext == name,
-                    )
-                    .values(resolved_target_id=loser.id)
+            # Prefer the persisted merge manifest for an exact reversal (restores
+            # ALL moved images including filename-resolved ones, plus notes and
+            # custom values). Merges made before manifests existed have none, so
+            # fall back to the legacy OBJECT-header name match (AUD-005).
+            manifest = (await session.execute(
+                select(MergeManifest)
+                .where(
+                    MergeManifest.loser_id == loser.id,
+                    MergeManifest.winner_id == winner.id,
                 )
+                .order_by(MergeManifest.created_at.desc())
+                .limit(1)
+            )).scalars().first()
+            if manifest is not None:
+                await apply_merge_manifest_restore(manifest, loser, winner, session)
+                await session.delete(manifest)
+            else:
+                for name in loser_names:
+                    await session.execute(
+                        update(Image)
+                        .where(
+                            Image.resolved_target_id == winner.id,
+                            Image.raw_headers["OBJECT"].astext == name,
+                        )
+                        .values(resolved_target_id=loser.id)
+                    )
             winner.aliases = [a for a in (winner.aliases or []) if a not in loser_names]
             loser.merged_into_id = None
             loser.merged_at = None
@@ -613,6 +643,10 @@ async def revert_merge_candidate(
         candidate.resolved_at = None
 
     await session.commit()
+    # Reverting a merge changes target membership just like merge/unmerge;
+    # invalidate the same caches so Statistics/Analysis reflect it immediately
+    # (AUD-034).
+    await invalidate_stats_and_analysis_cache()
     return {"status": "ok"}
 
 
@@ -722,6 +756,11 @@ async def update_target_identity(
 
     await session.commit()
     await session.refresh(target)
+
+    # A rename (or re-resolve) changes the name shown on the Statistics
+    # top-targets list and calendar; invalidate so it doesn't lag the
+    # already-uncached Dashboard for up to the cache TTL (AUD-034).
+    await invalidate_stats_and_analysis_cache()
 
     return TargetIdentityResponse(
         id=target.id,

@@ -206,6 +206,9 @@ export async function fetchJson<T>(path: string, init?: RequestInit, signal?: Ab
     }
     throw new ApiError(resp.status, message);
   }
+  if (resp.status === 204 || resp.headers.get("content-length") === "0") {
+    return undefined as T;
+  }
   return resp.json();
 }
 
@@ -933,8 +936,17 @@ export const api = {
     fetchJson<import("../types").NightEphemeris>(`/planning/night?date=${date}`),
 
   // Reference thumbnails
-  getReferenceThumbnailUrl: (targetId: string) =>
-    `${API_BASE}/targets/${encodeURIComponent(targetId)}/reference-thumbnail`,
+  // Fetch the DSS reference thumbnail as a blob (auth-aware, with token refresh).
+  getReferenceThumbnailBlob: async (targetId: string): Promise<Blob> => {
+    const resp = await fetchWithRefresh(
+      `/targets/${encodeURIComponent(targetId)}/reference-thumbnail`,
+      { method: "GET" }
+    );
+    if (!resp.ok) {
+      throw await extractApiError(resp, "Failed to load reference thumbnail");
+    }
+    return resp.blob();
+  },
 
   // Catalog enrichment tasks
   triggerReferenceThumbnails: (force = false) =>

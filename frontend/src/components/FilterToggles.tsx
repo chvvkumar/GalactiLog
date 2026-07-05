@@ -2,7 +2,7 @@ import { Component, For, Show } from "solid-js";
 import { useDashboardFilters } from "./DashboardFilterProvider";
 import { useSettingsContext } from "./SettingsProvider";
 import { useFilterOptions } from "../store/filterOptions";
-import { getFilterBadgeStyle } from "../utils/filterStyles";
+import { getFilterBadgeStyle, getFilterColor } from "../utils/filterStyles";
 
 const FilterToggles: Component = () => {
   const { filters, toggleOpticalFilter } = useDashboardFilters();
@@ -12,10 +12,7 @@ const FilterToggles: Component = () => {
   const isActive = (f: string) => filters().opticalFilters.includes(f);
 
   function getColor(name: string): string {
-    const colorMap = filterColorMap();
-    const aliasMap = filterAliasMap();
-    const canonical = aliasMap[name] || name;
-    return colorMap[canonical] || colorMap[name] || "#666666";
+    return getFilterColor(name, filterColorMap(), filterAliasMap());
   }
 
   const groupedFilters = () => {

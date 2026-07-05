@@ -28,6 +28,11 @@ from app.schemas.mosaic import (
 )
 from app.api.deps import get_current_user, require_admin
 from app.services.mosaic_composite import build_mosaic_composite, find_default_filter
+from app.services.mosaic_detection import (
+    load_mosaic_keywords,
+    object_matches_panel,
+    panel_number_from_label,
+)
 from app.services.mosaic_stats import (
     get_panel_included_dates as _get_panel_included_dates,
     panel_stats as _panel_stats,
@@ -85,6 +90,8 @@ async def get_suggestions(
     user: User = Depends(get_current_user),
 ):
     from app.schemas.mosaic import SuggestionPanelSession
+
+    keywords = await load_mosaic_keywords(session)
 
     q = select(MosaicSuggestion).where(MosaicSuggestion.status == "pending")
     all_pending = (await session.execute(q)).scalars().all()
@@ -151,22 +158,27 @@ async def get_suggestions(
         num = label.split()[-1] if label.startswith("Panel ") else label
         return f"%{base}%Panel%{num}%"
 
-    pattern_thumb_pairs: set[tuple[str, str]] = set()
+    pattern_thumb_pairs: set[tuple[str, str, str]] = set()
     for r in rows:
         geometry = r.geometry or {}
         for gp in geometry.get("panels", []):
             tid = gp.get("target_id")
             if tid is None:
                 continue
-            pattern = _pattern_for_label(r, gp.get("label") or "")
+            label = gp.get("label") or ""
+            pattern = _pattern_for_label(r, label)
             if pattern:
-                pattern_thumb_pairs.add((str(tid), pattern))
+                pattern_thumb_pairs.add((str(tid), pattern, panel_number_from_label(label)))
 
     pattern_thumb_map: dict[tuple[str, str], str] = {}
     obj_col_thumb = Image.raw_headers["OBJECT"].astext
-    for tid_str, pattern in pattern_thumb_pairs:
+    for tid_str, pattern, expected_num in pattern_thumb_pairs:
+        # ILIKE is a cheap pre-filter only (also matches sibling panels for
+        # which expected_num is a prefix, e.g. "1" matching "Panel 12"), so
+        # fetch a bounded candidate set ordered the same way and re-parse each
+        # OBJECT string to keep only the exact panel (AUD-008).
         pq = (
-            select(Image.thumbnail_path)
+            select(Image.thumbnail_path, obj_col_thumb.label("obj"))
             .where(
                 Image.resolved_target_id == tid_str,
                 Image.image_type == "LIGHT",
@@ -174,9 +186,13 @@ async def get_suggestions(
                 obj_col_thumb.ilike(pattern),
             )
             .order_by(Image.capture_date.desc())
-            .limit(1)
+            .limit(25)
         )
-        thumb_path = (await session.execute(pq)).scalars().first()
+        candidates = (await session.execute(pq)).all()
+        thumb_path = next(
+            (c.thumbnail_path for c in candidates if object_matches_panel(c.obj, keywords, expected_num)),
+            None,
+        )
         url = _thumb_url(thumb_path)
         if url:
             pattern_thumb_map[(tid_str, pattern)] = url
@@ -225,10 +241,16 @@ async def get_suggestions(
         for row in all_session_rows:
             obj_val = row.obj or ""
             for pattern, mappings in pattern_map.items():
-                # Match the ILIKE pattern with ordered, contiguous semantics so
-                # "%Sh2 119%1%" hits "Sh2 119 Panel 1" but NOT "...Panel 2".
+                # _ilike_pattern_matches mirrors ILIKE's own semantics (a cheap
+                # pre-filter), which still matches sibling panels for which a
+                # panel's number is a prefix (e.g. "1" matching "Panel 12").
+                # Re-parse and check each mapping's own expected number too
+                # (AUD-008) before accepting the row.
                 if _ilike_pattern_matches(pattern, obj_val):
                     for row_idx, label in mappings:
+                        expected_num = panel_number_from_label(label)
+                        if not object_matches_panel(obj_val, keywords, expected_num):
+                            continue
                         session_rows_by_idx[row_idx].append(SuggestionPanelSession(
                             panel_label=label,
                             object_name=obj_val,
@@ -313,6 +335,7 @@ async def accept_suggestion(
         raise HTTPException(404, "Suggestion not found or already resolved")
 
     selected = set(body.selected_panels) if body.selected_panels is not None else None
+    keywords = await load_mosaic_keywords(session)
 
     # Guard against a duplicate mosaic name BEFORE inserting. A stale bulk
     # "accept all" can have a sibling suggestion that already created this
@@ -385,8 +408,19 @@ async def accept_suggestion(
         ]
         if obj_pattern:
             base_filter.append(Image.raw_headers["OBJECT"].astext.ilike(obj_pattern))
-        all_dates_q = select(func.distinct(Image.session_date)).where(*base_filter)
-        all_dates = {r[0] for r in (await session.execute(all_dates_q)).all()}
+        # ILIKE is a cheap pre-filter only; re-parse each matched OBJECT and
+        # keep only frames that exactly belong to this panel number, so a
+        # sibling panel (e.g. panel "12" vs this panel "1") doesn't seed
+        # spurious "available" sessions (AUD-008).
+        expected_num = panel_number_from_label(label)
+        all_dates_q = select(
+            Image.session_date, Image.raw_headers["OBJECT"].astext.label("obj")
+        ).where(*base_filter).distinct()
+        all_dates = {
+            r.session_date
+            for r in (await session.execute(all_dates_q)).all()
+            if not obj_pattern or object_matches_panel(r.obj, keywords, expected_num)
+        }
 
         for d in all_dates:
             if d not in campaign_dates:
@@ -620,7 +654,7 @@ async def get_panel_thumbnails(
         included_dates = panel_included_dates.get(pid)
         result = await select_best_frame_for_filter(
             panel.target_id, panel.object_pattern, filter, session,
-            included_dates=included_dates,
+            included_dates=included_dates, panel_label=panel.panel_label,
         )
         if not result:
             results.append({
@@ -692,7 +726,7 @@ async def get_panel_thumbnail_image(
 
     result = await select_best_frame_for_filter(
         panel.target_id, panel.object_pattern, filter, session,
-        included_dates=included_dates,
+        included_dates=included_dates, panel_label=panel.panel_label,
     )
     if not result or not result[0].file_path:
         raise HTTPException(404, f"No frames for filter '{filter}' in this panel")
@@ -746,7 +780,9 @@ async def get_mosaic_composite_debug(
     tile_w, tile_h = 800, 800
 
     for panel in panels:
-        frame = await select_best_frame(panel.target_id, panel.object_pattern, session)
+        frame = await select_best_frame(
+            panel.target_id, panel.object_pattern, session, panel_label=panel.panel_label,
+        )
         if not frame or not frame.file_path:
             debug_panels.append({
                 "label": panel.panel_label,
@@ -1055,32 +1091,67 @@ async def get_panel_sessions(
     if panel.object_pattern:
         base_filter.append(Image.raw_headers["OBJECT"].astext.ilike(panel.object_pattern))
 
-    img_q = (
-        select(
-            Image.session_date,
-            Image.filter_used,
-            func.count(Image.id).label("frames"),
-            func.sum(Image.exposure_time).label("integration"),
+    if panel.object_pattern:
+        # ILIKE is a cheap pre-filter only (also matches sibling panels for
+        # which this panel's number is a prefix, e.g. "1" matching "Panel
+        # 12"), so fetch per-frame rows including OBJECT and re-parse before
+        # aggregating in Python (AUD-008).
+        keywords = await load_mosaic_keywords(session)
+        expected_num = panel_number_from_label(panel.panel_label)
+        img_q = (
+            select(
+                Image.session_date,
+                Image.filter_used,
+                Image.exposure_time,
+                Image.raw_headers["OBJECT"].astext.label("obj"),
+            )
+            .where(*base_filter)
+            .where(Image.session_date.isnot(None))
         )
-        .where(*base_filter)
-        .where(Image.session_date.isnot(None))
-        .group_by(Image.session_date, Image.filter_used)
-    )
-    rows = (await session.execute(img_q)).all()
+        frame_rows = [
+            r for r in (await session.execute(img_q)).all()
+            if object_matches_panel(r.obj, keywords, expected_num)
+        ]
+        date_data: dict[str, dict] = {}
+        for row in frame_rows:
+            ds = str(row.session_date)
+            if ds not in date_data:
+                date_data[ds] = {"frames": 0, "integration": 0.0, "filters": {}}
+            date_data[ds]["frames"] += 1
+            date_data[ds]["integration"] += row.exposure_time or 0
+            if row.filter_used:
+                f = date_data[ds]["filters"].setdefault(
+                    row.filter_used, {"frames": 0, "integration": 0.0}
+                )
+                f["frames"] += 1
+                f["integration"] += row.exposure_time or 0
+    else:
+        img_q = (
+            select(
+                Image.session_date,
+                Image.filter_used,
+                func.count(Image.id).label("frames"),
+                func.sum(Image.exposure_time).label("integration"),
+            )
+            .where(*base_filter)
+            .where(Image.session_date.isnot(None))
+            .group_by(Image.session_date, Image.filter_used)
+        )
+        rows = (await session.execute(img_q)).all()
 
-    # Aggregate by session_date
-    date_data: dict[str, dict] = {}
-    for row in rows:
-        ds = str(row.session_date)
-        if ds not in date_data:
-            date_data[ds] = {"frames": 0, "integration": 0.0, "filters": {}}
-        date_data[ds]["frames"] += row.frames
-        date_data[ds]["integration"] += row.integration or 0
-        if row.filter_used:
-            date_data[ds]["filters"][row.filter_used] = {
-                "frames": row.frames,
-                "integration": row.integration or 0,
-            }
+        # Aggregate by session_date
+        date_data: dict[str, dict] = {}
+        for row in rows:
+            ds = str(row.session_date)
+            if ds not in date_data:
+                date_data[ds] = {"frames": 0, "integration": 0.0, "filters": {}}
+            date_data[ds]["frames"] += row.frames
+            date_data[ds]["integration"] += row.integration or 0
+            if row.filter_used:
+                date_data[ds]["filters"][row.filter_used] = {
+                    "frames": row.frames,
+                    "integration": row.integration or 0,
+                }
 
     sessions_list = []
     for ds in sorted(date_data.keys(), reverse=True):

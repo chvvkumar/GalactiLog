@@ -293,6 +293,11 @@ def downgrade() -> None:
         )
     """))
     op.execute(text("DROP INDEX IF EXISTS ix_custom_column_values_mosaic"))
+    # Rows with a NULL target_id (mosaic-scoped values) cannot be represented
+    # once the column is reverted to NOT NULL, so they must be removed first,
+    # otherwise the alter_column below fails with a constraint violation and
+    # leaves the schema half-reverted (mosaic_id already dropped).
+    op.execute(text("DELETE FROM custom_column_values WHERE target_id IS NULL"))
     if _column_exists("custom_column_values", "mosaic_id"):
         op.drop_column("custom_column_values", "mosaic_id")
     op.alter_column("custom_column_values", "target_id", nullable=False)
@@ -355,4 +360,8 @@ def downgrade() -> None:
         if _column_exists(table, col):
             op.drop_column(table, col)
 
+    # Orphan merge candidates (suggested_target_id IS NULL) are exactly the
+    # rows this column was made nullable to support; 0001's schema cannot
+    # represent them, so they must be removed before re-imposing NOT NULL.
+    op.execute(text("DELETE FROM merge_candidates WHERE suggested_target_id IS NULL"))
     op.alter_column("merge_candidates", "suggested_target_id", nullable=False)

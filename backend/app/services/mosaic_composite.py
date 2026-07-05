@@ -149,6 +149,7 @@ async def select_best_frame(
     object_pattern: str | None,
     session: AsyncSession,
     included_dates: list | None = None,
+    panel_label: str | None = None,
 ):
     """Select the best LIGHT frame for a mosaic panel.
     Primary: lowest median_hfr > 0.
@@ -161,6 +162,17 @@ async def select_best_frame(
     ]
     if object_pattern:
         base_filter.append(Image.raw_headers["OBJECT"].astext.ilike(object_pattern))
+        # ILIKE is a cheap pre-filter only -- it also matches sibling panels
+        # for which this panel's number is a prefix (e.g. "1" matching
+        # "Panel 12"); pair it with an exact-number regex (AUD-008).
+        if panel_label:
+            from app.services.mosaic_detection import exact_panel_regex, load_mosaic_keywords, panel_number_from_label
+
+            keywords = await load_mosaic_keywords(session)
+            expected_num = panel_number_from_label(panel_label)
+            base_filter.append(
+                Image.raw_headers["OBJECT"].astext.op("~*")(exact_panel_regex(keywords, expected_num))
+            )
     if included_dates is not None:
         if included_dates:
             base_filter.append(Image.session_date.in_(included_dates))
@@ -196,6 +208,7 @@ async def select_best_frame_for_filter(
     filter_name: str,
     session: AsyncSession,
     included_dates: list | None = None,
+    panel_label: str | None = None,
 ) -> tuple[Any, float] | None:
     """Select the best LIGHT frame for a specific filter using quality scoring.
     Returns (frame, score) or None.
@@ -208,6 +221,16 @@ async def select_best_frame_for_filter(
     ]
     if object_pattern:
         base_filter.append(Image.raw_headers["OBJECT"].astext.ilike(object_pattern))
+        # See select_best_frame: ILIKE alone can match a sibling panel whose
+        # number this panel's number is a prefix of (AUD-008).
+        if panel_label:
+            from app.services.mosaic_detection import exact_panel_regex, load_mosaic_keywords, panel_number_from_label
+
+            keywords = await load_mosaic_keywords(session)
+            expected_num = panel_number_from_label(panel_label)
+            base_filter.append(
+                Image.raw_headers["OBJECT"].astext.op("~*")(exact_panel_regex(keywords, expected_num))
+            )
     if included_dates is not None:
         if included_dates:
             base_filter.append(Image.session_date.in_(included_dates))
@@ -255,6 +278,7 @@ async def find_default_filter(
     """
     from sqlalchemy import func as sa_func
     from collections import defaultdict
+    from app.services.mosaic_detection import exact_panel_regex, load_mosaic_keywords, panel_number_from_label
 
     # ----------------------------------------------------------------
     # Partition panels into "simple" (no object_pattern, no per-panel
@@ -273,6 +297,20 @@ async def find_default_filter(
             complex_panels.append(panel)
         else:
             simple_panels.append(panel)
+
+    # ILIKE alone matches sibling panels for which this panel's number is a
+    # prefix (e.g. "1" matching "Panel 12"); pair it with an exact-number
+    # regex for every panel that has an object_pattern (AUD-008).
+    keywords = await load_mosaic_keywords(session) if any(p.object_pattern for p in complex_panels) else []
+
+    def _object_pattern_filters(panel) -> list:
+        if not panel.object_pattern:
+            return []
+        expected_num = panel_number_from_label(panel.panel_label)
+        return [
+            Image.raw_headers["OBJECT"].astext.ilike(panel.object_pattern),
+            Image.raw_headers["OBJECT"].astext.op("~*")(exact_panel_regex(keywords, expected_num)),
+        ]
 
     all_filters: dict[str, float] = {}
 
@@ -303,8 +341,7 @@ async def find_default_filter(
             Image.image_type == "LIGHT",
             Image.file_path.isnot(None),
         ]
-        if panel.object_pattern:
-            base_filter.append(Image.raw_headers["OBJECT"].astext.ilike(panel.object_pattern))
+        base_filter.extend(_object_pattern_filters(panel))
         if panel_included_dates is not None:
             pid = str(panel.id)
             if pid in panel_included_dates:
@@ -378,8 +415,7 @@ async def find_default_filter(
             Image.file_path.isnot(None),
             Image.filter_used.in_(available),
         ]
-        if panel.object_pattern:
-            base_filter.append(Image.raw_headers["OBJECT"].astext.ilike(panel.object_pattern))
+        base_filter.extend(_object_pattern_filters(panel))
         if panel_included_dates is not None:
             pid = str(panel.id)
             if pid in panel_included_dates:
@@ -701,13 +737,13 @@ async def build_mosaic_composite(
             if filter_name:
                 result = await select_best_frame_for_filter(
                     panel.target_id, panel.object_pattern, filter_name, session,
-                    included_dates=included_dates,
+                    included_dates=included_dates, panel_label=panel.panel_label,
                 )
                 frame = result[0] if result else None
             else:
                 frame = await select_best_frame(
                     panel.target_id, panel.object_pattern, session,
-                    included_dates=included_dates,
+                    included_dates=included_dates, panel_label=panel.panel_label,
                 )
             if frame and frame.file_path:
                 panel_frames.append((panel, frame))

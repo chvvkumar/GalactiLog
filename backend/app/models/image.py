@@ -34,6 +34,10 @@ class Image(Base):
 
     # Quality metrics
     median_hfr: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # FWHM parsed from FITS/XISF headers (FWHM/MEANFWHM keywords). Kept separate
+    # from median_hfr because HFR and FWHM are different metrics on different
+    # scales, and separate from the CSV-sourced `fwhm` column below.
+    median_fwhm: Mapped[float | None] = mapped_column(Float, nullable=True)
     eccentricity: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     # --- CSV metrics (N.I.N.A. ImageMetaData) ---
@@ -93,4 +97,14 @@ class Image(Base):
         Index("ix_images_raw_headers", "raw_headers", postgresql_using="gin"),
         Index("ix_images_telescope", "telescope"),
         Index("ix_images_camera", "camera"),
+        Index("ix_images_median_hfr", "median_hfr"),
+        Index("ix_images_fwhm", "fwhm"),
+        Index("ix_images_eccentricity", "eccentricity"),
+        Index("ix_images_detected_stars", "detected_stars"),
+        Index("ix_images_guiding_rms_arcsec", "guiding_rms_arcsec"),
+        Index("ix_images_adu_mean", "adu_mean"),
+        Index("ix_images_focuser_temp", "focuser_temp"),
+        Index("ix_images_ambient_temp", "ambient_temp"),
+        Index("ix_images_humidity", "humidity"),
+        Index("ix_images_airmass", "airmass"),
     )

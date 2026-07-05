@@ -1,5 +1,50 @@
 // frontend/src/utils/filterStyles.ts
 
+// Canonical filter category for a given filter name.
+// Maps all common naming variations to one of the 7 standard categories,
+// or returns null for non-standard filters (IR, Duoband, etc.)
+export function canonicalFilterCategory(name: string): string | null {
+  const n = name.toLowerCase().replace(/[_\-\s]/g, "");
+  // Luminance
+  if (n === "l" || n === "lum" || n === "luminance" || n === "luminosity" || n === "clear") return "L";
+  // Red
+  if (n === "r" || n === "red") return "R";
+  // Green
+  if (n === "g" || n === "green") return "G";
+  // Blue
+  if (n === "b" || n === "blue") return "B";
+  // Sulfur II - check before Ha to avoid "sho" false matches
+  if (n === "sii" || n === "s2" || n === "s" || n === "sulfur" || n === "sulphur"
+    || n === "sulfurii" || n === "sulphurii") return "SII";
+  // Hydrogen alpha
+  if (n === "ha" || n === "h" || n === "halpha" || n === "hydrogenalpha"
+    || n === "hydrogen" || n === "h alpha" || n === "656nm" || n === "656") return "Ha";
+  // Oxygen III
+  if (n === "oiii" || n === "o3" || n === "o" || n === "oxygen" || n === "oxygeniii"
+    || n === "500nm" || n === "501nm") return "OIII";
+  return null;
+}
+
+// Single default gray used whenever a filter name has no color-map, alias-map,
+// or canonicalCategory hit (AUD-024).
+export const DEFAULT_FILTER_COLOR = "#666666";
+
+// Shared filter -> color resolution, used everywhere a filter name needs a
+// display color (badges, charts, toggles) so the same filter always renders
+// the same color regardless of page (AUD-024).
+export function getFilterColor(
+  name: string,
+  colorMap: Record<string, string>,
+  aliasMap: Record<string, string>,
+): string {
+  const canonical = aliasMap[name] || name;
+  if (colorMap[canonical]) return colorMap[canonical];
+  if (colorMap[name]) return colorMap[name];
+  const cat = canonicalFilterCategory(name);
+  if (cat && colorMap[cat]) return colorMap[cat];
+  return DEFAULT_FILTER_COLOR;
+}
+
 export type FilterBadgeStyle =
   | "solid"
   | "muted"

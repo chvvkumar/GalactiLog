@@ -1,13 +1,6 @@
 import { Component } from "solid-js";
 import type { OverviewStats } from "../types";
-import { formatIntegration } from "../utils/format";
-
-function formatBytes(b: number): string {
-  if (b < 1e6) return (b / 1e3).toFixed(0) + " KB";
-  if (b < 1e9) return (b / 1e6).toFixed(0) + " MB";
-  if (b < 1e12) return (b / 1e9).toFixed(1) + " GB";
-  return (b / 1e12).toFixed(2) + " TB";
-}
+import { formatIntegration, formatBytes } from "../utils/format";
 
 function formatSpan(start: string | null, end: string | null): string {
   if (!start || !end) return "\u2014";
@@ -36,8 +29,8 @@ const StatsOverview: Component<{
 }> = (props) => {
   const cards = (): { label: string; subtitle: string; value: string; title?: string }[] => {
     const ov = props.overview;
-    const avgSession = ov.session_count > 0
-      ? formatIntegration(ov.total_integration_seconds / ov.session_count)
+    const avgRigSession = ov.rig_session_count > 0
+      ? formatIntegration(ov.total_integration_seconds / ov.rig_session_count)
       : "\u2014";
     const avgPerTarget = ov.target_count > 0
       ? formatIntegration(ov.total_integration_seconds / ov.target_count)
@@ -47,8 +40,8 @@ const StatsOverview: Component<{
       { label: "Total Frames", subtitle: "all LIGHT frames", value: ov.total_frames.toLocaleString() },
       { label: "Catalogued Size", subtitle: props.storage ? `${formatBytes(props.storage.fits_disk_bytes)} on disk` : "", value: props.storage ? formatBytes(props.storage.fits_bytes) : "—", title: "Catalogued Size: total size of FITS files recorded in the catalog (sum of file sizes in the database; reflects the include-calibration setting). The 'on disk' figure is the actual disk usage of the FITS directory measured with du, including files not yet catalogued such as excluded calibration frames." },
       { label: "Active Span", subtitle: formatSpanSubtitle(ov.first_capture_date, ov.last_capture_date), value: formatSpan(ov.first_capture_date, ov.last_capture_date) },
-      { label: "Avg Session Length", subtitle: `${ov.session_count.toLocaleString()} sessions`, value: avgSession },
-      { label: "Avg per Target", subtitle: `${ov.target_count.toLocaleString()} targets`, value: avgPerTarget },
+      { label: "Avg Rig-Session Length", subtitle: `${ov.rig_session_count.toLocaleString()} rig-sessions`, value: avgRigSession, title: "A rig-session is one night imaged with one telescope+camera combination; a single night imaged with two rigs counts as two rig-sessions here. This differs from the Imaging Calendar and per-target session counts, which count distinct imaging nights." },
+      { label: "Avg per Target", subtitle: `${ov.target_count.toLocaleString()} resolved targets`, value: avgPerTarget },
     ];
   };
 

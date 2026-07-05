@@ -244,10 +244,15 @@ def sort_clause(sort_by: str, sort_dir: str) -> str:
         "integration": "total_integration",
         "lastSession": "last_session_date",
         "name": "primary_name",
+        "equipment": "equipment_sort_key",
     }
     col = col_map.get(sort_by, "total_integration")
     direction = "ASC" if sort_dir == "asc" else "DESC"
     nulls = "NULLS LAST" if direction == "DESC" else "NULLS FIRST"
+    if sort_by == "equipment":
+        # Uncategorized targets always sort last, regardless of direction,
+        # matching the previous client-side sort's behavior.
+        return f"(target_key = 'obj:__uncategorized__') ASC, {col} {direction} {nulls}"
     return f"{col} {direction} {nulls}"
 
 
@@ -1199,6 +1204,49 @@ async def list_targets_aggregated(
     # group in both phases.
     gk = "coalesce(CAST(i.resolved_target_id AS VARCHAR), concat('obj:', coalesce(nullif(i.raw_headers->>'OBJECT', ''), '__uncategorized__')))"
 
+    # Equipment sort support: only computed when actively sorting by
+    # equipment, since it requires two extra per-group array aggregates plus
+    # a normalization pass over the (small) alias maps. `grouped_eq` layers a
+    # single `equipment_sort_key` column on top of `grouped` -- the
+    # space-joined, alphabetized set of normalized camera + telescope names
+    # for the group, mirroring the Python-side normalization in Phase 4
+    # below (`equipment_map`). Uncategorized targets are sent last via
+    # `sort_clause`, independent of this key.
+    equipment_group_cols = ""
+    equipment_key_cte = ""
+    grouped_source = "grouped"
+    if sort_by == "equipment":
+        equipment_group_cols = (
+            ",\n               array_agg(DISTINCT coalesce(CAST(:cam_alias_map AS jsonb) ->> i.camera, i.camera)) "
+            "FILTER (WHERE i.camera IS NOT NULL) AS cam_arr,\n"
+            "               array_agg(DISTINCT coalesce(CAST(:tel_alias_map AS jsonb) ->> i.telescope, i.telescope)) "
+            "FILTER (WHERE i.telescope IS NOT NULL) AS tel_arr"
+        )
+        params["cam_alias_map"] = json.dumps(cam_map)
+        params["tel_alias_map"] = json.dumps(tel_map)
+        equipment_key_cte = """
+    grouped_eq AS (
+        SELECT g.*,
+               (
+                   SELECT array_to_string(array_agg(DISTINCT eq ORDER BY eq), ' ')
+                   FROM unnest(coalesce(g.cam_arr, ARRAY[]::text[]) || coalesce(g.tel_arr, ARRAY[]::text[])) AS eq
+                   WHERE eq IS NOT NULL AND eq != ''
+               ) AS equipment_sort_key
+        FROM grouped g
+    ),
+    """
+        grouped_source = "grouped_eq"
+
+    # NOTE (AUD-032, axis 1): the resulting `agg.target_count` below counts
+    # every group in `gk`, including unresolved-OBJECT / uncategorized "obj:"
+    # buckets, alongside resolved targets. This is intentionally a different,
+    # broader count than the Statistics overview's `target_count`
+    # (`stats._query_overview`, which counts only `count(distinct
+    # resolved_target_id)` and so excludes unresolved frames entirely). Both
+    # are kept as distinct metrics -- this one drives the Dashboard sidebar's
+    # "Targets" figure (a list-entry count including unresolved groups), the
+    # Statistics figure is labeled "Resolved targets". Do not silently unify
+    # them without updating both labels.
     combined_sql = text(f"""
     WITH grouped AS (
         SELECT {gk} AS target_key,
@@ -1209,19 +1257,20 @@ async def list_targets_aggregated(
                count(distinct coalesce(CAST(i.session_date AS VARCHAR), 'unknown')) AS session_count,
                max(i.session_date) AS last_session_date,
                min(i.session_date) AS oldest_date,
-               max(i.session_date) AS newest_date
+               max(i.session_date) AS newest_date{equipment_group_cols}
         FROM images i LEFT JOIN targets t ON i.resolved_target_id = t.id
         WHERE {where_sql}
         GROUP BY {gk}
         {having_sql}
     ),
+    {equipment_key_cte}
     agg AS (
         SELECT count(*) AS target_count, sum(total_integration) AS total_integration,
                sum(total_frames) AS total_frames,
-               min(oldest_date) AS oldest, max(newest_date) AS newest FROM grouped
+               min(oldest_date) AS oldest, max(newest_date) AS newest FROM {grouped_source}
     ),
     page AS (
-        SELECT * FROM grouped ORDER BY {sort_clause(sort_by, sort_dir)}
+        SELECT * FROM {grouped_source} ORDER BY {sort_clause(sort_by, sort_dir)}
         LIMIT :page_size OFFSET :page_offset
     )
     SELECT (SELECT target_count FROM agg) AS agg_target_count,

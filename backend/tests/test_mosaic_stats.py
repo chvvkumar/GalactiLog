@@ -113,6 +113,12 @@ class _FakeSession:
             return _Result(self._custom_rows)
         return _Result([])
 
+    async def get(self, model, pk):
+        """Only used by load_mosaic_keywords for the UserSettings row."""
+        settings = MagicMock()
+        settings.general = {"mosaic_keywords": ["Panel"]}
+        return settings
+
 
 def _idrow(value):
     r = MagicMock()

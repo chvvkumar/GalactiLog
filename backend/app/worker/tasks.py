@@ -4,6 +4,7 @@ from datetime import datetime
 from pathlib import Path
 
 import fitsio
+from celery.exceptions import SoftTimeLimitExceeded
 from sqlalchemy import create_engine, func, select, text, update as sa_update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -21,7 +22,11 @@ from app.services.target_resolver import resolve_target, normalize_sql_expr, mat
 from app.services.simbad_repair import repair_corrupted_simbad_cache
 from app.services.thumbnail import generate_thumbnail
 from app.services.xisf_parser import extract_xisf_metadata, generate_xisf_thumbnail
-from app.services.session_date import compute_session_date, extract_longitude
+from app.services.session_date import (
+    compute_session_date,
+    extract_longitude,
+    warn_imaging_night_fallback,
+)
 from app.schemas.settings import GeneralSettings
 from app.worker.celery_app import celery_app
 
@@ -53,6 +58,20 @@ def _activity_session():
 
 _redis = get_sync_redis()
 
+# Guards run_scan against duplicate concurrent execution (AUD-016): a second
+# dispatch (double-click, or auto_scan_tick racing a manual trigger) bails
+# out immediately instead of enumerating the tree twice. TTL covers only the
+# enumeration/dispatch phase of run_scan, not the async ingest tasks it queues,
+# so it self-heals quickly if a worker dies mid-scan.
+SCAN_RUN_LOCK = "scan:run_lock"
+SCAN_RUN_LOCK_TTL = 300  # 5 minutes
+
+# AUD-021: _do_ingest runs once per image, so the imaging-night UTC-fallback
+# warning must not be emitted per call (tens of thousands per scan, and app.*
+# loggers feed the DB-backed app_logs sink). Module-level once-per-process
+# guard: each worker process warns at most once.
+_imaging_night_fallback_warned = False
+
 
 def _invalidate_stats_cache():
     """Delete the stats cache key from Redis so the next stats request is fresh."""
@@ -72,211 +91,234 @@ def run_scan(self, include_calibration: bool = True, force_orphan_cleanup: bool 
     orphan cleanup is bypassed so a deliberate bulk deletion is reflected in the
     catalog. This flag is ephemeral and never set by auto-scans.
     """
-    from app.services.scanner import scan_directory
-
-    clear_cancel_sync(_redis)
-    start_scanning_sync(_redis)
-
-    # Get known paths and file stats from DB for delta scanning
-    with Session(_sync_engine) as session:
-        result = session.execute(
-            select(Image.file_path, Image.file_size, Image.file_mtime)
+    if not _redis.set(SCAN_RUN_LOCK, "1", nx=True, ex=SCAN_RUN_LOCK_TTL):
+        logger.info(
+            "run_scan: a scan is already running (run lock held), "
+            "skipping duplicate dispatch"
         )
-        rows = result.all()
-        known_paths = {row[0] for row in rows}
-        known_file_stats = {row[0]: (row[1], row[2]) for row in rows}
-
-    # Include previously skipped calibration paths so they aren't re-queued
-    if not include_calibration:
-        known_paths |= get_skipped_paths_sync(_redis)
-    else:
-        # Calibration now included - clear the skip cache so they get ingested
-        clear_skipped_paths_sync(_redis)
-
-    fits_root = Path(settings.fits_data_path)
-
-    # Load scan filters from user settings
-    from app.services.scan_filters import ScanFilterConfig
-    with Session(_sync_engine) as session:
-        us = session.execute(
-            select(UserSettings).where(UserSettings.id == SETTINGS_ROW_ID)
-        ).scalar_one_or_none()
-        general = (us.general if us else {}) or {}
+        return {"status": "skipped", "reason": "already running"}
     try:
-        filter_config = ScanFilterConfig.from_settings(general, fits_root)
-    except ValueError as exc:
-        logger.error("Invalid scan filters, scanning with no filters: %s", exc)
-        filter_config = ScanFilterConfig(include_paths=[], exclude_paths=[], name_rules=[])
+        from app.services.scanner import scan_directory
 
-    # Dispatch ingest tasks as files are discovered (parallel discovery + ingestion)
-    # Calibration filtering is deferred to the ingest phase to avoid opening
-    # every file during discovery (costly on NFS).
-    def _queue_file(path: Path) -> None:
-        ingest_file.delay(str(path), include_calibration=include_calibration)
+        clear_cancel_sync(_redis)
+        start_scanning_sync(_redis)
 
-    def _queue_changed_file(path: Path) -> None:
-        """Re-ingest a known file whose size or mtime changed on disk."""
-        reingest_changed_file.delay(str(path), include_calibration=include_calibration)
-
-    new_files: list[Path] = []
-    changed_files: list[Path] = []
-    all_disk_paths: set[str] = set()
-
-    for scan_root in filter_config.roots(fits_root):
-        if is_cancel_requested_sync(_redis):
-            break
-        nf, cf, paths = scan_directory(
-            scan_root,
-            known_paths=known_paths,
-            known_file_stats=known_file_stats,
-            on_progress=lambda count: set_discovered_sync(_redis, count),
-            is_cancelled=lambda: is_cancel_requested_sync(_redis),
-            on_new_file=_queue_file,
-            on_changed_file=_queue_changed_file,
-            filter_config=filter_config,
-            fits_root=fits_root,
-        )
-        new_files.extend(nf)
-        changed_files.extend(cf)
-        all_disk_paths.update(paths)
-
-    if is_cancel_requested_sync(_redis):
-        set_cancelled_sync(_redis)
-        with _activity_session() as _db:
-            _emit_activity_sync(
-                _db, redis=_redis, category="scan", severity="info",
-                event_type="scan_stopped",
-                message=f"Scan stopped by user ({len(new_files)} files discovered before stop)",
-                details={"discovered": len(new_files)}, actor="system",
-            )
-        return {"status": "cancelled"}
-
-    if changed_files:
-        logger.info("Delta scan: %d changed files queued for re-ingest", len(changed_files))
-        with _activity_session() as _db:
-            _emit_activity_sync(
-                _db, redis=_redis, category="scan", severity="info",
-                event_type="delta_scan",
-                message=f"Delta scan: {len(changed_files)} changed file{'s' if len(changed_files) != 1 else ''} detected and re-queued",
-                details={"changed_files": len(changed_files)}, actor="system",
-            )
-
-    # Detect and remove orphaned DB records (files deleted from disk).
-    # CRITICAL: only consider rows the walker would have actually visited
-    # under the current filter config. When include_paths or excludes narrow
-    # the scan, out-of-scope rows appear "missing from disk" even though the
-    # walker never looked for them. Those must NOT be treated as orphans.
-    in_scope_known_paths = {
-        p for p in known_paths
-        if p and filter_config.should_include_file(Path(p), fits_root)
-    }
-    orphaned_paths = in_scope_known_paths - all_disk_paths
-    removed = 0
-    _threshold = max(1, len(in_scope_known_paths)) * 0.5
-    _large_removal = len(orphaned_paths) >= _threshold or len(all_disk_paths) == 0
-    if orphaned_paths and (force_orphan_cleanup or len(orphaned_paths) < _threshold):
-        # Safety: only clean up if less than 50% of files appear missing
-        # (protects against unmounted shares / unreachable storage), unless an
-        # admin forced a one-time cleanup to reflect a deliberate bulk deletion.
+        # Get known paths and file stats from DB for delta scanning
         with Session(_sync_engine) as session:
-            for batch_start in range(0, len(orphaned_paths), 500):
-                batch = list(orphaned_paths)[batch_start:batch_start + 500]
-                rows = session.execute(
-                    select(Image.id, Image.thumbnail_path).where(
-                        Image.file_path.in_(batch)
-                    )
-                ).all()
-                for img_id, thumb_path in rows:
-                    if thumb_path:
-                        try:
-                            Path(thumb_path).unlink(missing_ok=True)
-                        except OSError:
-                            pass
-                    session.execute(
-                        text("DELETE FROM images WHERE id = :id"),
-                        {"id": img_id},
-                    )
-                    removed += 1
-                session.commit()
-        if removed:
-            logger.info("Removed %d orphaned image records (files deleted from disk)", removed)
+            result = session.execute(
+                select(Image.file_path, Image.file_size, Image.file_mtime)
+            )
+            rows = result.all()
+            known_paths = {row[0] for row in rows}
+            known_file_stats = {row[0]: (row[1], row[2]) for row in rows}
+
+        # Include previously skipped calibration paths so they aren't re-queued
+        if not include_calibration:
+            known_paths |= get_skipped_paths_sync(_redis)
+        else:
+            # Calibration now included - clear the skip cache so they get ingested
+            clear_skipped_paths_sync(_redis)
+
+        fits_root = Path(settings.fits_data_path)
+
+        # Load scan filters from user settings
+        from app.services.scan_filters import ScanFilterConfig
+        with Session(_sync_engine) as session:
+            us = session.execute(
+                select(UserSettings).where(UserSettings.id == SETTINGS_ROW_ID)
+            ).scalar_one_or_none()
+            general = (us.general if us else {}) or {}
+        try:
+            filter_config = ScanFilterConfig.from_settings(general, fits_root)
+        except ValueError as exc:
+            logger.error("Invalid scan filters, scanning with no filters: %s", exc)
+            filter_config = ScanFilterConfig(include_paths=[], exclude_paths=[], name_rules=[])
+
+        # Dispatch ingest tasks as files are discovered (parallel discovery + ingestion)
+        # Calibration filtering is deferred to the ingest phase to avoid opening
+        # every file during discovery (costly on NFS).
+        # Guard against dispatching the same path twice within one scan
+        # (AUD-015). roots() already drops nested include paths, but this is a
+        # cheap belt-and-suspenders against any other overlap source (e.g.
+        # symlinks resolving two roots onto the same tree).
+        queued_paths: set[str] = set()
+
+        def _queue_file(path: Path) -> None:
+            key = str(path)
+            if key in queued_paths:
+                return
+            queued_paths.add(key)
+            ingest_file.delay(str(path), include_calibration=include_calibration)
+
+        def _queue_changed_file(path: Path) -> None:
+            """Re-ingest a known file whose size or mtime changed on disk."""
+            key = str(path)
+            if key in queued_paths:
+                return
+            queued_paths.add(key)
+            reingest_changed_file.delay(str(path), include_calibration=include_calibration)
+
+        new_files: list[Path] = []
+        changed_files: list[Path] = []
+        all_disk_paths: set[str] = set()
+
+        for scan_root in filter_config.roots(fits_root):
+            if is_cancel_requested_sync(_redis):
+                break
+            nf, cf, paths = scan_directory(
+                scan_root,
+                known_paths=known_paths,
+                known_file_stats=known_file_stats,
+                on_progress=lambda count: set_discovered_sync(_redis, count),
+                is_cancelled=lambda: is_cancel_requested_sync(_redis),
+                on_new_file=_queue_file,
+                on_changed_file=_queue_changed_file,
+                filter_config=filter_config,
+                fits_root=fits_root,
+            )
+            new_files.extend(nf)
+            changed_files.extend(cf)
+            all_disk_paths.update(paths)
+
+        if is_cancel_requested_sync(_redis):
+            set_cancelled_sync(_redis)
             with _activity_session() as _db:
                 _emit_activity_sync(
                     _db, redis=_redis, category="scan", severity="info",
-                    event_type="orphan_cleanup",
-                    message=f"Removed {removed} deleted file{'s' if removed != 1 else ''} from catalog",
-                    details={"removed": removed}, actor="system",
+                    event_type="scan_stopped",
+                    message=f"Scan stopped by user ({len(new_files)} files discovered before stop)",
+                    details={"discovered": len(new_files)}, actor="system",
                 )
-            if force_orphan_cleanup and _large_removal and removed:
-                pct = round(removed / max(1, len(in_scope_known_paths)) * 100)
-                logger.warning(
-                    "Forced orphan cleanup removed %d of %d catalogued files (%d%%)",
-                    removed, len(in_scope_known_paths), pct,
+            return {"status": "cancelled"}
+
+        if changed_files:
+            logger.info("Delta scan: %d changed files queued for re-ingest", len(changed_files))
+            with _activity_session() as _db:
+                _emit_activity_sync(
+                    _db, redis=_redis, category="scan", severity="info",
+                    event_type="delta_scan",
+                    message=f"Delta scan: {len(changed_files)} changed file{'s' if len(changed_files) != 1 else ''} detected and re-queued",
+                    details={"changed_files": len(changed_files)}, actor="system",
                 )
+
+        # Detect and remove orphaned DB records (files deleted from disk).
+        # CRITICAL: only consider rows the walker would have actually visited
+        # under the current filter config. When include_paths or excludes narrow
+        # the scan, out-of-scope rows appear "missing from disk" even though the
+        # walker never looked for them. Those must NOT be treated as orphans.
+        in_scope_known_paths = {
+            p for p in known_paths
+            if p and filter_config.should_include_file(Path(p), fits_root)
+        }
+        orphaned_paths = in_scope_known_paths - all_disk_paths
+        removed = 0
+        _threshold = max(1, len(in_scope_known_paths)) * 0.5
+        _large_removal = len(orphaned_paths) >= _threshold or len(all_disk_paths) == 0
+        if orphaned_paths and (force_orphan_cleanup or len(orphaned_paths) < _threshold):
+            # Safety: only clean up if less than 50% of files appear missing
+            # (protects against unmounted shares / unreachable storage), unless an
+            # admin forced a one-time cleanup to reflect a deliberate bulk deletion.
+            with Session(_sync_engine) as session:
+                for batch_start in range(0, len(orphaned_paths), 500):
+                    batch = list(orphaned_paths)[batch_start:batch_start + 500]
+                    rows = session.execute(
+                        select(Image.id, Image.thumbnail_path).where(
+                            Image.file_path.in_(batch)
+                        )
+                    ).all()
+                    for img_id, thumb_path in rows:
+                        if thumb_path:
+                            try:
+                                Path(thumb_path).unlink(missing_ok=True)
+                            except OSError:
+                                pass
+                        session.execute(
+                            text("DELETE FROM images WHERE id = :id"),
+                            {"id": img_id},
+                        )
+                        removed += 1
+                    session.commit()
+            if removed:
+                logger.info("Removed %d orphaned image records (files deleted from disk)", removed)
                 with _activity_session() as _db:
                     _emit_activity_sync(
-                        _db, redis=_redis, category="scan", severity="warning",
-                        event_type="orphan_force_warning",
-                        message=(
-                            f"Forced orphan cleanup removed {removed} of "
-                            f"{len(in_scope_known_paths)} catalogued file"
-                            f"{'s' if removed != 1 else ''} ({pct}% of the catalog). "
-                            f"If a storage share was unmounted or unreachable, "
-                            f"restore from backup."
-                        ),
-                        details={"removed": removed, "total_known": len(in_scope_known_paths), "forced": True},
-                        actor="system",
+                        _db, redis=_redis, category="scan", severity="info",
+                        event_type="orphan_cleanup",
+                        message=f"Removed {removed} deleted file{'s' if removed != 1 else ''} from catalog",
+                        details={"removed": removed}, actor="system",
                     )
-    elif orphaned_paths:
-        logger.warning(
-            "Skipped orphan cleanup: %d of %d in-scope files missing (>50%%) - "
-            "possible unmounted share or unreachable storage",
-            len(orphaned_paths), len(in_scope_known_paths),
-        )
-        with _activity_session() as _db:
-            _emit_activity_sync(
-                _db, redis=_redis, category="scan", severity="warning",
-                event_type="orphan_warning",
-                message=f"Orphan cleanup skipped: {len(orphaned_paths)} of {len(in_scope_known_paths)} in-scope files missing (>50%) - possible unmounted share",
-                details={"missing": len(orphaned_paths), "total_known": len(in_scope_known_paths)},
-                actor="system",
+                if force_orphan_cleanup and _large_removal and removed:
+                    pct = round(removed / max(1, len(in_scope_known_paths)) * 100)
+                    logger.warning(
+                        "Forced orphan cleanup removed %d of %d catalogued files (%d%%)",
+                        removed, len(in_scope_known_paths), pct,
+                    )
+                    with _activity_session() as _db:
+                        _emit_activity_sync(
+                            _db, redis=_redis, category="scan", severity="warning",
+                            event_type="orphan_force_warning",
+                            message=(
+                                f"Forced orphan cleanup removed {removed} of "
+                                f"{len(in_scope_known_paths)} catalogued file"
+                                f"{'s' if removed != 1 else ''} ({pct}% of the catalog). "
+                                f"If a storage share was unmounted or unreachable, "
+                                f"restore from backup."
+                            ),
+                            details={"removed": removed, "total_known": len(in_scope_known_paths), "forced": True},
+                            actor="system",
+                        )
+        elif orphaned_paths:
+            logger.warning(
+                "Skipped orphan cleanup: %d of %d in-scope files missing (>50%%) - "
+                "possible unmounted share or unreachable storage",
+                len(orphaned_paths), len(in_scope_known_paths),
             )
+            with _activity_session() as _db:
+                _emit_activity_sync(
+                    _db, redis=_redis, category="scan", severity="warning",
+                    event_type="orphan_warning",
+                    message=f"Orphan cleanup skipped: {len(orphaned_paths)} of {len(in_scope_known_paths)} in-scope files missing (>50%) - possible unmounted share",
+                    details={"missing": len(orphaned_paths), "total_known": len(in_scope_known_paths)},
+                    actor="system",
+                )
 
-    total_queued = len(new_files) + len(changed_files)
-    if not total_queued:
-        set_idle_sync(_redis)
-        cataloged = len(known_paths) - removed
-        msg = f"Scan complete: no new files found ({cataloged} already cataloged)"
-        if removed:
-            msg += f", {removed} deleted files purged from catalog"
-        with _activity_session() as _db:
-            scan_activity_id = _emit_activity_sync(
-                _db, redis=_redis, category="scan", severity="info",
-                event_type="scan_complete", message=msg,
-                details={"completed": 0, "failed": 0, "already_known": cataloged, "removed": removed},
-                actor="system",
-            )
-        generate_reference_thumbnails.apply_async(countdown=20, kwargs={"parent_activity_id": scan_activity_id})
-        detect_duplicate_targets.apply_async(countdown=30, kwargs={"parent_activity_id": scan_activity_id})
-        backfill_dark_hours.apply_async(countdown=45, kwargs={"parent_activity_id": scan_activity_id})
-        return {"status": "complete", "new_files_queued": 0, "already_known": cataloged, "removed": removed}
+        total_queued = len(new_files) + len(changed_files)
+        if not total_queued:
+            set_idle_sync(_redis)
+            cataloged = len(known_paths) - removed
+            msg = f"Scan complete: no new files found ({cataloged} already cataloged)"
+            if removed:
+                msg += f", {removed} deleted files purged from catalog"
+            with _activity_session() as _db:
+                scan_activity_id = _emit_activity_sync(
+                    _db, redis=_redis, category="scan", severity="info",
+                    event_type="scan_complete", message=msg,
+                    details={"completed": 0, "failed": 0, "already_known": cataloged, "removed": removed},
+                    actor="system",
+                )
+            generate_reference_thumbnails.apply_async(countdown=20, kwargs={"parent_activity_id": scan_activity_id})
+            detect_duplicate_targets.apply_async(countdown=30, kwargs={"parent_activity_id": scan_activity_id})
+            backfill_dark_hours.apply_async(countdown=45, kwargs={"parent_activity_id": scan_activity_id})
+            return {"status": "complete", "new_files_queued": 0, "already_known": cataloged, "removed": removed}
 
-    # Transition to ingesting with final total - ingest tasks are already running
-    set_ingesting_sync(_redis, total=total_queued, removed=removed, new_files=len(new_files), changed_files=len(changed_files))
-    # Some tasks may have already completed during discovery, check now
-    check_complete_sync(_redis)
+        # Transition to ingesting with final total - ingest tasks are already running
+        set_ingesting_sync(_redis, total=total_queued, removed=removed, new_files=len(new_files), changed_files=len(changed_files))
+        # Some tasks may have already completed during discovery, check now
+        check_complete_sync(_redis)
 
-    # Post-scan tasks (smart_rebuild, detect_mosaic, detect_duplicates, backfill_dark_hours,
-    # generate_reference_thumbnails) are dispatched from check_complete_sync with parent_activity_id.
-    _invalidate_stats_cache()
+        # Post-scan tasks (smart_rebuild, detect_mosaic, detect_duplicates, backfill_dark_hours,
+        # generate_reference_thumbnails) are dispatched from check_complete_sync with parent_activity_id.
+        _invalidate_stats_cache()
 
-    return {
-        "status": "ingesting",
-        "new_files_queued": len(new_files),
-        "changed_files_queued": len(changed_files),
-        "already_known": len(known_paths),
-        "removed": removed,
-    }
+        return {
+            "status": "ingesting",
+            "new_files_queued": len(new_files),
+            "changed_files_queued": len(changed_files),
+            "already_known": len(known_paths),
+            "removed": removed,
+        }
+    finally:
+        _redis.delete(SCAN_RUN_LOCK)
 
 
 @celery_app.task
@@ -318,6 +360,26 @@ def auto_scan_tick():
     logger.info("Auto-scan triggered (interval=%dm)", interval_minutes)
     include_cal = (row.general or {}).get("include_calibration", False)
     run_scan.delay(include_calibration=include_cal)
+
+
+def _thumbnail_referenced(thumb_path_str: str) -> bool:
+    """Return True if any Image row references this thumbnail file.
+
+    The thumbnail filename is derived deterministically from the file path
+    (md5), so two ingest attempts for the same path target the same file.
+    Before unlinking a thumbnail after a failed insert we confirm no existing
+    row points at it, otherwise we would break the surviving row (AUD-015).
+    """
+    try:
+        with Session(_sync_engine) as session:
+            existing = session.execute(
+                select(Image.id).where(Image.thumbnail_path == thumb_path_str).limit(1)
+            ).first()
+            return existing is not None
+    except Exception:
+        # If the check itself fails, err on the side of NOT deleting a
+        # possibly-shared thumbnail.
+        return True
 
 
 def _do_ingest(fits_path: str, include_calibration: bool = True) -> dict:
@@ -408,6 +470,12 @@ def _do_ingest(fits_path: str, include_calibration: bool = True) -> dict:
         general = GeneralSettings(**(settings_row.general if settings_row and settings_row.general else {}))
 
     effective_lon = site_lon if site_lon is not None else general.observer_longitude
+    if general.use_imaging_night and effective_lon is None:
+        global _imaging_night_fallback_warned
+        if not _imaging_night_fallback_warned:
+            # Warn once per worker process, not once per ingested image.
+            warn_imaging_night_fallback(logger)
+            _imaging_night_fallback_warned = True
     session_date_val = compute_session_date(
         meta.get("capture_date"),
         use_imaging_night=general.use_imaging_night,
@@ -433,6 +501,7 @@ def _do_ingest(fits_path: str, include_calibration: bool = True) -> dict:
                 telescope=meta.get("telescope"),
                 camera=meta.get("camera"),
                 median_hfr=meta.get("median_hfr"),
+                median_fwhm=meta.get("median_fwhm"),
                 eccentricity=meta.get("eccentricity"),
                 raw_headers=meta.get("raw_headers", {}),
                 # CSV metrics (N.I.N.A. Session Metadata)
@@ -464,9 +533,17 @@ def _do_ingest(fits_path: str, include_calibration: bool = True) -> dict:
             )
             session.add(image)
             session.commit()
+    except IntegrityError:
+        # A row with this file_path already exists (UNIQUE constraint). The
+        # thumbnail we just (re)generated has a deterministic, path-derived
+        # filename, so it is the SAME file the pre-existing row's
+        # thumbnail_path points at. Do NOT unlink it -- deleting it would
+        # leave the surviving row pointing at a missing thumbnail (AUD-015).
+        raise
     except Exception:
-        # Clean up orphaned thumbnail if DB insert failed
-        if thumb_path and thumb_path.exists():
+        # Genuinely orphaned insert (non-duplicate failure): clean up the
+        # thumbnail we generated, but only if no existing row references it.
+        if thumb_path and thumb_path.exists() and not _thumbnail_referenced(str(thumb_path)):
             thumb_path.unlink(missing_ok=True)
         raise
 
@@ -598,7 +675,20 @@ def reingest_changed_file(self, fits_path: str, include_calibration: bool = True
     logger.info("Re-ingesting changed file: %s", path.name)
 
     try:
-        # Delete existing record
+        # AUD-029: validate the file is readable BEFORE deleting the existing
+        # catalog row. A file that is mid-write/truncated at the moment the
+        # size-change was detected raises here (ValueError/OSError). If we
+        # deleted first and then failed, an unrecoverable error would leave the
+        # frame with no catalog row until a later scan re-detected it. Reading
+        # the header/metadata is the failable I/O, so do it up front and bail
+        # without touching the DB or thumbnail when it fails.
+        if path.suffix.lower() == ".xisf":
+            extract_xisf_metadata(path)
+        else:
+            fitsio.read_header(str(path), ext=0)
+
+        # File is intact - now safe to delete the old record + thumbnail and
+        # re-run the full ingest pipeline.
         with Session(_sync_engine) as session:
             existing = session.execute(
                 select(Image).where(Image.file_path == fits_path)
@@ -619,6 +709,39 @@ def reingest_changed_file(self, fits_path: str, include_calibration: bool = True
         if _is_unrecoverable(exc) or self.request.retries >= self.max_retries:
             increment_failed_sync(_redis, file_path=fits_path, error=str(exc))
             return {"file": fits_path, "status": "failed", "error": str(exc)}
+        raise self.retry(exc=exc)
+
+
+@celery_app.task(bind=True, max_retries=3, default_retry_delay=30)
+def enrich_new_target_task(self, target_id: str) -> dict:
+    """Follow-up enrichment for a newly created target (AUD-006).
+
+    Dispatched async from `_create_target` so ingest is never blocked on Gaia/
+    HyperLEDA network latency. Runs the constellation fallback, per-target
+    catalog membership matching, cluster-gated Gaia distance, and galaxy-gated
+    HyperLEDA morphology/inclination. All steps are idempotent, so a retry is
+    safe. Makes at most a few network calls for one target, so the global
+    600s/660s Celery time limit is ample -- no task_annotations override needed.
+    """
+    import uuid as _uuid
+    from app.services.target_enrichment import enrich_new_target
+
+    try:
+        with Session(_sync_engine) as session:
+            target = session.get(Target, _uuid.UUID(str(target_id)))
+            if target is None:
+                logger.info("enrich_new_target_task: target %s not found", target_id)
+                return {"status": "missing", "target_id": str(target_id)}
+            result = enrich_new_target(session, target)
+            session.commit()
+        logger.info("enrich_new_target_task: enriched %s (%s)", target_id, result)
+        return {"status": "ok", "target_id": str(target_id), **result}
+    except SoftTimeLimitExceeded:
+        raise
+    except Exception as exc:
+        logger.warning("enrich_new_target_task failed for %s: %s", target_id, exc)
+        if self.request.retries >= self.max_retries:
+            return {"status": "failed", "target_id": str(target_id), "error": str(exc)}
         raise self.retry(exc=exc)
 
 
@@ -1185,48 +1308,75 @@ def rebuild_targets(self) -> dict:
 
     resolved = 0
     failed = 0
+    processed = 0
+    timed_out = False
 
-    # Phase 3: Resolve each and link images
-    for i, (obj_name, img_count) in enumerate(object_names):
-        if is_cancel_requested_sync(_redis):
-            details = {"resolved": resolved, "failed": failed, "total": total, "processed": i}
-            set_rebuild_cancelled_sync(
-                _redis,
-                f"Cancelled after {i}/{total} names ({resolved} resolved, {failed} failed)",
-                details,
-            )
-            with _activity_session() as _db:
-                _emit_activity_sync(
-                    _db, redis=_redis, category="rebuild", severity="info",
-                    event_type="rebuild_cancelled",
-                    message=f"Full Rebuild cancelled after {i}/{total} names",
-                    details=details, actor="system",
+    # Phase 3: Resolve each and link images. Each resolved name is committed on
+    # its own (below), so partial progress already persists across a kill; the
+    # SoftTimeLimitExceeded guard just makes sure REBUILD_KEY lands in a terminal
+    # state instead of being stranded at "running" (AUD-003).
+    try:
+        for i, (obj_name, img_count) in enumerate(object_names):
+            if is_cancel_requested_sync(_redis):
+                details = {"resolved": resolved, "failed": failed, "total": total, "processed": i}
+                set_rebuild_cancelled_sync(
+                    _redis,
+                    f"Cancelled after {i}/{total} names ({resolved} resolved, {failed} failed)",
+                    details,
                 )
-            logger.info("rebuild_targets: cancelled after %d/%d", i, total)
-            return {"status": "cancelled", **details}
+                with _activity_session() as _db:
+                    _emit_activity_sync(
+                        _db, redis=_redis, category="rebuild", severity="info",
+                        event_type="rebuild_cancelled",
+                        message=f"Full Rebuild cancelled after {i}/{total} names",
+                        details=details, actor="system",
+                    )
+                logger.info("rebuild_targets: cancelled after %d/%d", i, total)
+                return {"status": "cancelled", **details}
 
-        with Session(_sync_engine) as session:
-            target_id = resolve_target(obj_name, session, redis=_redis)
-
-        if target_id:
             with Session(_sync_engine) as session:
-                session.execute(text("""
-                    UPDATE images
-                    SET resolved_target_id = :tid
-                    WHERE resolved_target_id IS NULL
-                      AND raw_headers->>'OBJECT' = :obj_name
-                """), {"tid": target_id, "obj_name": obj_name})
-                session.commit()
-            resolved += 1
-            logger.info("rebuild_targets: %s -> %s (%d images)", obj_name, target_id, img_count)
-        else:
-            failed += 1
-            logger.info("rebuild_targets: FAILED %s (%d images)", obj_name, img_count)
+                target_id = resolve_target(obj_name, session, redis=_redis)
 
-        if (i + 1) % 5 == 0 or i + 1 == total:
-            set_rebuild_progress_sync(_redis, f"Resolving {i + 1}/{total} object names...")
+            if target_id:
+                with Session(_sync_engine) as session:
+                    session.execute(text("""
+                        UPDATE images
+                        SET resolved_target_id = :tid
+                        WHERE resolved_target_id IS NULL
+                          AND raw_headers->>'OBJECT' = :obj_name
+                    """), {"tid": target_id, "obj_name": obj_name})
+                    session.commit()
+                resolved += 1
+                logger.info("rebuild_targets: %s -> %s (%d images)", obj_name, target_id, img_count)
+            else:
+                failed += 1
+                logger.info("rebuild_targets: FAILED %s (%d images)", obj_name, img_count)
 
-        time.sleep(0.3)  # Rate limit SIMBAD
+            processed = i + 1
+            if (i + 1) % 5 == 0 or i + 1 == total:
+                set_rebuild_progress_sync(_redis, f"Resolving {i + 1}/{total} object names...")
+
+            time.sleep(0.3)  # Rate limit SIMBAD
+    except SoftTimeLimitExceeded:
+        timed_out = True
+
+    if timed_out:
+        details = {"resolved": resolved, "failed": failed, "total": total, "processed": processed}
+        set_rebuild_complete_sync(
+            _redis,
+            f"Full Rebuild paused at the time limit after {processed}/{total} names "
+            f"({resolved} resolved, {failed} failed)",
+            details,
+        )
+        with _activity_session() as _db:
+            _emit_activity_sync(
+                _db, redis=_redis, category="rebuild", severity="warning",
+                event_type="rebuild_complete",
+                message=f"Full Rebuild paused at time limit after {processed}/{total} names",
+                details=details, actor="system",
+            )
+        logger.warning("rebuild_targets: timed out after %d/%d names", processed, total)
+        return {"status": "timeout", **details}
 
     # Phase 4: Queue post-rebuild tasks
     detect_duplicate_targets.apply_async(countdown=10)
@@ -1297,47 +1447,75 @@ def retry_unresolved(self) -> dict:
 
     resolved = 0
     failed = 0
+    processed = 0
+    timed_out = False
 
-    # Phase 3: Resolve each and link images
-    for i, (obj_name, img_count) in enumerate(object_names):
-        if is_cancel_requested_sync(_redis):
-            details = {"resolved": resolved, "failed": failed, "total": total, "processed": i}
-            set_rebuild_cancelled_sync(
-                _redis,
-                f"Cancelled after {i}/{total} names ({resolved} resolved, {failed} still unresolved)",
-                details,
-            )
-            with _activity_session() as _db:
-                _emit_activity_sync(
-                    _db, redis=_redis, category="rebuild", severity="info",
-                    event_type="rebuild_cancelled",
-                    message=f"Retry Unresolved cancelled after {i}/{total} names",
-                    details=details, actor="system",
+    # Phase 3: Resolve each and link images. Only unresolved names are queried
+    # and each success is committed immediately, so a killed run resumes
+    # naturally (the next run re-selects whatever is still unresolved). The
+    # SoftTimeLimitExceeded guard just ensures a terminal REBUILD_KEY state
+    # instead of a stuck "running" (AUD-003).
+    try:
+        for i, (obj_name, img_count) in enumerate(object_names):
+            if is_cancel_requested_sync(_redis):
+                details = {"resolved": resolved, "failed": failed, "total": total, "processed": i}
+                set_rebuild_cancelled_sync(
+                    _redis,
+                    f"Cancelled after {i}/{total} names ({resolved} resolved, {failed} still unresolved)",
+                    details,
                 )
-            logger.info("retry_unresolved: cancelled after %d/%d", i, total)
-            return {"status": "cancelled", **details}
+                with _activity_session() as _db:
+                    _emit_activity_sync(
+                        _db, redis=_redis, category="rebuild", severity="info",
+                        event_type="rebuild_cancelled",
+                        message=f"Retry Unresolved cancelled after {i}/{total} names",
+                        details=details, actor="system",
+                    )
+                logger.info("retry_unresolved: cancelled after %d/%d", i, total)
+                return {"status": "cancelled", **details}
 
-        with Session(_sync_engine) as session:
-            target_id = resolve_target(obj_name, session, redis=_redis)
-
-        if target_id:
             with Session(_sync_engine) as session:
-                session.execute(text("""
-                    UPDATE images
-                    SET resolved_target_id = :tid
-                    WHERE resolved_target_id IS NULL
-                      AND raw_headers->>'OBJECT' = :obj_name
-                """), {"tid": target_id, "obj_name": obj_name})
-                session.commit()
-            resolved += 1
-            logger.info("retry_unresolved: %s -> %s (%d images)", obj_name, target_id, img_count)
-        else:
-            failed += 1
+                target_id = resolve_target(obj_name, session, redis=_redis)
 
-        if (i + 1) % 5 == 0 or i + 1 == total:
-            set_rebuild_progress_sync(_redis, f"Retrying {i + 1}/{total} unresolved names...")
+            if target_id:
+                with Session(_sync_engine) as session:
+                    session.execute(text("""
+                        UPDATE images
+                        SET resolved_target_id = :tid
+                        WHERE resolved_target_id IS NULL
+                          AND raw_headers->>'OBJECT' = :obj_name
+                    """), {"tid": target_id, "obj_name": obj_name})
+                    session.commit()
+                resolved += 1
+                logger.info("retry_unresolved: %s -> %s (%d images)", obj_name, target_id, img_count)
+            else:
+                failed += 1
 
-        time.sleep(0.3)  # Rate limit external services
+            processed = i + 1
+            if (i + 1) % 5 == 0 or i + 1 == total:
+                set_rebuild_progress_sync(_redis, f"Retrying {i + 1}/{total} unresolved names...")
+
+            time.sleep(0.3)  # Rate limit external services
+    except SoftTimeLimitExceeded:
+        timed_out = True
+
+    if timed_out:
+        details = {"resolved": resolved, "failed": failed, "total": total, "processed": processed}
+        set_rebuild_complete_sync(
+            _redis,
+            f"Retry Unresolved paused at the time limit after {processed}/{total} names "
+            f"({resolved} resolved, {failed} still unresolved)",
+            details,
+        )
+        with _activity_session() as _db:
+            _emit_activity_sync(
+                _db, redis=_redis, category="rebuild", severity="warning",
+                event_type="rebuild_complete",
+                message=f"Retry Unresolved paused at time limit after {processed}/{total} names",
+                details=details, actor="system",
+            )
+        logger.warning("retry_unresolved: timed out after %d/%d names", processed, total)
+        return {"status": "timeout", **details}
 
     details = {"resolved": resolved, "failed": failed, "total": total}
     set_rebuild_complete_sync(
@@ -1732,7 +1910,12 @@ def backfill_csv_metrics(self):
     """Walk FITS tree and backfill Image rows with CSV metric data."""
     import redis as _redis
 
-    redis_conn = _redis.from_url(settings.redis_url)
+    # decode_responses=True to match every other Redis connection in this
+    # module (app.config.get_sync_redis()) - without it, check_complete_sync's
+    # str-keyed hgetall() lookups below never match this connection's
+    # bytes-keyed results, which would silently defeat the kind="csv_backfill"
+    # cascade-suppression below (AUD-030).
+    redis_conn = _redis.from_url(settings.redis_url, decode_responses=True)
     root = Path(settings.fits_data_path)
 
     # Collect all directories containing ImageMetaData.csv
@@ -1742,7 +1925,7 @@ def backfill_csv_metrics(self):
         set_idle_sync(redis_conn)
         return {"updated": 0, "dirs": 0}
 
-    set_ingesting_sync(redis_conn, total=len(csv_dirs))
+    set_ingesting_sync(redis_conn, total=len(csv_dirs), kind="csv_backfill")
     total_updated = 0
 
     with _sync_engine.connect() as conn:
@@ -1833,6 +2016,32 @@ def run_data_migrations(self, from_version: int) -> dict:
                     session.commit()
                     results.append(f"v{ver}: {summary}")
                     logger.info("data_migrations: v%d complete - %s", ver, summary)
+                except SoftTimeLimitExceeded:
+                    # The task hit its (generous) time limit mid-migration.
+                    # Long per-target migration loops commit their work in
+                    # chunks, so that partial progress is already durable; only
+                    # the uncommitted tail is rolled back here. The version is
+                    # deliberately NOT stamped, so the entrypoint re-dispatches
+                    # this same migration on the next boot -- but because the
+                    # per-target enrichers skip already-enriched targets, the
+                    # replay is cheap and each run advances further until it
+                    # finally completes (AUD-035). A terminal activity event is
+                    # always written so this is never a silent loop.
+                    session.rollback()
+                    msg = (
+                        f"Data upgrade v{ver} ({desc}) paused at the task time "
+                        f"limit; committed progress is preserved and it will "
+                        f"resume on the next restart."
+                    )
+                    logger.warning("data_migrations: %s", msg)
+                    with _activity_session() as _db:
+                        _emit_activity_sync(
+                            _db, redis=_redis, category="migration", severity="warning",
+                            event_type="data_upgrade_paused",
+                            message=msg,
+                            details={"version": ver}, actor="system",
+                        )
+                    return {"status": "timeout", "version": ver}
                 except Exception as e:
                     session.rollback()
                     error_msg = f"Data upgrade failed at v{ver} ({desc}): {e}"
@@ -2087,7 +2296,16 @@ def generate_reference_thumbnails(self, force: bool = False, parent_activity_id:
     set_rebuild_running_sync(_redis, "ref_thumbnails", "Finding targets needing thumbnails...")
     output_dir = Path(settings.thumbnails_path) / "reference"
 
+    # Commit fetched thumbnails in small chunks so a run that is killed
+    # mid-loop (time limit, worker restart) persists the thumbnails it already
+    # fetched instead of rolling back the whole batch. Each subsequent run then
+    # re-queries only targets still missing a thumbnail and continues from
+    # there, rather than starting over (AUD-003). expire_on_commit is disabled
+    # so the pre-loaded target objects stay usable across those chunk commits
+    # without a reload round-trip per remaining target.
+    COMMIT_CHUNK = 10
     with Session(_sync_engine) as session:
+        session.expire_on_commit = False
         q = select(Target).where(
             Target.merged_into_id.is_(None),
             Target.ra.isnot(None),
@@ -2103,19 +2321,29 @@ def generate_reference_thumbnails(self, force: bool = False, parent_activity_id:
         )
         fetched = 0
         cancelled = False
-        for i, target in enumerate(targets):
-            if is_cancel_requested_sync(_redis):
-                cancelled = True
-                break
-            path = fetch_reference_thumbnail(target, output_dir)
-            if path:
-                target.reference_thumbnail_path = path
-                fetched += 1
-            if (i + 1) % 5 == 0 or i + 1 == total:
-                set_rebuild_progress_sync(
-                    _redis, f"Reference thumbnails: {i + 1}/{total} ({fetched} fetched)"
-                )
-            time.sleep(1.0)  # Rate limit
+        timed_out = False
+        try:
+            for i, target in enumerate(targets):
+                if is_cancel_requested_sync(_redis):
+                    cancelled = True
+                    break
+                path = fetch_reference_thumbnail(target, output_dir)
+                if path:
+                    target.reference_thumbnail_path = path
+                    fetched += 1
+                if (i + 1) % COMMIT_CHUNK == 0:
+                    session.commit()  # persist partial progress
+                if (i + 1) % 5 == 0 or i + 1 == total:
+                    set_rebuild_progress_sync(
+                        _redis, f"Reference thumbnails: {i + 1}/{total} ({fetched} fetched)"
+                    )
+                time.sleep(1.0)  # Rate limit
+        except SoftTimeLimitExceeded:
+            # Hit the (generous) task time limit. Persist what we have and fall
+            # through to write a terminal "complete" state so REBUILD_KEY is
+            # never left stuck at "running"; the remaining targets are picked up
+            # on the next run because they still have no thumbnail path.
+            timed_out = True
         session.commit()
 
     if cancelled:
@@ -2134,15 +2362,21 @@ def generate_reference_thumbnails(self, force: bool = False, parent_activity_id:
         return {"status": "cancelled", **stats}
 
     _invalidate_stats_cache()
-    stats = {"fetched": fetched, "total": total}
-    set_rebuild_complete_sync(
-        _redis, f"Fetched {fetched}/{total} reference thumbnails", stats
-    )
+    stats = {"fetched": fetched, "total": total, "timed_out": timed_out}
+    if timed_out:
+        message = (
+            f"Fetched {fetched}/{total} reference thumbnails "
+            "(paused at the time limit; the rest continue on the next scan)"
+        )
+    else:
+        message = f"Fetched {fetched}/{total} reference thumbnails"
+    set_rebuild_complete_sync(_redis, message, stats)
     with _activity_session() as _db:
         _emit_activity_sync(
             _db, redis=_redis, category="thumbnail", severity="info",
             event_type="ref_thumbnails_complete",
-            message=f"Reference Thumbnails: fetched {fetched}/{total}",
+            message=f"Reference Thumbnails: fetched {fetched}/{total}"
+                    + (" (paused at time limit)" if timed_out else ""),
             details=stats, actor="system",
             parent_id=parent_activity_id,
         )
@@ -2163,6 +2397,7 @@ def recompute_session_dates(self):
         general = GeneralSettings(**(settings_row.general if settings_row and settings_row.general else {}))
         fallback_lon = general.observer_longitude
         use_night = general.use_imaging_night
+        fallback_warned = False  # AUD-021: one warning per run, not per image
 
         # Phase 1: Recompute all image session_dates in batches
         BATCH = 5000
@@ -2182,6 +2417,10 @@ def recompute_session_dates(self):
             for img_id, capture_date, raw_headers in rows:
                 site_lon = extract_longitude(raw_headers)
                 effective_lon = site_lon if site_lon is not None else fallback_lon
+                if use_night and effective_lon is None and not fallback_warned:
+                    # Warn once per recompute run, not once per image.
+                    warn_imaging_night_fallback(logger)
+                    fallback_warned = True
                 new_date = compute_session_date(
                     capture_date,
                     use_imaging_night=use_night,

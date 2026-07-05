@@ -57,6 +57,7 @@ async def test_trigger_scan_accepted():
         mock_redis.expire = AsyncMock()
         mock_redis.set = AsyncMock(return_value=True)  # lock acquired
         mock_redis.delete = AsyncMock()
+        mock_redis.exists = AsyncMock(return_value=0)  # no scan already dispatched
         mock_redis_cm.side_effect = _mock_async_redis(mock_redis)
 
         transport = ASGITransport(app=app)
@@ -67,6 +68,7 @@ async def test_trigger_scan_accepted():
     data = resp.json()
     assert data["status"] == "accepted"
     mock_session.commit.assert_called_once()
+    mock_redis.set.assert_any_call("scan:dispatched", "1", ex=60)
 
     app.dependency_overrides.clear()
 
@@ -80,6 +82,7 @@ async def test_scan_status_idle():
             mock_redis = AsyncMock()
             mock_redis.hgetall = AsyncMock(return_value={})
             mock_redis.get = AsyncMock(return_value=None)  # no stale-scan progress key
+            mock_redis.exists = AsyncMock(return_value=0)  # no scan already dispatched
             mock_redis_cm.side_effect = _mock_async_redis(mock_redis)
 
             transport = ASGITransport(app=app)

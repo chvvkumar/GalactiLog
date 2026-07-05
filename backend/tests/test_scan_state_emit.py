@@ -90,6 +90,72 @@ def test_scan_files_failed_emitted_when_failures_occur():
     assert "truncated" in failure_evs[0]["details"]
 
 
+def test_start_scanning_sync_resets_kind_and_clears_dispatch_marker():
+    """start_scanning_sync must reset kind back to "scan" (in case a prior
+    CSV backfill left kind="csv_backfill" on the shared hash) and clear the
+    scan:dispatched marker now that the real state has taken over (AUD-016,
+    AUD-030)."""
+    from app.services.scan_state import start_scanning_sync, SCAN_DISPATCHED_KEY
+
+    r = MagicMock()
+    start_scanning_sync(r)
+
+    mapping = r.hset.call_args.kwargs["mapping"]
+    assert mapping["kind"] == "scan"
+    assert mapping["state"] == "scanning"
+    r.delete.assert_any_call(SCAN_DISPATCHED_KEY)
+
+
+def test_check_complete_sync_skips_activity_and_cascade_for_csv_backfill_kind():
+    """AUD-030: a CSV backfill run reaching "complete" must not emit the
+    scan_complete activity or dispatch the post-scan maintenance cascade -
+    only a real scan (kind="scan", the default) should do that.
+    """
+    from app.services.scan_state import check_complete_sync
+    r = _redis(total=3, completed=3, failed=0)
+    r.hgetall.return_value["kind"] = "csv_backfill"
+    emit_calls = []
+
+    def fake_emit(*a, **kw):
+        emit_calls.append(True)
+
+    with patch("app.services.scan_state.emit_sync", fake_emit), \
+         patch("app.services.scan_state.create_engine") as mock_engine:
+        check_complete_sync(r)
+
+    assert emit_calls == []
+    mock_engine.assert_not_called()
+    # State still transitions to a terminal value and the stats cache is
+    # still invalidated - only the scan-specific activity/cascade are skipped.
+    r.hset.assert_called_once()
+    assert r.hset.call_args.kwargs["mapping"]["state"] == "complete"
+    r.expire.assert_called_once()
+    r.delete.assert_called_once_with("galactilog:stats:cache", "galactilog:fits_keys")
+
+
+def test_check_complete_sync_default_kind_still_runs_scan_cascade():
+    """A hash with no "kind" field (every pre-existing real scan) is treated
+    as kind="scan" and keeps emitting the scan_complete activity.
+    """
+    from app.services.scan_state import check_complete_sync
+    r = _redis()
+    assert "kind" not in r.hgetall.return_value
+    emit_calls = []
+
+    def fake_emit(session, *, redis, category, severity, event_type, message, **kw):
+        emit_calls.append(event_type)
+
+    mock_session = MagicMock()
+    with patch("app.services.scan_state.emit_sync", fake_emit), \
+         patch("app.services.scan_state.create_engine"), \
+         patch("app.services.scan_state._SyncSession") as ms:
+        ms.return_value.__enter__ = lambda s, *a: mock_session
+        ms.return_value.__exit__ = lambda s, *a: None
+        check_complete_sync(r)
+
+    assert "scan_complete" in emit_calls
+
+
 def test_thumbnail_regen_failed_emitted_for_thumbnail_failures():
     import json
     from app.services.scan_state import check_complete_sync
