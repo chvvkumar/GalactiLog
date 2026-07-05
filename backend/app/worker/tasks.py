@@ -533,6 +533,11 @@ def _do_ingest(fits_path: str, include_calibration: bool = True) -> dict:
             )
             session.add(image)
             session.commit()
+            # Capture the generated id while the instance is still bound to an
+            # open session. After the `with` block closes the session, `image`
+            # is detached and touching any attribute raises
+            # DetachedInstanceError (accessing `image.id` here refreshes it).
+            image_id = image.id
     except IntegrityError:
         # A row with this file_path already exists (UNIQUE constraint). The
         # thumbnail we just (re)generated has a deterministic, path-derived
@@ -576,7 +581,7 @@ def _do_ingest(fits_path: str, include_calibration: bool = True) -> dict:
                 if is_dismissed:
                     pass
                 elif existing:
-                    existing.image_ids = list(existing.image_ids or []) + [image.id]
+                    existing.image_ids = list(existing.image_ids or []) + [image_id]
                     existing.file_paths = list(existing.file_paths or []) + [str(path)]
                     existing.file_count = len(existing.image_ids)
                 else:
@@ -595,7 +600,7 @@ def _do_ingest(fits_path: str, include_calibration: bool = True) -> dict:
                         status="pending",
                         file_count=1,
                         file_paths=[str(path)],
-                        image_ids=[image.id],
+                        image_ids=[image_id],
                     ))
                 session.commit()
         except Exception:
