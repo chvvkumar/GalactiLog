@@ -101,18 +101,31 @@ import redis as sync_redis
 from contextlib import asynccontextmanager
 
 
-# Single module-level async Redis client, shared across all requests. redis-py
-# manages an internal connection pool, so building a fresh client (and TCP
-# connection) per call is pure overhead on hot paths. The client is created
-# lazily on first use and reused for the lifetime of the process.
+import asyncio
+
+# Single async Redis client shared across all requests. redis-py manages an
+# internal connection pool, so building a fresh client (and TCP connection) per
+# call is pure overhead on hot paths. The client is created lazily and reused.
+#
+# The client's connection pool is bound to the event loop it was created on, so
+# it is keyed by that loop: in production there is one long-lived loop and thus
+# one client for the process lifetime; under pytest each test runs on its own
+# loop, so a new client is created per loop (the previous one is discarded),
+# which preserves test isolation without a fixture reset.
 _shared_async_redis: "aioredis.Redis | None" = None
+_shared_async_redis_loop = None
 
 
 def get_async_redis() -> aioredis.Redis:
-    """Return the shared module-level async Redis client (lazily created)."""
-    global _shared_async_redis
-    if _shared_async_redis is None:
+    """Return the shared async Redis client for the current event loop."""
+    global _shared_async_redis, _shared_async_redis_loop
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+    if _shared_async_redis is None or _shared_async_redis_loop is not loop:
         _shared_async_redis = aioredis.from_url(settings.redis_url, decode_responses=True)
+        _shared_async_redis_loop = loop
     return _shared_async_redis
 
 
