@@ -1,6 +1,7 @@
 import logging
 import os
 import secrets
+import tempfile
 import threading
 
 from pydantic_settings import BaseSettings
@@ -45,9 +46,15 @@ def load_or_create_jwt_secret(secret_file: str) -> str:
     """Load a persisted JWT secret from ``secret_file`` or create one.
 
     The generated secret is written to a stable file so it survives process
-    restarts and is shared across multiple workers. The write tolerates
-    concurrent workers racing to create the file: if another worker wins the
-    race, the secret it persisted is read back and returned.
+    restarts and is shared across multiple workers. The write is atomic:
+    the secret is first written completely to a temporary file (mode 0600)
+    in the same directory, which is then published under the final name via
+    os.link, an atomic create-if-absent. A process that loses the creation
+    race therefore can only ever observe the winner's fully written file,
+    never a partial one, and reads the winner's secret back so all
+    processes end up sharing the same secret. On filesystems without hard
+    link support the publish falls back to os.replace, which is equally
+    atomic but last-writer-wins rather than first-writer-wins.
     """
     # Fast path: file already exists.
     try:
@@ -68,24 +75,40 @@ def load_or_create_jwt_secret(secret_file: str) -> str:
         except OSError as exc:
             logger.warning("Could not create directory for JWT secret file %s: %s", parent, exc)
 
+    tmp_path = None
     try:
-        # O_EXCL ensures only the first worker writes; others race-lose here.
-        fd = os.open(secret_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        # Write the full secret to a temp file in the target directory first
+        # (mkstemp creates it 0600), then publish it under the final name.
+        fd, tmp_path = tempfile.mkstemp(dir=parent or ".", prefix=".jwt_secret.tmp.")
         try:
             os.write(fd, secret.encode("utf-8"))
         finally:
             os.close(fd)
-        return secret
-    except FileExistsError:
-        # Another worker created it first; read back its secret.
         try:
-            with open(secret_file, "r", encoding="utf-8") as fh:
-                persisted = fh.read().strip()
-            if persisted:
-                return persisted
-        except OSError as exc:
-            logger.warning("Could not read JWT secret file %s after race: %s", secret_file, exc)
-        return secret
+            # os.link is an atomic create-if-absent: it fails if the target
+            # already exists and, because the temp file is complete before
+            # the link, a racing loser can never see a partially written
+            # secret under the final name.
+            os.link(tmp_path, secret_file)
+            return secret
+        except FileExistsError:
+            # Another worker published first; its file is complete by
+            # construction, so a single read-back suffices.
+            try:
+                with open(secret_file, "r", encoding="utf-8") as fh:
+                    persisted = fh.read().strip()
+                if persisted:
+                    return persisted
+            except OSError as exc:
+                logger.warning("Could not read JWT secret file %s after race: %s", secret_file, exc)
+            return secret
+        except OSError:
+            # Filesystem without hard link support: fall back to os.replace,
+            # which is still atomic (readers never see a partial file) but
+            # last-writer-wins instead of first-writer-wins.
+            os.replace(tmp_path, secret_file)
+            tmp_path = None
+            return secret
     except OSError as exc:
         # Could not persist (read-only FS etc.); fall back to in-memory secret.
         logger.warning(
@@ -95,6 +118,12 @@ def load_or_create_jwt_secret(secret_file: str) -> str:
             exc,
         )
         return secret
+    finally:
+        if tmp_path is not None:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
 
 
 def jwt_secret_persisted(secret_file: str, secret: str) -> bool:

@@ -105,6 +105,43 @@ def test_jwt_secret_file_created_with_owner_only_perms(tmp_path):
     assert mode == 0o600
 
 
+def test_jwt_secret_no_temp_files_left_behind(tmp_path):
+    secret_file = tmp_path / ".jwt_secret"
+    load_or_create_jwt_secret(str(secret_file))
+    # Loser-ish path too: call again with the file already present.
+    load_or_create_jwt_secret(str(secret_file))
+    leftovers = [p.name for p in tmp_path.iterdir() if p.name != ".jwt_secret"]
+    assert leftovers == []
+
+
+def test_jwt_secret_concurrent_callers_converge(tmp_path):
+    """Racing callers must all end up with the secret persisted in the file.
+
+    The write publishes a fully written temp file atomically (os.link), so
+    a race loser can never read a partial file and silently diverge onto
+    its own unpersisted secret.
+    """
+    import threading
+
+    secret_file = tmp_path / ".jwt_secret"
+    results = []
+    barrier = threading.Barrier(8)
+
+    def worker():
+        barrier.wait()
+        results.append(load_or_create_jwt_secret(str(secret_file)))
+
+    threads = [threading.Thread(target=worker) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    persisted = secret_file.read_text(encoding="utf-8").strip()
+    assert persisted
+    assert set(results) == {persisted}
+
+
 def test_jwt_secret_persisted_true_when_file_matches(tmp_path):
     secret_file = tmp_path / ".jwt_secret"
     secret = load_or_create_jwt_secret(str(secret_file))

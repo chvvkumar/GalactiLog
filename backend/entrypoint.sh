@@ -75,22 +75,29 @@ fi
 # independent of GALACTILOG_SKIP_CHOWN: unlike the bind-mounted data/
 # thumbnails directories, ownership of this file is an internal
 # implementation detail, not something an operator manages externally. It is
-# a no-op when the file doesn't exist yet or is already owned correctly, and
-# it deliberately does not follow symlinks.
+# a no-op when the file doesn't exist yet or already has the correct owner
+# and mode, and it deliberately does not follow symlinks.
 JWT_SECRET_FILE=$(python -c "from app.config import settings; print(settings.jwt_secret_file)" 2>/dev/null || echo "/app/data/.jwt_secret")
 if [ -n "$JWT_SECRET_FILE" ]; then
     if [ -L "$JWT_SECRET_FILE" ]; then
-        echo "Warning: JWT secret file $JWT_SECRET_FILE is a symlink - refusing to touch ownership."
+        echo "Warning: JWT secret file $JWT_SECRET_FILE is a symlink - refusing to touch ownership or mode."
     elif [ -f "$JWT_SECRET_FILE" ]; then
         jwt_owner=$(stat -c '%u:%g' "$JWT_SECRET_FILE" 2>/dev/null || echo "")
         desired="$PUID:$PGID"
         if [ -n "$jwt_owner" ] && [ "$jwt_owner" != "$desired" ]; then
             echo "Repairing ownership of JWT secret file $JWT_SECRET_FILE ($jwt_owner -> $desired)..."
-            if chown "$PUID:$PGID" "$JWT_SECRET_FILE" 2>/dev/null; then
-                chmod 600 "$JWT_SECRET_FILE" 2>/dev/null || true
-            else
+            if ! chown "$PUID:$PGID" "$JWT_SECRET_FILE" 2>/dev/null; then
                 echo "Warning: could not chown $JWT_SECRET_FILE - sessions may not survive restarts."
             fi
+        fi
+        # Enforce owner-only permissions independently of the ownership
+        # check: a correctly-owned but group/world-readable secret file must
+        # still be tightened to 0600.
+        jwt_mode=$(stat -c '%a' "$JWT_SECRET_FILE" 2>/dev/null || echo "")
+        if [ -n "$jwt_mode" ] && [ "$jwt_mode" != "600" ]; then
+            echo "Tightening permissions of JWT secret file $JWT_SECRET_FILE ($jwt_mode -> 600)..."
+            chmod 600 "$JWT_SECRET_FILE" 2>/dev/null || \
+                echo "Warning: could not chmod $JWT_SECRET_FILE"
         fi
     fi
 fi
