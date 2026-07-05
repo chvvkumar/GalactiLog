@@ -204,8 +204,14 @@ fi
 
 echo "Migrations complete."
 
-# Dispatch data migrations if needed (runs in Celery background after services start)
-DATA_RESULT=$(python -c "
+# Check stored data version against this release's minimum supported data
+# version before touching anything else. A fresh install (no app_metadata
+# table, or no data_version row yet) has nothing to gate on and proceeds
+# unchanged; an install at or above the minimum proceeds unchanged too.
+# Only an install whose data predates what this release knows how to migrate
+# from is refused, so that a future checkpoint release can delete superseded
+# data-migration code without breaking upgrades from very old installs.
+STORED_DATA_VERSION=$(python -c "
 from sqlalchemy import create_engine, text
 from app.config import settings
 url = settings.database_url.replace('+asyncpg', '+psycopg2')
@@ -215,18 +221,44 @@ with eng.connect() as c:
         \"SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'app_metadata')\"
     )).scalar()
     if not has_table:
-        print('current')
+        print('')
     else:
         row = c.execute(text(
             \"SELECT value FROM app_metadata WHERE key = 'data_version'\"
         )).first()
-        current = int(row[0]) if row else 0
-        from app.services.data_migrations import DATA_VERSION
-        if current < DATA_VERSION:
-            print(f'{current}')
-        else:
-            print('current')
+        print(row[0] if row else '')
 eng.dispose()
+" 2>/dev/null || echo "")
+
+if [ -n "$STORED_DATA_VERSION" ]; then
+    MIN_DATA_VERSION=$(python -c "from app.config import MIN_UPGRADE_FROM_DATA_VERSION; print(MIN_UPGRADE_FROM_DATA_VERSION)" 2>/dev/null || echo "")
+    if [ -n "$MIN_DATA_VERSION" ] && [ "$STORED_DATA_VERSION" -lt "$MIN_DATA_VERSION" ]; then
+        CHECKPOINT_TAG=$(python -c "from app.config import CHECKPOINT_IMAGE_TAG; print(CHECKPOINT_IMAGE_TAG)" 2>/dev/null || echo "unknown")
+        echo "ERROR: Database is at data version $STORED_DATA_VERSION, which this release does not support upgrading from."
+        echo ""
+        echo "The data has NOT been modified."
+        echo ""
+        echo "This database was last touched by a different release and must first be"
+        echo "upgraded through the checkpoint image before this release can proceed."
+        echo "This release supports upgrading from data version $MIN_DATA_VERSION or newer."
+        echo ""
+        echo "Run the checkpoint image first:"
+        echo "  $CHECKPOINT_TAG"
+        echo ""
+        echo "Then retry starting this release."
+        exit 1
+    fi
+fi
+
+# Dispatch data migrations if needed (runs in Celery background after services
+# start). Reuses STORED_DATA_VERSION computed above rather than re-querying.
+DATA_RESULT=$(python -c "
+current = '$STORED_DATA_VERSION'
+from app.services.data_migrations import DATA_VERSION
+if current == '' or int(current) >= DATA_VERSION:
+    print('current')
+else:
+    print(current)
 " 2>/dev/null || echo "current")
 
 if [ "$DATA_RESULT" != "current" ]; then
