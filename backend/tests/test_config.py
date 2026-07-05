@@ -1,6 +1,15 @@
+import os
 from unittest.mock import MagicMock
 
-from app.config import Settings, client_ip_from_request, load_or_create_jwt_secret
+import pytest
+
+from app.config import (
+    Settings,
+    client_ip_from_request,
+    get_jwt_secret,
+    jwt_secret_persisted,
+    load_or_create_jwt_secret,
+)
 
 
 def test_settings_defaults():
@@ -86,3 +95,43 @@ def test_jwt_secret_stable_across_calls(tmp_path):
     first = load_or_create_jwt_secret(str(secret_file))
     second = load_or_create_jwt_secret(str(secret_file))
     assert first == second
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX file permission bits aren't meaningful on Windows")
+def test_jwt_secret_file_created_with_owner_only_perms(tmp_path):
+    secret_file = tmp_path / ".jwt_secret"
+    load_or_create_jwt_secret(str(secret_file))
+    mode = secret_file.stat().st_mode & 0o777
+    assert mode == 0o600
+
+
+def test_jwt_secret_persisted_true_when_file_matches(tmp_path):
+    secret_file = tmp_path / ".jwt_secret"
+    secret = load_or_create_jwt_secret(str(secret_file))
+    assert jwt_secret_persisted(str(secret_file), secret) is True
+
+
+def test_jwt_secret_persisted_false_when_file_unreadable(tmp_path):
+    # Simulates the production bug: file exists but the current process
+    # cannot read it back (e.g. owned by a different user).
+    secret_file = tmp_path / "does-not-exist" / ".jwt_secret"
+    assert jwt_secret_persisted(str(secret_file), "some-secret") is False
+
+
+def test_get_jwt_secret_generates_lazily_not_on_import(monkeypatch, tmp_path):
+    """Regression test: generation must not be a side effect of importing
+    app.config (see get_jwt_secret's docstring for why - root-context
+    entrypoint snippets import this module before privileges drop)."""
+    from app import config as config_module
+
+    secret_file = tmp_path / ".jwt_secret"
+    monkeypatch.setattr(config_module.settings, "jwt_secret", "")
+    monkeypatch.setattr(config_module.settings, "jwt_secret_file", str(secret_file))
+
+    assert not secret_file.exists()
+
+    secret = get_jwt_secret()
+
+    assert secret_file.exists()
+    assert secret
+    assert get_jwt_secret() == secret  # cached, stable across calls

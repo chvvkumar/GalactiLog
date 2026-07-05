@@ -1,6 +1,7 @@
 import logging
 import os
 import secrets
+import threading
 
 from pydantic_settings import BaseSettings
 
@@ -96,12 +97,44 @@ def load_or_create_jwt_secret(secret_file: str) -> str:
         return secret
 
 
-# Auto-generate JWT secret if not set. The secret is persisted to a stable file
-# (settings.jwt_secret_file) so it survives restarts and is shared by all
-# workers. Operators should still set GALACTILOG_JWT_SECRET explicitly for
-# production/multi-host deployments (see the startup warning in main.py).
-if not settings.jwt_secret:
-    settings.jwt_secret = load_or_create_jwt_secret(settings.jwt_secret_file)
+def jwt_secret_persisted(secret_file: str, secret: str) -> bool:
+    """Best-effort check that ``secret`` actually made it to ``secret_file``.
+
+    load_or_create_jwt_secret() falls back to an in-memory-only secret when it
+    can't read or write the file (e.g. wrong ownership, read-only filesystem).
+    Callers use this to avoid logging that sessions survive restarts when
+    they in fact won't.
+    """
+    try:
+        with open(secret_file, "r", encoding="utf-8") as fh:
+            return fh.read().strip() == secret
+    except OSError:
+        return False
+
+
+_jwt_secret_lock = threading.Lock()
+
+
+def get_jwt_secret() -> str:
+    """Return the configured JWT secret, generating/loading it on first use.
+
+    This is deliberately lazy rather than run as a side effect of importing
+    this module. The entrypoint script imports app.config from several
+    root-context helper snippets (to read settings.database_url, version
+    constants, etc.) before privileges drop to the unprivileged app user. If
+    secret generation ran at import time, whichever of those root snippets
+    happened to import this module first would create the persisted secret
+    file as root, and the app user would never be able to read it back -
+    causing a fresh secret (and fresh sessions) on every restart. Deferring
+    generation until a token is actually created/decoded ensures the file is
+    created by the process that needs it, running as the app user.
+    """
+    if settings.jwt_secret:
+        return settings.jwt_secret
+    with _jwt_secret_lock:
+        if not settings.jwt_secret:
+            settings.jwt_secret = load_or_create_jwt_secret(settings.jwt_secret_file)
+    return settings.jwt_secret
 
 import redis.asyncio as aioredis
 import redis as sync_redis

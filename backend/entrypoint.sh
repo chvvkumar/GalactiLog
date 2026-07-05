@@ -62,6 +62,40 @@ if [ "${GALACTILOG_SKIP_CHOWN:-0}" != "1" ]; then
 fi
 # ---- end PUID/PGID handling ----
 
+# ---- JWT secret file self-heal ----
+# The persisted JWT secret (settings.jwt_secret_file, default
+# /app/data/.jwt_secret) must be owned by the app user with mode 0600, since
+# it is generated and read back by app.config running as galactilog (see
+# app/config.py's get_jwt_secret()). Some existing installs were left with
+# this file owned by root (a prior version of app.config generated it as a
+# side effect of importing the module, which could happen from a
+# root-context entrypoint snippet before privileges dropped). Repair that
+# here, while still root and before any service starts, so already-affected
+# deployments heal on their next restart with no manual steps. This check is
+# independent of GALACTILOG_SKIP_CHOWN: unlike the bind-mounted data/
+# thumbnails directories, ownership of this file is an internal
+# implementation detail, not something an operator manages externally. It is
+# a no-op when the file doesn't exist yet or is already owned correctly, and
+# it deliberately does not follow symlinks.
+JWT_SECRET_FILE=$(python -c "from app.config import settings; print(settings.jwt_secret_file)" 2>/dev/null || echo "/app/data/.jwt_secret")
+if [ -n "$JWT_SECRET_FILE" ]; then
+    if [ -L "$JWT_SECRET_FILE" ]; then
+        echo "Warning: JWT secret file $JWT_SECRET_FILE is a symlink - refusing to touch ownership."
+    elif [ -f "$JWT_SECRET_FILE" ]; then
+        jwt_owner=$(stat -c '%u:%g' "$JWT_SECRET_FILE" 2>/dev/null || echo "")
+        desired="$PUID:$PGID"
+        if [ -n "$jwt_owner" ] && [ "$jwt_owner" != "$desired" ]; then
+            echo "Repairing ownership of JWT secret file $JWT_SECRET_FILE ($jwt_owner -> $desired)..."
+            if chown "$PUID:$PGID" "$JWT_SECRET_FILE" 2>/dev/null; then
+                chmod 600 "$JWT_SECRET_FILE" 2>/dev/null || true
+            else
+                echo "Warning: could not chown $JWT_SECRET_FILE - sessions may not survive restarts."
+            fi
+        fi
+    fi
+fi
+# ---- end JWT secret file self-heal ----
+
 echo "Running database migrations..."
 
 # Run a python DB probe with retries, distinguishing a genuine "no such

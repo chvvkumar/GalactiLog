@@ -10,7 +10,7 @@ from pwdlib import PasswordHash
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import settings
+from app.config import settings, get_jwt_secret
 from app.models.user import User
 from app.models.refresh_token import RefreshToken
 
@@ -53,13 +53,13 @@ def create_access_token(user_id: uuid.UUID, role: str) -> str:
         "iat": now,
         "jti": str(uuid.uuid4()),
     }
-    return jwt.encode(payload, settings.jwt_secret, algorithm="HS256")
+    return jwt.encode(payload, get_jwt_secret(), algorithm="HS256")
 
 
 def decode_access_token(token: str) -> dict:
     return jwt.decode(
         token,
-        settings.jwt_secret,
+        get_jwt_secret(),
         algorithms=["HS256"],
         options={"require": ["sub", "role", "exp", "iat", "jti"]},
     )
