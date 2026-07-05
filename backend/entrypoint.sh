@@ -64,11 +64,41 @@ fi
 
 echo "Running database migrations..."
 
+# Run a python DB probe with retries, distinguishing a genuine "no such
+# table/row" result (which the probe script itself prints, rc 0) from a
+# transient database error (nonzero rc, e.g. connection refused while
+# postgres is still starting). Probes that misclassify a connectivity error
+# as a definitive "no" can send an existing, populated database down the
+# fresh-install code path, so on persistent failure this refuses to start
+# rather than falling through to a wrong branch.
+run_db_probe() {
+    local desc="$1"
+    local script="$2"
+    local max_attempts=5
+    local attempt=1
+    local output
+    while [ "$attempt" -le "$max_attempts" ]; do
+        if output=$(python -c "$script" 2>&1); then
+            printf '%s' "$output"
+            return 0
+        fi
+        echo "Warning: $desc probe failed (attempt $attempt/$max_attempts): $output" >&2
+        attempt=$((attempt + 1))
+        [ "$attempt" -le "$max_attempts" ] && sleep 3
+    done
+    echo "ERROR: Could not reach the database after $max_attempts attempts while checking: $desc" >&2
+    echo "" >&2
+    echo "The database has NOT been modified." >&2
+    echo "This looks like a transient database connectivity issue rather than a" >&2
+    echo "fresh or unrecognized database, so startup is refusing to guess." >&2
+    exit 1
+}
+
 # Check if alembic_version table exists. If the DB has tables but no
 # alembic tracking (created by Base.metadata.create_all), stamp at head
 # since create_all produces the current schema. This makes deployment
 # safe for existing installs - future migrations will run incrementally.
-HAS_ALEMBIC=$(python -c "
+HAS_ALEMBIC=$(run_db_probe "alembic_version table check" "
 from sqlalchemy import create_engine, text
 from app.config import settings
 url = settings.database_url.replace('+asyncpg', '+psycopg2')
@@ -79,7 +109,7 @@ with eng.connect() as c:
     ))
     print('yes' if r.scalar() else 'no')
 eng.dispose()
-" 2>/dev/null || echo "no")
+")
 
 if [ "$HAS_ALEMBIC" = "no" ]; then
     # Check if the images table exists (i.e. DB has data but no alembic
@@ -89,7 +119,7 @@ if [ "$HAS_ALEMBIC" = "no" ]; then
     # so silently stamping would claim a schema state the database was never
     # actually migrated to. Refuse and point at the checkpoint image, same as
     # the unknown-revision gate below.
-    HAS_IMAGES=$(python -c "
+    HAS_IMAGES=$(run_db_probe "images table check" "
 from sqlalchemy import create_engine, text
 from app.config import settings
 url = settings.database_url.replace('+asyncpg', '+psycopg2')
@@ -100,7 +130,7 @@ with eng.connect() as c:
     ))
     print('yes' if r.scalar() else 'no')
 eng.dispose()
-" 2>/dev/null || echo "no")
+")
 
     if [ "$HAS_IMAGES" = "yes" ]; then
         CHECKPOINT_TAG=$(python -c "from app.config import CHECKPOINT_IMAGE_TAG; print(CHECKPOINT_IMAGE_TAG)" 2>/dev/null || echo "unknown")
@@ -126,7 +156,7 @@ else
     # last touched by a different release (older or newer, or one whose
     # history was squashed at a checkpoint) and we must refuse to proceed
     # rather than silently rewrite migration state.
-    STAMPED_REV=$(python -c "
+    STAMPED_REV=$(run_db_probe "stamped alembic revision read" "
 from sqlalchemy import create_engine, text
 from app.config import settings
 url = settings.database_url.replace('+asyncpg', '+psycopg2')
@@ -135,7 +165,7 @@ with eng.connect() as c:
     row = c.execute(text('SELECT version_num FROM alembic_version')).first()
     print(row[0] if row else '')
 eng.dispose()
-" 2>/dev/null || echo "")
+")
 
     REV_KNOWN=$(python -c "
 from alembic.config import Config
@@ -170,15 +200,23 @@ ALEMBIC_OUTPUT=$(alembic upgrade head 2>&1) || ALEMBIC_EXIT=$?
 ALEMBIC_EXIT=${ALEMBIC_EXIT:-0}
 echo "$ALEMBIC_OUTPUT"
 
-# Post migration result to Redis activity feed so it shows in the UI
+# Post migration result to Redis activity feed so it shows in the UI. The
+# alembic output is passed via environment variable rather than interpolated
+# into the python source: alembic output can contain quotes/backslashes
+# (e.g. from a migration's docstring or an error traceback) that would break
+# out of a naively-interpolated triple-quoted string literal.
+# Note: the "stamped" (pre-alembic-tracking existing DB) case used to be
+# logged here too, but that path now hard-stops above (see the HAS_IMAGES
+# check) before alembic ever runs, so it can no longer occur at this point.
+export GALACTILOG_ALEMBIC_OUTPUT="$ALEMBIC_OUTPUT"
+export GALACTILOG_ALEMBIC_EXIT="$ALEMBIC_EXIT"
 python -c "
 import json, time, sys, os
 try:
     import redis
     r = redis.from_url(os.environ.get('GALACTILOG_REDIS_URL', 'redis://redis:6379/0'))
-    output = '''$ALEMBIC_OUTPUT'''
-    exit_code = $ALEMBIC_EXIT
-    stamped = '$HAS_ALEMBIC' == 'no' and '$HAS_IMAGES' == 'yes'
+    output = os.environ.get('GALACTILOG_ALEMBIC_OUTPUT', '')
+    exit_code = int(os.environ.get('GALACTILOG_ALEMBIC_EXIT', '0'))
 
     if exit_code != 0:
         entry = {
@@ -196,14 +234,7 @@ try:
         entry = {
             'type': 'migration_applied',
             'message': msg,
-            'details': {'steps': len(steps), 'stamped': stamped},
-            'timestamp': time.time(),
-        }
-    elif stamped:
-        entry = {
-            'type': 'migration_initialized',
-            'message': 'Database migration tracking initialized (existing database detected)',
-            'details': {'stamped': True},
+            'details': {'steps': len(steps)},
             'timestamp': time.time(),
         }
     else:
@@ -216,6 +247,7 @@ try:
 except Exception as e:
     print(f'Warning: could not post migration activity: {e}', file=sys.stderr)
 " 2>&1 || true
+unset GALACTILOG_ALEMBIC_OUTPUT GALACTILOG_ALEMBIC_EXIT
 
 if [ $ALEMBIC_EXIT -ne 0 ]; then
     echo "ERROR: Database migration failed!"
@@ -231,7 +263,7 @@ echo "Migrations complete."
 # Only an install whose data predates what this release knows how to migrate
 # from is refused, so that a future checkpoint release can delete superseded
 # data-migration code without breaking upgrades from very old installs.
-STORED_DATA_VERSION=$(python -c "
+STORED_DATA_VERSION=$(run_db_probe "stored data version read" "
 from sqlalchemy import create_engine, text
 from app.config import settings
 url = settings.database_url.replace('+asyncpg', '+psycopg2')
@@ -248,7 +280,7 @@ with eng.connect() as c:
         )).first()
         print(row[0] if row else '')
 eng.dispose()
-" 2>/dev/null || echo "")
+")
 
 if [ -n "$STORED_DATA_VERSION" ]; then
     MIN_DATA_VERSION=$(python -c "from app.config import MIN_UPGRADE_FROM_DATA_VERSION; print(MIN_UPGRADE_FROM_DATA_VERSION)" 2>/dev/null || echo "")
@@ -309,6 +341,19 @@ smart_rebuild_targets.apply_async(countdown=10)
 detect_mosaic_panels_task.apply_async(countdown=30)
 " 2>&1 || echo "Warning: could not dispatch startup maintenance tasks"
 fi
+
+# Load the static reference catalogs (OpenNGC, SAC, Caldwell, Herschel 400,
+# Arp, Abell) if they have never been loaded. Dispatched unconditionally and
+# independent of the data-version branch above: the v2.0 baseline seeds fresh
+# databases at the current data_version so the upgrade gate holds, which means
+# the data migrations that used to load these catalogs as a side effect never
+# fire on a fresh install, leaving the catalog tables permanently empty. The
+# task itself checks openngc_catalog for emptiness before doing any work, so
+# this is a cheap no-op on every other boot.
+python -c "
+from app.worker.tasks import load_reference_catalogs_if_empty
+load_reference_catalogs_if_empty.apply_async(countdown=2)
+" 2>&1 || echo "Warning: could not dispatch reference catalog load task"
 
 if [ "$DID_CHOWN" = "1" ]; then
     python -c "

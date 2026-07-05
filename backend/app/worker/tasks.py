@@ -2139,6 +2139,67 @@ def run_data_migrations(self, from_version: int) -> dict:
         _redis.delete(DATA_MIGRATION_LOCK)
 
 
+REFERENCE_CATALOG_LOCK = "reference_catalogs:lock"
+REFERENCE_CATALOG_LOCK_TTL = 600  # 10 minutes
+
+
+@celery_app.task(bind=True)
+def load_reference_catalogs_if_empty(self) -> dict:
+    """Load static reference catalogs (OpenNGC, SAC, Caldwell, Herschel 400,
+    Arp, Abell) on boot if they have never been loaded.
+
+    Dispatched unconditionally from the entrypoint on every startup. The v2.0
+    baseline seeds fresh databases at the current data_version, so the data
+    migrations that used to load these catalogs as a side effect (v3, v7, v13)
+    never run against a fresh install, leaving the catalog tables permanently
+    empty. Gating on emptiness here (rather than always reloading) keeps
+    normal restarts of an already-loaded install cheap, while every loader
+    invoked by load_reference_catalogs is itself an idempotent upsert, so a
+    second run - e.g. a retry after a crash mid-load - never duplicates rows.
+    """
+    from app.services.data_migrations import (
+        reference_catalogs_are_empty, load_reference_catalogs,
+    )
+
+    if not _redis.set(REFERENCE_CATALOG_LOCK, "1", nx=True, ex=REFERENCE_CATALOG_LOCK_TTL):
+        logger.info("reference_catalogs: another load is already running, skipping")
+        return {"status": "skipped"}
+
+    try:
+        with Session(_sync_engine) as session:
+            if not reference_catalogs_are_empty(session):
+                return {"status": "noop"}
+
+            logger.info("reference_catalogs: openngc_catalog is empty, loading static catalogs")
+            try:
+                summary = load_reference_catalogs(session)
+                session.commit()
+            except Exception as e:
+                session.rollback()
+                error_msg = f"Reference catalog load failed: {e}"
+                logger.exception("reference_catalogs: %s", error_msg)
+                with _activity_session() as _db:
+                    _emit_activity_sync(
+                        _db, redis=_redis, category="migration", severity="error",
+                        event_type="reference_catalog_load_failed",
+                        message=error_msg,
+                        details={"error": str(e)}, actor="system",
+                    )
+                return {"status": "error", "error": str(e)}
+
+            logger.info("reference_catalogs: %s", summary)
+            with _activity_session() as _db:
+                _emit_activity_sync(
+                    _db, redis=_redis, category="migration", severity="info",
+                    event_type="reference_catalog_load_complete",
+                    message=f"Reference catalogs loaded: {summary}",
+                    details={}, actor="system",
+                )
+            return {"status": "loaded", "summary": summary}
+    finally:
+        _redis.delete(REFERENCE_CATALOG_LOCK)
+
+
 DARK_HOURS_LOCK = "dark_hours:lock"
 DARK_HOURS_LOCK_TTL = 300  # 5 minutes
 
