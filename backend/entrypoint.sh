@@ -82,7 +82,13 @@ eng.dispose()
 " 2>/dev/null || echo "no")
 
 if [ "$HAS_ALEMBIC" = "no" ]; then
-    # Check if the images table exists (i.e. DB was created by create_all)
+    # Check if the images table exists (i.e. DB has data but no alembic
+    # tracking). Post-squash, this can only mean a pre-checkpoint (pre-v2.0)
+    # install: the migration history that used to let us safely assume
+    # create_all's schema matched "stamp head" no longer exists in this tree,
+    # so silently stamping would claim a schema state the database was never
+    # actually migrated to. Refuse and point at the checkpoint image, same as
+    # the unknown-revision gate below.
     HAS_IMAGES=$(python -c "
 from sqlalchemy import create_engine, text
 from app.config import settings
@@ -97,8 +103,22 @@ eng.dispose()
 " 2>/dev/null || echo "no")
 
     if [ "$HAS_IMAGES" = "yes" ]; then
-        echo "Existing database detected without alembic tracking - stamping at head"
-        alembic stamp head
+        CHECKPOINT_TAG=$(python -c "from app.config import CHECKPOINT_IMAGE_TAG; print(CHECKPOINT_IMAGE_TAG)" 2>/dev/null || echo "unknown")
+        MIN_REV=$(python -c "from app.config import MIN_UPGRADE_FROM_ALEMBIC_REVISION; print(MIN_UPGRADE_FROM_ALEMBIC_REVISION)" 2>/dev/null || echo "unknown")
+        echo "ERROR: Database has existing tables but no alembic tracking."
+        echo ""
+        echo "The database has NOT been modified."
+        echo ""
+        echo "This database predates alembic tracking entirely, which means it also"
+        echo "predates the checkpoint release and must first be upgraded through the"
+        echo "checkpoint image before this release can proceed."
+        echo "This release supports upgrading from revision $MIN_REV or newer."
+        echo ""
+        echo "Run the checkpoint image first:"
+        echo "  $CHECKPOINT_TAG"
+        echo ""
+        echo "Then retry starting this release."
+        exit 1
     fi
 else
     # alembic_version exists - check whether the stamped revision is known
