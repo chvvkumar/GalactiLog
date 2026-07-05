@@ -402,6 +402,16 @@ export interface ObjectTypeCount {
   count: number;
 }
 
+// Single-request SPA startup payload (GET /api/bootstrap).
+export interface BootstrapResponse {
+  user: AuthUser;
+  settings: SettingsResponse;
+  equipment: EquipmentList;
+  fits_keys: string[];
+  object_types: ObjectTypeCount[];
+  custom_columns: CustomColumn[];
+}
+
 export interface MergeCandidateResponse {
   id: string;
   source_name: string;

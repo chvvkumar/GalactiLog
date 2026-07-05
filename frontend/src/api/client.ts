@@ -261,8 +261,19 @@ export const api = {
   logout: () =>
     fetchJson<void>("/auth/logout", { method: "POST" }),
 
+  changePassword: (currentPassword: string, newPassword: string) =>
+    fetchJson<{ status: string }>("/auth/password", {
+      method: "PUT",
+      body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+    }),
+
   getMe: () =>
     fetchJson<AuthUser>("/auth/me"),
+
+  // Single startup call that returns settings, equipment, fits keys, object
+  // types and custom columns together.
+  getBootstrap: () =>
+    fetchJson<import("../types").BootstrapResponse>("/bootstrap"),
 
   getUsers: () =>
     fetchJson<import("../types").UserAccount[]>("/auth/users"),
