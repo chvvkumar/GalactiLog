@@ -127,11 +127,25 @@ def run_scan(self, include_calibration: bool = True, force_orphan_cleanup: bool 
         # Dispatch ingest tasks as files are discovered (parallel discovery + ingestion)
         # Calibration filtering is deferred to the ingest phase to avoid opening
         # every file during discovery (costly on NFS).
+        # Guard against dispatching the same path twice within one scan
+        # (AUD-015). roots() already drops nested include paths, but this is a
+        # cheap belt-and-suspenders against any other overlap source (e.g.
+        # symlinks resolving two roots onto the same tree).
+        queued_paths: set[str] = set()
+
         def _queue_file(path: Path) -> None:
+            key = str(path)
+            if key in queued_paths:
+                return
+            queued_paths.add(key)
             ingest_file.delay(str(path), include_calibration=include_calibration)
 
         def _queue_changed_file(path: Path) -> None:
             """Re-ingest a known file whose size or mtime changed on disk."""
+            key = str(path)
+            if key in queued_paths:
+                return
+            queued_paths.add(key)
             reingest_changed_file.delay(str(path), include_calibration=include_calibration)
 
         new_files: list[Path] = []
@@ -338,6 +352,26 @@ def auto_scan_tick():
     run_scan.delay(include_calibration=include_cal)
 
 
+def _thumbnail_referenced(thumb_path_str: str) -> bool:
+    """Return True if any Image row references this thumbnail file.
+
+    The thumbnail filename is derived deterministically from the file path
+    (md5), so two ingest attempts for the same path target the same file.
+    Before unlinking a thumbnail after a failed insert we confirm no existing
+    row points at it, otherwise we would break the surviving row (AUD-015).
+    """
+    try:
+        with Session(_sync_engine) as session:
+            existing = session.execute(
+                select(Image.id).where(Image.thumbnail_path == thumb_path_str).limit(1)
+            ).first()
+            return existing is not None
+    except Exception:
+        # If the check itself fails, err on the side of NOT deleting a
+        # possibly-shared thumbnail.
+        return True
+
+
 def _do_ingest(fits_path: str, include_calibration: bool = True) -> dict:
     """Core ingest logic for a single FITS/XISF file.
 
@@ -483,9 +517,17 @@ def _do_ingest(fits_path: str, include_calibration: bool = True) -> dict:
             )
             session.add(image)
             session.commit()
+    except IntegrityError:
+        # A row with this file_path already exists (UNIQUE constraint). The
+        # thumbnail we just (re)generated has a deterministic, path-derived
+        # filename, so it is the SAME file the pre-existing row's
+        # thumbnail_path points at. Do NOT unlink it -- deleting it would
+        # leave the surviving row pointing at a missing thumbnail (AUD-015).
+        raise
     except Exception:
-        # Clean up orphaned thumbnail if DB insert failed
-        if thumb_path and thumb_path.exists():
+        # Genuinely orphaned insert (non-duplicate failure): clean up the
+        # thumbnail we generated, but only if no existing row references it.
+        if thumb_path and thumb_path.exists() and not _thumbnail_referenced(str(thumb_path)):
             thumb_path.unlink(missing_ok=True)
         raise
 

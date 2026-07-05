@@ -175,6 +175,46 @@ def test_roots_returns_includes_when_set(tmp_path):
     assert cfg.roots(tmp_path) == [tmp_path / "a", tmp_path / "b"]
 
 
+def test_roots_drops_nested_include_path(tmp_path):
+    # include_paths = [/data, /data/M31] must not walk /data/M31 twice: the
+    # nested descendant is dropped because walking /data already covers it.
+    cfg = ScanFilterConfig(
+        include_paths=[tmp_path / "data", tmp_path / "data" / "M31"],
+        exclude_paths=[],
+        name_rules=[],
+    )
+    assert cfg.roots(tmp_path) == [tmp_path / "data"]
+
+
+def test_roots_drops_nested_regardless_of_order(tmp_path):
+    # Descendant listed first: still collapse to the ancestor only.
+    cfg = ScanFilterConfig(
+        include_paths=[tmp_path / "data" / "M31", tmp_path / "data"],
+        exclude_paths=[],
+        name_rules=[],
+    )
+    assert cfg.roots(tmp_path) == [tmp_path / "data"]
+
+
+def test_roots_deduplicates_exact_duplicates(tmp_path):
+    cfg = ScanFilterConfig(
+        include_paths=[tmp_path / "a", tmp_path / "a"],
+        exclude_paths=[],
+        name_rules=[],
+    )
+    assert cfg.roots(tmp_path) == [tmp_path / "a"]
+
+
+def test_roots_keeps_sibling_paths(tmp_path):
+    # Siblings share a parent but neither is nested under the other: keep both.
+    cfg = ScanFilterConfig(
+        include_paths=[tmp_path / "data" / "M31", tmp_path / "data" / "M42"],
+        exclude_paths=[],
+        name_rules=[],
+    )
+    assert cfg.roots(tmp_path) == [tmp_path / "data" / "M31", tmp_path / "data" / "M42"]
+
+
 def test_test_path_included(tmp_path):
     cfg = _cfg()
     result = cfg.test_path(tmp_path / "M31" / "frame.fits", tmp_path)

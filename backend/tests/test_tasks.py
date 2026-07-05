@@ -4,6 +4,8 @@ import numpy as np
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
+from sqlalchemy.exc import IntegrityError
+
 # conftest.py handles env vars, fitsio stubbing, and the app.worker.tasks mock.
 # Do not override those stubs here.
 
@@ -378,3 +380,125 @@ class TestReingestValidatesBeforeDelete:
 
         assert result["status"] == "ok"
         mock_do_ingest.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# AUD-015: a duplicate ingest of the same path must NOT delete the surviving
+# row's thumbnail (the thumbnail filename is deterministic from the path, so
+# both attempts target the same file).
+# ---------------------------------------------------------------------------
+
+class _FakeInsertSession:
+    """Minimal Session stand-in: get() returns None (defaults), and commit()
+    raises the supplied exception so the insert path exercises its except
+    branches without a live DB."""
+
+    def __init__(self, commit_exc):
+        self._commit_exc = commit_exc
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def get(self, *a, **kw):
+        return None
+
+    def add(self, *a, **kw):
+        pass
+
+    def execute(self, *a, **kw):
+        return MagicMock()
+
+    def commit(self):
+        raise self._commit_exc
+
+
+class TestDuplicateIngestPreservesThumbnail:
+    def _run_do_ingest(self, tasks_mod, tmp_path, commit_exc, thumb_referenced=None):
+        """Invoke _do_ingest with heavy I/O mocked and the insert commit forced
+        to raise ``commit_exc``. Returns (raised_exc, thumb_path)."""
+        fits_root = tmp_path / "fits"
+        thumbs = tmp_path / "thumbs"
+        fits_root.mkdir()
+        thumbs.mkdir()
+        fits_path = fits_root / "M31" / "Light_M31_001.fits"
+        fits_path.parent.mkdir(parents=True)
+        fits_path.write_bytes(b"stub")
+
+        def _fake_gen_thumb(path, thumb_path, max_width=None):
+            thumb_path.parent.mkdir(parents=True, exist_ok=True)
+            thumb_path.write_bytes(b"thumbnail-bytes")
+            return thumb_path
+
+        meta = {
+            "file_path": str(fits_path),
+            "file_name": fits_path.name,
+            "object_name": "M31",
+            "image_type": "LIGHT",
+            "raw_headers": {},
+            "capture_date": None,
+        }
+
+        patchers = [
+            patch.object(tasks_mod.settings, "fits_data_path", str(fits_root)),
+            patch.object(tasks_mod.settings, "thumbnails_path", str(thumbs)),
+            patch.object(tasks_mod, "fitsio", MagicMock()),
+            patch.object(tasks_mod, "extract_metadata", MagicMock(return_value=meta)),
+            patch.object(tasks_mod, "generate_thumbnail", _fake_gen_thumb),
+            patch.object(tasks_mod, "resolve_target", MagicMock(return_value=None)),
+            patch.object(tasks_mod, "Session", lambda *a, **kw: _FakeInsertSession(commit_exc)),
+            patch.object(tasks_mod, "_redis", MagicMock()),
+            patch.object(tasks_mod, "increment_completed_sync", MagicMock()),
+            patch.object(tasks_mod, "increment_csv_enriched_sync", MagicMock()),
+        ]
+        if thumb_referenced is not None:
+            patchers.append(
+                patch.object(tasks_mod, "_thumbnail_referenced",
+                             MagicMock(return_value=thumb_referenced))
+            )
+
+        import contextlib
+        raised = None
+        with contextlib.ExitStack() as stack:
+            for p in patchers:
+                stack.enter_context(p)
+            try:
+                tasks_mod._do_ingest(str(fits_path), include_calibration=True)
+            except Exception as exc:  # noqa: BLE001
+                raised = exc
+
+        # Reconstruct the deterministic thumbnail path the task would have used.
+        import hashlib
+        path_hash = hashlib.md5(str(fits_path).encode()).hexdigest()[:12]
+        thumb_path = thumbs / f"{fits_path.stem}_{path_hash}.jpg"
+        return raised, thumb_path
+
+    def test_integrity_error_preserves_thumbnail(self, tmp_path):
+        """Duplicate path -> IntegrityError on commit -> thumbnail is kept."""
+        tasks_mod = _bootstrap_tasks()
+        exc = IntegrityError("INSERT", {}, Exception("duplicate key"))
+        raised, thumb_path = self._run_do_ingest(tasks_mod, tmp_path, exc)
+        assert isinstance(raised, IntegrityError)
+        assert thumb_path.exists(), "surviving row's thumbnail must not be deleted"
+
+    def test_orphaned_insert_removes_unreferenced_thumbnail(self, tmp_path):
+        """Genuine insert failure with no row referencing the thumb -> deleted."""
+        tasks_mod = _bootstrap_tasks()
+        exc = RuntimeError("boom")
+        raised, thumb_path = self._run_do_ingest(
+            tasks_mod, tmp_path, exc, thumb_referenced=False
+        )
+        assert isinstance(raised, RuntimeError)
+        assert not thumb_path.exists(), "orphaned thumbnail should be cleaned up"
+
+    def test_orphaned_insert_keeps_referenced_thumbnail(self, tmp_path):
+        """Insert failure but another row references the thumb -> kept (defensive)."""
+        tasks_mod = _bootstrap_tasks()
+        exc = RuntimeError("boom")
+        raised, thumb_path = self._run_do_ingest(
+            tasks_mod, tmp_path, exc, thumb_referenced=True
+        )
+        assert isinstance(raised, RuntimeError)
+        assert thumb_path.exists(), "shared thumbnail must not be deleted"
