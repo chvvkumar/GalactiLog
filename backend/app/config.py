@@ -32,6 +32,13 @@ class Settings(BaseSettings):
 
 settings = Settings()
 
+# Upgrade gate: oldest install state this release can upgrade from.
+# Installs older than this must first run the checkpoint image below.
+# Bump these when migration history is squashed at a checkpoint release.
+MIN_UPGRADE_FROM_ALEMBIC_REVISION = "0001"
+MIN_UPGRADE_FROM_DATA_VERSION = 1
+CHECKPOINT_IMAGE_TAG = "chvvkumar/galactilog:v2.0"
+
 
 def load_or_create_jwt_secret(secret_file: str) -> str:
     """Load a persisted JWT secret from ``secret_file`` or create one.
