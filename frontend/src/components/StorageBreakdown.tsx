@@ -1,11 +1,5 @@
 import { Component } from "solid-js";
-
-function formatBytes(b: number): string {
-  if (b < 1e6) return (b / 1e3).toFixed(0) + " KB";
-  if (b < 1e9) return (b / 1e6).toFixed(0) + " MB";
-  if (b < 1e12) return (b / 1e9).toFixed(1) + " GB";
-  return (b / 1e12).toFixed(2) + " TB";
-}
+import { formatBytes } from "../utils/format";
 
 const StorageBreakdown: Component<{
   fitsBytes: number;

@@ -18,7 +18,7 @@ import MergePreviewModal from "../components/MergePreviewModal";
 import { useAuth } from "../components/AuthProvider";
 import { OBJECT_TYPE_OPTIONS } from "../constants/objectTypes";
 
-import { formatIntegration } from "../utils/format";
+import { formatIntegration, formatArcsec } from "../utils/format";
 import { getErrorMessage } from "../utils/errors";
 
 function formatCoord(val: number | null, label: string): string {
@@ -108,7 +108,7 @@ const MergeFromDetailFlow: Component<MergeFromDetailFlowProps> = (props) => {
               </p>
             </div>
             <div class="p-4 space-y-3">
-              <div class="text-xs px-2 py-1.5 rounded bg-yellow-500/10 text-yellow-400 border border-yellow-500/20">
+              <div class="text-xs px-2 py-1.5 rounded bg-theme-warning/10 text-theme-warning border border-theme-warning/20">
                 All images and sessions from the selected target will be moved here. You can revert from Settings &gt; Target Merges.
               </div>
               <div>
@@ -138,7 +138,7 @@ const MergeFromDetailFlow: Component<MergeFromDetailFlowProps> = (props) => {
                           <span class="text-xs text-theme-text-secondary ml-2">{t.object_type}</span>
                         </Show>
                         <Show when={t.unresolved}>
-                          <span class="text-xs text-yellow-400 ml-2">
+                          <span class="text-xs text-theme-warning ml-2">
                             Unresolved{t.image_count != null ? ` · ${t.image_count} ${t.image_count === 1 ? "image" : "images"}` : ""}
                           </span>
                         </Show>
@@ -915,7 +915,7 @@ const TargetDetailPage: Component = () => {
                   <Show when={visible("guiding", "rms_total")}>
                     <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-3 text-center">
                       <div class="text-lg font-semibold text-metric-guiding">
-                        {detail().avg_guiding_rms_arcsec !== null ? `${detail().avg_guiding_rms_arcsec?.toFixed(2)}"` : "—"}
+                        {detail().avg_guiding_rms_arcsec !== null ? formatArcsec(detail().avg_guiding_rms_arcsec) : "—"}
                       </div>
                       <div class="text-caption text-theme-text-secondary">Avg Guide RMS</div>
                     </div>

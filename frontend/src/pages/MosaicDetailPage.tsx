@@ -418,9 +418,9 @@ const MosaicDetailPage: Component = () => {
 
             {/* Needs Review Banner */}
             <Show when={mosaic()?.needs_review}>
-              <div class="rounded-[var(--radius-sm)] bg-amber-500/10 border border-amber-500/30 p-4 flex items-center justify-between">
+              <div class="rounded-[var(--radius-sm)] bg-theme-warning/10 border border-theme-warning/30 p-4 flex items-center justify-between">
                 <div>
-                  <p class="text-sm font-medium text-amber-400">Session review required</p>
+                  <p class="text-sm font-medium text-theme-warning">Session review required</p>
                   <p class="text-xs text-theme-text-secondary mt-1">
                     This mosaic was created before session management. Select which sessions to include for each panel.
                   </p>
@@ -441,7 +441,7 @@ const MosaicDetailPage: Component = () => {
                     refetch();
                     showToast("All sessions included");
                   }}
-                  class="px-4 py-2 text-sm bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded-[var(--radius-sm)] hover:bg-amber-500/30 transition-colors whitespace-nowrap"
+                  class="px-4 py-2 text-sm bg-theme-warning/20 text-theme-warning border border-theme-warning/30 rounded-[var(--radius-sm)] hover:bg-theme-warning/30 transition-colors whitespace-nowrap"
                 >
                   Include All
                 </button>
@@ -579,7 +579,7 @@ const MosaicDetailPage: Component = () => {
                             {formatIntegration(panel.total_integration_seconds)} · {panel.total_frames} frames
                           </span>
                           <Show when={(panel.available_session_count ?? 0) > 0}>
-                            <span class="text-xs text-amber-400">
+                            <span class="text-xs text-theme-warning">
                               {panel.available_session_count} available
                             </span>
                           </Show>
@@ -634,7 +634,7 @@ const MosaicDetailPage: Component = () => {
                             <Show when={available().length > 0}>
                               <div class="p-3 space-y-2 border-t border-theme-border/50">
                                 <div class="flex items-center justify-between">
-                                  <div class="text-xs font-medium text-amber-400">Available ({available().length})</div>
+                                  <div class="text-xs font-medium text-theme-warning">Available ({available().length})</div>
                                   <button
                                     onClick={() => handleInclude(available().map((s) => s.session_date))}
                                     class="text-xs text-theme-accent hover:underline"

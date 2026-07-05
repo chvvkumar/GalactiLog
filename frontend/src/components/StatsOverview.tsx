@@ -1,13 +1,6 @@
 import { Component } from "solid-js";
 import type { OverviewStats } from "../types";
-import { formatIntegration } from "../utils/format";
-
-function formatBytes(b: number): string {
-  if (b < 1e6) return (b / 1e3).toFixed(0) + " KB";
-  if (b < 1e9) return (b / 1e6).toFixed(0) + " MB";
-  if (b < 1e12) return (b / 1e9).toFixed(1) + " GB";
-  return (b / 1e12).toFixed(2) + " TB";
-}
+import { formatIntegration, formatBytes } from "../utils/format";
 
 function formatSpan(start: string | null, end: string | null): string {
   if (!start || !end) return "\u2014";

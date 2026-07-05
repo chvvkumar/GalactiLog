@@ -1,6 +1,7 @@
 import { Component, createEffect, createMemo, createResource, createSignal, For, onCleanup, Show } from "solid-js";
 import { parsePrometheusText, type MetricFamily } from "../../utils/prometheusParse";
 import { aggregate, emptyPrev, type Health, type PrevCounters } from "../../utils/metricsAggregate";
+import { formatBytes } from "../../utils/format";
 
 type RefreshOption = "off" | "5" | "15" | "30" | "60";
 
@@ -47,15 +48,6 @@ function formatSeconds(s: number): string {
   if (s < 60) return `${s.toFixed(1)} s`;
   if (s < 3600) return `${Math.round(s / 60)} min`;
   return `${(s / 3600).toFixed(1)} h`;
-}
-
-function formatBytes(b: number): string {
-  if (!isFinite(b) || b <= 0) return "0 B";
-  const units = ["B", "KB", "MB", "GB", "TB"];
-  let i = 0;
-  let v = b;
-  while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
-  return `${v.toFixed(v >= 100 ? 0 : 1)} ${units[i]}`;
 }
 
 function formatUptime(s: number): string {

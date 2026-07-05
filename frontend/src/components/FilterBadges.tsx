@@ -1,31 +1,6 @@
 import { Component, For, Show } from "solid-js";
 import { useSettingsContext } from "./SettingsProvider";
-import { getFilterBadgeStyle } from "../utils/filterStyles";
-
-// Canonical filter category for a given filter name.
-// Maps all common naming variations to one of the 7 standard categories,
-// or returns null for non-standard filters (IR, Duoband, etc.)
-function canonicalCategory(name: string): string | null {
-  const n = name.toLowerCase().replace(/[_\-\s]/g, "");
-  // Luminance
-  if (n === "l" || n === "lum" || n === "luminance" || n === "luminosity" || n === "clear") return "L";
-  // Red
-  if (n === "r" || n === "red") return "R";
-  // Green
-  if (n === "g" || n === "green") return "G";
-  // Blue
-  if (n === "b" || n === "blue") return "B";
-  // Sulfur II - check before Ha to avoid "sho" false matches
-  if (n === "sii" || n === "s2" || n === "s" || n === "sulfur" || n === "sulphur"
-    || n === "sulfurii" || n === "sulphurii") return "SII";
-  // Hydrogen alpha
-  if (n === "ha" || n === "h" || n === "halpha" || n === "hydrogenalpha"
-    || n === "hydrogen" || n === "h alpha" || n === "656nm" || n === "656") return "Ha";
-  // Oxygen III
-  if (n === "oiii" || n === "o3" || n === "o" || n === "oxygen" || n === "oxygeniii"
-    || n === "500nm" || n === "501nm") return "OIII";
-  return null;
-}
+import { getFilterBadgeStyle, canonicalFilterCategory, getFilterColor } from "../utils/filterStyles";
 
 // Sort order: L R G B S H O, then everything else alphabetically
 const FILTER_ORDER: Record<string, number> = {
@@ -52,7 +27,7 @@ const SHORT_LABEL: Record<string, string> = {
 
 function filterSortKey(name: string): number {
   if (FILTER_ORDER[name] !== undefined) return FILTER_ORDER[name];
-  const cat = canonicalCategory(name);
+  const cat = canonicalFilterCategory(name);
   if (cat && FILTER_ORDER[cat] !== undefined) return FILTER_ORDER[cat];
   return 100; // non-standard filters sort after LRGBSHO
 }
@@ -63,13 +38,7 @@ const FilterBadges: Component<{ distribution: Record<string, number>; compact?: 
   const { filterColorMap, filterAliasMap, filterBadgeStyle } = useSettingsContext();
 
   function getColor(name: string): string {
-    const colorMap = filterColorMap();
-    const aliasMap = filterAliasMap();
-    const canonical = aliasMap[name] || name;
-    if (colorMap[canonical]) return colorMap[canonical];
-    const cat = canonicalCategory(name);
-    if (cat && colorMap[cat]) return colorMap[cat];
-    return "#666666";
+    return getFilterColor(name, filterColorMap(), filterAliasMap());
   }
 
   const entries = () =>

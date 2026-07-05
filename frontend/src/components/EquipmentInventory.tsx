@@ -1,6 +1,6 @@
 import { Component, For, Show } from "solid-js";
 import type { EquipmentItem } from "../types";
-import { formatIntegration } from "../utils/format";
+import { formatIntegration, formatArcsec } from "../utils/format";
 
 const EquipmentTable: Component<{ title: string; items: EquipmentItem[] }> = (props) => (
   <div>
@@ -41,8 +41,8 @@ const EquipmentTable: Component<{ title: string; items: EquipmentItem[] }> = (pr
             <td class="text-right text-theme-text-secondary py-1 pr-4 whitespace-nowrap">{item.target_count.toLocaleString()}</td>
             <td class="text-right text-theme-text-secondary py-1 pr-4 whitespace-nowrap">{item.avg_session_seconds !== null ? formatIntegration(item.avg_session_seconds) : "—"}</td>
             <td class="text-right text-theme-text-secondary py-1 pr-4 whitespace-nowrap">{formatIntegration(item.integration_seconds)}</td>
-            <td class="text-right text-theme-text-secondary py-1 pr-4 whitespace-nowrap">{item.median_fwhm !== null ? item.median_fwhm.toFixed(2) + "″" : "—"}</td>
-            <td class="text-right text-theme-text-secondary py-1 whitespace-nowrap">{item.median_guiding_rms !== null ? item.median_guiding_rms.toFixed(2) + "″" : "—"}</td>
+            <td class="text-right text-theme-text-secondary py-1 pr-4 whitespace-nowrap">{item.median_fwhm !== null ? formatArcsec(item.median_fwhm) : "—"}</td>
+            <td class="text-right text-theme-text-secondary py-1 whitespace-nowrap">{item.median_guiding_rms !== null ? formatArcsec(item.median_guiding_rms) : "—"}</td>
           </tr>
         )}</For>
       </tbody>
