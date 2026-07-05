@@ -591,18 +591,26 @@ def clear_cancel_sync(r: sync_redis.Redis) -> None:
 
 
 def set_cancelled_sync(r: sync_redis.Redis) -> None:
+    # Unlike set_idle_sync (nothing was ever processed there, so 0/0 is
+    # factually correct), a cancelled scan has real progress in the flat
+    # counters, and the hash lives on for EXPIRE_AFTER_COMPLETE (24h). The
+    # envelope must agree with completed/failed/total at the moment of
+    # cancellation - otherwise a bar reading percent would snap from e.g.
+    # 80% to 0% and stay wrong until the hash expires.
+    data = r.hgetall(SCAN_KEY)
+    snap = parse_snapshot(data)
+    kind = data.get("kind", "scan") if data else "scan"
     r.hset(SCAN_KEY, mapping={
         "state": "complete",
         "completed_at": time.time(),
     })
     r.expire(SCAN_KEY, EXPIRE_AFTER_COMPLETE)
     r.delete(SCAN_CANCEL_KEY)
-    # Cancellation is a terminal state, same "no fixed total" treatment as
-    # set_idle_sync above - reset to indeterminate rather than trying to
-    # reverse-engineer a final step count from whatever the counters
-    # happened to reach when the cancel was requested.
     from app.services.progress_envelope import set_progress
-    set_progress(r, SCAN_KEY, task="scan", step=0, total_steps=0, message="Cancelled")
+    set_progress(
+        r, SCAN_KEY, task=kind, step=snap.completed + snap.failed,
+        total_steps=snap.total, message="Cancelled",
+    )
 
 
 # ── Rebuild status (Quick Fix / Full Rebuild) ────────────────────────────

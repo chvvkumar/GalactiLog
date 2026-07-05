@@ -358,13 +358,69 @@ def test_set_idle_sync_resets_envelope_to_indeterminate():
     assert envelope_mapping["total_steps"] == 0
 
 
-def test_set_cancelled_sync_resets_envelope_to_indeterminate():
+def test_set_cancelled_sync_preserves_progress_from_counters():
+    """A cancelled scan keeps its real completed/failed/total counters on the
+    hash for EXPIRE_AFTER_COMPLETE (24h), so the envelope must agree with
+    them at the moment of cancellation - not snap back to 0%. Cancel at 8/10
+    must leave step=8, total_steps=10 (percent derives to 80.0 on read)."""
     from app.services.scan_state import set_cancelled_sync
 
     r = MagicMock()
+    r.hgetall.return_value = {
+        "state": "ingesting", "total": "10", "completed": "7", "failed": "1",
+        "started_at": "1700000000.0", "completed_at": "", "kind": "scan",
+    }
     set_cancelled_sync(r)
 
     envelope_mapping = r.hset.call_args_list[-1].kwargs["mapping"]
+    assert envelope_mapping["task"] == "scan"
+    assert envelope_mapping["step"] == 8
+    assert envelope_mapping["total_steps"] == 10
+    assert envelope_mapping["message"] == "Cancelled"
+
+
+def test_set_cancelled_sync_derived_percent_survives_roundtrip():
+    """End-to-end through parse_snapshot: cancel at 8/10 must read back as
+    percent 80.0, not 0.0."""
+    from app.services.scan_state import set_cancelled_sync, parse_snapshot
+
+    store = {}
+
+    r = MagicMock()
+    r.hgetall.side_effect = lambda key: dict(store)
+
+    def _hset(key, field=None, value=None, mapping=None):
+        if mapping:
+            store.update({k: str(v) for k, v in mapping.items()})
+        if field is not None:
+            store[field] = str(value)
+
+    r.hset.side_effect = _hset
+    store.update({
+        "state": "ingesting", "total": "10", "completed": "7", "failed": "1",
+        "started_at": "1700000000.0", "completed_at": "", "kind": "scan",
+    })
+
+    set_cancelled_sync(r)
+
+    snap = parse_snapshot(dict(store))
+    assert snap.step == 8
+    assert snap.total_steps == 10
+    assert snap.percent == 80.0
+    assert snap.message == "Cancelled"
+
+
+def test_set_cancelled_sync_with_empty_hash_falls_back_to_zero():
+    """Cancel before any state was written (empty hash) must not blow up -
+    it degrades to an indeterminate 0/0 envelope."""
+    from app.services.scan_state import set_cancelled_sync
+
+    r = MagicMock()
+    r.hgetall.return_value = {}
+    set_cancelled_sync(r)
+
+    envelope_mapping = r.hset.call_args_list[-1].kwargs["mapping"]
+    assert envelope_mapping["task"] == "scan"
     assert envelope_mapping["step"] == 0
     assert envelope_mapping["total_steps"] == 0
 
