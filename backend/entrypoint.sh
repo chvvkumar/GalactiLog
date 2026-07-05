@@ -101,40 +101,47 @@ eng.dispose()
         alembic stamp head
     fi
 else
-    # alembic_version exists - check if it points to a revision that no
-    # longer exists (old incremental migrations were replaced by 0001).
-    # If so, re-stamp to the current head.
-    STALE=$(python -c "
-from alembic.config import Config
-from alembic.script import ScriptDirectory
+    # alembic_version exists - check whether the stamped revision is known
+    # to this release's migration history. If it is not, the database was
+    # last touched by a different release (older or newer, or one whose
+    # history was squashed at a checkpoint) and we must refuse to proceed
+    # rather than silently rewrite migration state.
+    STAMPED_REV=$(python -c "
 from sqlalchemy import create_engine, text
 from app.config import settings
 url = settings.database_url.replace('+asyncpg', '+psycopg2')
 eng = create_engine(url)
+with eng.connect() as c:
+    row = c.execute(text('SELECT version_num FROM alembic_version')).first()
+    print(row[0] if row else '')
+eng.dispose()
+" 2>/dev/null || echo "")
+
+    REV_KNOWN=$(python -c "
+from alembic.config import Config
+from alembic.script import ScriptDirectory
 cfg = Config('alembic.ini')
 scripts = ScriptDirectory.from_config(cfg)
 known = {s.revision for s in scripts.walk_revisions()}
-with eng.connect() as c:
-    row = c.execute(text('SELECT version_num FROM alembic_version')).first()
-    if row and row[0] not in known:
-        print('yes')
-    else:
-        print('no')
-eng.dispose()
+print('yes' if '$STAMPED_REV' in known else 'no')
 " 2>/dev/null || echo "no")
 
-    if [ "$STALE" = "yes" ]; then
-        echo "Stale migration revision detected - re-stamping to current head"
-        python -c "
-from sqlalchemy import create_engine, text
-from app.config import settings
-url = settings.database_url.replace('+asyncpg', '+psycopg2')
-eng = create_engine(url)
-with eng.begin() as c:
-    c.execute(text(\"DELETE FROM alembic_version\"))
-    c.execute(text(\"INSERT INTO alembic_version (version_num) VALUES ('0001')\"))
-eng.dispose()
-"
+    if [ "$REV_KNOWN" = "no" ]; then
+        CHECKPOINT_TAG=$(python -c "from app.config import CHECKPOINT_IMAGE_TAG; print(CHECKPOINT_IMAGE_TAG)" 2>/dev/null || echo "unknown")
+        MIN_REV=$(python -c "from app.config import MIN_UPGRADE_FROM_ALEMBIC_REVISION; print(MIN_UPGRADE_FROM_ALEMBIC_REVISION)" 2>/dev/null || echo "unknown")
+        echo "ERROR: Database is stamped at alembic revision '$STAMPED_REV', which this release does not recognize."
+        echo ""
+        echo "The database has NOT been modified."
+        echo ""
+        echo "This database was last touched by a different release and must first be"
+        echo "upgraded through the checkpoint image before this release can proceed."
+        echo "This release supports upgrading from revision $MIN_REV or newer."
+        echo ""
+        echo "Run the checkpoint image first:"
+        echo "  $CHECKPOINT_TAG"
+        echo ""
+        echo "Then retry starting this release."
+        exit 1
     fi
 fi
 
