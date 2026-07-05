@@ -6,7 +6,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, Query
 from starlette.responses import Response
-from sqlalchemy import select, func, case
+from sqlalchemy import select, func, case, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings, async_redis
@@ -234,24 +234,42 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
 
     async def _query_overview():
         capture_date_col = Image.session_date
+        has_date = Image.capture_date.isnot(None)
+        # Frames belonging to a merged-away (loser) target should not be
+        # double-counted under a stale target id; mirrors the merged-target
+        # guard in target_aggregation.list_targets_aggregated (AUD-032, axis 3).
+        merged_ok = or_(Image.resolved_target_id.is_(None), Target.merged_into_id.is_(None))
+        # rig_session_count: distinct (night, telescope, camera) combinations.
+        # This is deliberately NOT "distinct nights" -- a night imaged with two
+        # rigs counts as two rig-sessions here. Every other surface (the
+        # calendar below, target-detail session_count, the paginated
+        # aggregation) counts distinct session_date alone, i.e. imaging
+        # nights. Both definitions are kept and exposed as separate,
+        # explicitly-named metrics rather than unified; see AUD-019. Do not
+        # rename this back to a bare "session_count" / "sessions" label.
+        rig_session_expr = func.concat(
+            capture_date_col,
+            "|",
+            func.coalesce(Image.telescope, ""),
+            "|",
+            func.coalesce(Image.camera, ""),
+        )
         q = select(
-            func.coalesce(func.sum(Image.exposure_time), 0),
-            func.count(func.distinct(Image.resolved_target_id)),
+            func.coalesce(func.sum(Image.exposure_time).filter(has_date), 0),
+            func.count(func.distinct(Image.resolved_target_id)).filter(has_date),
+            # total_frames: all LIGHT frames regardless of capture_date, matching
+            # its "all LIGHT frames" label (AUD-032, axis 2: the aggregation
+            # used for the Dashboard sidebar counts NULL-capture_date frames
+            # too, so this no longer silently excludes them here).
             func.count(Image.id),
-            func.count(func.distinct(
-                func.concat(
-                    capture_date_col,
-                    "|",
-                    func.coalesce(Image.telescope, ""),
-                    "|",
-                    func.coalesce(Image.camera, ""),
-                )
-            )),
-            func.min(capture_date_col),
-            func.max(capture_date_col),
+            func.count(func.distinct(rig_session_expr)).filter(has_date),
+            func.min(capture_date_col).filter(has_date),
+            func.max(capture_date_col).filter(has_date),
+        ).select_from(Image).outerjoin(
+            Target, Image.resolved_target_id == Target.id
         ).where(
             Image.image_type == "LIGHT",
-            Image.capture_date.isnot(None),
+            merged_ok,
         )
         async with async_session() as s:
             return (await s.execute(q)).one()
@@ -466,7 +484,7 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
         total_seconds,
         target_count,
         total_frames,
-        session_count,
+        rig_session_count,
         first_capture_date,
         last_capture_date,
     ) = ov_row
@@ -477,7 +495,7 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
         total_frames=total_frames,
         all_frames=all_frames,
         disk_usage_bytes=_storage_cache["fits"] + _storage_cache["thumbnails"],
-        session_count=session_count or 0,
+        rig_session_count=rig_session_count or 0,
         first_capture_date=first_capture_date.isoformat() if first_capture_date else None,
         last_capture_date=last_capture_date.isoformat() if last_capture_date else None,
     )
@@ -849,6 +867,9 @@ async def get_calendar(
     session: AsyncSession = Depends(get_session),
     user: User = Depends(get_current_user),
 ):
+    # Grouped by distinct imaging night (session_date alone), not by rig -- see
+    # the rig_session_count comment in _query_overview (AUD-019). A night with
+    # two rigs is one calendar cell here, but two rig-sessions in the overview.
     date_col = Image.session_date
     q = (
         select(

@@ -23,6 +23,7 @@ from app.models.custom_column import CustomColumnValue
 from app.schemas.target import (
     MergeRequest, MergePreviewRequest, MergePreviewResponse, MergePreviewSide,
 )
+from app.services.cache import invalidate_stats_and_analysis_cache
 
 
 async def _record_merge_manifest(loser, winner, session: AsyncSession) -> None:
@@ -290,6 +291,10 @@ async def merge_targets(body: MergeRequest, session: AsyncSession) -> dict:
         raise HTTPException(status_code=400, detail="Either loser_id or loser_name must be provided")
 
     await session.commit()
+    # Statistics/Analysis caches are stale after a merge (new membership,
+    # renamed-via-alias target); invalidate so both pages reflect it
+    # immediately instead of waiting out the TTL (AUD-034).
+    await invalidate_stats_and_analysis_cache()
     return {"status": "ok"}
 
 
@@ -479,4 +484,6 @@ async def unmerge_target(target_id, session: AsyncSession) -> dict:
     )
 
     await session.commit()
+    # See the matching comment in merge_targets (AUD-034).
+    await invalidate_stats_and_analysis_cache()
     return {"status": "ok"}

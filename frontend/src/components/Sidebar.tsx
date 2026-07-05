@@ -78,8 +78,8 @@ const Sidebar: Component = () => {
             <span class="text-theme-text-secondary">
               Integration <span class="text-theme-text-primary font-semibold">{formatIntegration(data().aggregates.total_integration_seconds)}</span>
             </span>
-            <span class="text-theme-text-secondary">
-              Targets <span class="text-theme-text-primary font-semibold">{String(data().aggregates.target_count)}</span>
+            <span class="text-theme-text-secondary" title="Includes unresolved OBJECT-header groups alongside resolved targets; the Statistics page reports resolved targets only, so the two counts can differ by design.">
+              Groups <span class="text-theme-text-primary font-semibold">{String(data().aggregates.target_count)}</span>
             </span>
             <span class="text-theme-text-secondary">
               Frames <span class="text-theme-text-primary font-semibold">{data().aggregates.total_frames.toLocaleString()}</span>

@@ -1199,6 +1199,16 @@ async def list_targets_aggregated(
     # group in both phases.
     gk = "coalesce(CAST(i.resolved_target_id AS VARCHAR), concat('obj:', coalesce(nullif(i.raw_headers->>'OBJECT', ''), '__uncategorized__')))"
 
+    # NOTE (AUD-032, axis 1): the resulting `agg.target_count` below counts
+    # every group in `gk`, including unresolved-OBJECT / uncategorized "obj:"
+    # buckets, alongside resolved targets. This is intentionally a different,
+    # broader count than the Statistics overview's `target_count`
+    # (`stats._query_overview`, which counts only `count(distinct
+    # resolved_target_id)` and so excludes unresolved frames entirely). Both
+    # are kept as distinct metrics -- this one drives the Dashboard sidebar's
+    # "Targets" figure (a list-entry count including unresolved groups), the
+    # Statistics figure is labeled "Resolved targets". Do not silently unify
+    # them without updating both labels.
     combined_sql = text(f"""
     WITH grouped AS (
         SELECT {gk} AS target_key,
