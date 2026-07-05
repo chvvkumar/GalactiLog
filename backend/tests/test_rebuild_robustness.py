@@ -224,7 +224,7 @@ def _run_thumbnails(tasks, targets, fetch):
     cm.__exit__ = MagicMock(return_value=False)
     captured = {}
 
-    def _capture_complete(r, message, details):
+    def _capture_complete(r, message, details, **kwargs):
         captured["message"] = message
         captured["details"] = details
 
@@ -299,7 +299,7 @@ def _run_rebuild_family(tasks, task, object_names, resolve_side_effect):
     cm.__exit__ = MagicMock(return_value=False)
     captured = {}
 
-    def _capture_complete(r, message, details):
+    def _capture_complete(r, message, details, **kwargs):
         captured["message"] = message
         captured["details"] = details
 
@@ -496,3 +496,94 @@ class TestSoftLimitPropagation:
 
         with patch.object(httpx, "Client", side_effect=httpx.ConnectError("boom")):
             assert fetch_reference_thumbnail(target, "/tmp/test_thumbnails/reference") is None
+
+
+# ---------------------------------------------------------------------------
+# Task 2: Rebuild progress envelope integration
+# ---------------------------------------------------------------------------
+
+class TestRebuildProgressEnvelope:
+    """Tests for Phase 3 Task 2: migrate rebuild tasks to structured envelope.
+    Verifies that rebuild status captures step/total_steps/percent alongside
+    the existing message field."""
+
+    def test_set_progress_writes_envelope_fields_to_rebuild_key(self):
+        from app.services.progress_envelope import set_progress
+        from app.services import scan_state
+
+        sync = FakeSyncRedis()
+        scan_state.set_rebuild_running_sync(sync, "full", "starting")
+        set_progress(
+            sync, scan_state.REBUILD_KEY, task="full", step=2, total_steps=10,
+            message="Resolving 2/10 object names...",
+        )
+        status = scan_state._parse_rebuild(sync.hgetall(scan_state.REBUILD_KEY))
+        assert status.step == 2
+        assert status.total_steps == 10
+        assert status.percent == 20.0
+        assert status.message == "Resolving 2/10 object names..."
+
+    def test_progress_percent_derived_on_parse(self):
+        """Percent is never stored, always derived from step/total_steps."""
+        from app.services.progress_envelope import set_progress
+        from app.services import scan_state
+
+        sync = FakeSyncRedis()
+        scan_state.set_rebuild_running_sync(sync, "full", "starting")
+        set_progress(
+            sync, scan_state.REBUILD_KEY, task="full", step=3, total_steps=7,
+            message="3/7",
+        )
+        # Verify percent is not stored as a separate field.
+        h = sync.hgetall(scan_state.REBUILD_KEY)
+        assert "percent" not in h
+        # Verify percent is derived on parse (rounded to 1 decimal place).
+        status = scan_state._parse_rebuild(h)
+        assert status.percent == 42.9
+
+    def test_progress_zero_total_steps_yields_zero_percent(self):
+        from app.services.progress_envelope import set_progress
+        from app.services import scan_state
+
+        sync = FakeSyncRedis()
+        scan_state.set_rebuild_running_sync(sync, "full", "starting")
+        set_progress(
+            sync, scan_state.REBUILD_KEY, task="full", step=0, total_steps=0,
+            message="starting",
+        )
+        status = scan_state._parse_rebuild(sync.hgetall(scan_state.REBUILD_KEY))
+        assert status.step == 0
+        assert status.total_steps == 0
+        assert status.percent == 0.0
+
+    def test_progress_full_completion(self):
+        from app.services.progress_envelope import set_progress
+        from app.services import scan_state
+
+        sync = FakeSyncRedis()
+        scan_state.set_rebuild_running_sync(sync, "full", "starting")
+        set_progress(
+            sync, scan_state.REBUILD_KEY, task="full", step=10, total_steps=10,
+            message="done",
+        )
+        status = scan_state._parse_rebuild(sync.hgetall(scan_state.REBUILD_KEY))
+        assert status.percent == 100.0
+
+    def test_rebuild_to_dict_includes_progress_fields(self):
+        """RebuildStatus.to_dict() must include step/total_steps/percent for
+        API responses (GET /scan/rebuild-status)."""
+        from app.services.progress_envelope import set_progress
+        from app.services import scan_state
+
+        sync = FakeSyncRedis()
+        scan_state.set_rebuild_running_sync(sync, "retry", "working")
+        set_progress(
+            sync, scan_state.REBUILD_KEY, task="retry", step=5, total_steps=15,
+            message="Retrying 5/15",
+        )
+        status = scan_state._parse_rebuild(sync.hgetall(scan_state.REBUILD_KEY))
+        d = status.to_dict()
+        assert d["step"] == 5
+        assert d["total_steps"] == 15
+        assert d.get("percent") == pytest.approx(33.3, abs=0.01)
+        assert d["message"] == "Retrying 5/15"

@@ -98,6 +98,9 @@ class RebuildStatusResponse(BaseModel):
     started_at: float | None = None
     completed_at: float | None = None
     details: dict[str, Any]
+    step: int | None = None
+    total_steps: int | None = None
+    percent: float | None = None
 
 
 class DbSummaryResponse(BaseModel):

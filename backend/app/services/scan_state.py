@@ -510,6 +510,9 @@ class RebuildStatus:
     started_at: float | None
     completed_at: float | None
     details: dict
+    step: int | None = None
+    total_steps: int | None = None
+    percent: float | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -519,6 +522,9 @@ class RebuildStatus:
             "started_at": self.started_at,
             "completed_at": self.completed_at,
             "details": self.details,
+            "step": self.step,
+            "total_steps": self.total_steps,
+            "percent": self.percent,
         }
 
 
@@ -526,9 +532,19 @@ def _parse_rebuild(data: dict | None) -> RebuildStatus:
     if not data or "state" not in data:
         return RebuildStatus(
             state="idle", mode="", message="", started_at=None,
-            completed_at=None, details={},
+            completed_at=None, details={}, step=None, total_steps=None, percent=None,
         )
     import json
+
+    # Derive percent from step/total_steps (never stored directly).
+    # Use ProgressEnvelope.for_progress logic for consistency.
+    step = int(data.get("step", 0) or 0)
+    total_steps = int(data.get("total_steps", 0) or 0)
+    if total_steps > 0:
+        percent = round(100 * step / total_steps, 1)
+    else:
+        percent = 0.0
+
     return RebuildStatus(
         state=data.get("state", "idle"),
         mode=data.get("mode", ""),
@@ -536,6 +552,9 @@ def _parse_rebuild(data: dict | None) -> RebuildStatus:
         started_at=float(data["started_at"]) if data.get("started_at") else None,
         completed_at=float(data["completed_at"]) if data.get("completed_at") else None,
         details=json.loads(data["details"]) if data.get("details") else {},
+        step=step if step >= 0 else None,
+        total_steps=total_steps if total_steps >= 0 else None,
+        percent=percent,
     )
 
 
@@ -559,7 +578,18 @@ async def get_rebuild_state(r: aioredis.Redis) -> RebuildStatus:
     return snap
 
 
-def set_rebuild_running_sync(r: sync_redis.Redis, mode: str, message: str) -> None:
+def set_rebuild_running_sync(
+    r: sync_redis.Redis, mode: str, message: str,
+    task: str | None = None, step: int = 0, total_steps: int = 0,
+) -> None:
+    """Set rebuild state to running, optionally with progress envelope fields.
+
+    If task/step/total_steps are provided, also writes those fields via the
+    structured progress envelope (Phase 3). task should match mode (e.g. "full",
+    "retry", "backfill", "smart", "ref_thumbnails") unless overridden.
+    """
+    from app.services.progress_envelope import set_progress
+
     r.hset(REBUILD_KEY, mapping={
         "state": "running",
         "mode": mode,
@@ -571,17 +601,46 @@ def set_rebuild_running_sync(r: sync_redis.Redis, mode: str, message: str) -> No
     r.persist(REBUILD_KEY)
     r.set(REBUILD_PROGRESS_KEY, str(time.time()))
 
+    # Write envelope fields if task is provided (Phase 3 structured progress).
+    if task is not None:
+        set_progress(r, REBUILD_KEY, task=task, step=step, total_steps=total_steps, message=message)
 
-def set_rebuild_progress_sync(r: sync_redis.Redis, message: str) -> None:
+
+def set_rebuild_progress_sync(
+    r: sync_redis.Redis, message: str,
+    task: str | None = None, step: int | None = None, total_steps: int | None = None,
+) -> None:
+    """Update rebuild message and progress, optionally with envelope fields.
+
+    If task/step/total_steps are provided, also writes those fields via the
+    structured progress envelope (Phase 3). message stays unchanged from its
+    current value for backward compatibility with existing notifications.
+    """
+    from app.services.progress_envelope import set_progress
+
     r.hset(REBUILD_KEY, "message", message)
     # Heartbeat for stale detection: every incremental progress write bumps the
     # last-progress marker so get_rebuild_state can tell a slow-but-alive run
     # from a hard-killed one (AUD-003).
     r.set(REBUILD_PROGRESS_KEY, str(time.time()))
 
+    # Write envelope fields if task is provided (Phase 3 structured progress).
+    if task is not None and step is not None and total_steps is not None:
+        set_progress(r, REBUILD_KEY, task=task, step=step, total_steps=total_steps, message=message)
 
-def set_rebuild_complete_sync(r: sync_redis.Redis, message: str, details: dict) -> None:
+
+def set_rebuild_complete_sync(
+    r: sync_redis.Redis, message: str, details: dict,
+    task: str | None = None, step: int | None = None, total_steps: int | None = None,
+) -> None:
+    """Complete rebuild, optionally with progress envelope fields at completion.
+
+    If task/step/total_steps are provided, marks progress as fully complete
+    (step == total_steps) via the structured progress envelope (Phase 3).
+    """
+    from app.services.progress_envelope import set_progress
     import json
+
     r.hset(REBUILD_KEY, mapping={
         "state": "complete",
         "message": message,
@@ -590,6 +649,10 @@ def set_rebuild_complete_sync(r: sync_redis.Redis, message: str, details: dict) 
     })
     r.expire(REBUILD_KEY, REBUILD_EXPIRE)
     r.delete(REBUILD_PROGRESS_KEY)
+
+    # Write envelope fields at completion if task is provided (Phase 3).
+    if task is not None and step is not None and total_steps is not None:
+        set_progress(r, REBUILD_KEY, task=task, step=step, total_steps=total_steps, message=message)
 
 
 def set_rebuild_cancelled_sync(

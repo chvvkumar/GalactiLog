@@ -39,12 +39,13 @@ _sync_url = settings.database_url.replace("+asyncpg", "+psycopg2")
 _sync_engine = create_engine(_sync_url, pool_pre_ping=True, pool_size=2, max_overflow=2, pool_recycle=1800)
 
 from app.config import get_sync_redis
+from app.services.progress_envelope import set_progress
 from app.services.scan_state import (
     increment_completed_sync, increment_failed_sync, increment_csv_enriched_sync,
     increment_skipped_calibration_sync,
     start_scanning_sync, set_ingesting_sync, set_idle_sync,
     set_rebuild_running_sync, set_rebuild_progress_sync, set_rebuild_complete_sync,
-    set_rebuild_cancelled_sync,
+    set_rebuild_cancelled_sync, REBUILD_KEY,
     set_discovered_sync, is_cancel_requested_sync, clear_cancel_sync, set_cancelled_sync,
     check_complete_sync,
     add_skipped_path_sync, get_skipped_paths_sync, clear_skipped_paths_sync,
@@ -1454,7 +1455,10 @@ def rebuild_targets(self) -> dict:
 
     total = len(object_names)
     logger.info("rebuild_targets: found %d unique OBJECT names", total)
-    set_rebuild_progress_sync(_redis, f"Resolving 0/{total} object names...")
+    set_rebuild_progress_sync(
+        _redis, f"Resolving 0/{total} object names...",
+        task="full", step=0, total_steps=total,
+    )
 
     resolved = 0
     failed = 0
@@ -1504,7 +1508,10 @@ def rebuild_targets(self) -> dict:
 
             processed = i + 1
             if (i + 1) % 5 == 0 or i + 1 == total:
-                set_rebuild_progress_sync(_redis, f"Resolving {i + 1}/{total} object names...")
+                set_rebuild_progress_sync(
+                    _redis, f"Resolving {i + 1}/{total} object names...",
+                    task="full", step=i + 1, total_steps=total,
+                )
 
             time.sleep(0.3)  # Rate limit SIMBAD
     except SoftTimeLimitExceeded:
@@ -1517,6 +1524,7 @@ def rebuild_targets(self) -> dict:
             f"Full Rebuild paused at the time limit after {processed}/{total} names "
             f"({resolved} resolved, {failed} failed)",
             details,
+            task="full", step=processed, total_steps=total,
         )
         with _activity_session() as _db:
             _emit_activity_sync(
@@ -1537,6 +1545,7 @@ def rebuild_targets(self) -> dict:
         _redis,
         f"Resolved {resolved} targets, {failed} failed out of {total} object names",
         details,
+        task="full", step=total, total_steps=total,
     )
     with _activity_session() as _db:
         _emit_activity_sync(
@@ -1593,7 +1602,10 @@ def retry_unresolved(self) -> dict:
 
     total = len(object_names)
     logger.info("retry_unresolved: found %d unresolved object names", total)
-    set_rebuild_progress_sync(_redis, f"Retrying 0/{total} unresolved names...")
+    set_rebuild_progress_sync(
+        _redis, f"Retrying 0/{total} unresolved names...",
+        task="retry", step=0, total_steps=total,
+    )
 
     resolved = 0
     failed = 0
@@ -1643,7 +1655,10 @@ def retry_unresolved(self) -> dict:
 
             processed = i + 1
             if (i + 1) % 5 == 0 or i + 1 == total:
-                set_rebuild_progress_sync(_redis, f"Retrying {i + 1}/{total} unresolved names...")
+                set_rebuild_progress_sync(
+                    _redis, f"Retrying {i + 1}/{total} unresolved names...",
+                    task="retry", step=i + 1, total_steps=total,
+                )
 
             time.sleep(0.3)  # Rate limit external services
     except SoftTimeLimitExceeded:
@@ -1656,6 +1671,7 @@ def retry_unresolved(self) -> dict:
             f"Retry Unresolved paused at the time limit after {processed}/{total} names "
             f"({resolved} resolved, {failed} still unresolved)",
             details,
+            task="retry", step=processed, total_steps=total,
         )
         with _activity_session() as _db:
             _emit_activity_sync(
@@ -1672,6 +1688,7 @@ def retry_unresolved(self) -> dict:
         _redis,
         f"Retry: {resolved} resolved, {failed} still unresolved out of {total} names",
         details,
+        task="retry", step=total, total_steps=total,
     )
     with _activity_session() as _db:
         _emit_activity_sync(
@@ -1726,7 +1743,10 @@ def backfill_catalog_identity(self) -> dict:
         """)).all()
 
     total = len(rows)
-    set_rebuild_progress_sync(_redis, f"Linking 0/{total} orphaned names...")
+    set_rebuild_progress_sync(
+        _redis, f"Linking 0/{total} orphaned names...",
+        task="backfill", step=0, total_steps=total,
+    )
     linked = 0
     skipped = 0
 
@@ -1759,7 +1779,10 @@ def backfill_catalog_identity(self) -> dict:
                 skipped += 1
 
         if (i + 1) % 5 == 0 or i + 1 == total:
-            set_rebuild_progress_sync(_redis, f"Linking {i + 1}/{total} orphaned names...")
+            set_rebuild_progress_sync(
+                _redis, f"Linking {i + 1}/{total} orphaned names...",
+                task="backfill", step=i + 1, total_steps=total,
+            )
         time.sleep(0.1)
 
     details = {
@@ -1771,6 +1794,7 @@ def backfill_catalog_identity(self) -> dict:
         f"Re-linked {linked} catalog orphans, {skipped} left unresolved "
         f"({repair_summary['repaired']} cache rows repaired)",
         details,
+        task="backfill", step=total, total_steps=total,
     )
     logger.info("backfill_catalog_identity: complete %s", details)
     return {"status": "complete", **details}
@@ -1978,7 +2002,10 @@ def _smart_rebuild_inner(manual: bool = False, parent_activity_id: int | None = 
     if stats.get("stale_candidates_removed"): parts.append(f"{stats['stale_candidates_removed']} stale candidates removed")
     message = "; ".join(parts) if parts else "No issues found"
 
-    set_rebuild_complete_sync(_redis, message, stats)
+    set_rebuild_complete_sync(
+        _redis, message, stats,
+        task="smart", step=1, total_steps=1,
+    )
     _invalidate_stats_cache()
 
     # Update scan summary with targets_updated from aliases updated this run
@@ -2583,7 +2610,8 @@ def generate_reference_thumbnails(self, force: bool = False, parent_activity_id:
 
         total = len(targets)
         set_rebuild_progress_sync(
-            _redis, f"Fetching reference thumbnails 0/{total}..."
+            _redis, f"Fetching reference thumbnails 0/{total}...",
+            task="ref_thumbnails", step=0, total_steps=total,
         )
         fetched = 0
         cancelled = False
@@ -2601,7 +2629,8 @@ def generate_reference_thumbnails(self, force: bool = False, parent_activity_id:
                     session.commit()  # persist partial progress
                 if (i + 1) % 5 == 0 or i + 1 == total:
                     set_rebuild_progress_sync(
-                        _redis, f"Reference thumbnails: {i + 1}/{total} ({fetched} fetched)"
+                        _redis, f"Reference thumbnails: {i + 1}/{total} ({fetched} fetched)",
+                        task="ref_thumbnails", step=i + 1, total_steps=total,
                     )
                 time.sleep(1.0)  # Rate limit
         except SoftTimeLimitExceeded:
@@ -2636,7 +2665,10 @@ def generate_reference_thumbnails(self, force: bool = False, parent_activity_id:
         )
     else:
         message = f"Fetched {fetched}/{total} reference thumbnails"
-    set_rebuild_complete_sync(_redis, message, stats)
+    set_rebuild_complete_sync(
+        _redis, message, stats,
+        task="ref_thumbnails", step=fetched, total_steps=total,
+    )
     with _activity_session() as _db:
         _emit_activity_sync(
             _db, redis=_redis, category="thumbnail", severity="info",
