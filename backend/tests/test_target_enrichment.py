@@ -404,10 +404,10 @@ class TestEnrichNewTargetParity:
             load_all_catalogs(session)
             session.commit()
 
-            def _make(tid):
+            def _make(tid, primary_name):
                 return Target(
                     id=tid,
-                    primary_name="NGC 4236",
+                    primary_name=primary_name,
                     catalog_id="NGC 4236",
                     object_type="G",
                     ra=184.176,
@@ -415,7 +415,10 @@ class TestEnrichNewTargetParity:
                 )
 
             # Migration-time target: enriched via the bulk matcher + HyperLEDA.
-            session.add(_make(mig_id))
+            # `primary_name` is unique per row and irrelevant to matching (which
+            # keys off catalog_id/ra/dec/object_type), so the two rows use
+            # distinct display names while sharing the same catalog identity.
+            session.add(_make(mig_id, "NGC 4236"))
             session.commit()
             with patch(
                 "app.services.hyperleda.query_hyperleda",
@@ -427,7 +430,7 @@ class TestEnrichNewTargetParity:
             session.commit()
 
             # Freshly-ingested target: enriched via the new per-target path.
-            session.add(_make(new_id))
+            session.add(_make(new_id, "NGC 4236 (new)"))
             session.commit()
             with patch(
                 "app.services.hyperleda.query_hyperleda",
