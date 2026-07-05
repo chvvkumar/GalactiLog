@@ -28,6 +28,11 @@ class ScanQueueResponse(BaseModel):
     skipped_calibration: int | None = None
     new_files: int | None = None
     changed_files: int | None = None
+    task: str | None = None
+    step: int | None = None
+    total_steps: int | None = None
+    percent: float | None = None
+    message: str | None = None
 
 
 class RegenerateThumbnailsResponse(BaseModel):
@@ -52,6 +57,11 @@ class ScanStateResponse(BaseModel):
     new_files: int = 0
     changed_files: int = 0
     failed_files: list[str] | None = None
+    task: str = ""
+    step: int = 0
+    total_steps: int = 0
+    percent: float = 0.0
+    message: str = ""
 
 
 class ScanStopResponse(BaseModel):

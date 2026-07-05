@@ -100,7 +100,9 @@ def test_start_scanning_sync_resets_kind_and_clears_dispatch_marker():
     r = MagicMock()
     start_scanning_sync(r)
 
-    mapping = r.hset.call_args.kwargs["mapping"]
+    # First hset call is the counter reset; the envelope write (added by
+    # Phase 3 T3) happens afterwards as a second hset call.
+    mapping = r.hset.call_args_list[0].kwargs["mapping"]
     assert mapping["kind"] == "scan"
     assert mapping["state"] == "scanning"
     r.delete.assert_any_call(SCAN_DISPATCHED_KEY)
@@ -127,8 +129,14 @@ def test_check_complete_sync_skips_activity_and_cascade_for_csv_backfill_kind():
     mock_engine.assert_not_called()
     # State still transitions to a terminal value and the stats cache is
     # still invalidated - only the scan-specific activity/cascade are skipped.
-    r.hset.assert_called_once()
-    assert r.hset.call_args.kwargs["mapping"]["state"] == "complete"
+    # Two hset calls: the state-transition mapping, then the progress-envelope
+    # write (added by Phase 3 T3) marking the csv_backfill task complete.
+    assert r.hset.call_count == 2
+    assert r.hset.call_args_list[0].kwargs["mapping"]["state"] == "complete"
+    envelope_mapping = r.hset.call_args_list[1].kwargs["mapping"]
+    assert envelope_mapping["task"] == "csv_backfill"
+    assert envelope_mapping["step"] == 3
+    assert envelope_mapping["total_steps"] == 3
     r.expire.assert_called_once()
     r.delete.assert_called_once_with("galactilog:stats:cache", "galactilog:fits_keys")
 
@@ -202,6 +210,163 @@ def test_rebuild_skipped_paths_sync_replaces_set_with_ttl():
     assert set(pipe.sadd.call_args[0][1:]) == {"/data/a.fits", "/data/b.fits"}
     pipe.expire.assert_called_once_with(SCAN_SKIPPED_PATHS_KEY, SCAN_SKIPPED_PATHS_TTL)
     pipe.execute.assert_called_once()
+
+
+def test_parse_snapshot_derives_percent_from_envelope_fields():
+    """ScanStateSnapshot.to_dict() exposes the Phase 3 envelope
+    (task/step/total_steps/percent/message) alongside the existing flat
+    counters, with percent derived at read time, never stored."""
+    from app.services.scan_state import parse_snapshot
+
+    snap = parse_snapshot({
+        "state": "ingesting", "total": "10", "completed": "3", "failed": "1",
+        "started_at": "1700000000.0", "completed_at": "",
+        "kind": "scan", "task": "scan", "step": "4", "total_steps": "10",
+        "message": "Ingesting 4/10 files",
+    })
+
+    assert snap.task == "scan"
+    assert snap.step == 4
+    assert snap.total_steps == 10
+    assert snap.percent == 40.0
+    assert snap.message == "Ingesting 4/10 files"
+    d = snap.to_dict()
+    assert d["task"] == "scan"
+    assert d["percent"] == 40.0
+
+
+def test_parse_snapshot_missing_envelope_fields_default_to_zero():
+    """A hash written before this task (no task/step/total_steps/message
+    fields yet) must still parse cleanly with a 0/0/0.0 envelope."""
+    from app.services.scan_state import parse_snapshot
+
+    snap = parse_snapshot({
+        "state": "ingesting", "total": "5", "completed": "5", "failed": "0",
+        "started_at": "1700000000.0", "completed_at": "",
+    })
+
+    assert snap.task == ""
+    assert snap.step == 0
+    assert snap.total_steps == 0
+    assert snap.percent == 0.0
+    assert snap.message == ""
+
+
+def test_start_scanning_sync_resets_envelope_to_indeterminate_discovery():
+    """Discovery has no fixed total (files aren't counted yet), so the
+    envelope starts at 0/0 rather than a fake total."""
+    from app.services.scan_state import start_scanning_sync
+
+    r = MagicMock()
+    start_scanning_sync(r)
+
+    envelope_mapping = r.hset.call_args_list[1].kwargs["mapping"]
+    assert envelope_mapping["task"] == "scan"
+    assert envelope_mapping["step"] == 0
+    assert envelope_mapping["total_steps"] == 0
+
+
+def test_set_ingesting_sync_writes_envelope_with_task_and_total():
+    """set_ingesting_sync knows the real total, so the envelope's
+    total_steps is populated (task defaults to kind, e.g. "scan" or
+    "csv_backfill")."""
+    from app.services.scan_state import set_ingesting_sync
+
+    r = MagicMock()
+    set_ingesting_sync(r, total=25, kind="csv_backfill")
+
+    envelope_mapping = r.hset.call_args_list[1].kwargs["mapping"]
+    assert envelope_mapping["task"] == "csv_backfill"
+    assert envelope_mapping["step"] == 0
+    assert envelope_mapping["total_steps"] == 25
+
+
+def test_check_complete_sync_updates_envelope_step_while_in_progress():
+    """Each increment_completed_sync/increment_failed_sync call ends in
+    check_complete_sync - while the job isn't done yet, the envelope's step
+    must track completed+failed so the percent bar moves incrementally."""
+    from app.services.scan_state import check_complete_sync
+
+    r = _redis(total=10, completed=4, failed=1)
+    check_complete_sync(r)
+
+    envelope_mapping = r.hset.call_args.kwargs["mapping"]
+    assert envelope_mapping["task"] == "scan"
+    assert envelope_mapping["step"] == 5
+    assert envelope_mapping["total_steps"] == 10
+
+
+def test_check_complete_sync_envelope_reaches_100_percent_on_scan_completion():
+    """On the completing call for a real scan, the envelope's message must
+    equal the same human-readable summary used for the scan_complete
+    activity log entry (roadmap: 'notification text unchanged in
+    readability')."""
+    from app.services.scan_state import check_complete_sync
+
+    r = _redis(total=5, completed=5, failed=0, new_files=5)
+
+    with patch("app.services.scan_state.emit_sync") as mock_emit, \
+         patch("app.services.scan_state.create_engine"), \
+         patch("app.services.scan_state._SyncSession") as ms:
+        ms.return_value.__enter__ = lambda s, *a: MagicMock()
+        ms.return_value.__exit__ = lambda s, *a: None
+        mock_emit.return_value = None
+        check_complete_sync(r)
+
+    envelope_calls = [
+        c for c in r.hset.call_args_list
+        if "mapping" in c.kwargs and "task" in c.kwargs["mapping"]
+    ]
+    assert len(envelope_calls) == 1
+    mapping = envelope_calls[0].kwargs["mapping"]
+    assert mapping["task"] == "scan"
+    assert mapping["step"] == 5
+    assert mapping["total_steps"] == 5
+    assert mapping["message"] == "Scan complete: 5 new files added"
+
+
+def test_check_complete_sync_envelope_completes_for_csv_backfill_kind():
+    """The early-return csv_backfill branch (AUD-030: no activity/cascade)
+    still finalizes the progress envelope so the bar reaches 100%."""
+    from app.services.scan_state import check_complete_sync
+
+    r = _redis(total=3, completed=3, failed=0)
+    r.hgetall.return_value["kind"] = "csv_backfill"
+
+    check_complete_sync(r)
+
+    envelope_calls = [
+        c for c in r.hset.call_args_list
+        if "mapping" in c.kwargs and "task" in c.kwargs["mapping"]
+    ]
+    assert len(envelope_calls) == 1
+    mapping = envelope_calls[0].kwargs["mapping"]
+    assert mapping["task"] == "csv_backfill"
+    assert mapping["step"] == 3
+    assert mapping["total_steps"] == 3
+
+
+def test_set_idle_sync_resets_envelope_to_indeterminate():
+    from app.services.scan_state import set_idle_sync
+
+    r = MagicMock()
+    r.hgetall.return_value = {"kind": "scan", "total": "0"}
+    set_idle_sync(r)
+
+    envelope_mapping = r.hset.call_args_list[-1].kwargs["mapping"]
+    assert envelope_mapping["step"] == 0
+    assert envelope_mapping["total_steps"] == 0
+
+
+def test_set_cancelled_sync_resets_envelope_to_indeterminate():
+    from app.services.scan_state import set_cancelled_sync
+
+    r = MagicMock()
+    set_cancelled_sync(r)
+
+    envelope_mapping = r.hset.call_args_list[-1].kwargs["mapping"]
+    assert envelope_mapping["step"] == 0
+    assert envelope_mapping["total_steps"] == 0
 
 
 def test_rebuild_skipped_paths_sync_empty_still_deletes_key():

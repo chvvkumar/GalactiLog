@@ -3,6 +3,16 @@
 Keys used:
   scan:state   - hash with fields: state, total, completed, failed, started_at, completed_at
   scan:state is set to expire after 24h on completion so old results don't linger forever.
+
+Phase 3 of docs/retrofit-roadmap.md ("Structured progress envelope") layers
+task/step/total_steps/message onto this same scan:state hash via
+app.services.progress_envelope.set_progress, additively alongside the
+counters above (completed/failed/total etc. stay the source of truth for
+the scan_complete activity summary - see check_complete_sync). percent is
+never stored; it's derived at read time in parse_snapshot. The discovery
+phase (start_scanning_sync/set_discovered_sync) has no fixed total, so it
+reports an indeterminate 0/0 rather than a fake total - the real total
+appears once set_ingesting_sync runs.
 """
 
 import logging
@@ -58,6 +68,16 @@ class ScanStateSnapshot:
     skipped_calibration: int = 0
     new_files: int = 0
     changed_files: int = 0
+    # Phase 3 structured progress envelope (task/step/total_steps/percent/
+    # message) - additive fields layered onto this same hash, alongside the
+    # counters above which stay the source of truth for the scan_complete
+    # activity summary. percent is always derived from step/total_steps at
+    # read time, never stored (see app.services.progress_envelope).
+    task: str = ""
+    step: int = 0
+    total_steps: int = 0
+    percent: float = 0.0
+    message: str = ""
 
     def to_dict(self) -> dict:
         return {
@@ -73,6 +93,11 @@ class ScanStateSnapshot:
             "skipped_calibration": self.skipped_calibration,
             "new_files": self.new_files,
             "changed_files": self.changed_files,
+            "task": self.task,
+            "step": self.step,
+            "total_steps": self.total_steps,
+            "percent": self.percent,
+            "message": self.message,
         }
 
 
@@ -82,6 +107,16 @@ def parse_snapshot(data: dict | None) -> ScanStateSnapshot:
             state="idle", total=0, completed=0, failed=0,
             started_at=None, completed_at=None,
         )
+    from app.schemas.scan import ProgressEnvelope
+
+    step = int(data.get("step", 0) or 0)
+    total_steps = int(data.get("total_steps", 0) or 0)
+    task = data.get("task", "")
+    message = data.get("message", "")
+    percent = ProgressEnvelope.for_progress(
+        task=task, step=step, total_steps=total_steps, message=message,
+    ).percent
+
     return ScanStateSnapshot(
         state=data.get("state", "idle"),
         total=int(data.get("total", 0)),
@@ -95,7 +130,27 @@ def parse_snapshot(data: dict | None) -> ScanStateSnapshot:
         skipped_calibration=int(data.get("skipped_calibration", 0)),
         new_files=int(data.get("new_files", 0)),
         changed_files=int(data.get("changed_files", 0)),
+        task=task,
+        step=step,
+        total_steps=total_steps,
+        percent=percent,
+        message=message,
     )
+
+
+def _ingest_progress_message(kind: str, step: int, total: int) -> str:
+    """Human-readable ingest-progress message; unit depends on ``kind``.
+
+    ``kind`` distinguishes a real directory scan ("scan") from other work
+    reusing this same hash (currently only "csv_backfill") - see
+    set_ingesting_sync's docstring. Shared by set_ingesting_sync (initial
+    0/total message) and check_complete_sync (each incremental update).
+    """
+    if kind == "csv_backfill":
+        noun = "directory" if total == 1 else "directories"
+        return f"Backfilling CSV metrics: {step}/{total} {noun}"
+    noun = "file" if total == 1 else "files"
+    return f"Ingesting {step}/{total} {noun}"
 
 
 # ── Async API (for FastAPI) ──────────────────────────────────────────────
@@ -240,133 +295,157 @@ def increment_failed_sync(r: sync_redis.Redis, file_path: str = "", error: str =
 
 
 def check_complete_sync(r: sync_redis.Redis) -> None:
+    from app.services.progress_envelope import set_progress
+
     data = r.hgetall(SCAN_KEY)
     snap = parse_snapshot(data)
-    if snap.state == "ingesting" and snap.total > 0 and (snap.completed + snap.failed) >= snap.total:
-        kind = data.get("kind", "scan")
-        r.hset(SCAN_KEY, mapping={
-            "state": "complete",
-            "completed_at": time.time(),
-        })
-        r.expire(SCAN_KEY, EXPIRE_AFTER_COMPLETE)
-        if kind != "scan":
-            # Non-scan ingestion (e.g. CSV metrics backfill) reuses this same
-            # progress hash to track its own total/completed/failed counts,
-            # but reaching "complete" here is not a real scan finishing: it
-            # must not emit the scan_complete activity or dispatch the
-            # post-scan maintenance cascade (smart_rebuild, reference
-            # thumbnails, mosaic/duplicate detection, dark-hours backfill).
-            # See AUD-030.
-            try:
-                r.delete("galactilog:stats:cache", "galactilog:fits_keys")
-            except Exception:
-                logger.debug("scan_state: Redis stats cache invalidation failed", exc_info=True)
-            return
-        parts = []
-        actual_new = max(0, snap.new_files - snap.skipped_calibration)
-        if actual_new:
-            parts.append(f"{actual_new} new file{'s' if actual_new != 1 else ''} added")
-        if snap.skipped_calibration:
-            parts.append(f"{snap.skipped_calibration} calibration frame{'s' if snap.skipped_calibration != 1 else ''} skipped")
-        if snap.changed_files:
-            parts.append(f"{snap.changed_files} changed file{'s' if snap.changed_files != 1 else ''} re-ingested")
-        if snap.failed:
-            parts.append(f"{snap.failed} failed")
-        if snap.csv_enriched:
-            parts.append(f"{snap.csv_enriched} CSV enriched")
-        if snap.removed:
-            parts.append(f"{snap.removed} deleted file{'s' if snap.removed != 1 else ''} purged")
-        msg = "Scan complete: " + (", ".join(parts) if parts else "no changes")
-        scan_activity_id = None
-        try:
-            from app.config import settings as _cfg
-            _engine = create_engine(
-                _cfg.database_url.replace("+asyncpg", "+psycopg2"),
-                pool_pre_ping=True,
-            )
-            with _SyncSession(_engine) as _db:
-                scan_activity_id = emit_sync(
-                    _db, redis=r, category="scan", severity="info",
-                    event_type="scan_complete", message=msg,
-                    details={
-                        "completed": snap.completed, "failed": snap.failed,
-                        "skipped_calibration": snap.skipped_calibration,
-                        "csv_enriched": snap.csv_enriched, "total": snap.total,
-                        "removed": snap.removed, "new_files": snap.new_files,
-                        "changed_files": snap.changed_files,
-                    },
-                    actor="system",
-                )
-                if snap.failed > 0:
-                    import json as _json
-                    raw = r.lrange(SCAN_FAILED_KEY, 0, -1)
-                    failed_files = []
-                    for item in raw[:500]:
-                        try:
-                            entry = _json.loads(item)
-                            failed_files.append({
-                                "path": entry.get("file", ""),
-                                "reason": entry.get("error", ""),
-                            })
-                        except Exception:
-                            logger.debug("scan_state: failed to parse failed-file entry: %r", item, exc_info=True)
-                    from app.config import settings as _cfg2
-                    thumb_root = _cfg2.thumbnails_path
-                    thumb_failures = [f for f in failed_files if f["path"].startswith(thumb_root)]
-                    fits_failures = [f for f in failed_files if not f["path"].startswith(thumb_root)]
-
-                    if thumb_failures:
-                        emit_sync(
-                            _db, redis=r, category="thumbnail", severity="warning",
-                            event_type="thumbnail_regen_failed",
-                            message=f"Thumbnail regen: {len(thumb_failures)} failure{'s' if len(thumb_failures) != 1 else ''}",
-                            details={"failed_files": thumb_failures, "truncated": len(raw) > 500},
-                            actor="system",
-                            parent_id=scan_activity_id,
-                        )
-                    if fits_failures:
-                        emit_sync(
-                            _db, redis=r, category="scan", severity="warning",
-                            event_type="scan_files_failed",
-                            message=f"Scan completed with {len(fits_failures)} file failure{'s' if len(fits_failures) != 1 else ''}",
-                            details={"failed_files": fits_failures, "truncated": len(raw) > 500},
-                            actor="system",
-                            parent_id=scan_activity_id,
-                        )
-        except Exception:
-            logger.exception("scan_state: failed to emit scan_complete activity")
-        # Invalidate stats cache immediately so the next request gets fresh data
+    if snap.state != "ingesting" or snap.total <= 0:
+        return
+    kind = data.get("kind", "scan")
+    step = snap.completed + snap.failed
+    if step < snap.total:
+        # Not done yet - just move the envelope's step forward so the
+        # frontend progress bar tracks completed+failed incrementally
+        # (called on every increment_completed_sync/increment_failed_sync).
+        set_progress(
+            r, SCAN_KEY, task=kind, step=step, total_steps=snap.total,
+            message=_ingest_progress_message(kind, step, snap.total),
+        )
+        return
+    r.hset(SCAN_KEY, mapping={
+        "state": "complete",
+        "completed_at": time.time(),
+    })
+    r.expire(SCAN_KEY, EXPIRE_AFTER_COMPLETE)
+    if kind != "scan":
+        # Non-scan ingestion (e.g. CSV metrics backfill) reuses this same
+        # progress hash to track its own total/completed/failed counts,
+        # but reaching "complete" here is not a real scan finishing: it
+        # must not emit the scan_complete activity or dispatch the
+        # post-scan maintenance cascade (smart_rebuild, reference
+        # thumbnails, mosaic/duplicate detection, dark-hours backfill).
+        # See AUD-030.
         try:
             r.delete("galactilog:stats:cache", "galactilog:fits_keys")
         except Exception:
             logger.debug("scan_state: Redis stats cache invalidation failed", exc_info=True)
-        # Chain post-scan maintenance tasks
-        from app.worker.tasks import (
-            smart_rebuild_targets, detect_mosaic_panels_task,
-            generate_reference_thumbnails, detect_duplicate_targets,
-            backfill_dark_hours,
+        set_progress(
+            r, SCAN_KEY, task=kind, step=snap.total, total_steps=snap.total,
+            message=_ingest_progress_message(kind, snap.total, snap.total),
         )
-        smart_rebuild_targets.apply_async(countdown=10, kwargs={"parent_activity_id": scan_activity_id})
-        generate_reference_thumbnails.apply_async(countdown=20, kwargs={"parent_activity_id": scan_activity_id})
-        detect_mosaic_panels_task.apply_async(countdown=30, kwargs={"parent_activity_id": scan_activity_id})
-        detect_duplicate_targets.apply_async(countdown=30, kwargs={"parent_activity_id": scan_activity_id})
-        backfill_dark_hours.apply_async(countdown=45, kwargs={"parent_activity_id": scan_activity_id})
-        # Write initial scan summary to Redis for /scan/summary endpoint
-        try:
-            import json as _json
-            from datetime import datetime as _dt
-            _summary = {
-                "completed_at": _dt.utcnow().isoformat() + "Z",
-                "files_ingested": snap.completed,
-                "targets_created": 0,
-                "targets_updated": 0,
-                "duplicates_found": 0,
-                "unresolved_names": 0,
-                "errors": snap.failed,
-            }
-            r.set("galactilog:scan_summary", _json.dumps(_summary))
-        except Exception:
-            logger.exception("scan_state: failed to write scan_summary to Redis")
+        return
+    parts = []
+    actual_new = max(0, snap.new_files - snap.skipped_calibration)
+    if actual_new:
+        parts.append(f"{actual_new} new file{'s' if actual_new != 1 else ''} added")
+    if snap.skipped_calibration:
+        parts.append(f"{snap.skipped_calibration} calibration frame{'s' if snap.skipped_calibration != 1 else ''} skipped")
+    if snap.changed_files:
+        parts.append(f"{snap.changed_files} changed file{'s' if snap.changed_files != 1 else ''} re-ingested")
+    if snap.failed:
+        parts.append(f"{snap.failed} failed")
+    if snap.csv_enriched:
+        parts.append(f"{snap.csv_enriched} CSV enriched")
+    if snap.removed:
+        parts.append(f"{snap.removed} deleted file{'s' if snap.removed != 1 else ''} purged")
+    msg = "Scan complete: " + (", ".join(parts) if parts else "no changes")
+    # Envelope reaches 100% here, reusing the exact same human-readable
+    # summary as the scan_complete activity below - one message, not two
+    # divergent copies (roadmap: "notification text unchanged in readability").
+    set_progress(
+        r, SCAN_KEY, task="scan", step=snap.total, total_steps=snap.total,
+        message=msg,
+    )
+    scan_activity_id = None
+    try:
+        from app.config import settings as _cfg
+        _engine = create_engine(
+            _cfg.database_url.replace("+asyncpg", "+psycopg2"),
+            pool_pre_ping=True,
+        )
+        with _SyncSession(_engine) as _db:
+            scan_activity_id = emit_sync(
+                _db, redis=r, category="scan", severity="info",
+                event_type="scan_complete", message=msg,
+                details={
+                    "completed": snap.completed, "failed": snap.failed,
+                    "skipped_calibration": snap.skipped_calibration,
+                    "csv_enriched": snap.csv_enriched, "total": snap.total,
+                    "removed": snap.removed, "new_files": snap.new_files,
+                    "changed_files": snap.changed_files,
+                },
+                actor="system",
+            )
+            if snap.failed > 0:
+                import json as _json
+                raw = r.lrange(SCAN_FAILED_KEY, 0, -1)
+                failed_files = []
+                for item in raw[:500]:
+                    try:
+                        entry = _json.loads(item)
+                        failed_files.append({
+                            "path": entry.get("file", ""),
+                            "reason": entry.get("error", ""),
+                        })
+                    except Exception:
+                        logger.debug("scan_state: failed to parse failed-file entry: %r", item, exc_info=True)
+                from app.config import settings as _cfg2
+                thumb_root = _cfg2.thumbnails_path
+                thumb_failures = [f for f in failed_files if f["path"].startswith(thumb_root)]
+                fits_failures = [f for f in failed_files if not f["path"].startswith(thumb_root)]
+
+                if thumb_failures:
+                    emit_sync(
+                        _db, redis=r, category="thumbnail", severity="warning",
+                        event_type="thumbnail_regen_failed",
+                        message=f"Thumbnail regen: {len(thumb_failures)} failure{'s' if len(thumb_failures) != 1 else ''}",
+                        details={"failed_files": thumb_failures, "truncated": len(raw) > 500},
+                        actor="system",
+                        parent_id=scan_activity_id,
+                    )
+                if fits_failures:
+                    emit_sync(
+                        _db, redis=r, category="scan", severity="warning",
+                        event_type="scan_files_failed",
+                        message=f"Scan completed with {len(fits_failures)} file failure{'s' if len(fits_failures) != 1 else ''}",
+                        details={"failed_files": fits_failures, "truncated": len(raw) > 500},
+                        actor="system",
+                        parent_id=scan_activity_id,
+                    )
+    except Exception:
+        logger.exception("scan_state: failed to emit scan_complete activity")
+    # Invalidate stats cache immediately so the next request gets fresh data
+    try:
+        r.delete("galactilog:stats:cache", "galactilog:fits_keys")
+    except Exception:
+        logger.debug("scan_state: Redis stats cache invalidation failed", exc_info=True)
+    # Chain post-scan maintenance tasks
+    from app.worker.tasks import (
+        smart_rebuild_targets, detect_mosaic_panels_task,
+        generate_reference_thumbnails, detect_duplicate_targets,
+        backfill_dark_hours,
+    )
+    smart_rebuild_targets.apply_async(countdown=10, kwargs={"parent_activity_id": scan_activity_id})
+    generate_reference_thumbnails.apply_async(countdown=20, kwargs={"parent_activity_id": scan_activity_id})
+    detect_mosaic_panels_task.apply_async(countdown=30, kwargs={"parent_activity_id": scan_activity_id})
+    detect_duplicate_targets.apply_async(countdown=30, kwargs={"parent_activity_id": scan_activity_id})
+    backfill_dark_hours.apply_async(countdown=45, kwargs={"parent_activity_id": scan_activity_id})
+    # Write initial scan summary to Redis for /scan/summary endpoint
+    try:
+        import json as _json
+        from datetime import datetime as _dt
+        _summary = {
+            "completed_at": _dt.utcnow().isoformat() + "Z",
+            "files_ingested": snap.completed,
+            "targets_created": 0,
+            "targets_updated": 0,
+            "duplicates_found": 0,
+            "unresolved_names": 0,
+            "errors": snap.failed,
+        }
+        r.set("galactilog:scan_summary", _json.dumps(_summary))
+    except Exception:
+        logger.exception("scan_state: failed to write scan_summary to Redis")
 
 
 def start_scanning_sync(r: sync_redis.Redis) -> None:
@@ -388,6 +467,15 @@ def start_scanning_sync(r: sync_redis.Redis) -> None:
     r.persist(SCAN_KEY)
     r.delete(SCAN_FAILED_KEY)
     r.delete(SCAN_DISPATCHED_KEY)  # real state has taken over from the dispatch marker
+    # Reset the progress envelope unconditionally so a new scan can never
+    # inherit the previous run's step/total_steps/percent from the
+    # still-persisted scan:state hash (same rationale as
+    # set_rebuild_running_sync). Discovery hasn't counted files yet, so
+    # total_steps is genuinely unknown here - 0/0 (indeterminate) rather
+    # than a fake total; set_ingesting_sync fills in the real total once
+    # discovery finishes.
+    from app.services.progress_envelope import set_progress
+    set_progress(r, SCAN_KEY, task="scan", step=0, total_steps=0, message="Discovering files...")
 
 
 def set_ingesting_sync(
@@ -405,6 +493,8 @@ def set_ingesting_sync(
     metrics backfill ("csv_backfill"). ``check_complete_sync`` reads it back
     to decide whether reaching "complete" should emit the scan_complete
     activity and dispatch the post-scan maintenance cascade (AUD-030).
+    ``kind`` also doubles as the progress envelope's ``task`` field - one
+    less field to keep in sync, since both distinguish the exact same thing.
     """
     r.hset(SCAN_KEY, mapping={
         "state": "ingesting",
@@ -414,6 +504,11 @@ def set_ingesting_sync(
         "changed_files": changed_files,
         "kind": kind,
     })
+    from app.services.progress_envelope import set_progress
+    set_progress(
+        r, SCAN_KEY, task=kind, step=0, total_steps=total,
+        message=_ingest_progress_message(kind, 0, total),
+    )
 
 
 def increment_csv_enriched_sync(r: sync_redis.Redis) -> None:
@@ -456,17 +551,35 @@ def rebuild_skipped_paths_sync(r: sync_redis.Redis, paths: set[str]) -> None:
 
 
 def set_idle_sync(r: sync_redis.Redis) -> None:
+    """Mark scan as complete with zero files (nothing to do).
+
+    Reached without ever calling set_ingesting_sync, so there's no
+    meaningful step/total to report - the envelope resets to indeterminate
+    0/0 rather than forcing a fake total, matching the "no fixed total"
+    treatment used for the discovery phase.
+    """
     r.hset(SCAN_KEY, mapping={
         "state": "complete",
         "total": 0,
         "completed_at": time.time(),
     })
     r.expire(SCAN_KEY, EXPIRE_AFTER_COMPLETE)
+    from app.services.progress_envelope import set_progress
+    set_progress(r, SCAN_KEY, task="scan", step=0, total_steps=0, message="No files to process")
 
 
 def set_discovered_sync(r: sync_redis.Redis, count: int) -> None:
     r.hset(SCAN_KEY, "discovered", count)
     r.set(SCAN_PROGRESS_KEY, str(time.time()))
+    # Discovery phase has no fixed total (files aren't counted as a
+    # denominator until set_ingesting_sync knows the real total), so the
+    # envelope stays at 0/0 - only the message is refreshed to surface the
+    # running discovery count.
+    from app.services.progress_envelope import set_progress
+    set_progress(
+        r, SCAN_KEY, task="scan", step=0, total_steps=0,
+        message=f"Discovered {count} file{'s' if count != 1 else ''} so far",
+    )
 
 
 def is_cancel_requested_sync(r: sync_redis.Redis) -> bool:
@@ -484,6 +597,12 @@ def set_cancelled_sync(r: sync_redis.Redis) -> None:
     })
     r.expire(SCAN_KEY, EXPIRE_AFTER_COMPLETE)
     r.delete(SCAN_CANCEL_KEY)
+    # Cancellation is a terminal state, same "no fixed total" treatment as
+    # set_idle_sync above - reset to indeterminate rather than trying to
+    # reverse-engineer a final step count from whatever the counters
+    # happened to reach when the cancel was requested.
+    from app.services.progress_envelope import set_progress
+    set_progress(r, SCAN_KEY, task="scan", step=0, total_steps=0, message="Cancelled")
 
 
 # ── Rebuild status (Quick Fix / Full Rebuild) ────────────────────────────
