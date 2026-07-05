@@ -8,6 +8,13 @@ logger = logging.getLogger(__name__)
 
 STATS_CACHE_KEY = "galactilog:stats:cache"
 ANALYSIS_CACHE_PATTERN = "galactilog:analysis:*"
+# Cached "this rig overall" frame-quality baselines (target-independent,
+# grouped by normalized telescope|camera|filter over every LIGHT frame). This
+# scan touched the entire images table on every session-card open; the result
+# only changes when the catalog does, so it is cached here and invalidated by
+# the catalog-mutating tasks (see worker.tasks._invalidate_stats_cache).
+RIG_BASELINES_CACHE_KEY = "galactilog:rig_baselines:cache"
+RIG_BASELINES_CACHE_TTL = 3600
 
 
 async def invalidate_stats_and_analysis_cache() -> None:

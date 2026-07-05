@@ -98,9 +98,9 @@ async def restore_backup_endpoint(
         # Invalidate stats cache since restored data changes aggregates
         try:
             from app.config import async_redis
-            r = await async_redis()
-            await r.delete("galactilog:stats:cache", "galactilog:fits_keys")
-            await r.aclose()
+            from app.services.cache import RIG_BASELINES_CACHE_KEY
+            async with async_redis() as r:
+                await r.delete("galactilog:stats:cache", "galactilog:fits_keys", RIG_BASELINES_CACHE_KEY)
         except Exception:
             pass
         logger.info("backup: restore success user=%s applied=%s", user.username, list(result.get("applied", {}).keys()))

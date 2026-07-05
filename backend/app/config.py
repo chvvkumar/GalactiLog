@@ -101,18 +101,31 @@ import redis as sync_redis
 from contextlib import asynccontextmanager
 
 
+# Single module-level async Redis client, shared across all requests. redis-py
+# manages an internal connection pool, so building a fresh client (and TCP
+# connection) per call is pure overhead on hot paths. The client is created
+# lazily on first use and reused for the lifetime of the process.
+_shared_async_redis: "aioredis.Redis | None" = None
+
+
 def get_async_redis() -> aioredis.Redis:
-    return aioredis.from_url(settings.redis_url, decode_responses=True)
+    """Return the shared module-level async Redis client (lazily created)."""
+    global _shared_async_redis
+    if _shared_async_redis is None:
+        _shared_async_redis = aioredis.from_url(settings.redis_url, decode_responses=True)
+    return _shared_async_redis
 
 
 @asynccontextmanager
 async def async_redis():
-    """Async context manager that auto-closes the Redis connection."""
-    r = get_async_redis()
-    try:
-        yield r
-    finally:
-        await r.aclose()
+    """Yield the shared async Redis client.
+
+    Kept as a context manager for call-site compatibility, but it no longer
+    opens or closes a connection per use: it hands out the process-wide shared
+    client and leaves it open (closing would tear down the pool other callers
+    depend on). The pool self-manages connections.
+    """
+    yield get_async_redis()
 
 
 def get_sync_redis() -> sync_redis.Redis:

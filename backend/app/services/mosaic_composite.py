@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import io
 import logging
@@ -757,8 +758,9 @@ async def build_mosaic_composite(
         if cached:
             return cached
 
-        panel_infos = []
-        tiles = {}
+        # First pass: resolve coordinates and validate file paths. This is
+        # cheap (no FITS reads) so it stays on the event loop.
+        renderable = []
         for panel, frame in panel_frames:
             headers = frame.raw_headers or {}
             ra_raw = headers.get("RA") or headers.get("OBJCTRA")
@@ -772,12 +774,29 @@ async def build_mosaic_composite(
             fits_path = Path(frame.file_path)
             if not fits_path.exists():
                 continue
-            try:
-                tile_img, native_width = generate_panel_thumbnail(fits_path, max_width=tile_max_width)
-                tiles[pid] = tile_img
-            except Exception:
+            renderable.append((panel, frame, pid, fits_path, ra, dec, headers))
+
+        # Second pass: generate every panel tile concurrently. Each
+        # generate_panel_thumbnail is a blocking FITS read + numpy stretch +
+        # PIL encode, so it runs in a worker thread (off the event loop); the
+        # gather also parallelizes the NFS reads across panels.
+        tile_results = await asyncio.gather(
+            *(
+                asyncio.to_thread(generate_panel_thumbnail, fits_path, max_width=tile_max_width)
+                for (_p, _f, _pid, fits_path, _ra, _dec, _h) in renderable
+            ),
+            return_exceptions=True,
+        )
+
+        panel_infos = []
+        tiles = {}
+        native_width = 0
+        for (panel, frame, pid, fits_path, ra, dec, headers), result in zip(renderable, tile_results):
+            if isinstance(result, Exception):
                 logger.warning("Failed to generate thumbnail for panel %s", panel.id)
                 continue
+            tile_img, native_width = result
+            tiles[pid] = tile_img
 
             panel_infos.append(PanelInfo(
                 panel_id=pid,
