@@ -92,11 +92,6 @@ class DbSummaryResponse(BaseModel):
     cached_sesame_negative: int
 
 
-class AutoscanResponse(BaseModel):
-    enabled: bool
-    interval_minutes: int
-
-
 class BackfillCsvResponse(BaseModel):
     status: str
     state: str | None = None

@@ -266,26 +266,6 @@ async def test_merge_history_unknown_uuid_returns_404(viewer_user):
         app.dependency_overrides.clear()
 
 
-@pytest.mark.asyncio
-async def test_merge_candidate_count_returns_count(viewer_user):
-    mock_result = MagicMock()
-    mock_result.scalar_one.return_value = 7
-    mock_session = AsyncMock()
-    mock_session.execute = AsyncMock(return_value=mock_result)
-
-    _override_session(mock_session)
-    app.dependency_overrides[get_current_user] = lambda: viewer_user
-    try:
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
-            resp = await client.get("/api/targets/merge-candidates/count")
-        assert resp.status_code == 200, resp.text
-        assert resp.json() == {"count": 7}
-    finally:
-        app.dependency_overrides.clear()
-
-
 def _make_candidate(status="accepted", method="orphan", suggested_target_id=None, source_name="Foo"):
     from app.models.merge_candidate import MergeCandidate
     c = MagicMock(spec=MergeCandidate)

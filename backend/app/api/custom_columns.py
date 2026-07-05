@@ -14,7 +14,6 @@ from app.schemas.custom_column import (
     CustomColumnUpdate,
     CustomColumnResponse,
     CustomColumnValueSet,
-    CustomColumnValueResponse,
 )
 
 router = APIRouter(prefix="/custom-columns", tags=["custom-columns"])
@@ -135,31 +134,6 @@ async def delete_custom_column(
 
 
 # --- Values ---
-
-@router.get("/values/{target_id}", response_model=list[CustomColumnValueResponse])
-async def get_custom_values(
-    target_id: uuid.UUID,
-    session: AsyncSession = Depends(get_session),
-    user: User = Depends(get_current_user),
-):
-    q = (
-        select(CustomColumnValue, CustomColumn.slug)
-        .join(CustomColumn)
-        .where(CustomColumnValue.target_id == target_id)
-    )
-    rows = (await session.execute(q)).all()
-    return [
-        CustomColumnValueResponse(
-            column_id=str(v.column_id), column_slug=slug,
-            target_id=str(v.target_id) if v.target_id else None,
-            mosaic_id=str(v.mosaic_id) if v.mosaic_id else None,
-            session_date=v.session_date,
-            rig_label=v.rig_label, value=v.value,
-            updated_by=str(v.updated_by), updated_at=v.updated_at,
-        )
-        for v, slug in rows
-    ]
-
 
 @router.put("/values")
 async def set_custom_value(

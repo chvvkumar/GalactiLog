@@ -11,7 +11,7 @@ from app.models.user import User
 from app.models.target import Target
 from app.models.image import Image
 from app.models.merge_candidate import MergeCandidate
-from app.schemas.target import MergeCandidateResponse, MergedTargetResponse, MergeRequest, OrphanPreviewRequest, OrphanPreviewResponse, OrphanCreateRequest, MergePreviewRequest, MergePreviewResponse, TargetIdentityRequest, TargetIdentityResponse, StatusResponse, MergeCandidateCountResponse, DuplicateDetectionResponse, OrphanCreateResponse, CustomTargetCreateRequest, CustomTargetCreateResponse
+from app.schemas.target import MergeCandidateResponse, MergedTargetResponse, MergeRequest, OrphanPreviewRequest, OrphanPreviewResponse, OrphanCreateRequest, MergePreviewRequest, MergePreviewResponse, TargetIdentityRequest, TargetIdentityResponse, StatusResponse, DuplicateDetectionResponse, OrphanCreateResponse, CustomTargetCreateRequest, CustomTargetCreateResponse
 from app.services.simbad import normalize_catalog_id, normalize_object_name
 from app.models.simbad_cache import SimbadCache
 from app.models.sesame_cache import SesameCache
@@ -64,19 +64,6 @@ async def unmerge_target(
 ):
     """Restore a soft-deleted (merged) target."""
     return await _unmerge_target_service(target_id, session)
-
-
-@router.get("/merge-candidates/count", response_model=MergeCandidateCountResponse)
-async def get_merge_candidate_count(
-    session: AsyncSession = Depends(get_session),
-    user: User = Depends(get_current_user),
-):
-    """Return count of pending merge candidates (for badge display)."""
-    result = await session.execute(
-        select(func.count(MergeCandidate.id)).where(MergeCandidate.status == "pending")
-    )
-    count = result.scalar_one()
-    return {"count": count}
 
 
 @router.get("/merge-candidates", response_model=list[MergeCandidateResponse])
@@ -465,41 +452,6 @@ async def create_custom_target(
         "linked_candidates": len(pending),
         "linked_images": linked_images,
     }
-
-
-@router.get("/merged-targets", response_model=list[MergedTargetResponse])
-async def list_merged_targets(
-    session: AsyncSession = Depends(get_session),
-    user: User = Depends(get_current_user),
-):
-    """List all soft-deleted (merged) targets with winner name and image count."""
-    winner_alias = aliased(Target, name="winner")
-
-    result = await session.execute(
-        select(
-            Target,
-            winner_alias.primary_name.label("merged_into_name"),
-            func.count(Image.id).label("image_count"),
-        )
-        .join(winner_alias, Target.merged_into_id == winner_alias.id)
-        .outerjoin(Image, Image.resolved_target_id == winner_alias.id)
-        .where(Target.merged_into_id.is_not(None))
-        .group_by(Target.id, winner_alias.primary_name)
-        .order_by(Target.merged_at.desc())
-    )
-    rows = result.all()
-
-    return [
-        MergedTargetResponse(
-            id=target.id,
-            primary_name=target.primary_name,
-            merged_into_id=target.merged_into_id,
-            merged_into_name=merged_into_name,
-            merged_at=target.merged_at.isoformat() if target.merged_at else "",
-            image_count=image_count,
-        )
-        for target, merged_into_name, image_count in rows
-    ]
 
 
 @router.get("/{target_id:path}/merge-history", response_model=list[MergedTargetResponse])

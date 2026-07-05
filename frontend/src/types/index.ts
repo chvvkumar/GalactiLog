@@ -402,6 +402,16 @@ export interface ObjectTypeCount {
   count: number;
 }
 
+// Single-request SPA startup payload (GET /api/bootstrap).
+export interface BootstrapResponse {
+  user: AuthUser;
+  settings: SettingsResponse;
+  equipment: EquipmentList;
+  fits_keys: string[];
+  object_types: ObjectTypeCount[];
+  custom_columns: CustomColumn[];
+}
+
 export interface MergeCandidateResponse {
   id: string;
   source_name: string;
@@ -609,19 +619,6 @@ export interface CatalogMembershipEntry {
   metadata: Record<string, any> | null;
 }
 
-// === Night Ephemeris (Planning) ===
-
-export interface NightEphemeris {
-  date: string;
-  astro_dusk: string | null;
-  astro_dawn: string | null;
-  moon_phase: string | null;
-  moon_illumination: number | null;
-  moon_rise: string | null;
-  moon_set: string | null;
-  source_available: boolean;
-}
-
 // === Settings ===
 
 export interface MetricGroupSettings {
@@ -713,11 +710,6 @@ export interface AuthUser {
   role: "admin" | "viewer";
 }
 
-export interface LoginRequest {
-  username: string;
-  password: string;
-}
-
 export interface LoginResponse {
   username: string;
   role: string;
@@ -794,6 +786,11 @@ export interface CorrelationResponse {
   x_stats: SummaryStats | null;
   y_stats: SummaryStats | null;
   target_names: Record<string, string>;
+  // Present when the backend downsamples the returned point set. Trend lines and
+  // statistics are still computed over the full set; `sampled_count` points are
+  // returned out of `total_count` total matching frames.
+  total_count?: number;
+  sampled_count?: number;
 }
 
 export interface HistogramBin {

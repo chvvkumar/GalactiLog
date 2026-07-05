@@ -9,16 +9,6 @@ class MosaicPanelCreate(BaseModel):
     object_pattern: str | None = None
 
 
-class MosaicPanelUpdate(BaseModel):
-    panel_label: str | None = None
-    sort_order: int | None = None
-    object_pattern: str | None = None
-    grid_row: int | None = None
-    grid_col: int | None = None
-    rotation: int | None = None
-    flip_h: bool | None = None
-
-
 class MosaicCreate(BaseModel):
     name: str
     notes: str | None = None

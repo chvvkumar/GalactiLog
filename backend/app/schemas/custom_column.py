@@ -41,13 +41,3 @@ class CustomColumnValueSet(BaseModel):
     value: str
 
 
-class CustomColumnValueResponse(BaseModel):
-    column_id: str
-    column_slug: str
-    target_id: str | None = None
-    mosaic_id: str | None = None
-    session_date: date | None = None
-    rig_label: str | None = None
-    value: str
-    updated_by: str
-    updated_at: datetime

@@ -425,10 +425,6 @@ class StatusResponse(BaseModel):
     status: str
 
 
-class MergeCandidateCountResponse(BaseModel):
-    count: int
-
-
 class DuplicateDetectionResponse(BaseModel):
     status: str
     task_id: str

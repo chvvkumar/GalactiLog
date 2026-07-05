@@ -18,7 +18,7 @@ from app.models.mosaic_panel_session import MosaicPanelSession
 from app.models.mosaic_suggestion import MosaicSuggestion
 from app.schemas.mosaic import (
     AcceptSuggestionRequest,
-    MosaicCreate, MosaicUpdate, MosaicPanelCreate, MosaicPanelUpdate,
+    MosaicCreate, MosaicUpdate, MosaicPanelCreate,
     MosaicPanelBatchItem, MosaicPanelBatchRequest,
     MosaicSummary, MosaicDetailResponse, PanelStats, MosaicSuggestionResponse,
     SuggestionPreviewPanel,
@@ -928,37 +928,6 @@ async def batch_update_panels(
 
     await session.commit()
     return result
-
-
-@router.put("/{mosaic_id}/panels/{panel_id}", response_model=StatusResponse)
-async def update_panel(
-    mosaic_id: uuid.UUID,
-    panel_id: uuid.UUID,
-    body: MosaicPanelUpdate,
-    session: AsyncSession = Depends(get_session),
-    user: User = Depends(require_admin),
-):
-    panel = await session.get(MosaicPanel, panel_id)
-    if not panel or panel.mosaic_id != mosaic_id:
-        raise HTTPException(404, "Panel not found")
-    if body.panel_label is not None:
-        panel.panel_label = body.panel_label
-    if body.sort_order is not None:
-        panel.sort_order = body.sort_order
-    if body.object_pattern is not None:
-        panel.object_pattern = body.object_pattern
-    if body.grid_row is not None:
-        panel.grid_row = body.grid_row
-    if body.grid_col is not None:
-        panel.grid_col = body.grid_col
-    if body.rotation is not None:
-        if body.rotation not in (0, 90, 180, 270):
-            raise HTTPException(400, "rotation must be 0, 90, 180, or 270")
-        panel.rotation = body.rotation
-    if body.flip_h is not None:
-        panel.flip_h = body.flip_h
-    await session.commit()
-    return {"status": "ok"}
 
 
 @router.delete("/{mosaic_id}/panels/{panel_id}", response_model=StatusResponse)
