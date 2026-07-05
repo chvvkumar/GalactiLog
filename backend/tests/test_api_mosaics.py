@@ -173,12 +173,18 @@ async def test_get_suggestions_includes_new_fields_and_preview_panels(viewer_use
     thumb_result.all.return_value = [(target_id, "/data/thumbs/heart_target.jpg")]
 
     pattern_thumb_result = MagicMock()
-    pattern_thumb_result.scalars.return_value.first.return_value = "/data/thumbs/heart_panel1.jpg"
+    pattern_thumb_result.all.return_value = [
+        MagicMock(thumbnail_path="/data/thumbs/heart_panel1.jpg", obj="Heart Nebula Panel 1"),
+    ]
 
     sessions_result = MagicMock()
     sessions_result.all.return_value = []
 
+    mock_settings = MagicMock()
+    mock_settings.general = {"mosaic_keywords": ["Panel"]}
+
     mock_session = AsyncMock()
+    mock_session.get = AsyncMock(return_value=mock_settings)
     mock_session.execute = AsyncMock(side_effect=[
         pending_result,
         mosaic_names_result,
@@ -274,21 +280,35 @@ async def test_get_suggestions_shared_target_panels_get_distinct_thumbnails(view
             return target_names_result
         if n == 4:
             return thumb_result
+        if n == 7:
+            # The single batched session-summary query (its own OR'd pattern
+            # params also contain "Veil"/"1%"/"2%" substrings, so it must be
+            # dispatched by call index, not content, to avoid being routed to
+            # the per-pattern-thumbnail branches below).
+            return sessions_result
         # Calls 5 and 6 are the two per-(target, pattern) thumbnail queries
-        # (order depends on set iteration); call 7 is the session summary.
+        # (order depends on set iteration).
         params = stmt.compile().params
         pattern_vals = [v for v in params.values() if isinstance(v, str) and "Veil" in v]
         if pattern_vals and any(p.endswith("1%") for p in pattern_vals):
             result = MagicMock()
-            result.scalars.return_value.first.return_value = "/data/thumbs/veil_panel1.jpg"
+            result.all.return_value = [
+                MagicMock(thumbnail_path="/data/thumbs/veil_panel1.jpg", obj="Veil Nebula Panel 1"),
+            ]
             return result
         if pattern_vals and any(p.endswith("2%") for p in pattern_vals):
             result = MagicMock()
-            result.scalars.return_value.first.return_value = "/data/thumbs/veil_panel2.jpg"
+            result.all.return_value = [
+                MagicMock(thumbnail_path="/data/thumbs/veil_panel2.jpg", obj="Veil Nebula Panel 2"),
+            ]
             return result
         return sessions_result
 
+    mock_settings = MagicMock()
+    mock_settings.general = {"mosaic_keywords": ["Panel"]}
+
     mock_session = AsyncMock()
+    mock_session.get = AsyncMock(return_value=mock_settings)
     mock_session.execute = _execute
 
     _override_session(mock_session)
@@ -383,8 +403,12 @@ async def test_get_suggestions_distributes_sessions_to_correct_panel(viewer_user
         _mk_row("Sh2 119 Panel 2", "2025-01-02", 12, 720.0, "Ha"),
     ]
 
+    mock_settings = MagicMock()
+    mock_settings.general = {"mosaic_keywords": ["Panel"]}
+
     # geometry has no panels, so no per-(target,pattern) thumb queries run.
     mock_session = AsyncMock()
+    mock_session.get = AsyncMock(return_value=mock_settings)
     mock_session.execute = AsyncMock(side_effect=[
         pending_result,
         mosaic_names_result,

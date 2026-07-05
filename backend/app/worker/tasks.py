@@ -22,7 +22,11 @@ from app.services.target_resolver import resolve_target, normalize_sql_expr, mat
 from app.services.simbad_repair import repair_corrupted_simbad_cache
 from app.services.thumbnail import generate_thumbnail
 from app.services.xisf_parser import extract_xisf_metadata, generate_xisf_thumbnail
-from app.services.session_date import compute_session_date, extract_longitude
+from app.services.session_date import (
+    compute_session_date,
+    extract_longitude,
+    warn_imaging_night_fallback,
+)
 from app.schemas.settings import GeneralSettings
 from app.worker.celery_app import celery_app
 
@@ -61,6 +65,12 @@ _redis = get_sync_redis()
 # so it self-heals quickly if a worker dies mid-scan.
 SCAN_RUN_LOCK = "scan:run_lock"
 SCAN_RUN_LOCK_TTL = 300  # 5 minutes
+
+# AUD-021: _do_ingest runs once per image, so the imaging-night UTC-fallback
+# warning must not be emitted per call (tens of thousands per scan, and app.*
+# loggers feed the DB-backed app_logs sink). Module-level once-per-process
+# guard: each worker process warns at most once.
+_imaging_night_fallback_warned = False
 
 
 def _invalidate_stats_cache():
@@ -460,6 +470,12 @@ def _do_ingest(fits_path: str, include_calibration: bool = True) -> dict:
         general = GeneralSettings(**(settings_row.general if settings_row and settings_row.general else {}))
 
     effective_lon = site_lon if site_lon is not None else general.observer_longitude
+    if general.use_imaging_night and effective_lon is None:
+        global _imaging_night_fallback_warned
+        if not _imaging_night_fallback_warned:
+            # Warn once per worker process, not once per ingested image.
+            warn_imaging_night_fallback(logger)
+            _imaging_night_fallback_warned = True
     session_date_val = compute_session_date(
         meta.get("capture_date"),
         use_imaging_night=general.use_imaging_night,
@@ -2381,6 +2397,7 @@ def recompute_session_dates(self):
         general = GeneralSettings(**(settings_row.general if settings_row and settings_row.general else {}))
         fallback_lon = general.observer_longitude
         use_night = general.use_imaging_night
+        fallback_warned = False  # AUD-021: one warning per run, not per image
 
         # Phase 1: Recompute all image session_dates in batches
         BATCH = 5000
@@ -2400,6 +2417,10 @@ def recompute_session_dates(self):
             for img_id, capture_date, raw_headers in rows:
                 site_lon = extract_longitude(raw_headers)
                 effective_lon = site_lon if site_lon is not None else fallback_lon
+                if use_night and effective_lon is None and not fallback_warned:
+                    # Warn once per recompute run, not once per image.
+                    warn_imaging_night_fallback(logger)
+                    fallback_warned = True
                 new_date = compute_session_date(
                     capture_date,
                     use_imaging_night=use_night,

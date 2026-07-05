@@ -206,10 +206,77 @@ def build_panel_pattern(base_name: str, keyword: str | None, num: str) -> str:
     match a sibling panel of the same base (important when the base itself
     contains digits, e.g. "Sh2 119"). Tile candidates carry the R-C token, which
     is already unique within the base.
+
+    NOTE: this pattern is a cheap SQL pre-filter only. Because the trailing
+    "%" imposes no boundary after ``num``, it also matches sibling panels for
+    which ``num`` is a prefix (panel "1" also matches "Panel 12"). Callers
+    MUST re-parse every ILIKE-matched OBJECT string with
+    ``object_matches_panel`` (or ``match_panel_token_full`` directly) and keep
+    only exact matches; see AUD-008.
     """
     if keyword:
         return f"%{base_name}%{keyword}%{num}%"
     return f"%{base_name}%{num}%"
+
+
+def panel_number_from_label(label: str) -> str:
+    """Extract the panel-number token from a stored panel label.
+
+    Labels are generated as "Panel {num}" (see ``_panel_label``); a manually
+    relabeled panel that no longer follows this convention falls back to
+    using the whole label, which simply never matches a real OBJECT token
+    (same as pre-fix behavior for that edge case).
+    """
+    return label.split()[-1] if label and label.startswith("Panel ") else label
+
+
+def object_matches_panel(
+    object_name: str | None, keywords: list[str], expected_num: str
+) -> bool:
+    """True iff ``object_name`` genuinely belongs to the panel numbered
+    ``expected_num``, re-parsed with the same tokenizer used to build panel
+    candidates (``match_panel_token_full``).
+
+    This is the re-parse step every ``build_panel_pattern``/ILIKE call site
+    must apply to its SQL-matched rows: the ILIKE pattern is only a cheap
+    pre-filter and can match sibling panels whose number the target number is
+    a prefix of (e.g. pattern for panel "1" also matches OBJECT "...Panel
+    12"). Comparing the exact parsed number closes that gap.
+    """
+    if not object_name:
+        return False
+    match = match_panel_token_full(object_name, keywords)
+    if match is None:
+        return False
+    return match[1] == expected_num
+
+
+def exact_panel_regex(keywords: list[str], expected_num: str) -> str:
+    """POSIX regex (for use with PostgreSQL's ``~*`` operator against the
+    OBJECT header) that only matches when the trailing panel-number token is
+    exactly ``expected_num``, not merely a prefix of a longer number.
+
+    Used as an additional SQL-level filter alongside the existing ILIKE
+    pre-filter in aggregate queries where fetching every row into Python to
+    re-parse with ``match_panel_token_full`` would be a larger rewrite (see
+    AUD-008). Mirrors the same end-of-string, optional-trailing-whitespace
+    boundary ``match_panel_token_full`` uses, so "1" no longer matches
+    "...Panel 12" while "...Panel 1 " (trailing whitespace) still matches.
+    """
+    num_re = re.escape(expected_num)
+    if keywords:
+        kw_alt = "|".join(re.escape(k) for k in keywords)
+        return rf"({kw_alt})\s*[-_]?\s*{num_re}\s*$"
+    return rf"{num_re}\s*$"
+
+
+async def load_mosaic_keywords(session: AsyncSession) -> list[str]:
+    """Load the configured panel keywords (e.g. ["Panel", "P"]) used by both
+    detection and every accepted-mosaic panel-matching call site so they all
+    re-parse OBJECT strings with the same tokenizer."""
+    settings = await session.get(UserSettings, SETTINGS_ROW_ID)
+    general = settings.general if settings else {}
+    return general.get("mosaic_keywords", ["Panel", "P"]) or []
 
 
 # ---------------------------------------------------------------------------
@@ -786,17 +853,30 @@ async def detect_mosaic_panels(session: AsyncSession, gap_days: int = 0) -> int:
     new_base_names = {g.base_name for g in groups}
 
     # Durable dismissals: load the dedup signatures of rejected (dismissed)
-    # suggestions BEFORE clearing pending. Any regenerated group whose signature
-    # matches is skipped so a dismissed suggestion does not resurface. If the
+    # suggestions BEFORE clearing pending, along with the session dates each
+    # dismissal covered at the time. A regenerated group is skipped only when
+    # its signature matches AND its own session dates are fully covered by
+    # (a subset of) the dismissed suggestion's dates -- a later campaign over
+    # the same panel set that includes genuinely new dates (e.g. a re-shoot
+    # years later, AUD-033) is NOT a subset and resurfaces normally. If the
     # panel set materially changes (different target set or panel_labels) the
-    # signature differs and the suggestion may resurface (acceptable default).
-    rejected_q = select(MosaicSuggestion.dedup_signature).where(
+    # signature differs and the suggestion may resurface regardless.
+    rejected_q = select(
+        MosaicSuggestion.dedup_signature, MosaicSuggestion.session_dates
+    ).where(
         MosaicSuggestion.status == "rejected",
         MosaicSuggestion.dedup_signature.is_not(None),
     )
-    rejected_signatures = {
-        r[0] for r in (await session.execute(rejected_q)).all() if r[0]
-    }
+    rejected_signatures: dict[str, set[str]] = {}
+    for sig, dates_by_label in (await session.execute(rejected_q)).all():
+        if not sig:
+            continue
+        flat_dates: set[str] = set()
+        for dates in (dates_by_label or {}).values():
+            flat_dates.update(dates or [])
+        # Multiple dismissed rows can share a signature (re-dismissed after a
+        # resurfacing); union their covered dates so any of them can suppress.
+        rejected_signatures.setdefault(sig, set()).update(flat_dates)
 
     # Detection is idempotent: clear ALL pending suggestions before regenerating.
     # This drops stale rows from prior runs AND legacy rows from the old code
@@ -837,16 +917,29 @@ async def detect_mosaic_panels(session: AsyncSession, gap_days: int = 0) -> int:
         sess_dates: dict[str, list[str]] = {}
         all_dates: list[str] = []
         per_panel_dates: list[list[str]] = []
-        for label, pattern in zip(g.panel_labels, panel_patterns):
-            dates_q = select(func.distinct(Image.session_date)).where(
-                Image.image_type == "LIGHT",
-                Image.raw_headers["OBJECT"].astext.ilike(pattern),
+        for label, pattern, num in zip(g.panel_labels, panel_patterns, g.panel_numbers):
+            # ILIKE is a cheap pre-filter only (it also matches sibling panels
+            # for which `num` is a prefix, e.g. "1" matching "Panel 12"), so
+            # fetch (session_date, OBJECT) pairs and re-parse each OBJECT to
+            # keep only frames that exactly belong to this panel (AUD-008).
+            dates_q = (
+                select(
+                    Image.session_date,
+                    Image.raw_headers["OBJECT"].astext.label("obj"),
+                )
+                .where(
+                    Image.image_type == "LIGHT",
+                    Image.raw_headers["OBJECT"].astext.ilike(pattern),
+                )
+                .distinct()
             )
-            raw_dates = (await session.execute(dates_q)).scalars().all()
+            raw_rows = (await session.execute(dates_q)).all()
             date_strs = sorted(
-                d.strftime("%Y-%m-%d") if hasattr(d, "strftime") else str(d)
-                for d in raw_dates
-                if d is not None
+                {
+                    d.strftime("%Y-%m-%d") if hasattr(d, "strftime") else str(d)
+                    for d, obj in raw_rows
+                    if d is not None and object_matches_panel(obj, keywords, num)
+                }
             )
             sess_dates[label] = date_strs
             per_panel_dates.append(date_strs)
@@ -903,12 +996,14 @@ def _add_suggestion(
     suggested_name: str,
     subset_idxs: list[int] | None = None,
     used_names: set[str] | None = None,
-    rejected_signatures: set[str] | None = None,
+    rejected_signatures: dict[str, set[str]] | None = None,
 ) -> int:
     """Create and add one MosaicSuggestion.
 
     Returns 1 if created, 0 if skipped because its dedup signature matches a
-    dismissed (rejected) suggestion. ``suggested_name`` is uniquified against
+    dismissed (rejected) suggestion AND its session dates are fully covered
+    by that dismissal's dates (AUD-033: a later campaign with genuinely new
+    dates is not suppressed). ``suggested_name`` is uniquified against
     ``used_names`` only when the suggestion is actually created.
     """
     if subset_idxs is None:
@@ -932,7 +1027,13 @@ def _add_suggestion(
 
     signature = compute_dedup_signature(group.base_name, target_ids, panel_labels)
     if rejected_signatures and signature in rejected_signatures:
-        return 0  # user dismissed this exact panel set; do not resurface it
+        campaign_dates: set[str] = set()
+        for dates in sess_dates.values():
+            campaign_dates.update(dates or [])
+        if campaign_dates <= rejected_signatures[signature]:
+            # Every date in this campaign was already covered by the
+            # dismissal; do not resurface it.
+            return 0
 
     if used_names is not None:
         suggested_name = _unique_name(suggested_name, used_names)

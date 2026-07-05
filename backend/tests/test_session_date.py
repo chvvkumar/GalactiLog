@@ -70,6 +70,72 @@ class TestComputeSessionDate:
         assert result is None
 
 
+class TestImagingNightFallbackWarning:
+    """AUD-021: the UTC-midnight fallback must be surfaced, but rate-limited
+    to one warning per scan/recompute run, never one per image."""
+
+    def test_compute_session_date_itself_is_silent(self, caplog):
+        """The per-image function must NOT log the warning (it is emitted by
+        callers via warn_imaging_night_fallback, once per run)."""
+        import logging
+
+        dt = datetime(2024, 11, 16, 2, 0, tzinfo=timezone.utc)
+        with caplog.at_level(logging.WARNING, logger="app.services.session_date"):
+            for _ in range(5):
+                compute_session_date(dt, use_imaging_night=True, longitude=None)
+        assert caplog.records == []
+
+    def test_warn_helper_emits_single_warning(self, caplog):
+        import logging
+        from app.services.session_date import warn_imaging_night_fallback
+
+        with caplog.at_level(logging.WARNING, logger="app.services.session_date"):
+            warn_imaging_night_fallback()
+        assert len(caplog.records) == 1
+        assert "observer_longitude" in caplog.records[0].getMessage()
+
+    def test_ingest_guard_warns_exactly_once_across_multiple_calls(self, caplog):
+        """Simulate the caller-side pattern used by _do_ingest and
+        recompute_session_dates: many fallback observations in one run emit
+        exactly one warning."""
+        import logging
+        from app.services.session_date import warn_imaging_night_fallback
+
+        dt = datetime(2024, 11, 16, 2, 0, tzinfo=timezone.utc)
+        fallback_warned = False
+        with caplog.at_level(logging.WARNING, logger="app.services.session_date"):
+            for _ in range(100):
+                use_imaging_night = True
+                longitude = None
+                if use_imaging_night and longitude is None and not fallback_warned:
+                    warn_imaging_night_fallback()
+                    fallback_warned = True
+                compute_session_date(
+                    dt, use_imaging_night=use_imaging_night, longitude=longitude
+                )
+        assert len(caplog.records) == 1
+
+    def test_worker_module_guard_warns_once_per_process(self, caplog):
+        """The module-level guard in app.worker.tasks (used by the per-image
+        _do_ingest path) fires the warning at most once per process."""
+        import logging
+        import app.worker.tasks as tasks_mod
+        from app.services.session_date import warn_imaging_night_fallback
+
+        tasks_mod._imaging_night_fallback_warned = False
+        try:
+            with caplog.at_level(logging.WARNING, logger="app.services.session_date"):
+                for _ in range(10):
+                    # Mirrors the guard block in _do_ingest.
+                    if not tasks_mod._imaging_night_fallback_warned:
+                        warn_imaging_night_fallback()
+                        tasks_mod._imaging_night_fallback_warned = True
+            assert len(caplog.records) == 1
+            assert tasks_mod._imaging_night_fallback_warned is True
+        finally:
+            tasks_mod._imaging_night_fallback_warned = False
+
+
 class TestExtractLongitude:
     def test_sitelong_header(self):
         from app.services.session_date import extract_longitude

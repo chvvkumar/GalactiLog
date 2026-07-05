@@ -7,6 +7,7 @@ and returned PanelStats/MosaicSummary fields) is preserved exactly.
 
 import re
 from collections import defaultdict
+from datetime import datetime
 
 from sqlalchemy import select, func, or_, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,6 +19,12 @@ from app.models.mosaic import Mosaic
 from app.models.mosaic_panel import MosaicPanel
 from app.models.mosaic_panel_session import MosaicPanelSession
 from app.schemas.mosaic import MosaicSummary, PanelStats
+from app.services.mosaic_detection import (
+    exact_panel_regex,
+    load_mosaic_keywords,
+    object_matches_panel,
+    panel_number_from_label,
+)
 
 
 def _ilike_to_regex(pattern: str):
@@ -95,13 +102,23 @@ async def panel_stats(panel: MosaicPanel, session: AsyncSession) -> PanelStats:
     target = panel.target
 
     # When an object_pattern is set, filter frames by OBJECT header
-    # (needed when multiple panels share the same target after SIMBAD merge)
+    # (needed when multiple panels share the same target after SIMBAD merge).
+    # The ILIKE pattern is a cheap pre-filter only -- it also matches sibling
+    # panels for which this panel's number is a prefix (e.g. "1" matching
+    # "Panel 12"), so pair it with an exact-number regex (AUD-008).
+    object_regex = None
+    if panel.object_pattern:
+        keywords = await load_mosaic_keywords(session)
+        expected_num = panel_number_from_label(panel.panel_label)
+        object_regex = exact_panel_regex(keywords, expected_num)
+
     base_filter = [
         Image.resolved_target_id == panel.target_id,
         Image.image_type == "LIGHT",
     ]
     if panel.object_pattern:
         base_filter.append(Image.raw_headers["OBJECT"].astext.ilike(panel.object_pattern))
+        base_filter.append(Image.raw_headers["OBJECT"].astext.op("~*")(object_regex))
 
     # Fetch all membership rows in one query, then derive both the total count
     # (any status) and the included-date list in Python. This replaces the two
@@ -130,6 +147,7 @@ async def panel_stats(panel: MosaicPanel, session: AsyncSession) -> PanelStats:
         ]
         if panel.object_pattern:
             all_dates_filter.append(Image.raw_headers["OBJECT"].astext.ilike(panel.object_pattern))
+            all_dates_filter.append(Image.raw_headers["OBJECT"].astext.op("~*")(object_regex))
         all_dates_q = (
             select(func.count(func.distinct(Image.session_date)))
             .where(*all_dates_filter)
@@ -595,6 +613,13 @@ async def list_mosaic_summaries(session: AsyncSession) -> list[MosaicSummary]:
         for p in pattern_panels:
             pair_to_panels[(str(p.target_id), p.object_pattern)].append(str(p.id))
 
+        # rx.match() mirrors ILIKE semantics only (a cheap pre-filter): it
+        # still matches sibling panels for which this panel's number is a
+        # prefix (e.g. "1" matching "Panel 12"). Re-parse and compare each
+        # panel's own exact expected number before accumulating (AUD-008).
+        keywords = await load_mosaic_keywords(session)
+        panel_expected_num = {str(p.id): panel_number_from_label(p.panel_label) for p in pattern_panels}
+
         # Accumulate per panel: total integration, total frames, and the set of
         # contributing session dates (for min/max). Sum/count come pre-aggregated
         # from SQL; we add a session's totals to a panel when its pattern matches
@@ -611,6 +636,8 @@ async def list_mosaic_summaries(session: AsyncSession) -> list[MosaicSummary]:
             for pat, rx in patterns_by_target.get(tid_str, []):
                 if rx.match(obj_name):
                     for pid in pair_to_panels.get((tid_str, pat), []):
+                        if not object_matches_panel(obj_name, keywords, panel_expected_num[pid]):
+                            continue
                         if pid not in panel_has_membership:
                             # No membership records - legacy unscoped
                             panel_integration[pid] += integration
