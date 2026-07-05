@@ -4,18 +4,16 @@ Introduces a single table that gives each backfill run (starting with the
 existing data-migration runner) a durable record: identity (job_type +
 job_key), a state machine (pending/running/succeeded/failed/interrupted),
 progress counters (step/total_steps + free-text message), timestamps
-(enqueued/started/finished/heartbeat), attempt count, and last_error. This
-lets a restarted worker find its own row and resume or restart idempotently
-instead of always redoing completed work, and gives a future API endpoint
-something to poll for progress.
+(enqueued/started/finished/heartbeat), attempt count, and last_error.
+
+Completion authority stays with the app_metadata "data_version" row read by
+get_pending_migrations and the boot gate. data_jobs rows record attempt,
+progress, and outcome for observability and API progress reporting only;
+they are never consulted to decide what work is already done.
 
 No behavior change yet: nothing writes to this table until the
-run_data_migrations refactor that follows this migration. The existing
-app_metadata "data_version" row remains the sole source of truth the boot
-gate reads; this table is for observability and resume, not authority.
+run_data_migrations refactor that follows this migration.
 """
-import uuid
-
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import ENUM, UUID
@@ -30,7 +28,10 @@ depends_on = None
 def upgrade() -> None:
     op.create_table(
         "data_jobs",
-        sa.Column("id", UUID(as_uuid=True), primary_key=True, default=uuid.uuid4),
+        sa.Column(
+            "id", UUID(as_uuid=True), primary_key=True,
+            server_default=sa.text("gen_random_uuid()"),
+        ),
         sa.Column("job_type", sa.String(64), nullable=False),
         sa.Column("job_key", sa.String(128), nullable=False),
         sa.Column(
