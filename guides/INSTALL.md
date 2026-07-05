@@ -187,6 +187,8 @@ Migrations run automatically on startup. To pin a specific version:
 image: chvvkumar/galactilog:1.0.1
 ```
 
+If you are upgrading from a pre-v2.0 release (v1.x or earlier), see the [Upgrading Guide](UPGRADING.md) for the required checkpoint release path.
+
 ## Building from Source
 
 ```bash
