@@ -102,7 +102,6 @@ class Image(Base):
         Index("ix_images_eccentricity", "eccentricity"),
         Index("ix_images_detected_stars", "detected_stars"),
         Index("ix_images_guiding_rms_arcsec", "guiding_rms_arcsec"),
-        Index("ix_images_adu_mean", "adu_mean"),
         Index("ix_images_focuser_temp", "focuser_temp"),
         Index("ix_images_ambient_temp", "ambient_temp"),
         Index("ix_images_humidity", "humidity"),
