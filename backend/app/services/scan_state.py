@@ -25,6 +25,11 @@ SCAN_CANCEL_KEY = "scan:cancel"
 SCAN_ACTIVITY_KEY = "scan:activity"
 SCAN_ACTIVITY_MAX = 20
 SCAN_SKIPPED_PATHS_KEY = "scan:skipped_paths"
+# Backstop TTL for the skipped-paths set. Membership is normally kept accurate
+# by rebuild_skipped_paths_sync() on every full scan (dropping entries for
+# files no longer on disk), but the TTL guarantees the set cannot grow
+# unbounded forever even if a scan is never re-run with calibration excluded.
+SCAN_SKIPPED_PATHS_TTL = 7 * 86400  # 7 days
 # Short-lived marker set inside trigger_scan's lock, between the idle/active
 # check and the `run_scan.delay()` dispatch (AUD-016). Closes the window where
 # a second POST arrives after the dispatch lock is released but before the
@@ -418,6 +423,9 @@ def increment_csv_enriched_sync(r: sync_redis.Redis) -> None:
 def add_skipped_path_sync(r: sync_redis.Redis, path: str) -> None:
     """Track a calibration/skipped file path so it's excluded from future scans."""
     r.sadd(SCAN_SKIPPED_PATHS_KEY, path)
+    # Refresh the backstop TTL on every write so a set that keeps getting new
+    # members during a long scan doesn't expire mid-scan.
+    r.expire(SCAN_SKIPPED_PATHS_KEY, SCAN_SKIPPED_PATHS_TTL)
 
 
 def get_skipped_paths_sync(r: sync_redis.Redis) -> set[str]:
@@ -428,6 +436,23 @@ def get_skipped_paths_sync(r: sync_redis.Redis) -> set[str]:
 def clear_skipped_paths_sync(r: sync_redis.Redis) -> None:
     """Clear skipped paths cache (e.g. when include_calibration setting changes)."""
     r.delete(SCAN_SKIPPED_PATHS_KEY)
+
+
+def rebuild_skipped_paths_sync(r: sync_redis.Redis, paths: set[str]) -> None:
+    """Replace the skipped-paths set with exactly ``paths``, with TTL backstop.
+
+    Called once per full scan (when calibration is excluded) after checking
+    which previously-skipped paths still exist on disk, so entries for files
+    that were deleted or moved don't linger in the set forever. Always sets
+    the 7-day TTL backstop, even for an empty rebuild, so an unrelated
+    long-lived key can't survive without one.
+    """
+    pipe = r.pipeline()
+    pipe.delete(SCAN_SKIPPED_PATHS_KEY)
+    if paths:
+        pipe.sadd(SCAN_SKIPPED_PATHS_KEY, *paths)
+        pipe.expire(SCAN_SKIPPED_PATHS_KEY, SCAN_SKIPPED_PATHS_TTL)
+    pipe.execute()
 
 
 def set_idle_sync(r: sync_redis.Redis) -> None:

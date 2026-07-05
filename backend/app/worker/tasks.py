@@ -47,6 +47,7 @@ from app.services.scan_state import (
     set_discovered_sync, is_cancel_requested_sync, clear_cancel_sync, set_cancelled_sync,
     check_complete_sync,
     add_skipped_path_sync, get_skipped_paths_sync, clear_skipped_paths_sync,
+    rebuild_skipped_paths_sync,
 )
 from app.services.activity import emit_sync as _emit_activity_sync
 
@@ -148,9 +149,16 @@ def run_scan(self, include_calibration: bool = True, force_orphan_cleanup: bool 
             known_paths = {row[0] for row in rows}
             known_file_stats = {row[0]: (row[1], row[2]) for row in rows}
 
-        # Include previously skipped calibration paths so they aren't re-queued
+        # Include previously skipped calibration paths so they aren't re-queued.
+        # Rebuild the tracked set to only paths still present on disk (files
+        # that were deleted or moved since the last scan are dropped) so it
+        # can't grow unbounded; the 7-day TTL in rebuild_skipped_paths_sync is
+        # a backstop on top of this.
         if not include_calibration:
-            known_paths |= get_skipped_paths_sync(_redis)
+            prior_skipped = get_skipped_paths_sync(_redis)
+            still_present = {p for p in prior_skipped if Path(p).exists()}
+            rebuild_skipped_paths_sync(_redis, still_present)
+            known_paths |= still_present
         else:
             # Calibration now included - clear the skip cache so they get ingested
             clear_skipped_paths_sync(_redis)

@@ -59,6 +59,7 @@ celery_app.conf.update(
         # backend for them entirely.
         "app.worker.drain_logs.drain_app_logs": {"ignore_result": True},
         "app.worker.prune_activity.prune_activity_events": {"ignore_result": True},
+        "app.worker.prune_activity.prune_refresh_tokens": {"ignore_result": True},
         "app.worker.tasks.auto_scan_tick": {"ignore_result": True},
     },
     # Cap how long task results linger in the result backend. Anything that
@@ -76,6 +77,10 @@ celery_app.conf.update(
         "prune-activity-events": {
             "task": "app.worker.prune_activity.prune_activity_events",
             "schedule": crontab(hour=3, minute=0),
+        },
+        "prune-refresh-tokens": {
+            "task": "app.worker.prune_activity.prune_refresh_tokens",
+            "schedule": crontab(hour=3, minute=30),
         },
         "drain-app-logs": {
             "task": "app.worker.drain_logs.drain_app_logs",

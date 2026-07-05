@@ -178,3 +178,43 @@ def test_thumbnail_regen_failed_emitted_for_thumbnail_failures():
 
     ev_types = [e["event_type"] for e in emit_calls]
     assert "thumbnail_regen_failed" in ev_types
+
+
+def test_add_skipped_path_sync_refreshes_ttl():
+    """3.3: every insert refreshes the 7-day backstop TTL, not just rebuilds."""
+    from app.services.scan_state import add_skipped_path_sync, SCAN_SKIPPED_PATHS_KEY, SCAN_SKIPPED_PATHS_TTL
+    r = MagicMock()
+    add_skipped_path_sync(r, "/data/dark_001.fits")
+    r.sadd.assert_called_once_with(SCAN_SKIPPED_PATHS_KEY, "/data/dark_001.fits")
+    r.expire.assert_called_once_with(SCAN_SKIPPED_PATHS_KEY, SCAN_SKIPPED_PATHS_TTL)
+
+
+def test_rebuild_skipped_paths_sync_replaces_set_with_ttl():
+    from app.services.scan_state import rebuild_skipped_paths_sync, SCAN_SKIPPED_PATHS_KEY, SCAN_SKIPPED_PATHS_TTL
+    r = MagicMock()
+    pipe = MagicMock()
+    r.pipeline.return_value = pipe
+
+    rebuild_skipped_paths_sync(r, {"/data/a.fits", "/data/b.fits"})
+
+    pipe.delete.assert_called_once_with(SCAN_SKIPPED_PATHS_KEY)
+    assert pipe.sadd.call_args[0][0] == SCAN_SKIPPED_PATHS_KEY
+    assert set(pipe.sadd.call_args[0][1:]) == {"/data/a.fits", "/data/b.fits"}
+    pipe.expire.assert_called_once_with(SCAN_SKIPPED_PATHS_KEY, SCAN_SKIPPED_PATHS_TTL)
+    pipe.execute.assert_called_once()
+
+
+def test_rebuild_skipped_paths_sync_empty_still_deletes_key():
+    """An empty rebuild (no paths survived) must still clear the stale set,
+    but skips the now-pointless sadd/expire (nothing to expire)."""
+    from app.services.scan_state import rebuild_skipped_paths_sync, SCAN_SKIPPED_PATHS_KEY
+    r = MagicMock()
+    pipe = MagicMock()
+    r.pipeline.return_value = pipe
+
+    rebuild_skipped_paths_sync(r, set())
+
+    pipe.delete.assert_called_once_with(SCAN_SKIPPED_PATHS_KEY)
+    pipe.sadd.assert_not_called()
+    pipe.expire.assert_not_called()
+    pipe.execute.assert_called_once()

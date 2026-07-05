@@ -283,6 +283,68 @@ def test_run_scan_releases_run_lock_after_completing():
     mock_redis.delete.assert_any_call(tasks_mod.SCAN_RUN_LOCK)
 
 
+def test_run_scan_rebuilds_skipped_paths_dropping_missing_files():
+    """3.3: scan:skipped_paths must be rebuilt each excluded-calibration scan to
+    only paths still present on disk, not merely accumulated forever."""
+    tasks_mod = _bootstrap_real_tasks()
+
+    prior_skipped = {
+        "/tmp/test_fits/still_here.fits",
+        "/tmp/test_fits/deleted.fits",
+    }
+
+    class _EmptySession:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def execute(self, *a, **k):
+            res = MagicMock()
+            res.all.return_value = []
+            res.scalar_one_or_none.return_value = None
+            return res
+
+    mock_redis = MagicMock()
+    mock_redis.set.return_value = True
+
+    mock_actx = MagicMock()
+    mock_actx.__enter__ = lambda s, *a: MagicMock()
+    mock_actx.__exit__ = lambda s, *a: None
+
+    fake_cfg = MagicMock()
+    fake_cfg.should_include_file.return_value = True
+    fake_cfg.roots.return_value = [tasks_mod.Path("/tmp/test_fits")]
+
+    rebuild_calls = []
+
+    def _fake_exists(self):
+        return self.name == "still_here.fits"
+
+    with patch.object(tasks_mod, "Session", lambda *a, **k: _EmptySession()), \
+         patch.object(tasks_mod, "_redis", mock_redis), \
+         patch.object(tasks_mod, "_activity_session", lambda: mock_actx), \
+         patch.object(tasks_mod, "clear_cancel_sync"), \
+         patch.object(tasks_mod, "start_scanning_sync"), \
+         patch.object(tasks_mod, "get_skipped_paths_sync", return_value=set(prior_skipped)), \
+         patch.object(tasks_mod, "rebuild_skipped_paths_sync", side_effect=lambda r, p: rebuild_calls.append(p)), \
+         patch.object(tasks_mod, "is_cancel_requested_sync", return_value=False), \
+         patch.object(tasks_mod, "set_discovered_sync"), \
+         patch.object(tasks_mod, "set_idle_sync"), \
+         patch.object(tasks_mod, "generate_reference_thumbnails"), \
+         patch.object(tasks_mod, "detect_duplicate_targets"), \
+         patch.object(tasks_mod, "backfill_dark_hours"), \
+         patch("pathlib.Path.exists", _fake_exists), \
+         patch("app.services.scan_filters.ScanFilterConfig.from_settings", return_value=fake_cfg), \
+         patch("app.services.scanner.scan_directory", return_value=([], [], set())):
+        result = tasks_mod.run_scan.run(include_calibration=False)
+
+    assert result["status"] == "complete"
+    assert len(rebuild_calls) == 1
+    assert rebuild_calls[0] == {"/tmp/test_fits/still_here.fits"}
+
+
 def test_mosaic_detection_complete_emits():
     tasks_mod = _bootstrap_real_tasks()
     detect_mosaic_panels_task = tasks_mod.detect_mosaic_panels_task
