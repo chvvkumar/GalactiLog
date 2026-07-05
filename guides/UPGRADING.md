@@ -10,7 +10,7 @@ If your install predates v2.0, a one-time hop through the checkpoint image is re
 
 ### Fresh Install (No Existing Database)
 
-Download the latest image tag and start normally. A fresh database is seeded at the current schema revision and data version, so no migrations run on first boot.
+Download the latest image tag and start normally. On first boot, alembic applies the baseline schema migration (revision 0015) plus any newer linear migrations to the empty database. The baseline seeds the current data version directly, so the background data migration sequence is skipped.
 
 ```bash
 docker compose up -d
