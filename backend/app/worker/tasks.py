@@ -21,6 +21,7 @@ from app.services.simbad import (
 )
 from app.services.target_resolver import resolve_target, normalize_sql_expr, match_target_by_identity
 from app.services.simbad_repair import repair_corrupted_simbad_cache
+from app.services.mosaic_detection import resolve_panel_membership
 from app.services import catalog_cache as cc
 from app.services.thumbnail import generate_thumbnail
 from app.services.xisf_parser import extract_xisf_metadata, generate_xisf_thumbnail
@@ -628,8 +629,24 @@ def _do_ingest(fits_path: str, include_calibration: bool = True) -> dict:
         longitude=effective_lon,
     )
 
+    # Step 4b: Parse panel membership (Phase 5). Only LIGHT frames with a
+    # resolved target and a usable OBJECT string can carry a panel token;
+    # calibration frames and unresolved targets are never assigned a panel.
+    # Kept in the same transaction as the Image insert below so panel
+    # membership is atomic with ingest, not a separate round trip.
+    panel_label = None
+    panel_id = None
+    object_name_for_panel = meta.get("object_name")
+    parse_panel = (
+        image_type == "LIGHT" and target_id is not None and bool(object_name_for_panel)
+    )
+
     try:
         with Session(_sync_engine) as session:
+            if parse_panel:
+                panel_label, panel_id = resolve_panel_membership(
+                    session, target_id, object_name_for_panel, general.mosaic_keywords,
+                )
             image = Image(
                 file_path=meta["file_path"],
                 file_name=meta["file_name"],
@@ -639,6 +656,8 @@ def _do_ingest(fits_path: str, include_calibration: bool = True) -> dict:
                 session_date=session_date_val,
                 thumbnail_path=str(thumb_path) if thumb_path else None,
                 resolved_target_id=target_id,
+                panel_label=panel_label,
+                panel_id=panel_id,
                 exposure_time=meta.get("exposure_time"),
                 filter_used=meta.get("filter_used"),
                 sensor_temp=meta.get("sensor_temp"),

@@ -24,6 +24,7 @@ from datetime import datetime
 
 from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 
 from app.models import Target, UserSettings, SETTINGS_ROW_ID
 from app.models.image import Image
@@ -277,6 +278,52 @@ async def load_mosaic_keywords(session: AsyncSession) -> list[str]:
     settings = await session.get(UserSettings, SETTINGS_ROW_ID)
     general = settings.general if settings else {}
     return general.get("mosaic_keywords", ["Panel", "P"]) or []
+
+
+def resolve_panel_membership(
+    session: Session,
+    target_id,
+    object_name: str | None,
+    keywords: list[str],
+) -> tuple[str | None, "object | None"]:
+    """Resolve ``(panel_label, panel_id)`` for one Image at ingest time.
+
+    Synchronous (plain ``Session``, not ``AsyncSession``) since it runs from
+    the Celery sync worker's ``_do_ingest``. Mirrors the backfill semantics
+    in ``alembic/versions/0018_image_panel_membership.py`` exactly (both must
+    agree so ingest-time and backfill-time assignment never drift):
+
+    - ``object_name`` parses to a panel token (``match_panel_token_full``) ->
+      ``panel_label`` is the derived label (``_panel_label(num)``);
+      ``panel_id`` is the id of the ``MosaicPanel`` row already matching
+      ``(target_id, panel_label)``, or ``None`` if no such row exists yet.
+    - ``object_name`` carries no panel token -> ``panel_label`` stays
+      ``None``; ``panel_id`` falls back to the target's "simple" panel (a
+      ``MosaicPanel`` with no ``object_pattern``) only when there is EXACTLY
+      ONE such panel for this target (ambiguous otherwise, so no fallback is
+      applied). This is the mechanism that lets non-token, one-target-one-
+      panel mosaics still get ``panel_id`` populated on their Images.
+    """
+    token = match_panel_token_full(object_name, keywords)
+    if token is not None:
+        _base, num, _keyword = token
+        label = _panel_label(num)
+        panel_id = session.execute(
+            select(MosaicPanel.id).where(
+                MosaicPanel.target_id == target_id,
+                MosaicPanel.panel_label == label,
+            )
+        ).scalars().first()
+        return label, panel_id
+
+    simple_ids = session.execute(
+        select(MosaicPanel.id).where(
+            MosaicPanel.target_id == target_id,
+            MosaicPanel.object_pattern.is_(None),
+        )
+    ).scalars().all()
+    panel_id = simple_ids[0] if len(simple_ids) == 1 else None
+    return None, panel_id
 
 
 # ---------------------------------------------------------------------------
