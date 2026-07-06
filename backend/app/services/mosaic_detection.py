@@ -32,7 +32,7 @@ from app.models.mosaic import Mosaic
 from app.models.mosaic_panel import MosaicPanel
 from app.models.mosaic_panel_session import MosaicPanelSession
 from app.models.mosaic_suggestion import MosaicSuggestion
-from app.services.mosaic_composite import _parse_ra, _parse_coord
+from app.services.coordinates import _parse_ra, _parse_coord
 
 
 # Fallback position tolerance when no FOV-derived value is available
