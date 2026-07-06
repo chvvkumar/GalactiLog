@@ -81,6 +81,16 @@ class MosaicPanelBatchRequest(BaseModel):
     rotation_angle: float | None = None
 
 
+class AvailablePanelLabel(BaseModel):
+    """A panel label parsed at ingest (Image.panel_label) for one of a
+    mosaic's targets that has no backing MosaicPanel row yet (Image.panel_id
+    IS NULL). target_id identifies which of the mosaic's targets the label
+    was seen on, so a client can promote the label to a real panel via
+    POST /mosaics/{mosaic_id}/panels."""
+    label: str
+    target_id: str
+
+
 class MosaicDetailResponse(BaseModel):
     id: str
     name: str
@@ -94,11 +104,10 @@ class MosaicDetailResponse(BaseModel):
     default_filter: str | None = None
     needs_review: bool = False
     custom_values: dict[str, str] | None = None
-    # Panel labels parsed at ingest (Image.panel_label) for this mosaic's
-    # targets that have no backing MosaicPanel row yet (Image.panel_id IS
-    # NULL). Read-only surfacing of newly-ingested panel tokens on an already
-    # -accepted mosaic; does not itself create a MosaicPanel.
-    available_panel_labels: list[str] = []
+    # Newly-ingested panel labels not yet backed by a MosaicPanel row.
+    # Surfacing only; promoting a label to a real panel is the explicit
+    # POST /mosaics/{mosaic_id}/panels action.
+    available_panel_labels: list[AvailablePanelLabel] = []
 
 
 class SuggestionPanelSession(BaseModel):

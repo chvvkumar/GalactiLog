@@ -18,6 +18,7 @@ from app.models.mosaic_panel_session import MosaicPanelSession
 from app.models.mosaic_suggestion import MosaicSuggestion
 from app.schemas.mosaic import (
     AcceptSuggestionRequest,
+    AvailablePanelLabel,
     MosaicCreate, MosaicUpdate, MosaicPanelCreate,
     MosaicPanelBatchItem, MosaicPanelBatchRequest,
     MosaicSummary, MosaicDetailResponse, PanelStats, MosaicSuggestionResponse,
@@ -600,14 +601,15 @@ async def get_mosaic_detail(
     # backing MosaicPanel row yet. This is the "accepted mosaics frozen" fix:
     # the offline detection job skips targets already in a MosaicPanel, but
     # ingest-time parsing (Task 1/2) still stamps Image.panel_label on every
-    # new frame, leaving Image.panel_id NULL when no MosaicPanel matches. Read
-    # -only surfacing; does not create a MosaicPanel row.
+    # new frame, leaving Image.panel_id NULL when no MosaicPanel matches.
+    # Surfacing only; each entry carries its target_id so a client can
+    # promote the label to a real panel via POST /{mosaic_id}/panels.
     target_ids = {p.target_id for p in sorted_panels}
     existing_labels_by_target: dict[uuid.UUID, set[str]] = defaultdict(set)
     for p in sorted_panels:
         existing_labels_by_target[p.target_id].add(p.panel_label)
 
-    available_panel_labels: list[str] = []
+    available_panel_labels: list[AvailablePanelLabel] = []
     if target_ids:
         avail_q = (
             select(Image.resolved_target_id, Image.panel_label)
@@ -619,7 +621,7 @@ async def get_mosaic_detail(
             .distinct()
         )
         avail_rows = (await session.execute(avail_q)).all()
-        labels = set()
+        pairs = set()
         for target_id, panel_label in avail_rows:
             # Defensive guard: panel_id IS NULL should already imply no
             # MosaicPanel matched this (target_id, panel_label), but skip any
@@ -627,8 +629,11 @@ async def get_mosaic_detail(
             # double-counting it as "available".
             if panel_label in existing_labels_by_target.get(target_id, ()):
                 continue
-            labels.add(panel_label)
-        available_panel_labels = sorted(labels)
+            pairs.add((panel_label, str(target_id)))
+        available_panel_labels = [
+            AvailablePanelLabel(label=label, target_id=target_id)
+            for label, target_id in sorted(pairs)
+        ]
 
     return MosaicDetailResponse(
         id=str(mosaic.id),

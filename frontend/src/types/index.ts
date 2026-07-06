@@ -970,9 +970,17 @@ export interface MosaicDetailResponse {
   needs_review?: boolean;
   custom_values?: Record<string, string> | null;
   /** Panel labels parsed at ingest for this mosaic's targets that have no
-   * backing MosaicPanel row yet -- surfaced so an admin can see a new panel
-   * label exists without the offline detection job re-running. */
-  available_panel_labels?: string[];
+   * backing MosaicPanel row yet -- surfaced so an admin can promote them to
+   * real panels without waiting for the offline detection job. */
+  available_panel_labels?: AvailablePanelLabel[];
+}
+
+/** A newly-ingested panel label with no backing MosaicPanel row yet.
+ * target_id identifies which of the mosaic's targets the label was seen on,
+ * for promotion via POST /mosaics/{id}/panels (api.addMosaicPanel). */
+export interface AvailablePanelLabel {
+  label: string;
+  target_id: string;
 }
 
 export interface PanelThumbnailResponse {

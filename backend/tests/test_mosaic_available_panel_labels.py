@@ -148,13 +148,17 @@ async def test_new_panel_label_without_backing_panel_is_surfaced(api_client, db)
             session_date=date(2026, 1, 2),
         ))
         await s.commit()
-        mosaic_id = mosaic.id
+        mosaic_id, target_id = mosaic.id, target.id
 
     resp = await api_client.get(f"/api/mosaics/{mosaic_id}")
     assert resp.status_code == 200, resp.text
     data = resp.json()
 
-    assert data["available_panel_labels"] == ["Panel 3"]
+    # Each entry carries the target_id the label was seen on, so the client
+    # can promote it via POST /mosaics/{mosaic_id}/panels.
+    assert data["available_panel_labels"] == [
+        {"label": "Panel 3", "target_id": str(target_id)}
+    ]
     # Existing panels/response shape unaffected.
     assert len(data["panels"]) == 2
     assert data["total_frames"] == 1
@@ -174,13 +178,15 @@ async def test_no_duplicates_when_multiple_images_share_new_label(api_client, db
                 session_date=date(2026, 1, 3 + i),
             ))
         await s.commit()
-        mosaic_id = mosaic.id
+        mosaic_id, target_id = mosaic.id, target.id
 
     resp = await api_client.get(f"/api/mosaics/{mosaic_id}")
     assert resp.status_code == 200, resp.text
     data = resp.json()
 
-    assert data["available_panel_labels"] == ["Panel 5"]
+    assert data["available_panel_labels"] == [
+        {"label": "Panel 5", "target_id": str(target_id)}
+    ]
 
 
 @pytest.mark.asyncio
@@ -231,10 +237,48 @@ async def test_sorted_and_deduplicated_across_multiple_new_labels(api_client, db
             session_date=date(2026, 1, 8),
         ))
         await s.commit()
-        mosaic_id = mosaic.id
+        mosaic_id, target_id = mosaic.id, target.id
 
     resp = await api_client.get(f"/api/mosaics/{mosaic_id}")
     assert resp.status_code == 200, resp.text
     data = resp.json()
 
-    assert data["available_panel_labels"] == ["Panel 4", "Panel 9"]
+    assert data["available_panel_labels"] == [
+        {"label": "Panel 4", "target_id": str(target_id)},
+        {"label": "Panel 9", "target_id": str(target_id)},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_promoting_available_label_via_add_panel_removes_it(api_client, db):
+    """The promotion path: POST /{mosaic_id}/panels with the surfaced
+    (label, target_id) creates a real MosaicPanel, after which the label no
+    longer appears as available (the existing-panel-label guard excludes it)."""
+    Session = db
+    async with Session() as s:
+        target, mosaic, panel_1, panel_2 = await _seed_mosaic_with_panels(s)
+
+        s.add(_img(
+            resolved_target_id=target.id, exposure_time=200.0,
+            panel_id=None, panel_label="Panel 3",
+            raw_headers={"OBJECT": "NGC 1499 Panel 3"},
+            session_date=date(2026, 1, 2),
+        ))
+        await s.commit()
+        mosaic_id, target_id = mosaic.id, target.id
+
+    resp = await api_client.get(f"/api/mosaics/{mosaic_id}")
+    entry = resp.json()["available_panel_labels"][0]
+
+    resp = await api_client.post(
+        f"/api/mosaics/{mosaic_id}/panels",
+        json={"target_id": entry["target_id"], "panel_label": entry["label"]},
+    )
+    assert resp.status_code == 200, resp.text
+
+    resp = await api_client.get(f"/api/mosaics/{mosaic_id}")
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["available_panel_labels"] == []
+    assert len(data["panels"]) == 3
+    assert any(p["panel_label"] == "Panel 3" for p in data["panels"])

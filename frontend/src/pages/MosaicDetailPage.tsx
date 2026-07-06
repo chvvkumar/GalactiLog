@@ -1,9 +1,10 @@
 import { Component, Show, For, createResource, createSignal, createMemo, createEffect } from "solid-js";
 import { A, useParams, useNavigate } from "@solidjs/router";
 import { api } from "../api/client";
-import type { PanelStats } from "../types";
+import type { AvailablePanelLabel, PanelStats } from "../types";
 import { formatIntegration, contentWidthClass } from "../utils/format";
 import { useSettingsContext } from "../components/SettingsProvider";
+import { useAuth } from "../components/AuthProvider";
 import HelpPopover from "../components/HelpPopover";
 import { showToast } from "../components/Toast";
 import InlineEditCell from "../components/InlineEditCell";
@@ -20,7 +21,25 @@ const MosaicDetailPage: Component = () => {
   const ctx = useSettingsContext();
   const params = useParams<{ mosaicId: string }>();
   const navigate = useNavigate();
+  const { isAdmin } = useAuth();
   const [mosaic, { refetch }] = createResource(() => params.mosaicId, (id) => api.getMosaicDetail(id));
+
+  // Promote an available (unconfigured) panel label to a real MosaicPanel.
+  const [addingPanelLabel, setAddingPanelLabel] = createSignal<string | null>(null);
+  const handleAddPanel = async (entry: AvailablePanelLabel) => {
+    const data = mosaic();
+    if (!data || addingPanelLabel() !== null) return;
+    setAddingPanelLabel(entry.label);
+    try {
+      await api.addMosaicPanel(data.id, entry.target_id, entry.label);
+      refetch();
+      showToast(`Panel "${entry.label}" added`);
+    } catch (e: unknown) {
+      showToast(getErrorMessage(e, "Failed to add panel"), "error", 5000);
+    } finally {
+      setAddingPanelLabel(null);
+    }
+  };
 
   // Title-row actions: composite, rename, delete, export.
   const [showComposite, setShowComposite] = createSignal(false);
@@ -413,9 +432,19 @@ const MosaicDetailPage: Component = () => {
                 </div>
                 <div class="flex flex-wrap gap-2 mt-2">
                   <For each={mosaic()?.available_panel_labels ?? []}>
-                    {(label) => (
-                      <span class="px-2 py-1 text-xs bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded-[var(--radius-sm)]">
-                        {label}
+                    {(entry) => (
+                      <span class="inline-flex items-center gap-2 px-2 py-1 text-xs bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded-[var(--radius-sm)]">
+                        {entry.label}
+                        <Show when={isAdmin()}>
+                          <button
+                            type="button"
+                            disabled={addingPanelLabel() !== null}
+                            class="text-theme-accent hover:underline disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                            onClick={() => handleAddPanel(entry)}
+                          >
+                            {addingPanelLabel() === entry.label ? "Adding..." : "Add panel"}
+                          </button>
+                        </Show>
                       </span>
                     )}
                   </For>
