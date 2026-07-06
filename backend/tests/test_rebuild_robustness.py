@@ -227,6 +227,7 @@ def _run_thumbnails(tasks, targets, fetch):
     def _capture_complete(r, message, details, **kwargs):
         captured["message"] = message
         captured["details"] = details
+        captured["kwargs"] = kwargs
 
     with patch.object(tasks, "Session", return_value=cm), \
          patch("app.services.skyview.fetch_reference_thumbnail", side_effect=fetch), \
@@ -276,6 +277,26 @@ class TestThumbnailPartialProgress:
         assert session.commit.called
         assert result["fetched"] == 11
 
+    def test_soft_time_limit_reports_step_as_processed_not_total(self):
+        """A paused run must report progress as the actual processed count,
+        not the full total -- otherwise the progress bar reads 100% while
+        the message says "paused"."""
+        tasks = _bootstrap_tasks()
+        targets = _thumbnail_targets(25)
+        calls = {"n": 0}
+
+        def fetch(target, output_dir):
+            calls["n"] += 1
+            if calls["n"] == 12:
+                raise tasks.SoftTimeLimitExceeded()
+            return "thumb.png"
+
+        result, session, captured = _run_thumbnails(tasks, targets, fetch=fetch)
+        assert result["timed_out"] is True
+        assert captured["kwargs"]["step"] == 11
+        assert captured["kwargs"]["step"] != captured["kwargs"]["total_steps"]
+        assert captured["kwargs"]["total_steps"] == 25
+
     def test_resume_query_skips_targets_with_thumbnails(self):
         """Non-force runs only select targets whose thumbnail path is NULL, so a
         re-run after a partial kill continues instead of starting over."""
@@ -302,6 +323,7 @@ def _run_rebuild_family(tasks, task, object_names, resolve_side_effect):
     def _capture_complete(r, message, details, **kwargs):
         captured["message"] = message
         captured["details"] = details
+        captured["kwargs"] = kwargs
 
     with patch.object(tasks, "Session", return_value=cm), \
          patch.object(tasks, "resolve_target", side_effect=resolve_side_effect), \

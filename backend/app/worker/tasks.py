@@ -39,13 +39,12 @@ _sync_url = settings.database_url.replace("+asyncpg", "+psycopg2")
 _sync_engine = create_engine(_sync_url, pool_pre_ping=True, pool_size=2, max_overflow=2, pool_recycle=1800)
 
 from app.config import get_sync_redis
-from app.services.progress_envelope import set_progress
 from app.services.scan_state import (
     increment_completed_sync, increment_failed_sync, increment_csv_enriched_sync,
     increment_skipped_calibration_sync,
     start_scanning_sync, set_ingesting_sync, set_idle_sync,
     set_rebuild_running_sync, set_rebuild_progress_sync, set_rebuild_complete_sync,
-    set_rebuild_cancelled_sync, REBUILD_KEY,
+    set_rebuild_cancelled_sync,
     set_discovered_sync, is_cancel_requested_sync, clear_cancel_sync, set_cancelled_sync,
     check_complete_sync,
     add_skipped_path_sync, get_skipped_paths_sync, clear_skipped_paths_sync,
@@ -2629,6 +2628,7 @@ def generate_reference_thumbnails(self, force: bool = False, parent_activity_id:
             task="ref_thumbnails", step=0, total_steps=total,
         )
         fetched = 0
+        processed = 0
         cancelled = False
         timed_out = False
         try:
@@ -2640,6 +2640,7 @@ def generate_reference_thumbnails(self, force: bool = False, parent_activity_id:
                 if path:
                     target.reference_thumbnail_path = path
                     fetched += 1
+                processed = i + 1
                 if (i + 1) % COMMIT_CHUNK == 0:
                     session.commit()  # persist partial progress
                 if (i + 1) % 5 == 0 or i + 1 == total:
@@ -2682,7 +2683,7 @@ def generate_reference_thumbnails(self, force: bool = False, parent_activity_id:
         message = f"Fetched {fetched}/{total} reference thumbnails"
     set_rebuild_complete_sync(
         _redis, message, stats,
-        task="ref_thumbnails", step=total, total_steps=total,
+        task="ref_thumbnails", step=(processed if timed_out else total), total_steps=total,
     )
     with _activity_session() as _db:
         _emit_activity_sync(
