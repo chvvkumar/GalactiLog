@@ -15,6 +15,7 @@ for _mod in ("fitsio",):
 
 
 TASKS_PATH = pathlib.Path("app/worker/tasks.py")
+ORPHAN_CLEANUP_PATH = pathlib.Path("app/services/orphan_cleanup.py")
 
 
 def _run_scan_source() -> str:
@@ -27,16 +28,34 @@ def _run_scan_source() -> str:
 
 
 def test_run_scan_uses_emit_sync_not_append_activity_sync():
-    """The 5 scan emit sites inside run_scan must use emit_sync, not append_activity_sync."""
+    """The scan emit sites must use emit_sync, not append_activity_sync.
+
+    scan_stopped, delta_scan, and scan_complete stay inline in run_scan.
+    orphan_cleanup, orphan_force_warning, and orphan_warning were extracted
+    into app.services.orphan_cleanup.cleanup_orphaned_images (Phase 6 Task 4)
+    -- run_scan forwards its own _emit_activity_sync reference into that
+    call, so the emit sites still resolve to the same function, just via the
+    `emit_fn` parameter instead of the module-level name directly.
+    """
     run_scan_src = _run_scan_source()
+    orphan_cleanup_src = ORPHAN_CLEANUP_PATH.read_text()
     assert "append_activity_sync(" not in run_scan_src, (
         "run_scan still contains append_activity_sync() calls; "
-        "all 5 scan emit sites should use _emit_activity_sync()"
+        "all scan emit sites should use _emit_activity_sync()"
     )
-    # All 5 sites should be migrated.
-    assert run_scan_src.count("_emit_activity_sync(") >= 5, (
-        "run_scan should contain at least 5 _emit_activity_sync() calls "
-        "(scan_stopped, delta_scan, orphan_cleanup, orphan_warning, scan_complete)"
+    assert "append_activity_sync(" not in orphan_cleanup_src, (
+        "orphan_cleanup still contains append_activity_sync() calls; "
+        "all scan emit sites should use emit_sync()"
+    )
+    # All 6 sites (across both modules) should be migrated.
+    total_emit_calls = (
+        run_scan_src.count("_emit_activity_sync(")
+        + orphan_cleanup_src.count("emit_fn(")
+    )
+    assert total_emit_calls >= 5, (
+        "expected at least 5 emit_sync-based calls across run_scan and "
+        "orphan_cleanup (scan_stopped, delta_scan, orphan_cleanup, "
+        "orphan_force_warning, orphan_warning, scan_complete)"
     )
 
 

@@ -26,6 +26,10 @@ from app.services.mosaic_detection import (
     prune_stale_panel_sessions,
     recompute_panel_membership_for_images_sync,
 )
+from app.services.orphan_cleanup import (
+    cleanup_orphaned_images,
+    thumbnail_referenced as _thumbnail_referenced_impl,
+)
 from app.services import catalog_cache as cc
 from app.services.thumbnail import generate_thumbnail
 from app.services.xisf_parser import extract_xisf_metadata, generate_xisf_thumbnail
@@ -354,103 +358,26 @@ def run_scan(self, include_calibration: bool = True, force_orphan_cleanup: bool 
                 )
 
         # Detect and remove orphaned DB records (files deleted from disk).
-        # CRITICAL: only consider rows the walker would have actually visited
-        # under the current filter config. When include_paths or excludes narrow
-        # the scan, out-of-scope rows appear "missing from disk" even though the
-        # walker never looked for them. Those must NOT be treated as orphans.
-        in_scope_known_paths = {
-            p for p in known_paths
-            if p and filter_config.should_include_file(Path(p), fits_root)
-        }
-        orphaned_paths = in_scope_known_paths - all_disk_paths
-        removed = 0
-        _threshold = max(1, len(in_scope_known_paths)) * 0.5
-        _large_removal = len(orphaned_paths) >= _threshold or len(all_disk_paths) == 0
-        if orphaned_paths and (force_orphan_cleanup or len(orphaned_paths) < _threshold):
-            # Safety: only clean up if less than 50% of files appear missing
-            # (protects against unmounted shares / unreachable storage), unless an
-            # admin forced a one-time cleanup to reflect a deliberate bulk deletion.
-            with Session(_sync_engine) as session:
-                # Capture each deleted row's panel_id before the delete fires --
-                # ON DELETE SET NULL on images.panel_id means it can't be read
-                # back off the images table afterward. Pruning of stale
-                # MosaicPanelSession rows for these panels runs once after the
-                # whole orphan pass (not per 500-row batch): a single pass is
-                # cheaper and avoids redundant work while more deletes in the
-                # same run are still happening.
-                affected_panel_ids: set = set()
-                for batch_start in range(0, len(orphaned_paths), 500):
-                    batch = list(orphaned_paths)[batch_start:batch_start + 500]
-                    rows = session.execute(
-                        select(Image.id, Image.thumbnail_path, Image.panel_id).where(
-                            Image.file_path.in_(batch)
-                        )
-                    ).all()
-                    for img_id, thumb_path, panel_id in rows:
-                        if thumb_path:
-                            try:
-                                Path(thumb_path).unlink(missing_ok=True)
-                            except OSError:
-                                pass
-                        if panel_id is not None:
-                            affected_panel_ids.add(panel_id)
-                        session.execute(
-                            text("DELETE FROM images WHERE id = :id"),
-                            {"id": img_id},
-                        )
-                        removed += 1
-                    session.commit()
-
-                if affected_panel_ids:
-                    pruned = prune_stale_panel_sessions(session, affected_panel_ids)
-                    if pruned:
-                        logger.info(
-                            "Pruned %d stale mosaic panel session row%s after orphan cleanup",
-                            pruned, "s" if pruned != 1 else "",
-                        )
-            if removed:
-                logger.info("Removed %d orphaned image records (files deleted from disk)", removed)
-                with _activity_session() as _db:
-                    _emit_activity_sync(
-                        _db, redis=_redis, category="scan", severity="info",
-                        event_type="orphan_cleanup",
-                        message=f"Removed {removed} deleted file{'s' if removed != 1 else ''} from catalog",
-                        details={"removed": removed}, actor="system",
-                    )
-                if force_orphan_cleanup and _large_removal and removed:
-                    pct = round(removed / max(1, len(in_scope_known_paths)) * 100)
-                    logger.warning(
-                        "Forced orphan cleanup removed %d of %d catalogued files (%d%%)",
-                        removed, len(in_scope_known_paths), pct,
-                    )
-                    with _activity_session() as _db:
-                        _emit_activity_sync(
-                            _db, redis=_redis, category="scan", severity="warning",
-                            event_type="orphan_force_warning",
-                            message=(
-                                f"Forced orphan cleanup removed {removed} of "
-                                f"{len(in_scope_known_paths)} catalogued file"
-                                f"{'s' if removed != 1 else ''} ({pct}% of the catalog). "
-                                f"If a storage share was unmounted or unreachable, "
-                                f"restore from backup."
-                            ),
-                            details={"removed": removed, "total_known": len(in_scope_known_paths), "forced": True},
-                            actor="system",
-                        )
-        elif orphaned_paths:
-            logger.warning(
-                "Skipped orphan cleanup: %d of %d in-scope files missing (>50%%) - "
-                "possible unmounted share or unreachable storage",
-                len(orphaned_paths), len(in_scope_known_paths),
-            )
-            with _activity_session() as _db:
-                _emit_activity_sync(
-                    _db, redis=_redis, category="scan", severity="warning",
-                    event_type="orphan_warning",
-                    message=f"Orphan cleanup skipped: {len(orphaned_paths)} of {len(in_scope_known_paths)} in-scope files missing (>50%) - possible unmounted share",
-                    details={"missing": len(orphaned_paths), "total_known": len(in_scope_known_paths)},
-                    actor="system",
-                )
+        # The 50%-missing safety threshold, 500-row delete batching, and
+        # activity events (orphan_cleanup / orphan_force_warning /
+        # orphan_warning) live in cleanup_orphaned_images now; the module-level
+        # names below are forwarded explicitly (rather than imported directly
+        # in the service module) so tests that patch them on this module keep
+        # working unchanged.
+        cleanup_result = cleanup_orphaned_images(
+            _sync_engine,
+            _redis,
+            known_paths,
+            all_disk_paths,
+            filter_config,
+            fits_root,
+            force_orphan_cleanup,
+            session_factory=Session,
+            activity_session_factory=_activity_session,
+            emit_fn=_emit_activity_sync,
+            prune_fn=prune_stale_panel_sessions,
+        )
+        removed = cleanup_result["removed"]
 
         total_queued = len(new_files) + len(changed_files)
         if not total_queued:
@@ -535,21 +462,12 @@ def auto_scan_tick():
 def _thumbnail_referenced(thumb_path_str: str) -> bool:
     """Return True if any Image row references this thumbnail file.
 
-    The thumbnail filename is derived deterministically from the file path
-    (md5), so two ingest attempts for the same path target the same file.
-    Before unlinking a thumbnail after a failed insert we confirm no existing
-    row points at it, otherwise we would break the surviving row (AUD-015).
+    Thin wrapper around app.services.orphan_cleanup.thumbnail_referenced,
+    kept under this name (rather than calling the service directly at the
+    _do_ingest call site) because tests patch `_thumbnail_referenced` on
+    this module.
     """
-    try:
-        with Session(_sync_engine) as session:
-            existing = session.execute(
-                select(Image.id).where(Image.thumbnail_path == thumb_path_str).limit(1)
-            ).first()
-            return existing is not None
-    except Exception:
-        # If the check itself fails, err on the side of NOT deleting a
-        # possibly-shared thumbnail.
-        return True
+    return _thumbnail_referenced_impl(thumb_path_str, _sync_engine)
 
 
 def _do_ingest(fits_path: str, include_calibration: bool = True) -> dict:
