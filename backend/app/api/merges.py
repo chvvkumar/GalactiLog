@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -345,7 +346,7 @@ async def orphan_create(
     await invalidate_stats_and_analysis_cache()
 
     if not body.user_defined:
-        _enrich_new_target(target.id)
+        await asyncio.to_thread(_enrich_new_target, target.id)
 
     return {"target_id": str(target.id)}
 
@@ -445,7 +446,7 @@ async def create_custom_target(
     await invalidate_stats_and_analysis_cache()
 
     if not body.user_defined:
-        _enrich_new_target(target.id)
+        await asyncio.to_thread(_enrich_new_target, target.id)
 
     return {
         "target_id": str(target.id),
