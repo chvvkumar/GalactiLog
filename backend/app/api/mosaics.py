@@ -1,5 +1,4 @@
 import asyncio
-import re
 import uuid
 from collections import defaultdict
 
@@ -22,7 +21,6 @@ from app.schemas.mosaic import (
     MosaicCreate, MosaicUpdate, MosaicPanelCreate,
     MosaicPanelBatchItem, MosaicPanelBatchRequest,
     MosaicSummary, MosaicDetailResponse, PanelStats, MosaicSuggestionResponse,
-    SuggestionPreviewPanel,
     PanelThumbnail,
     PanelSessionsResponse, PanelSessionInfo, SessionStatusUpdate,
     StatusResponse, OkResponse, PanelCreateResponse,
@@ -32,8 +30,6 @@ from app.api.deps import get_current_user, require_admin
 from app.services.mosaic_composite import build_mosaic_composite, find_default_filter
 from app.services.mosaic_detection import (
     load_mosaic_keywords,
-    object_matches_panel,
-    panel_number_from_label,
     retro_link_panel_images as _retro_link_panel_images,
 )
 from app.services.mosaic_stats import (
@@ -42,32 +38,15 @@ from app.services.mosaic_stats import (
     batch_panel_stats as _batch_panel_stats,
     list_mosaic_summaries,
 )
+from app.services.mosaic_suggestions import (
+    strip_year_suffix,
+    object_pattern_for_label,
+    list_pending_suggestions,
+    accept_suggestion_panels,
+    _ilike_pattern_matches,
+)
 
 router = APIRouter(prefix="/mosaics", tags=["mosaics"])
-
-
-def _ilike_pattern_matches(pattern: str, value: str) -> bool:
-    """Match an SQL ILIKE pattern against a value with the SAME semantics SQL
-    uses: '%' is an ordered, possibly-empty gap and '_' a single char. Literal
-    segments must appear in order and contiguously (no reordering).
-
-    A naive "split on % and check each segment is a substring" test is wrong:
-    for "%Sh2 119%1%" the segments are ["sh2 119", "1"], and "Sh2 119 Panel 2"
-    contains both ("1" lives inside "119"), so it would falsely match Panel 1.
-    Translating to an anchored regex preserves order and avoids that.
-    """
-    if value is None:
-        return False
-    regex_parts = []
-    for ch in pattern:
-        if ch == "%":
-            regex_parts.append(".*")
-        elif ch == "_":
-            regex_parts.append(".")
-        else:
-            regex_parts.append(re.escape(ch))
-    regex = "^" + "".join(regex_parts) + "$"
-    return re.match(regex, value, re.IGNORECASE | re.DOTALL) is not None
 
 
 @router.post("/detect", response_model=DetectionStartedResponse, status_code=202)
@@ -118,238 +97,7 @@ async def get_suggestions(
     session: AsyncSession = Depends(get_session),
     user: User = Depends(get_current_user),
 ):
-    from app.schemas.mosaic import SuggestionPanelSession
-
-    keywords = await load_mosaic_keywords(session)
-
-    q = select(MosaicSuggestion).where(MosaicSuggestion.status == "pending")
-    all_pending = (await session.execute(q)).scalars().all()
-
-    # Filter out suggestions whose name already matches an existing mosaic
-    existing_mosaic_names_q = select(Mosaic.name)
-    existing_mosaic_names = {
-        r[0].upper() for r in (await session.execute(existing_mosaic_names_q)).all()
-    }
-    rows = [r for r in all_pending if r.suggested_name.upper() not in existing_mosaic_names]
-
-    # Resolve target names in batch
-    all_ids = {t for r in rows for t in r.target_ids}
-    name_map: dict[str, str] = {}
-    if all_ids:
-        tq = select(Target.id, Target.primary_name).where(Target.id.in_(all_ids))
-        for tid, tname in (await session.execute(tq)).all():
-            name_map[str(tid)] = tname
-
-    def _thumb_url(thumbnail_path: str | None) -> str | None:
-        if not thumbnail_path:
-            return None
-        filename = thumbnail_path.split("/")[-1].split("\\")[-1]
-        return f"/thumbnails/{filename}"
-
-    # Per-target fallback thumbnail in one query (avoid N+1). Reuses the panel
-    # stats scheme: the most recent LIGHT frame with a thumbnail_path becomes
-    # /thumbnails/{filename}. DISTINCT ON keeps one row per target. Used when a
-    # panel has no object_pattern or no pattern-matching frame.
-    thumb_map: dict[str, str] = {}
-    if all_ids:
-        thumb_q = (
-            select(
-                Image.resolved_target_id,
-                Image.thumbnail_path,
-            )
-            .where(
-                Image.resolved_target_id.in_(all_ids),
-                Image.image_type == "LIGHT",
-                Image.thumbnail_path.is_not(None),
-            )
-            .distinct(Image.resolved_target_id)
-            .order_by(Image.resolved_target_id, Image.capture_date.desc())
-        )
-        for tid, thumb_path in (await session.execute(thumb_q)).all():
-            url = _thumb_url(thumb_path)
-            if url:
-                thumb_map[str(tid)] = url
-
-    # Per-(target, object_pattern) thumbnail resolution. Two panels can share one
-    # target_id (SIMBAD merges "Veil Nebula Panel 1"/"Panel 2" into NGC 6960);
-    # the per-target fallback would give both the same image. Resolve each panel
-    # by the same (resolved_target_id + OBJECT ILIKE pattern) frame selection
-    # that mosaic_stats/mosaic_composite use for accepted panels. Collect the
-    # distinct pairs first so each is queried once (LIMIT 1, bounded by panel
-    # count across pending suggestions).
-    def _pattern_for_label(r, label: str) -> str | None:
-        """Object pattern for a panel label, mirroring accept_suggestion."""
-        if r.panel_patterns and label in r.panel_labels:
-            idx = r.panel_labels.index(label)
-            if idx < len(r.panel_patterns):
-                return r.panel_patterns[idx]
-        base = r.base_name or r.suggested_name
-        num = label.split()[-1] if label.startswith("Panel ") else label
-        return f"%{base}%Panel%{num}%"
-
-    pattern_thumb_pairs: set[tuple[str, str, str]] = set()
-    for r in rows:
-        geometry = r.geometry or {}
-        for gp in geometry.get("panels", []):
-            tid = gp.get("target_id")
-            if tid is None:
-                continue
-            label = gp.get("label") or ""
-            pattern = _pattern_for_label(r, label)
-            if pattern:
-                pattern_thumb_pairs.add((str(tid), pattern, panel_number_from_label(label)))
-
-    pattern_thumb_map: dict[tuple[str, str], str] = {}
-    obj_col_thumb = Image.raw_headers["OBJECT"].astext
-    for tid_str, pattern, expected_num in pattern_thumb_pairs:
-        # ILIKE is a cheap pre-filter only (also matches sibling panels for
-        # which expected_num is a prefix, e.g. "1" matching "Panel 12"), so
-        # fetch a bounded candidate set ordered the same way and re-parse each
-        # OBJECT string to keep only the exact panel (AUD-008).
-        pq = (
-            select(Image.thumbnail_path, obj_col_thumb.label("obj"))
-            .where(
-                Image.resolved_target_id == tid_str,
-                Image.image_type == "LIGHT",
-                Image.thumbnail_path.is_not(None),
-                obj_col_thumb.ilike(pattern),
-            )
-            .order_by(Image.capture_date.desc())
-            .limit(25)
-        )
-        candidates = (await session.execute(pq)).all()
-        thumb_path = next(
-            (c.thumbnail_path for c in candidates if object_matches_panel(c.obj, keywords, expected_num)),
-            None,
-        )
-        url = _thumb_url(thumb_path)
-        if url:
-            pattern_thumb_map[(tid_str, pattern)] = url
-
-    # Build all OBJECT ILIKE patterns across every suggestion+panel,
-    # then fetch session summaries in a single query instead of N queries.
-    # Each pattern maps back to (suggestion index, panel label).
-    pattern_map: dict[str, list[tuple[int, str]]] = {}  # pattern -> [(row_idx, label)]
-    for idx, r in enumerate(rows):
-        if r.panel_patterns:
-            # Use pre-computed patterns stored at detection time
-            for label, pattern in zip(r.panel_labels, r.panel_patterns):
-                pattern_map.setdefault(pattern, []).append((idx, label))
-        else:
-            # Fallback for legacy suggestions without panel_patterns
-            base = r.base_name or r.suggested_name
-            for label in r.panel_labels:
-                num = label.split()[-1] if label.startswith("Panel ") else label
-                obj_pattern = f"%{base}%Panel%{num}%"
-                pattern_map.setdefault(obj_pattern, []).append((idx, label))
-
-    # Run one query with all patterns OR'd together
-    all_patterns = list(pattern_map.keys())
-    obj_col = Image.raw_headers["OBJECT"].astext
-    session_rows_by_idx: dict[int, list[SuggestionPanelSession]] = defaultdict(list)
-
-    if all_patterns:
-        sq = (
-            select(
-                obj_col.label("obj"),
-                Image.session_date.label("night"),
-                Image.filter_used,
-                func.count(Image.id).label("frames"),
-                func.sum(Image.exposure_time).label("integration"),
-            )
-            .where(
-                Image.image_type == "LIGHT",
-                or_(*(obj_col.ilike(p) for p in all_patterns)),
-            )
-            .group_by("obj", "night", Image.filter_used)
-            .order_by("obj", "night")
-        )
-        all_session_rows = (await session.execute(sq)).all()
-
-        # Distribute each result row back to the suggestions whose pattern matches
-        for row in all_session_rows:
-            obj_val = row.obj or ""
-            for pattern, mappings in pattern_map.items():
-                # _ilike_pattern_matches mirrors ILIKE's own semantics (a cheap
-                # pre-filter), which still matches sibling panels for which a
-                # panel's number is a prefix (e.g. "1" matching "Panel 12").
-                # Re-parse and check each mapping's own expected number too
-                # (AUD-008) before accepting the row.
-                if _ilike_pattern_matches(pattern, obj_val):
-                    for row_idx, label in mappings:
-                        expected_num = panel_number_from_label(label)
-                        if not object_matches_panel(obj_val, keywords, expected_num):
-                            continue
-                        session_rows_by_idx[row_idx].append(SuggestionPanelSession(
-                            panel_label=label,
-                            object_name=obj_val,
-                            date=str(row.night) if row.night else "",
-                            frames=row.frames,
-                            integration_seconds=row.integration or 0,
-                            filter_used=row.filter_used,
-                        ))
-
-    results = []
-    for idx, r in enumerate(rows):
-        all_sessions = session_rows_by_idx.get(idx, [])
-        filtered_sessions = all_sessions
-        other_count = 0
-
-        if r.session_dates:
-            campaign_dates = set()
-            for dates in r.session_dates.values():
-                campaign_dates.update(dates)
-            filtered_sessions = [s for s in all_sessions if s.date in campaign_dates]
-            other_count = len(all_sessions) - len(filtered_sessions)
-
-        # Build preview panels from stored geometry. The frontend arranger
-        # auto-arranges tiles, so grid_row/grid_col are left null here; only
-        # thumbnail_url is resolved (batched above, no per-panel compute).
-        preview_panels: list[SuggestionPreviewPanel] = []
-        geometry = r.geometry or {}
-        for gp in geometry.get("panels", []):
-            tid = gp.get("target_id")
-            if tid is None:
-                continue
-            tid_str = str(tid)
-            label = gp.get("label") or ""
-            pattern = _pattern_for_label(r, label)
-            # Prefer the per-(target, pattern) frame so merged-target panels get
-            # distinct thumbnails; fall back to the per-target latest thumbnail.
-            thumb = None
-            if pattern is not None:
-                thumb = pattern_thumb_map.get((tid_str, pattern))
-            if thumb is None:
-                thumb = thumb_map.get(tid_str)
-            preview_panels.append(SuggestionPreviewPanel(
-                target_id=tid_str,
-                panel_label=label,
-                ra=gp.get("ra"),
-                dec=gp.get("dec"),
-                thumbnail_url=thumb,
-                grid_row=None,
-                grid_col=None,
-            ))
-
-        results.append(MosaicSuggestionResponse(
-            id=str(r.id),
-            suggested_name=r.suggested_name,
-            base_name=r.base_name,
-            target_ids=[str(t) for t in r.target_ids],
-            panel_labels=r.panel_labels,
-            panel_patterns=r.panel_patterns,
-            target_names={str(t): name_map.get(str(t), "Unknown") for t in set(r.target_ids)},
-            sessions=filtered_sessions,
-            session_dates=r.session_dates,
-            other_session_count=other_count,
-            status=r.status,
-            confidence=r.confidence,
-            discovery_source=r.discovery_source,
-            flags=list(r.flags) if r.flags else [],
-            preview_panels=preview_panels,
-        ))
-
-    return results
+    return await list_pending_suggestions(session)
 
 
 @router.post("/suggestions/{suggestion_id}/accept", response_model=MosaicSummary)
@@ -381,91 +129,7 @@ async def accept_suggestion(
             detail=f"A mosaic named '{suggestion.suggested_name}' already exists",
         )
 
-    # Create the mosaic
-    mosaic = Mosaic(name=suggestion.suggested_name)
-    session.add(mosaic)
-    await session.flush()
-
-    from datetime import date as date_type
-
-    # Create panels - multiple panels may share the same target_id
-    # (SIMBAD often merges panel variants into one target)
-    panel_num = 0
-    created = 0
-    for target_id, label in zip(suggestion.target_ids, suggestion.panel_labels):
-        if selected is not None and label not in selected:
-            continue
-        # Use pre-computed pattern if available, else derive from base_name
-        panel_idx = None
-        for pi, pl in enumerate(suggestion.panel_labels):
-            if pl == label:
-                panel_idx = pi
-                break
-        if suggestion.panel_patterns and panel_idx is not None and panel_idx < len(suggestion.panel_patterns):
-            obj_pattern = suggestion.panel_patterns[panel_idx]
-        else:
-            base = suggestion.base_name or suggestion.suggested_name
-            num = label.split()[-1] if label.startswith("Panel ") else label
-            obj_pattern = f"%{base}%Panel%{num}%"
-        panel = MosaicPanel(
-            mosaic_id=mosaic.id,
-            target_id=target_id,
-            panel_label=label,
-            sort_order=panel_num,
-            object_pattern=obj_pattern,
-        )
-        session.add(panel)
-        await session.flush()  # get panel.id
-
-        # Claim already-ingested frames whose parsed label matches this
-        # panel -- panel stats read Image.panel_id, so without this the
-        # freshly-accepted mosaic would show zero frames until re-ingest.
-        await _retro_link_panel_images(session, panel.id, target_id, label)
-
-        # Seed session membership from suggestion's session_dates
-        campaign_dates = set()
-        if suggestion.session_dates and label in suggestion.session_dates:
-            for ds in suggestion.session_dates[label]:
-                d = date_type.fromisoformat(ds)
-                campaign_dates.add(d)
-                session.add(MosaicPanelSession(
-                    panel_id=panel.id,
-                    session_date=d,
-                    status="included",
-                ))
-
-        # Find additional sessions outside the campaign
-        base_filter = [
-            Image.resolved_target_id == target_id,
-            Image.image_type == "LIGHT",
-            Image.session_date.isnot(None),
-        ]
-        if obj_pattern:
-            base_filter.append(Image.raw_headers["OBJECT"].astext.ilike(obj_pattern))
-        # ILIKE is a cheap pre-filter only; re-parse each matched OBJECT and
-        # keep only frames that exactly belong to this panel number, so a
-        # sibling panel (e.g. panel "12" vs this panel "1") doesn't seed
-        # spurious "available" sessions (AUD-008).
-        expected_num = panel_number_from_label(label)
-        all_dates_q = select(
-            Image.session_date, Image.raw_headers["OBJECT"].astext.label("obj")
-        ).where(*base_filter).distinct()
-        all_dates = {
-            r.session_date
-            for r in (await session.execute(all_dates_q)).all()
-            if not obj_pattern or object_matches_panel(r.obj, keywords, expected_num)
-        }
-
-        for d in all_dates:
-            if d not in campaign_dates:
-                session.add(MosaicPanelSession(
-                    panel_id=panel.id,
-                    session_date=d,
-                    status="available",
-                ))
-
-        panel_num += 1
-        created += 1
+    mosaic, created = await accept_suggestion_panels(session, suggestion, selected, keywords)
 
     suggestion.status = "accepted"
     await session.commit()
@@ -530,9 +194,8 @@ async def create_mosaic(
     for p in body.panels:
         obj_pattern = p.object_pattern
         if obj_pattern is None:
-            num = p.panel_label.split()[-1] if p.panel_label.startswith("Panel ") else p.panel_label
-            base = re.sub(r'\s*\(\d{4}(?:-\d{4})?\)\s*$', '', mosaic.name)
-            obj_pattern = f"%{base}%Panel%{num}%"
+            base = strip_year_suffix(mosaic.name)
+            obj_pattern = object_pattern_for_label(p.panel_label, base)
         panel = MosaicPanel(
             mosaic_id=mosaic.id,
             target_id=p.target_id,
@@ -858,7 +521,7 @@ async def delete_mosaic(
 
     # Clean up accepted suggestions matching this mosaic name so detection
     # can re-suggest them. Strip year suffix for base_name matching too.
-    base = re.sub(r'\s*\(\d{4}(?:-\d{4})?\)\s*$', '', mosaic.name)
+    base = strip_year_suffix(mosaic.name)
     stale_q = select(MosaicSuggestion).where(
         MosaicSuggestion.status == "accepted",
         or_(
@@ -901,10 +564,9 @@ async def add_panel(
     # matching the logic used in accept_suggestion.
     obj_pattern = body.object_pattern
     if obj_pattern is None:
-        num = body.panel_label.split()[-1] if body.panel_label.startswith("Panel ") else body.panel_label
         # Strip year suffix from mosaic name for pattern matching
-        base = re.sub(r'\s*\(\d{4}(?:-\d{4})?\)\s*$', '', mosaic.name)
-        obj_pattern = f"%{base}%Panel%{num}%"
+        base = strip_year_suffix(mosaic.name)
+        obj_pattern = object_pattern_for_label(body.panel_label, base)
 
     panel = MosaicPanel(
         mosaic_id=mosaic_id,
