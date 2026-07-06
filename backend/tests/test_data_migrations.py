@@ -93,7 +93,7 @@ class TestV11HyperledaBackfill:
     def test_enriches_galaxy_target(self):
         from sqlalchemy import text
         from app.models import Target
-        from app.models.hyperleda_cache import HyperLEDACache
+        from app.models.catalog_cache import CatalogCache
 
         Session, engine = _sync_session_factory()
         catalog_id = f"NGC TEST {uuid.uuid4().hex[:8]}"
@@ -110,9 +110,9 @@ class TestV11HyperledaBackfill:
                 "mosaic_panels",
                 "mosaics",
                 "targets",
-                "hyperleda_cache",
             ):
                 session.execute(text(f"DELETE FROM {tbl}"))
+            session.execute(text("DELETE FROM catalog_cache WHERE source = 'hyperleda'"))
             session.commit()
 
             # Seed one galaxy target.
@@ -143,10 +143,10 @@ class TestV11HyperledaBackfill:
             assert refreshed.hubble_t_type == pytest.approx(4.0)
             assert refreshed.inclination == pytest.approx(67.3)
 
-            cache_row = session.get(HyperLEDACache, catalog_id)
+            cache_row = session.get(CatalogCache, ("hyperleda", catalog_id))
             assert cache_row is not None
-            assert cache_row.t_type == pytest.approx(4.0)
-            assert cache_row.inclination == pytest.approx(67.3)
+            assert cache_row.payload["t_type"] == pytest.approx(4.0)
+            assert cache_row.payload["inclination"] == pytest.approx(67.3)
         finally:
             # Cleanup seeded rows.
             session.rollback()
@@ -154,7 +154,7 @@ class TestV11HyperledaBackfill:
                 text("DELETE FROM targets WHERE id = :id"), {"id": tid}
             )
             session.execute(
-                text("DELETE FROM hyperleda_cache WHERE catalog_id = :cid"),
+                text("DELETE FROM catalog_cache WHERE source = 'hyperleda' AND key = :cid"),
                 {"cid": catalog_id},
             )
             session.commit()
