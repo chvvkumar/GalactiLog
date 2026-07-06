@@ -306,23 +306,38 @@ def get_cached_vizier(catalog_id: str, session: Session) -> dict[str, Any] | str
     return cc.get_cached(session, "vizier", catalog_id)
 
 
+def _build_vizier_payload(
+    viz_id: str | None, data: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """Build the cache payload for a VizieR lookup result.
+
+    Returns None for a negative result. Positive payloads always carry the
+    same key shape as the 0017-migrated rows: size_major, size_minor,
+    constellation, plus the vizier_catalog metadata (the specific VizieR
+    catalog like "VII/20", preserved for reference even though it plays no
+    role in negative detection). Shared by save_vizier_cache and by
+    enrich_target_from_vizier's fetch path so both cache identical shapes.
+    """
+    if data is None:
+        return None
+    return {
+        "size_major": data.get("size_major"),
+        "size_minor": data.get("size_minor"),
+        "constellation": data.get("constellation"),
+        "vizier_catalog": viz_id,
+    }
+
+
 def save_vizier_cache(
     session: Session, catalog_id: str, viz_id: str | None, data: dict[str, Any] | None,
 ) -> None:
     """Save a VizieR lookup result (including negative) to the cache.
 
-    viz_id (the specific VizieR catalog like "VII/20") is preserved in the payload
-    for reference. Does not commit -- caller owns the transaction.
+    Stores the same payload shape enrich_target_from_vizier's fetch path
+    caches (see _build_vizier_payload). Does not commit -- caller owns the
+    transaction.
     """
-    payload = None
-    if data is not None:
-        payload = {
-            "size_major": data.get("size_major"),
-            "size_minor": data.get("size_minor"),
-            "constellation": data.get("constellation"),
-            "vizier_catalog": viz_id,  # Preserve metadata even though not used in negative detection
-        }
-    cc.save_cached(session, "vizier", catalog_id, payload)
+    cc.save_cached(session, "vizier", catalog_id, _build_vizier_payload(viz_id, data))
 
 
 def enrich_target_from_vizier(session: Session, target: "Target") -> bool:
@@ -373,9 +388,13 @@ def enrich_target_from_vizier(session: Session, target: "Target") -> bool:
 
     # Cache miss or expired - Query VizieR via the cache wrapper (handles
     # retry/backoff and negative caching). The HTTP call happens outside any
-    # open transaction.
+    # open transaction. The fetch builds the full cache payload (including
+    # the vizier_catalog metadata and the constellation key) so newly
+    # cached rows keep the same shape as save_vizier_cache/0017-migrated rows.
+    viz_id = determine_vizier_catalog(target.catalog_id)[0]
+
     def fetch() -> dict[str, Any] | None:
-        return query_vizier(target.catalog_id)
+        return _build_vizier_payload(viz_id, query_vizier(target.catalog_id))
 
     data = cc.get_or_fetch(session, "vizier", target.catalog_id, fetch)
     session.commit()

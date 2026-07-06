@@ -284,6 +284,42 @@ class TestEnrichTargetFromVizierCache:
         assert target.size_major == 45.0
         assert target.size_minor == 30.0
 
+    def test_cache_miss_persists_full_payload_shape(self):
+        """A newly cached positive row must carry the full payload shape:
+        vizier_catalog metadata plus the constellation key, matching
+        save_vizier_cache and the 0017-migrated rows, not query_vizier's
+        raw {size_major, size_minor} return.
+        """
+        catalog_id = "SH 2-129"
+        fetched_data = {"size_major": 45.0, "size_minor": 30.0}
+
+        mock_session = MagicMock()
+        mock_session.get.return_value = None  # real cc.get_cached: cache miss
+
+        target = MagicMock()
+        target.user_defined = False
+        target.catalog_id = catalog_id
+        target.size_major = None
+        target.size_minor = None
+        target.constellation = None
+
+        with patch("app.services.vizier.get_cached_vizier", return_value=None), \
+             patch("app.services.vizier.query_vizier", return_value=fetched_data), \
+             patch("app.services.catalog_cache.save_cached") as mock_save:
+            result = enrich_target_from_vizier(mock_session, target)
+
+        assert result is True
+        mock_save.assert_called_once()
+        _session, source, key, payload = mock_save.call_args[0]
+        assert source == "vizier"
+        assert key == catalog_id
+        assert payload == {
+            "size_major": 45.0,
+            "size_minor": 30.0,
+            "constellation": None,  # key present for shape parity
+            "vizier_catalog": "VII/20",
+        }
+
 
 class TestEnrichTargetFromVizierRetrySemantics:
     """Verify the cache-miss path is routed through cc.get_or_fetch so that a
