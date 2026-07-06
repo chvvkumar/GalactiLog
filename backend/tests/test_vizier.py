@@ -1,10 +1,13 @@
+from unittest.mock import MagicMock, patch
 import pytest
 from app.services.vizier import (
     determine_vizier_catalog,
     build_adql_query,
     _adql_quote,
     _adql_int,
+    enrich_target_from_vizier,
 )
+from app.services import catalog_cache as cc
 
 
 class TestAdqlEscaping:
@@ -164,3 +167,118 @@ class TestBuildAdqlQuery:
 
     def test_ngc_returns_none(self):
         assert build_adql_query("NGC 7000") is None
+
+
+class TestEnrichTargetFromVizierCache:
+    """Test enrich_target_from_vizier behavior with the generic catalog cache wrapper."""
+
+    def test_negative_cache_suppresses_refetch(self):
+        """Test that a negative cache hit suppresses HTTP calls without fetching."""
+        catalog_id = "SH 2-999"
+        mock_session = MagicMock()
+
+        # Create a mock target
+        target = MagicMock()
+        target.user_defined = False
+        target.catalog_id = catalog_id
+        target.size_major = None
+        target.size_minor = None
+        target.constellation = None
+
+        # Mock get_cached_vizier to return cc.NEGATIVE
+        with patch("app.services.vizier.get_cached_vizier") as mock_get_cached:
+            mock_get_cached.return_value = cc.NEGATIVE
+
+            # Mock query_vizier to track if it's called
+            with patch("app.services.vizier.query_vizier") as mock_query:
+                result = enrich_target_from_vizier(mock_session, target)
+
+        # Should return False (no update) and not call query_vizier
+        assert result is False
+        mock_query.assert_not_called()
+
+    def test_positive_cache_applies_enrichment(self):
+        """Test that a positive cache hit applies enrichment to target."""
+        catalog_id = "SH 2-129"
+        payload = {
+            "size_major": 45.0,
+            "size_minor": 30.0,
+            "constellation": "CYG",
+            "vizier_catalog": "VII/20",
+        }
+
+        mock_session = MagicMock()
+
+        # Create a mock target
+        target = MagicMock()
+        target.user_defined = False
+        target.catalog_id = catalog_id
+        target.size_major = None
+        target.size_minor = None
+        target.constellation = None
+
+        # Mock get_cached_vizier to return the positive cache
+        with patch("app.services.vizier.get_cached_vizier") as mock_get_cached:
+            mock_get_cached.return_value = payload
+
+            # Mock query_vizier to verify it's not called
+            with patch("app.services.vizier.query_vizier") as mock_query:
+                result = enrich_target_from_vizier(mock_session, target)
+
+        # Should apply enrichment without calling query_vizier
+        assert result is True
+        assert target.size_major == 45.0
+        assert target.size_minor == 30.0
+        assert target.constellation == "CYG"
+        mock_query.assert_not_called()
+
+    def test_user_defined_targets_skipped(self):
+        """Test that user-defined targets are never enriched."""
+        mock_session = MagicMock()
+        target = MagicMock()
+        target.user_defined = True
+        target.catalog_id = "SH 2-129"
+
+        with patch("app.services.vizier.query_vizier") as mock_query:
+            result = enrich_target_from_vizier(mock_session, target)
+
+        assert result is False
+        mock_query.assert_not_called()
+
+    def test_cache_miss_triggers_query(self):
+        """Test that a cache miss triggers a VizieR query and caches the result."""
+        catalog_id = "SH 2-129"
+        fetched_data = {"size_major": 45.0, "size_minor": 30.0}
+
+        mock_session = MagicMock()
+
+        # Create a mock target
+        target = MagicMock()
+        target.user_defined = False
+        target.catalog_id = catalog_id
+        target.size_major = None
+        target.size_minor = None
+        target.constellation = None
+
+        # Mock get_cached_vizier to return None (cache miss)
+        with patch("app.services.vizier.get_cached_vizier") as mock_get_cached:
+            mock_get_cached.return_value = None
+
+            # Mock query_vizier to return data
+            with patch("app.services.vizier.query_vizier") as mock_query:
+                mock_query.return_value = fetched_data
+
+                # Mock save_vizier_cache to verify it's called
+                with patch("app.services.vizier.save_vizier_cache") as mock_save:
+                    result = enrich_target_from_vizier(mock_session, target)
+
+        # Should have called query_vizier
+        mock_query.assert_called_once_with(catalog_id)
+
+        # Should have saved to cache
+        mock_save.assert_called_once()
+
+        # Should have applied enrichment
+        assert result is True
+        assert target.size_major == 45.0
+        assert target.size_minor == 30.0

@@ -6,11 +6,9 @@ import re
 from typing import TYPE_CHECKING, Any
 
 import httpx
-from sqlalchemy import select
 from sqlalchemy.orm import Session
-from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-from app.models.vizier_cache import VizierCache
+from app.services import catalog_cache as cc
 
 if TYPE_CHECKING:
     from app.models.target import Target
@@ -269,7 +267,11 @@ def _coords_to_constellation(ra: float | None, dec: float | None) -> str | None:
 
 
 def query_vizier(catalog_id: str) -> dict[str, Any] | None:
-    """Query VizieR TAP for target data. Returns dict with size_major, size_minor, or None."""
+    """Query VizieR TAP for target data. Returns dict with size_major, size_minor, or None.
+
+    Raises on HTTP/network failures for the wrapper's retry+backoff to handle.
+    Returns None only for "queried successfully, no result" (parsed as negative cache).
+    """
     adql = build_adql_query(catalog_id)
     if adql is None:
         return None
@@ -279,49 +281,48 @@ def query_vizier(catalog_id: str) -> dict[str, Any] | None:
         return None
     viz_id = result[0]
 
-    try:
-        with httpx.Client(timeout=15.0) as client:
-            resp = client.post(
-                VIZIER_TAP_URL,
-                data={
-                    "REQUEST": "doQuery",
-                    "LANG": "ADQL",
-                    "FORMAT": "tsv",
-                    "QUERY": adql,
-                },
-            )
-            resp.raise_for_status()
-            lines = resp.text.strip().splitlines()
-            return _parse_vizier_response(viz_id, lines)
-
-    except (httpx.HTTPError, ValueError, IndexError) as e:
-        logger.warning("VizieR query failed for '%s': %s", catalog_id, e)
-        return None
+    with httpx.Client(timeout=15.0) as client:
+        resp = client.post(
+            VIZIER_TAP_URL,
+            data={
+                "REQUEST": "doQuery",
+                "LANG": "ADQL",
+                "FORMAT": "tsv",
+                "QUERY": adql,
+            },
+        )
+        resp.raise_for_status()
+        lines = resp.text.strip().splitlines()
+        return _parse_vizier_response(viz_id, lines)
 
 
-def get_cached_vizier(catalog_id: str, session: Session) -> VizierCache | None:
-    """Check the VizieR cache for a previous lookup."""
-    return session.execute(
-        select(VizierCache).where(VizierCache.catalog_id == catalog_id)
-    ).scalar_one_or_none()
+def get_cached_vizier(catalog_id: str, session: Session) -> dict[str, Any] | str | None:
+    """Check the VizieR cache for a previous lookup.
+
+    Returns the cached payload dict on a positive hit, cc.NEGATIVE on a negative cache hit,
+    or None on a cache miss. Separates cache-check from fetch so HTTP calls happen outside
+    any open transaction.
+    """
+    return cc.get_cached(session, "vizier", catalog_id)
 
 
 def save_vizier_cache(
     session: Session, catalog_id: str, viz_id: str | None, data: dict[str, Any] | None,
 ) -> None:
-    """Save a VizieR lookup result (including negative) to the cache."""
-    entry = {
-        "catalog_id": catalog_id,
-        "vizier_catalog": viz_id,
-        "size_major": data.get("size_major") if data else None,
-        "size_minor": data.get("size_minor") if data else None,
-        "constellation": data.get("constellation") if data else None,
-    }
-    stmt = pg_insert(VizierCache).values(**entry).on_conflict_do_update(
-        index_elements=["catalog_id"],
-        set_=entry,
-    )
-    session.execute(stmt)
+    """Save a VizieR lookup result (including negative) to the cache.
+
+    viz_id (the specific VizieR catalog like "VII/20") is preserved in the payload
+    for reference. Does not commit -- caller owns the transaction.
+    """
+    payload = None
+    if data is not None:
+        payload = {
+            "size_major": data.get("size_major"),
+            "size_minor": data.get("size_minor"),
+            "constellation": data.get("constellation"),
+            "vizier_catalog": viz_id,  # Preserve metadata even though not used in negative detection
+        }
+    cc.save_cached(session, "vizier", catalog_id, payload)
 
 
 def enrich_target_from_vizier(session: Session, target: "Target") -> bool:
@@ -342,25 +343,31 @@ def enrich_target_from_vizier(session: Session, target: "Target") -> bool:
     if determine_vizier_catalog(target.catalog_id) is None:
         return False
 
-    # Check cache (read-only)
+    # Check cache (read-only, no transaction). Returns:
+    # - dict (positive hit) -- apply enrichment
+    # - cc.NEGATIVE (negative hit) -- skip query
+    # - None (cache miss or expired) -- query
     cached = get_cached_vizier(target.catalog_id, session)
+
+    if cached is cc.NEGATIVE:
+        # Negative cache hit - skip the query
+        return False
+
     if cached is not None:
-        # Cached (positive or negative) - apply if positive
-        if cached.size_major is None and cached.size_minor is None:
-            return False
+        # Positive cache hit - apply enrichment
         updated = False
-        if cached.size_major is not None and target.size_major is None:
-            target.size_major = cached.size_major
+        if cached.get("size_major") is not None and target.size_major is None:
+            target.size_major = cached["size_major"]
             updated = True
-        if cached.size_minor is not None and target.size_minor is None:
-            target.size_minor = cached.size_minor
+        if cached.get("size_minor") is not None and target.size_minor is None:
+            target.size_minor = cached["size_minor"]
             updated = True
-        if cached.constellation is not None and target.constellation is None:
-            target.constellation = cached.constellation
+        if cached.get("constellation") is not None and target.constellation is None:
+            target.constellation = cached["constellation"]
             updated = True
         return updated
 
-    # Query VizieR (HTTP call - outside transaction)
+    # Cache miss or expired - Query VizieR (HTTP call - outside transaction)
     viz_id = determine_vizier_catalog(target.catalog_id)[0]
     data = query_vizier(target.catalog_id)
 
