@@ -496,3 +496,266 @@ async def test_filename_candidate_accept_populates_panel_membership(api_client, 
         refreshed = await s2.get(Image, img_id)
         assert refreshed.resolved_target_id == target_id
         assert refreshed.panel_id == panel_id
+
+
+# ---------------------------------------------------------------------------
+# Part B (continued): end-to-end coverage of every recompute call site,
+# driven through the real endpoint/service function so the moved-image-id
+# plumbing (returning() results, apply_merge_manifest_restore's return value)
+# is exercised, not just the recompute helper in isolation.
+# ---------------------------------------------------------------------------
+
+async def _seed_merged_pair(s, suffix, *, with_manifest, loser_owns_panel):
+    """Seed a winner/loser pair in post-merge state with one moved image.
+
+    The image sits on the winner with panel_label "Panel 1". When
+    loser_owns_panel, a matching MosaicPanel already belongs to the loser
+    (so a correct revert repoints panel_id to it); otherwise the panel
+    belongs to the winner (so a correct revert must CLEAR panel_id, since
+    revert_merge_candidate never moves panels back).
+    """
+    from app.models.merge_candidate import MergeCandidate
+
+    loser = Target(primary_name=f"{TEST_MARK}_rl_{suffix}", aliases=[])
+    winner = Target(primary_name=f"{TEST_MARK}_rw_{suffix}",
+                    aliases=[f"{TEST_MARK}_rl_{suffix}"])
+    s.add_all([loser, winner])
+    await s.flush()
+    loser.merged_into_id = winner.id
+
+    mosaic = Mosaic(name=f"{TEST_MARK}_mosaic_rev_{suffix}")
+    s.add(mosaic)
+    await s.flush()
+    panel_owner = loser if loser_owns_panel else winner
+    panel = MosaicPanel(
+        mosaic_id=mosaic.id, target_id=panel_owner.id,
+        panel_label="Panel 1",
+        object_pattern=f"%{TEST_MARK}_rl_{suffix}%Panel%1%",
+    )
+    s.add(panel)
+    await s.flush()
+
+    img = _img(
+        resolved_target_id=winner.id,
+        panel_label="Panel 1",
+        panel_id=panel.id if not loser_owns_panel else None,
+        raw_headers={"OBJECT": loser.primary_name},
+    )
+    s.add(img)
+    await s.flush()
+
+    if with_manifest:
+        s.add(MergeManifest(
+            winner_id=winner.id, loser_id=loser.id,
+            payload={"image_ids": [str(img.id)], "notes_rekeyed": [],
+                     "notes_appended": [], "ccv_rekeyed": []},
+        ))
+
+    candidate = MergeCandidate(
+        source_name=loser.primary_name,
+        suggested_target_id=winner.id,
+        similarity_score=1.0,
+        method="exact",
+        status="accepted",
+    )
+    s.add(candidate)
+    await s.commit()
+    return candidate.id, loser.id, winner.id, panel.id, img.id
+
+
+@pytest.mark.asyncio
+async def test_revert_merge_candidate_manifest_branch_repoints_panel_id(api_client, db):
+    """Manifest-found branch: apply_merge_manifest_restore's returned moved
+    ids must reach the recompute, so an image restored to a loser that
+    already owns the matching panel gains that panel's id."""
+    Session = db
+    async with Session() as s:
+        candidate_id, loser_id, _winner_id, panel_id, img_id = await _seed_merged_pair(
+            s, "manif", with_manifest=True, loser_owns_panel=True,
+        )
+
+    resp = await api_client.post(f"/api/targets/merge-candidates/{candidate_id}/revert")
+    assert resp.status_code == 200
+
+    async with Session() as s2:
+        refreshed = await s2.get(Image, img_id)
+        assert refreshed.resolved_target_id == loser_id
+        assert refreshed.panel_id == panel_id
+
+
+@pytest.mark.asyncio
+async def test_revert_merge_candidate_legacy_branch_clears_stale_panel_id(api_client, db):
+    """Manifest-less legacy fallback branch: images restored by OBJECT-header
+    match must have their panel_id cleared when the matching panel still
+    belongs to the winner (this endpoint never moves panels back)."""
+    Session = db
+    async with Session() as s:
+        candidate_id, loser_id, _winner_id, _panel_id, img_id = await _seed_merged_pair(
+            s, "legacy", with_manifest=False, loser_owns_panel=False,
+        )
+
+    resp = await api_client.post(f"/api/targets/merge-candidates/{candidate_id}/revert")
+    assert resp.status_code == 200
+
+    async with Session() as s2:
+        refreshed = await s2.get(Image, img_id)
+        assert refreshed.resolved_target_id == loser_id
+        assert refreshed.panel_id is None
+
+
+@pytest.mark.asyncio
+async def test_create_custom_target_retro_link_clears_stale_panel_id(api_client, db):
+    """Custom-target retro-link: an orphan image carrying a stale panel_id
+    (pointing at another target's panel) gains the new target and has its
+    panel_id cleared, since the brand-new target has no matching panel."""
+    from app.models.merge_candidate import MergeCandidate
+
+    Session = db
+    object_name = f"{TEST_MARK}_customobj"
+    async with Session() as s:
+        other = Target(primary_name=f"{TEST_MARK}_other_c", aliases=[])
+        s.add(other)
+        await s.flush()
+        mosaic = Mosaic(name=f"{TEST_MARK}_mosaic_custom")
+        s.add(mosaic)
+        await s.flush()
+        foreign_panel = MosaicPanel(
+            mosaic_id=mosaic.id, target_id=other.id,
+            panel_label="Panel 1", object_pattern=f"%{TEST_MARK}%other%1%",
+        )
+        s.add(foreign_panel)
+        await s.flush()
+
+        img = _img(
+            resolved_target_id=None,
+            panel_label="Panel 1",
+            panel_id=foreign_panel.id,
+            raw_headers={"OBJECT": object_name},
+        )
+        s.add(img)
+        candidate = MergeCandidate(
+            source_name=object_name,
+            suggested_target_id=None,
+            similarity_score=0.0,
+            method="orphan",
+            status="pending",
+        )
+        s.add(candidate)
+        await s.commit()
+        img_id = img.id
+
+    resp = await api_client.post(
+        "/api/targets/custom",
+        json={"primary_name": object_name, "user_defined": True},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["linked_images"] == 1
+
+    async with Session() as s2:
+        refreshed = await s2.get(Image, img_id)
+        assert str(refreshed.resolved_target_id) == body["target_id"]
+        assert refreshed.panel_id is None
+
+
+@pytest.mark.asyncio
+async def test_orphan_create_clears_stale_panel_id(api_client, db):
+    """Orphan-create: same stale-panel_id-clearing guarantee, driven through
+    POST /api/targets/orphan-create."""
+    from app.models.merge_candidate import MergeCandidate
+
+    Session = db
+    object_name = f"{TEST_MARK}_orphanobj"
+    async with Session() as s:
+        other = Target(primary_name=f"{TEST_MARK}_other_o", aliases=[])
+        s.add(other)
+        await s.flush()
+        mosaic = Mosaic(name=f"{TEST_MARK}_mosaic_orphan")
+        s.add(mosaic)
+        await s.flush()
+        foreign_panel = MosaicPanel(
+            mosaic_id=mosaic.id, target_id=other.id,
+            panel_label="Panel 2", object_pattern=f"%{TEST_MARK}%other%2%",
+        )
+        s.add(foreign_panel)
+        await s.flush()
+
+        img = _img(
+            resolved_target_id=None,
+            panel_label="Panel 2",
+            panel_id=foreign_panel.id,
+            raw_headers={"OBJECT": object_name},
+        )
+        s.add(img)
+        candidate = MergeCandidate(
+            source_name=object_name,
+            suggested_target_id=None,
+            similarity_score=0.0,
+            method="orphan",
+            status="pending",
+        )
+        s.add(candidate)
+        await s.commit()
+        img_id = img.id
+        candidate_id = candidate.id
+
+    resp = await api_client.post(
+        "/api/targets/orphan-create",
+        json={
+            "candidate_id": str(candidate_id),
+            "primary_name": object_name,
+            "user_defined": True,
+        },
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+
+    async with Session() as s2:
+        refreshed = await s2.get(Image, img_id)
+        assert str(refreshed.resolved_target_id) == body["target_id"]
+        assert refreshed.panel_id is None
+
+
+@pytest.mark.asyncio
+async def test_merge_loser_name_populates_simple_panel_membership(api_client, db):
+    """merge_targets loser_name branch: unresolved images matched by OBJECT
+    header gain the winner and pick up the winner's unambiguous simple panel
+    via the recompute fallback."""
+    Session = db
+    loser_name = f"{TEST_MARK}_losername"
+    async with Session() as s:
+        winner = Target(primary_name=f"{TEST_MARK}_mergewinner", aliases=[])
+        s.add(winner)
+        await s.flush()
+        mosaic = Mosaic(name=f"{TEST_MARK}_mosaic_lname")
+        s.add(mosaic)
+        await s.flush()
+        simple_panel = MosaicPanel(
+            mosaic_id=mosaic.id, target_id=winner.id,
+            panel_label=f"{TEST_MARK}_lname_panel", object_pattern=None,
+        )
+        s.add(simple_panel)
+        await s.flush()
+
+        img = _img(
+            resolved_target_id=None,
+            panel_label=None,
+            panel_id=None,
+            raw_headers={"OBJECT": loser_name},
+        )
+        s.add(img)
+        await s.commit()
+        img_id = img.id
+        winner_id = winner.id
+        panel_id = simple_panel.id
+
+    resp = await api_client.post(
+        "/api/targets/merge",
+        json={"winner_id": str(winner_id), "loser_name": loser_name},
+    )
+    assert resp.status_code == 200
+
+    async with Session() as s2:
+        refreshed = await s2.get(Image, img_id)
+        assert refreshed.resolved_target_id == winner_id
+        assert refreshed.panel_id == panel_id
