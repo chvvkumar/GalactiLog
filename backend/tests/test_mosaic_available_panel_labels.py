@@ -29,7 +29,7 @@ sys.modules.setdefault("app.worker.tasks", MagicMock())
 import pytest
 import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.main import app
@@ -252,33 +252,116 @@ async def test_sorted_and_deduplicated_across_multiple_new_labels(api_client, db
 @pytest.mark.asyncio
 async def test_promoting_available_label_via_add_panel_removes_it(api_client, db):
     """The promotion path: POST /{mosaic_id}/panels with the surfaced
-    (label, target_id) creates a real MosaicPanel, after which the label no
-    longer appears as available (the existing-panel-label guard excludes it)."""
+    (label, target_id) creates a real MosaicPanel, retro-links the frames
+    that were ingested before the panel existed (so its stats are non-zero
+    immediately), and the label no longer appears as available."""
     Session = db
     async with Session() as s:
         target, mosaic, panel_1, panel_2 = await _seed_mosaic_with_panels(s)
 
+        # Two frames for the new label, one token-bearing frame with a
+        # DIFFERENT label, and one unlabeled frame -- only the first two may
+        # be claimed by the promotion.
         s.add(_img(
             resolved_target_id=target.id, exposure_time=200.0,
             panel_id=None, panel_label="Panel 3",
             raw_headers={"OBJECT": "NGC 1499 Panel 3"},
             session_date=date(2026, 1, 2),
         ))
+        s.add(_img(
+            resolved_target_id=target.id, exposure_time=300.0,
+            panel_id=None, panel_label="Panel 3",
+            raw_headers={"OBJECT": "NGC 1499 Panel 3"},
+            session_date=date(2026, 1, 3),
+        ))
+        s.add(_img(
+            resolved_target_id=target.id, exposure_time=50.0,
+            panel_id=None, panel_label="Panel 8",
+            raw_headers={"OBJECT": "NGC 1499 Panel 8"},
+            session_date=date(2026, 1, 4),
+        ))
+        s.add(_img(
+            resolved_target_id=target.id, exposure_time=60.0,
+            panel_id=None, panel_label=None,
+            raw_headers={"OBJECT": "NGC 1499"},
+            session_date=date(2026, 1, 5),
+        ))
         await s.commit()
         mosaic_id, target_id = mosaic.id, target.id
 
     resp = await api_client.get(f"/api/mosaics/{mosaic_id}")
-    entry = resp.json()["available_panel_labels"][0]
+    entry = next(
+        e for e in resp.json()["available_panel_labels"] if e["label"] == "Panel 3"
+    )
 
     resp = await api_client.post(
         f"/api/mosaics/{mosaic_id}/panels",
         json={"target_id": entry["target_id"], "panel_label": entry["label"]},
     )
     assert resp.status_code == 200, resp.text
+    new_panel_id = resp.json()["panel_id"]
+
+    resp = await api_client.get(f"/api/mosaics/{mosaic_id}")
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    # Promoted label is gone; the sibling label is still available.
+    assert data["available_panel_labels"] == [
+        {"label": "Panel 8", "target_id": str(target_id)}
+    ]
+    assert len(data["panels"]) == 3
+    # Retro-link makes the promoted panel's stats non-zero immediately.
+    promoted = next(p for p in data["panels"] if p["panel_label"] == "Panel 3")
+    assert promoted["panel_id"] == new_panel_id
+    assert promoted["total_frames"] == 2
+    assert promoted["total_integration_seconds"] == 500.0
+
+    # The frames themselves now carry the new panel_id; the other-label and
+    # unlabeled frames were not claimed.
+    async with Session() as s:
+        rows = (await s.execute(
+            select(Image.panel_label, Image.panel_id)
+            .where(Image.resolved_target_id == target_id)
+        )).all()
+    by_label: dict = {}
+    for label, pid in rows:
+        by_label.setdefault(label, []).append(pid)
+    assert len(by_label["Panel 3"]) == 2
+    assert all(str(pid) == new_panel_id for pid in by_label["Panel 3"])
+    assert by_label["Panel 8"] == [None]
+    assert by_label[None] == [None]
+
+
+@pytest.mark.asyncio
+async def test_create_mosaic_retro_links_existing_frames(api_client, db):
+    """POST /mosaics with panels claims already-ingested matching frames the
+    same way add_panel does, so a hand-created mosaic starts with stats."""
+    Session = db
+    async with Session() as s:
+        target = Target(primary_name="Heart create", aliases=[])
+        s.add(target)
+        await s.flush()
+        s.add(_img(
+            resolved_target_id=target.id, exposure_time=150.0,
+            panel_id=None, panel_label="Panel 1",
+            raw_headers={"OBJECT": "Heart create Panel 1"},
+            session_date=date(2026, 2, 1),
+        ))
+        await s.commit()
+        target_id = target.id
+
+    resp = await api_client.post(
+        "/api/mosaics",
+        json={
+            "name": "Heart create mosaic",
+            "panels": [{"target_id": str(target_id), "panel_label": "Panel 1"}],
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    mosaic_id = resp.json()["id"]
 
     resp = await api_client.get(f"/api/mosaics/{mosaic_id}")
     assert resp.status_code == 200, resp.text
     data = resp.json()
     assert data["available_panel_labels"] == []
-    assert len(data["panels"]) == 3
-    assert any(p["panel_label"] == "Panel 3" for p in data["panels"])
+    assert data["panels"][0]["total_frames"] == 1
+    assert data["panels"][0]["total_integration_seconds"] == 150.0

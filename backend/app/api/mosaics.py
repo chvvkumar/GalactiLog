@@ -5,7 +5,7 @@ from collections import defaultdict
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
-from sqlalchemy import select, func, or_
+from sqlalchemy import select, func, or_, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -43,6 +43,33 @@ from app.services.mosaic_stats import (
 )
 
 router = APIRouter(prefix="/mosaics", tags=["mosaics"])
+
+
+async def _retro_link_panel_images(
+    session: AsyncSession,
+    panel_id: uuid.UUID,
+    target_id: uuid.UUID,
+    panel_label: str,
+) -> None:
+    """Claim already-ingested frames for a newly created MosaicPanel.
+
+    Ingest (and the 0018 backfill) stamp Image.panel_label on token-bearing
+    frames but leave Image.panel_id NULL when no MosaicPanel exists yet.
+    Without this retro-link, a panel created after those frames were ingested
+    would start with zero stats until every file was re-ingested. Only frames
+    whose parsed label matches exactly are claimed; token-bearing frames with
+    other labels and unlabeled frames are never touched, matching the
+    established ingest/backfill semantics. Runs in the caller's transaction.
+    """
+    await session.execute(
+        update(Image)
+        .where(
+            Image.resolved_target_id == target_id,
+            Image.panel_label == panel_label,
+            Image.panel_id.is_(None),
+        )
+        .values(panel_id=panel_id)
+    )
 
 
 def _ilike_pattern_matches(pattern: str, value: str) -> bool:
@@ -416,6 +443,11 @@ async def accept_suggestion(
         session.add(panel)
         await session.flush()  # get panel.id
 
+        # Claim already-ingested frames whose parsed label matches this
+        # panel -- panel stats read Image.panel_id, so without this the
+        # freshly-accepted mosaic would show zero frames until re-ingest.
+        await _retro_link_panel_images(session, panel.id, target_id, label)
+
         # Seed session membership from suggestion's session_dates
         campaign_dates = set()
         if suggestion.session_dates and label in suggestion.session_dates:
@@ -534,6 +566,8 @@ async def create_mosaic(
             object_pattern=obj_pattern,
         )
         session.add(panel)
+        await session.flush()
+        await _retro_link_panel_images(session, panel.id, p.target_id, p.panel_label)
 
     await session.commit()
     return MosaicSummary(
@@ -905,6 +939,10 @@ async def add_panel(
         object_pattern=obj_pattern,
     )
     session.add(panel)
+    await session.flush()
+    # Claim frames ingested before this panel existed so its stats are
+    # populated immediately (same transaction as the panel insert).
+    await _retro_link_panel_images(session, panel.id, body.target_id, body.panel_label)
     await session.commit()
     return {"status": "ok", "panel_id": str(panel.id)}
 
