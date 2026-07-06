@@ -119,16 +119,16 @@ async def orphan_preview(
     await session.execute(
         delete(SimbadCache).where(SimbadCache.query_name == normalized, SimbadCache.main_id.is_(None))
     )
-    await session.execute(
-        delete(SesameCache).where(SesameCache.query_name == normalized, SesameCache.main_id.is_(None))
-    )
     await session.commit()
 
     async with async_redis() as redis:
         await redis.srem("target_resolver:negative", normalized)
 
     def _resolve_sync():
+        from app.services import catalog_cache as cc
         with SyncSession(sync_engine) as sync_db:
+            # Clear SESAME negative cache for this key so it gets a fresh attempt
+            cc.clear_negative(sync_db, "sesame", normalized)
             result = resolve_target_name_cached(source, sync_db)
             if result is None:
                 result = resolve_sesame_cached(source, sync_db)

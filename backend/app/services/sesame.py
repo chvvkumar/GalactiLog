@@ -64,54 +64,28 @@ async def _query_sesame_raw(
         logger.info("SESAME found no match for '%s'", object_name)
         return None
 
-    except (httpx.HTTPError, ET.ParseError, ValueError) as e:
-        logger.warning("SESAME query failed for '%s': %s", object_name, e)
+    except (ET.ParseError, ValueError) as e:
+        logger.warning("SESAME parse/value error for '%s': %s", object_name, e)
         return None
 
 
 def get_cached_sesame(query_name: str, db_session) -> dict[str, Any] | None:
     """Look up a cached SESAME result. Returns raw dict or None (not in cache)."""
-    from app.models.sesame_cache import SesameCache
-    import sqlalchemy as sa
+    from app.services import catalog_cache as cc
 
-    row = db_session.execute(
-        sa.select(SesameCache).where(SesameCache.query_name == query_name)
-    ).scalar_one_or_none()
-    if row is None:
-        return None
-    if row.main_id is None:
+    cached = cc.get_cached(db_session, "sesame", query_name)
+    if cached is cc.NEGATIVE:
         return {"_negative": True}
-    return {
-        "main_id": row.main_id,
-        "raw_aliases": row.raw_aliases or [],
-        "ra": row.ra,
-        "dec": row.dec,
-        "object_type": row.object_type,
-        "resolver": row.resolver,
-    }
+    return cached
 
 
 def save_sesame_cache(
     query_name: str, raw: dict[str, Any] | None, db_session,
 ) -> None:
     """Persist a SESAME result (or negative) to the cache table."""
-    from app.models.sesame_cache import SesameCache
-    from sqlalchemy.dialects.postgresql import insert as pg_insert
+    from app.services import catalog_cache as cc
 
-    values = {
-        "query_name": query_name,
-        "main_id": raw["main_id"] if raw else None,
-        "raw_aliases": raw.get("raw_aliases", []) if raw else [],
-        "ra": raw.get("ra") if raw else None,
-        "dec": raw.get("dec") if raw else None,
-        "object_type": raw.get("object_type") if raw else None,
-        "resolver": raw.get("resolver") if raw else None,
-    }
-    stmt = pg_insert(SesameCache).values(**values).on_conflict_do_update(
-        index_elements=["query_name"],
-        set_=values,
-    )
-    db_session.execute(stmt)
+    cc.save_cached(db_session, "sesame", query_name, raw)
 
 
 def resolve_sesame_cached(
