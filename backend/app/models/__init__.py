@@ -30,5 +30,6 @@ from .catalog_membership import TargetCatalogMembership
 from .activity_event import ActivityEvent
 from .app_log import AppLog
 from .data_job import DataJob, DataJobStatus
+from .catalog_cache import CatalogCache
 
-__all__ = ["Base", "Target", "Image", "UserSettings", "SETTINGS_ROW_ID", "MergeCandidate", "MergeManifest", "SimbadCache", "SesameCache", "User", "UserRole", "RefreshToken", "AppMetadata", "OpenNGCEntry", "VizierCache", "HyperLEDACache", "SiteDarkHours", "SessionNote", "Mosaic", "MosaicPanel", "MosaicSuggestion", "MosaicPanelSession", "CustomColumn", "CustomColumnValue", "ColumnType", "AppliesTo", "FilenameCandidate", "GaiaCache", "SACEntry", "CaldwellEntry", "Herschel400Entry", "ArpEntry", "AbellEntry", "TargetCatalogMembership", "ActivityEvent", "AppLog", "DataJob", "DataJobStatus"]
+__all__ = ["Base", "Target", "Image", "UserSettings", "SETTINGS_ROW_ID", "MergeCandidate", "MergeManifest", "SimbadCache", "SesameCache", "User", "UserRole", "RefreshToken", "AppMetadata", "OpenNGCEntry", "VizierCache", "HyperLEDACache", "SiteDarkHours", "SessionNote", "Mosaic", "MosaicPanel", "MosaicSuggestion", "MosaicPanelSession", "CustomColumn", "CustomColumnValue", "ColumnType", "AppliesTo", "FilenameCandidate", "GaiaCache", "SACEntry", "CaldwellEntry", "Herschel400Entry", "ArpEntry", "AbellEntry", "TargetCatalogMembership", "ActivityEvent", "AppLog", "DataJob", "DataJobStatus", "CatalogCache"]
