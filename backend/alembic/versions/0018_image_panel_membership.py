@@ -56,8 +56,9 @@ _SETTINGS_ROW_ID = "00000000-0000-4000-8000-000000000001"
 
 def upgrade() -> None:
     # One-off existence guards, NOT a return to the pre-v2.0 defensive
-    # default: the batched backfill below commits per batch, and those
-    # commits also persist this migration's DDL before alembic stamps 0018.
+    # default: the backfill below runs inside an autocommit_block, so each
+    # UPDATE (and the preceding DDL, once the block starts) is durable
+    # immediately rather than waiting on one final transaction commit.
     # A crash mid-backfill therefore leaves the columns in place with
     # alembic_version still at 0017, and a plain re-run would fail with
     # DuplicateColumn. Guarding the schema changes makes the whole migration

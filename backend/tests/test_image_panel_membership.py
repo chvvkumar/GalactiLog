@@ -229,9 +229,20 @@ def test_upgrade_rerun_on_existing_schema_is_safe(db):
     leaves behind (DDL committed, version stamp lost); `upgrade head` from
     that state must skip the existing DDL via the guards, re-run the
     idempotent backfill, and stamp 0018.
+
+    A seeded NULL/NULL image row proves the "re-run the idempotent backfill"
+    half of that claim isn't just asserted, it's observed: without the seed,
+    this test could pass even if a re-run silently skipped the backfill pass
+    entirely (columns already exist, guards trivially satisfied), since
+    nothing would exercise `backfill_panel_membership` a second time.
     """
     import subprocess
     import sys
+
+    from app.models.image import Image
+    from app.models.mosaic import Mosaic
+    from app.models.mosaic_panel import MosaicPanel
+    from app.models.target import Target
 
     backend_dir = os.path.join(os.path.dirname(__file__), "..")
     env = dict(os.environ)
@@ -244,7 +255,37 @@ def test_upgrade_rerun_on_existing_schema_is_safe(db):
         assert result.returncode == 0, f"{args} failed:\n{result.stdout}\n{result.stderr}"
 
     Session, engine = _sync_session_factory()
+    s = Session()
     try:
+        _cleanup(s)
+
+        target = Target(primary_name=f"{TEST_MARK}_rerun_target", aliases=[])
+        s.add(target)
+        s.flush()
+        mosaic = Mosaic(name=f"{TEST_MARK}_rerun_mosaic")
+        s.add(mosaic)
+        s.flush()
+        panel = MosaicPanel(
+            mosaic_id=mosaic.id, target_id=target.id, panel_label="Panel 1",
+        )
+        s.add(panel)
+        s.flush()
+
+        # NULL/NULL, exactly the state a mid-backfill crash (or a row added
+        # after a prior backfill pass completed) leaves behind.
+        image = Image(
+            file_path=f"/{TEST_MARK}/rerun_seed.fits",
+            file_name="rerun_seed.fits",
+            resolved_target_id=target.id,
+            image_type="LIGHT",
+            raw_headers={"OBJECT": f"{TEST_MARK}_rerun_target Panel 1"},
+            panel_label=None,
+            panel_id=None,
+        )
+        s.add(image)
+        s.commit()
+        image_id, panel_id = image.id, panel.id
+
         _run(["stamp", "0017"])
         _run(["upgrade", "head"])
         with engine.connect() as connection:
@@ -260,7 +301,14 @@ def test_upgrade_rerun_on_existing_schema_is_safe(db):
                 ))
             }
             assert cols == {"panel_label", "panel_id"}
+
+        s.expire_all()
+        refetched = s.get(Image, image_id)
+        assert refetched.panel_label == "Panel 1"
+        assert refetched.panel_id == panel_id
     finally:
+        _cleanup(s)
+        s.close()
         # Whatever happened above, leave the DB stamped at head for the
         # other tests / later phase tasks.
         _run(["stamp", "head"])
