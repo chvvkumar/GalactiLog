@@ -2,7 +2,7 @@ import asyncio
 import uuid
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select, update, func, delete, or_, text
+from sqlalchemy import select, update, func, or_, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
@@ -14,7 +14,6 @@ from app.models.image import Image
 from app.models.merge_candidate import MergeCandidate
 from app.schemas.target import MergeCandidateResponse, MergedTargetResponse, MergeRequest, OrphanPreviewRequest, OrphanPreviewResponse, OrphanCreateRequest, MergePreviewRequest, MergePreviewResponse, TargetIdentityRequest, TargetIdentityResponse, StatusResponse, DuplicateDetectionResponse, OrphanCreateResponse, CustomTargetCreateRequest, CustomTargetCreateResponse
 from app.services.simbad import normalize_catalog_id, normalize_object_name
-from app.models.sesame_cache import SesameCache
 from app.config import async_redis
 from app.models.merge_manifest import MergeManifest
 from app.services.target_merge import (
@@ -619,17 +618,7 @@ async def update_target_identity(
             target.aliases[0] if target.aliases else None
         )
 
-        # Delete negative cache entries for all of this target's aliases
         all_names = [lookup_name] + list(target.aliases or [])
-        for name in all_names:
-            n = normalize_object_name(name)
-            await session.execute(
-                delete(SesameCache).where(
-                    SesameCache.query_name == n,
-                    SesameCache.main_id.is_(None),
-                )
-            )
-        await session.flush()
 
         async with async_redis() as redis:
             for name in all_names:
@@ -640,7 +629,9 @@ async def update_target_identity(
             from app.services import catalog_cache as cc
             with SyncSession(sync_engine) as sync_db:
                 for name in all_names:
-                    cc.clear_negative(sync_db, "simbad", normalize_object_name(name))
+                    n = normalize_object_name(name)
+                    cc.clear_negative(sync_db, "simbad", n)
+                    cc.clear_negative(sync_db, "sesame", n)
                 return resolve_target_name_cached(lookup_name, sync_db)
 
         result = await asyncio.to_thread(_resolve_sync)

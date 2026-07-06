@@ -273,3 +273,113 @@ class TestResolveSesameNegativeCache:
 
             assert result is None
             mock_query.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# resolve_sesame_cached error handling (Phase 4 sesame-port follow-up)
+#
+# _query_sesame_raw raises httpx.HTTPError on network/HTTP failure (correct
+# per the catalog_cache port contract). resolve_sesame_cached must not let
+# a transient failure propagate to its callers (api/merges.py's
+# orphan_preview, the duplicate-detection worker task, filename_resolver.py,
+# target_resolver.py), none of which ever handled an exception from this
+# function pre-port. It's routed through catalog_cache.get_or_fetch, which
+# retries transient errors with backoff and negative-caches+swallows once
+# retries are exhausted (returns None), while a non-transient 4xx (other
+# than 429) raises NonTransientError uncaught -- the same semantics
+# enrich_target_from_vizier/hyperleda/gaia already have.
+# ---------------------------------------------------------------------------
+
+class TestResolveSesameErrorHandling:
+    @pytest.fixture(autouse=True)
+    def setup(self):
+        """Clear catalog_cache before/after each test."""
+        from app.database import sync_engine
+        from app.models.catalog_cache import CatalogCache
+        from sqlalchemy.orm import Session
+
+        with Session(sync_engine) as session:
+            session.query(CatalogCache).filter(CatalogCache.source == "sesame").delete()
+            session.commit()
+        yield
+        with Session(sync_engine) as session:
+            session.query(CatalogCache).filter(CatalogCache.source == "sesame").delete()
+            session.commit()
+
+    def test_transient_http_error_does_not_propagate_and_negative_caches(self):
+        """A transient httpx.HTTPError (e.g. a SESAME timeout) exhausting
+        retries must not propagate -- resolve_sesame_cached swallows it,
+        returns None, and negative-caches so the next call short-circuits."""
+        import httpx
+        from app.database import sync_engine
+        from sqlalchemy.orm import Session
+        from app.services import catalog_cache as cc
+
+        with Session(sync_engine) as session:
+            with patch(
+                "app.services.sesame._query_sesame_raw",
+                side_effect=httpx.ConnectTimeout("timed out"),
+            ), patch.object(cc.time, "sleep"):
+                result = resolve_sesame_cached("TRANSIENTFAIL", session)
+            session.commit()
+
+            assert result is None
+            assert get_cached_sesame("TRANSIENTFAIL", session) == {"_negative": True}
+
+    def test_non_transient_http_status_error_propagates(self):
+        """A non-transient 4xx (other than 429) raises NonTransientError
+        uncaught, matching enrich_target_from_vizier/hyperleda/gaia, and
+        nothing is cached for it."""
+        import httpx
+        from app.database import sync_engine
+        from sqlalchemy.orm import Session
+        from app.services import catalog_cache as cc
+
+        request = httpx.Request("GET", "https://cds.unistra.fr/cgi-bin/nph-sesame")
+        response = httpx.Response(400, request=request)
+        error = httpx.HTTPStatusError("bad request", request=request, response=response)
+
+        with Session(sync_engine) as session:
+            with patch("app.services.sesame._query_sesame_raw", side_effect=error):
+                with pytest.raises(cc.NonTransientError):
+                    resolve_sesame_cached("BADREQUEST", session)
+            session.commit()
+
+            assert get_cached_sesame("BADREQUEST", session) is None
+
+    def test_success_after_transient_retry_is_cached_and_curated(self):
+        """A transient failure followed by a successful attempt returns the
+        curated result and caches the positive payload."""
+        import httpx
+        from app.database import sync_engine
+        from sqlalchemy.orm import Session
+        from app.services import catalog_cache as cc
+
+        raw = {
+            "main_id": "M 42",
+            "ra": 83.82208,
+            "dec": -5.39111,
+            "object_type": "HII",
+            "raw_aliases": ["NGC 1976"],
+            "resolver": "N=NED",
+        }
+
+        attempts = []
+
+        async def _flaky(object_name, *, resolvers="SNV"):
+            attempts.append(1)
+            if len(attempts) < 2:
+                raise httpx.ConnectError("boom")
+            return raw
+
+        with Session(sync_engine) as session:
+            with patch("app.services.sesame._query_sesame_raw", side_effect=_flaky), \
+                 patch.object(cc.time, "sleep"):
+                result = resolve_sesame_cached("M 42", session)
+            session.commit()
+
+            assert result is not None
+            assert result["ra"] == pytest.approx(83.82208)
+            assert result["object_type"] == "HII"
+            assert len(attempts) == 2
+            assert get_cached_sesame("M 42", session)["main_id"] == "M 42"

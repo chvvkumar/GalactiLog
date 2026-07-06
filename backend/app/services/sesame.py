@@ -95,8 +95,18 @@ def resolve_sesame_cached(
 
     Returns curated dict compatible with target_resolver's _create_target,
     or None if unresolvable.
+
+    Routed through catalog_cache's get_or_fetch so a transient SESAME
+    failure (timeout, connection error, 5xx, 429) is retried with backoff
+    and, if every attempt fails, negative-cached and swallowed (returns
+    None) rather than propagating -- matching pre-port behavior for
+    callers (api/merges.py's orphan_preview, the duplicate-detection
+    worker task, filename_resolver.py, target_resolver.py) that never
+    handled an exception from this function. A non-transient failure
+    (a 4xx other than 429) raises NonTransientError uncaught, matching
+    enrich_target_from_vizier/hyperleda/gaia.
     """
-    import asyncio
+    from app.services import catalog_cache as cc
     from app.services.simbad import (
         normalize_object_name,
         curate_simbad_result,
@@ -104,22 +114,19 @@ def resolve_sesame_cached(
 
     normalized = normalize_object_name(object_name)
 
-    # Check cache first
-    cached = get_cached_sesame(normalized, db_session)
-    if cached is not None:
-        if cached.get("_negative"):
-            return None
-        return curate_simbad_result(cached)
+    def fetch() -> dict[str, Any] | None:
+        # Query SESAME (NED + VizieR only - skip SIMBAD since we already
+        # tried it). Own event loop since this runs on a sync/worker thread.
+        import asyncio
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(
+                _query_sesame_raw(object_name, resolvers="NV")
+            )
+        finally:
+            loop.close()
 
-    # Query SESAME (NED + VizieR only - skip SIMBAD since we already tried it)
-    loop = asyncio.new_event_loop()
-    try:
-        raw = loop.run_until_complete(_query_sesame_raw(object_name, resolvers="NV"))
-    finally:
-        loop.close()
-
-    # Cache the result (positive or negative)
-    save_sesame_cache(normalized, raw, db_session)
+    raw = cc.get_or_fetch(db_session, "sesame", normalized, fetch)
 
     if raw is None:
         return None
