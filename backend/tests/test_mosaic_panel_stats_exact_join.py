@@ -272,6 +272,65 @@ async def test_panel_stats_reflects_newly_ingested_image_without_redetection(db)
 
 
 # ---------------------------------------------------------------------------
+# Unmerge resilience: pattern-panel stats must be driven by panel_id ALONE.
+# A target unmerge (target_merge.py) can move an Image's resolved_target_id
+# back to an original target while the MosaicPanel still points at the merged
+# target -- if the stats query also required resolved_target_id agreement,
+# the panel's stats would silently drop to zero despite intact membership.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_pattern_panel_counts_frame_after_unmerge_moves_target(api_client, db):
+    Session = db
+    async with Session() as s:
+        merged_target = Target(primary_name="SNR merged", aliases=[])
+        original_target = Target(primary_name="SNR original", aliases=[])
+        s.add_all([merged_target, original_target])
+        await s.flush()
+
+        mosaic = Mosaic(name="SNR mosaic")
+        s.add(mosaic)
+        await s.flush()
+
+        panel = MosaicPanel(
+            mosaic_id=mosaic.id, target_id=merged_target.id,
+            panel_label="Panel 2", object_pattern="%SNR%Panel%2%",
+        )
+        s.add(panel)
+        await s.flush()
+
+        # Unmerge-style state: panel_id still points at this panel, but the
+        # image's resolved_target_id was moved back to the original target
+        # and no longer matches panel.target_id.
+        s.add(_img(
+            resolved_target_id=original_target.id, exposure_time=420.0,
+            filter_used="OIII",
+            panel_id=panel.id, panel_label="Panel 2",
+            raw_headers={"OBJECT": "SNR Panel 2"},
+            session_date=date(2026, 7, 1),
+        ))
+        await s.commit()
+
+        merged_target = await s.get(Target, merged_target.id)
+        panel_obj = await s.get(MosaicPanel, panel.id)
+        panel_obj.target = merged_target
+
+        stats = await panel_stats(panel_obj, s)
+        mosaic_id, panel_pk = mosaic.id, panel.id
+
+    assert stats.total_frames == 1
+    assert stats.total_integration_seconds == 420.0
+
+    # Same guarantee through the sessions endpoint.
+    resp = await api_client.get(f"/api/mosaics/{mosaic_id}/panels/{panel_pk}/sessions")
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert len(data["sessions"]) == 1
+    assert data["sessions"][0]["total_frames"] == 1
+    assert data["sessions"][0]["total_integration_seconds"] == 420.0
+
+
+# ---------------------------------------------------------------------------
 # batch_panel_stats: confirmed unchanged for simple panels -- still
 # resolved_target_id-scoped, still counts token-bearing frames.
 # ---------------------------------------------------------------------------

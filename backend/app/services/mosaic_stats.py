@@ -91,13 +91,15 @@ async def panel_stats(panel: MosaicPanel, session: AsyncSession) -> PanelStats:
 
     Pattern panels (object_pattern set -- multiple panels sharing a target
     after a SIMBAD merge) are scoped by the exact `Image.panel_id == panel.id`
-    join. `Image.panel_id` is assigned at ingest time (and by the 0018
+    join ALONE. `Image.panel_id` is assigned at ingest time (and by the 0018
     backfill) from the same tokenizer that built `object_pattern`, so this is
-    an exact match, not a prefilter -- no Python recheck is needed. The
-    `resolved_target_id` equality is kept alongside it as a cheap, already-
-    indexed defensive filter; it is redundant given FK integrity (a panel's
-    `target_id` and any Image row pointing at it via `panel_id` should always
-    agree) but costs nothing and guards against a stale/inconsistent row.
+    an exact match, not a prefilter -- no Python recheck is needed. No
+    `resolved_target_id` leg is added for pattern panels: the panel_id FK is
+    the authoritative membership column, and requiring target agreement would
+    couple stats to the unmerge substring-matching path (target_merge.py),
+    which can move an Image's resolved_target_id back to an original target
+    while the panel still points at the merged one -- silently zeroing the
+    panel's stats even though membership is intact.
 
     Simple panels (no object_pattern) are NOT switched to a panel_id filter:
     they intentionally count every LIGHT frame of the target via
@@ -112,12 +114,16 @@ async def panel_stats(panel: MosaicPanel, session: AsyncSession) -> PanelStats:
     """
     target = panel.target
 
-    base_filter = [
-        Image.resolved_target_id == panel.target_id,
-        Image.image_type == "LIGHT",
-    ]
     if panel.object_pattern:
-        base_filter.append(Image.panel_id == panel.id)
+        base_filter = [
+            Image.panel_id == panel.id,
+            Image.image_type == "LIGHT",
+        ]
+    else:
+        base_filter = [
+            Image.resolved_target_id == panel.target_id,
+            Image.image_type == "LIGHT",
+        ]
 
     # Fetch all membership rows in one query, then derive both the total count
     # (any status) and the included-date list in Python. This replaces the two
@@ -140,12 +146,16 @@ async def panel_stats(panel: MosaicPanel, session: AsyncSession) -> PanelStats:
 
     # Count available sessions
     if any_membership_count > 0:
-        all_dates_filter = [
-            Image.resolved_target_id == panel.target_id,
-            Image.image_type == "LIGHT",
-        ]
         if panel.object_pattern:
-            all_dates_filter.append(Image.panel_id == panel.id)
+            all_dates_filter = [
+                Image.panel_id == panel.id,
+                Image.image_type == "LIGHT",
+            ]
+        else:
+            all_dates_filter = [
+                Image.resolved_target_id == panel.target_id,
+                Image.image_type == "LIGHT",
+            ]
         all_dates_q = (
             select(func.count(func.distinct(Image.session_date)))
             .where(*all_dates_filter)

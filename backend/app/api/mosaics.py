@@ -959,9 +959,13 @@ async def get_panel_sessions(
     ILIKE-against-OBJECT prefilter plus a Python object_matches_panel recheck
     (AUD-008) -- Image.panel_id is assigned at ingest time / by the 0018
     backfill from the same tokenizer that built object_pattern, so the join
-    is exact by construction. Simple panels (no object_pattern) are
-    unchanged: they still count every LIGHT frame of the target via
-    resolved_target_id alone, preserving existing behavior.
+    is exact by construction. No resolved_target_id leg for pattern panels:
+    panel_id is the authoritative membership column, and requiring target
+    agreement would zero the panel's sessions when an unmerge moves images
+    back to an original target while the panel still points at the merged
+    one. Simple panels (no object_pattern) are unchanged: they still count
+    every LIGHT frame of the target via resolved_target_id alone (that IS
+    their membership mechanism), preserving existing behavior.
     """
     panel_q = (
         select(MosaicPanel)
@@ -979,12 +983,16 @@ async def get_panel_sessions(
     }
 
     # Get all session dates from images
-    base_filter = [
-        Image.resolved_target_id == panel.target_id,
-        Image.image_type == "LIGHT",
-    ]
     if panel.object_pattern:
-        base_filter.append(Image.panel_id == panel.id)
+        base_filter = [
+            Image.panel_id == panel.id,
+            Image.image_type == "LIGHT",
+        ]
+    else:
+        base_filter = [
+            Image.resolved_target_id == panel.target_id,
+            Image.image_type == "LIGHT",
+        ]
 
     img_q = (
         select(
