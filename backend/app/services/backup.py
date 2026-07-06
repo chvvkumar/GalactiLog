@@ -19,6 +19,7 @@ from app.models.mosaic_panel import MosaicPanel
 from app.models.user import User, UserRole
 from app.schemas.backup import BackupPayload
 from app.services.auth import hash_password
+from app.services.mosaic_detection import retro_link_panel_images
 
 CURRENT_BACKUP_SCHEMA_VERSION = 1
 APP_VERSION = "0.1.0"
@@ -540,6 +541,7 @@ async def restore_backup(
                 await session.flush()
                 added += 1
 
+            new_panels: list[tuple[MosaicPanel, object, str]] = []
             for p in m_data.panels:
                 panel_target = name_to_target.get(p.object_name)
                 if not panel_target:
@@ -547,12 +549,22 @@ async def restore_backup(
                         f"Target '{p.object_name}' not found - skipping mosaic panel"
                     )
                     continue
-                session.add(MosaicPanel(
+                panel_obj = MosaicPanel(
                     mosaic_id=mosaic_obj.id,
                     target_id=panel_target.id,
                     panel_label=p.panel_label,
                     sort_order=p.sort_order,
-                ))
+                )
+                session.add(panel_obj)
+                new_panels.append((panel_obj, panel_target.id, p.panel_label))
+
+            if new_panels:
+                # Flush to assign panel ids before retro-linking, since the
+                # link claims existing Images by (target_id, panel_label) and
+                # stamps this panel's id onto them.
+                await session.flush()
+                for panel_obj, target_id, panel_label in new_panels:
+                    await retro_link_panel_images(session, panel_obj.id, target_id, panel_label)
 
         await session.flush()
         result["applied"]["mosaics"] = {

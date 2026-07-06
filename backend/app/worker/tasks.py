@@ -21,7 +21,11 @@ from app.services.simbad import (
 )
 from app.services.target_resolver import resolve_target, normalize_sql_expr, match_target_by_identity
 from app.services.simbad_repair import repair_corrupted_simbad_cache
-from app.services.mosaic_detection import resolve_panel_membership, prune_stale_panel_sessions
+from app.services.mosaic_detection import (
+    resolve_panel_membership,
+    prune_stale_panel_sessions,
+    recompute_panel_membership_for_images_sync,
+)
 from app.services import catalog_cache as cc
 from app.services.thumbnail import generate_thumbnail
 from app.services.xisf_parser import extract_xisf_metadata, generate_xisf_thumbnail
@@ -1255,14 +1259,16 @@ def detect_duplicate_targets(parent_activity_id: int | None = None):
                 target_id = resolve_target(obj_name, db, redis=_redis)
                 if target_id:
                     from sqlalchemy import update as sa_update
-                    db.execute(
+                    resolved_ids = db.execute(
                         sa_update(Image)
                         .where(
                             Image.raw_headers["OBJECT"].astext == obj_name,
                             Image.resolved_target_id.is_(None),
                         )
                         .values(resolved_target_id=target_id)
-                    )
+                        .returning(Image.id)
+                    ).scalars().all()
+                    recompute_panel_membership_for_images_sync(db, resolved_ids)
                     db.commit()
                     logger.info("detect_duplicates: resolved %d images for '%s' to target %s",
                                 img_count, obj_name, target_id)
@@ -1466,13 +1472,18 @@ def rebuild_targets(self) -> dict:
     # cannot recreate. Unlink only images NOT attached to a surviving custom
     # target so a custom "Jupiter" and its frames survive the rebuild.
     with Session(_sync_engine) as session:
-        session.execute(text("""
+        cleared_ids = session.execute(text("""
             UPDATE images SET resolved_target_id = NULL
             WHERE resolved_target_id IS NULL
                OR resolved_target_id NOT IN (
                    SELECT id FROM targets WHERE user_defined = TRUE
                )
-        """))
+            RETURNING id
+        """)).scalars().all()
+        # Cleared images no longer have a valid (target_id, panel_label) to
+        # look up a panel under -- recompute (which clears panel_id when
+        # target_id is NULL) before the owning targets are deleted below.
+        recompute_panel_membership_for_images_sync(session, cleared_ids)
         session.execute(text("DELETE FROM merge_candidates"))
         session.execute(text("DELETE FROM targets WHERE user_defined = FALSE"))
         session.commit()
@@ -1540,12 +1551,14 @@ def rebuild_targets(self) -> dict:
 
             if target_id:
                 with Session(_sync_engine) as session:
-                    session.execute(text("""
+                    resolved_ids = session.execute(text("""
                         UPDATE images
                         SET resolved_target_id = :tid
                         WHERE resolved_target_id IS NULL
                           AND raw_headers->>'OBJECT' = :obj_name
-                    """), {"tid": target_id, "obj_name": obj_name})
+                        RETURNING id
+                    """), {"tid": target_id, "obj_name": obj_name}).scalars().all()
+                    recompute_panel_membership_for_images_sync(session, resolved_ids)
                     session.commit()
                 resolved += 1
                 logger.info("rebuild_targets: %s -> %s (%d images)", obj_name, target_id, img_count)
@@ -1700,12 +1713,14 @@ def retry_unresolved(self) -> dict:
 
             if target_id:
                 with Session(_sync_engine) as session:
-                    session.execute(text("""
+                    resolved_ids = session.execute(text("""
                         UPDATE images
                         SET resolved_target_id = :tid
                         WHERE resolved_target_id IS NULL
                           AND raw_headers->>'OBJECT' = :obj_name
-                    """), {"tid": target_id, "obj_name": obj_name})
+                        RETURNING id
+                    """), {"tid": target_id, "obj_name": obj_name}).scalars().all()
+                    recompute_panel_membership_for_images_sync(session, resolved_ids)
                     session.commit()
                 resolved += 1
                 logger.info("retry_unresolved: %s -> %s (%d images)", obj_name, target_id, img_count)
@@ -1827,12 +1842,14 @@ def backfill_catalog_identity(self) -> dict:
             if target is not None:
                 target_id = target.id
                 session.commit()  # persist alias addition from the matcher
-                session.execute(text("""
+                linked_ids = session.execute(text("""
                     UPDATE images
                     SET resolved_target_id = :tid
                     WHERE resolved_target_id IS NULL
                       AND raw_headers->>'OBJECT' = :obj
-                """), {"tid": target_id, "obj": obj_name})
+                    RETURNING id
+                """), {"tid": target_id, "obj": obj_name}).scalars().all()
+                recompute_panel_membership_for_images_sync(session, linked_ids)
                 session.commit()
                 linked += 1
                 logger.info("backfill: linked %d images for '%s' -> %s",
@@ -1917,19 +1934,21 @@ def _smart_rebuild_inner(manual: bool = False, parent_activity_id: int | None = 
 
     with Session(_sync_engine) as session:
         # Phase 1: Redirect images pointing to merged targets
-        result = session.execute(text("""
+        redirected_ids = session.execute(text("""
             UPDATE images
             SET resolved_target_id = t.merged_into_id
             FROM targets t
             WHERE images.resolved_target_id = t.id
               AND t.merged_into_id IS NOT NULL
-        """))
-        stats["redirected_merged"] = result.rowcount
-        logger.info("smart_rebuild: redirected %d images from merged targets", result.rowcount)
+            RETURNING images.id
+        """)).scalars().all()
+        recompute_panel_membership_for_images_sync(session, redirected_ids)
+        stats["redirected_merged"] = len(redirected_ids)
+        logger.info("smart_rebuild: redirected %d images from merged targets", len(redirected_ids))
 
         # Phase 2: Link unresolved images to existing targets via alias match
         norm_expr = normalize_sql_expr("images.raw_headers->>'OBJECT'")
-        result = session.execute(text(f"""
+        linked_ids = session.execute(text(f"""
             UPDATE images
             SET resolved_target_id = t.id
             FROM targets t
@@ -1938,9 +1957,11 @@ def _smart_rebuild_inner(manual: bool = False, parent_activity_id: int | None = 
               AND images.raw_headers->>'OBJECT' IS NOT NULL
               AND t.merged_into_id IS NULL
               AND t.aliases @> ARRAY[{norm_expr}]::varchar[]
-        """))
-        stats["linked_unresolved"] = result.rowcount
-        logger.info("smart_rebuild: linked %d unresolved images via alias match", result.rowcount)
+            RETURNING images.id
+        """)).scalars().all()
+        recompute_panel_membership_for_images_sync(session, linked_ids)
+        stats["linked_unresolved"] = len(linked_ids)
+        logger.info("smart_rebuild: linked %d unresolved images via alias match", len(linked_ids))
 
         # Phase 3: Ensure all FITS OBJECT names are in target aliases
         norm_expr = normalize_sql_expr("img.raw_headers->>'OBJECT'")

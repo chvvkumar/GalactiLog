@@ -716,6 +716,223 @@ async def test_orphan_create_clears_stale_panel_id(api_client, db):
         assert refreshed.panel_id is None
 
 
+# ---------------------------------------------------------------------------
+# Final-review fixes: bulk sync task-worker recompute, panel_label
+# re-tokenizing on NULL, and backup-restore retro-link.
+# ---------------------------------------------------------------------------
+
+import contextlib
+
+
+@contextlib.contextmanager
+def _real_tasks_module_with_live_db():
+    """Temporarily swap ``sys.modules["app.worker.tasks"]`` for a freshly
+    imported copy whose ``_sync_engine`` is a genuine connection to the test
+    Postgres DB, then restore whatever was cached there before.
+
+    Unlike ``tests.test_tasks_emit._bootstrap_real_tasks`` (which mocks
+    ``sqlalchemy.create_engine`` for its DB-free unit tests and leaves that
+    mock-engine module cached in ``sys.modules`` for the rest of the pytest
+    session -- polluting every other test that imports ``app.worker.tasks``
+    afterward, e.g. ``test_tasks.py`` / ``test_rebuild_robustness.py``), this
+    always imports fresh with the real, unpatched ``create_engine`` AND puts
+    the previous module object back afterward so this test's DB-backed import
+    cannot leak into any other test in the session.
+    """
+    import sys as _sys
+    previous = _sys.modules.pop("app.worker.tasks", None)
+    try:
+        import app.worker.tasks as tasks_mod
+        yield tasks_mod
+    finally:
+        _sys.modules.pop("app.worker.tasks", None)
+        if previous is not None:
+            _sys.modules["app.worker.tasks"] = previous
+
+
+def _normalize_alias(value: str) -> str:
+    import re as _re
+    return _re.sub(r"\s+", " ", value.strip()).upper()
+
+
+def test_smart_rebuild_inner_populates_panel_membership_for_late_linked_orphan(sync_db):
+    """Finding 1 (CRITICAL): smart_rebuild_targets' Phase 2 bulk alias-match
+    UPDATE sets Image.resolved_target_id in raw SQL without ever touching
+    panel membership. Before the fix an orphan frame linked this way kept
+    panel_label/panel_id NULL forever, even though its OBJECT header carries
+    a real panel token and a matching MosaicPanel already exists. Drives the
+    real ``_smart_rebuild_inner`` task function (not just the recompute
+    helper) against the test DB so the RETURNING-id plumbing added to the
+    task is exercised end to end.
+    """
+    s = sync_db
+    object_name = f"{TEST_MARK}_smart Panel 3"
+    target = Target(primary_name=f"{TEST_MARK}_smart", aliases=[_normalize_alias(object_name)])
+    s.add(target)
+    s.flush()
+    mosaic = Mosaic(name=f"{TEST_MARK}_smart_mosaic")
+    s.add(mosaic)
+    s.flush()
+    panel = MosaicPanel(
+        mosaic_id=mosaic.id, target_id=target.id, panel_label="Panel 3",
+        object_pattern=f"%{TEST_MARK}%smart%3%",
+    )
+    s.add(panel)
+    s.flush()
+    img = Image(
+        id=uuid.uuid4(),
+        file_path=f"/data/{TEST_MARK}_smart_orphan.fits",
+        file_name=f"{TEST_MARK}_smart_orphan.fits",
+        resolved_target_id=None,
+        panel_id=None,
+        panel_label=None,
+        image_type="LIGHT",
+        raw_headers={"OBJECT": object_name},
+    )
+    s.add(img)
+    s.commit()
+    img_id = img.id
+    panel_id = panel.id
+
+    with _real_tasks_module_with_live_db() as tasks_mod, \
+         patch.object(tasks_mod, "is_cancel_requested_sync", return_value=False), \
+         patch.object(tasks_mod, "clear_cancel_sync"), \
+         patch.object(tasks_mod, "set_rebuild_running_sync"), \
+         patch.object(tasks_mod, "set_rebuild_progress_sync"), \
+         patch.object(tasks_mod, "set_rebuild_complete_sync"), \
+         patch.object(tasks_mod, "set_rebuild_cancelled_sync"), \
+         patch.object(tasks_mod, "detect_duplicate_targets"), \
+         patch.object(tasks_mod, "detect_mosaic_panels_task"):
+        result = tasks_mod._smart_rebuild_inner()
+
+    assert result["status"] == "complete"
+    assert result["linked_unresolved"] == 1
+
+    s.expire_all()
+    refreshed = s.get(Image, img_id)
+    assert refreshed.resolved_target_id == target.id
+    assert refreshed.panel_label == "Panel 3"
+    assert refreshed.panel_id == panel_id
+
+
+@pytest.mark.asyncio
+async def test_orphan_create_retokenizes_null_panel_label_from_object_header(api_client, db):
+    """Finding 2 (IMPORTANT): an image ingested before its target existed
+    never gets a panel_label stamped (the ingest hook requires target_id), so
+    a token-bearing OBJECT header ("... Panel 3") on such an orphan frame
+    previously could never surface a panel_label even after the frame was
+    finally resolved. orphan_create's recompute must re-tokenize the raw
+    OBJECT header for images whose panel_label is still NULL and persist the
+    derived label. No matching MosaicPanel exists yet for the brand-new
+    target, so panel_id correctly stays NULL -- only panel_label is at stake
+    here."""
+    from app.models.merge_candidate import MergeCandidate
+
+    Session = db
+    object_name = f"{TEST_MARK}_retok Panel 3"
+    async with Session() as s:
+        img = _img(
+            resolved_target_id=None,
+            panel_label=None,
+            panel_id=None,
+            raw_headers={"OBJECT": object_name},
+        )
+        s.add(img)
+        candidate = MergeCandidate(
+            source_name=object_name,
+            suggested_target_id=None,
+            similarity_score=0.0,
+            method="orphan",
+            status="pending",
+        )
+        s.add(candidate)
+        await s.commit()
+        img_id = img.id
+        candidate_id = candidate.id
+
+    resp = await api_client.post(
+        "/api/targets/orphan-create",
+        json={
+            "candidate_id": str(candidate_id),
+            "primary_name": f"{TEST_MARK}_retok",
+            "user_defined": True,
+        },
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+
+    async with Session() as s2:
+        refreshed = await s2.get(Image, img_id)
+        assert str(refreshed.resolved_target_id) == body["target_id"]
+        assert refreshed.panel_label == "Panel 3"
+        assert refreshed.panel_id is None
+
+
+@pytest.mark.asyncio
+async def test_restore_backup_retro_links_existing_images_to_restored_panels(db):
+    """Finding 3 (IMPORTANT): backup restore recreates MosaicPanel rows for a
+    restored mosaic but, before this fix, never retro-linked existing Image
+    rows to them -- a restored panel started with zero stats until every
+    file was re-ingested. Verifies restore_backup now claims an already-
+    ingested, matching Image via the shared retro_link_panel_images service
+    helper (extracted from app.api.mosaics so the service layer does not
+    import from the API layer)."""
+    from datetime import datetime, timezone
+    from app.services.backup import restore_backup, CURRENT_BACKUP_SCHEMA_VERSION, APP_VERSION
+
+    Session = db
+    async with Session() as s:
+        target = Target(primary_name=f"{TEST_MARK}_restore", aliases=[])
+        s.add(target)
+        await s.flush()
+
+        img = _img(
+            resolved_target_id=target.id,
+            panel_label="Panel 1",
+            panel_id=None,
+            raw_headers={"OBJECT": f"{TEST_MARK}_restore Panel 1"},
+        )
+        s.add(img)
+        await s.commit()
+        img_id = img.id
+        target_id = target.id
+        target_name = target.primary_name
+
+    payload = {
+        "meta": {
+            "schema_version": CURRENT_BACKUP_SCHEMA_VERSION,
+            "app_version": APP_VERSION,
+            "exported_at": datetime.now(timezone.utc).isoformat(),
+        },
+        "settings": {},
+        "mosaics": [
+            {
+                "name": f"{TEST_MARK}_restoremosaic",
+                "notes": None,
+                "panels": [
+                    {"object_name": target_name, "panel_label": "Panel 1", "sort_order": 0},
+                ],
+            }
+        ],
+    }
+
+    async with Session() as s:
+        result = await restore_backup(s, payload, sections=["mosaics"], mode="merge")
+        await s.commit()
+
+    assert result["applied"]["mosaics"]["add"] == 1
+
+    async with Session() as s2:
+        refreshed = await s2.get(Image, img_id)
+        panel = (await s2.execute(
+            select(MosaicPanel).where(
+                MosaicPanel.panel_label == "Panel 1",
+                MosaicPanel.target_id == target_id,
+            )
+        )).scalar_one()
+        assert refreshed.panel_id == panel.id
+
+
 @pytest.mark.asyncio
 async def test_merge_loser_name_populates_simple_panel_membership(api_client, db):
     """merge_targets loser_name branch: unresolved images matched by OBJECT

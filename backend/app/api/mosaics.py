@@ -34,6 +34,7 @@ from app.services.mosaic_detection import (
     load_mosaic_keywords,
     object_matches_panel,
     panel_number_from_label,
+    retro_link_panel_images as _retro_link_panel_images,
 )
 from app.services.mosaic_stats import (
     get_panel_included_dates as _get_panel_included_dates,
@@ -43,33 +44,6 @@ from app.services.mosaic_stats import (
 )
 
 router = APIRouter(prefix="/mosaics", tags=["mosaics"])
-
-
-async def _retro_link_panel_images(
-    session: AsyncSession,
-    panel_id: uuid.UUID,
-    target_id: uuid.UUID,
-    panel_label: str,
-) -> None:
-    """Claim already-ingested frames for a newly created MosaicPanel.
-
-    Ingest (and the 0018 backfill) stamp Image.panel_label on token-bearing
-    frames but leave Image.panel_id NULL when no MosaicPanel exists yet.
-    Without this retro-link, a panel created after those frames were ingested
-    would start with zero stats until every file was re-ingested. Only frames
-    whose parsed label matches exactly are claimed; token-bearing frames with
-    other labels and unlabeled frames are never touched, matching the
-    established ingest/backfill semantics. Runs in the caller's transaction.
-    """
-    await session.execute(
-        update(Image)
-        .where(
-            Image.resolved_target_id == target_id,
-            Image.panel_label == panel_label,
-            Image.panel_id.is_(None),
-        )
-        .values(panel_id=panel_id)
-    )
 
 
 def _ilike_pattern_matches(pattern: str, value: str) -> bool:
