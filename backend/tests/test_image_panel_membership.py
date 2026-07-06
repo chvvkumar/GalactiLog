@@ -215,6 +215,59 @@ def test_downgrade_reverses_upgrade_schema_changes(db):
 
 
 # ---------------------------------------------------------------------------
+# Re-run safety: the batched backfill commits per batch, persisting the DDL
+# before alembic stamps 0018 -- a crash mid-backfill leaves the columns in
+# place at revision 0017. upgrade() must therefore tolerate the schema
+# already existing (existence guards) instead of failing DuplicateColumn.
+# ---------------------------------------------------------------------------
+
+def test_upgrade_rerun_on_existing_schema_is_safe(db):
+    """Reproduce the crash state exactly via the real alembic CLI.
+
+    The test DB is at 0018 with the columns present. Stamping back to 0017
+    without touching the schema is precisely what a mid-backfill crash
+    leaves behind (DDL committed, version stamp lost); `upgrade head` from
+    that state must skip the existing DDL via the guards, re-run the
+    idempotent backfill, and stamp 0018.
+    """
+    import subprocess
+    import sys
+
+    backend_dir = os.path.join(os.path.dirname(__file__), "..")
+    env = dict(os.environ)
+
+    def _run(args):
+        result = subprocess.run(
+            [sys.executable, "-m", "alembic"] + args,
+            cwd=backend_dir, env=env, capture_output=True, text=True,
+        )
+        assert result.returncode == 0, f"{args} failed:\n{result.stdout}\n{result.stderr}"
+
+    Session, engine = _sync_session_factory()
+    try:
+        _run(["stamp", "0017"])
+        _run(["upgrade", "head"])
+        with engine.connect() as connection:
+            version = connection.execute(
+                text("SELECT version_num FROM alembic_version")
+            ).scalar_one()
+            assert version == "0018"
+            cols = {
+                row[0]
+                for row in connection.execute(text(
+                    "SELECT column_name FROM information_schema.columns "
+                    "WHERE table_name = 'images' AND column_name IN ('panel_label', 'panel_id')"
+                ))
+            }
+            assert cols == {"panel_label", "panel_id"}
+    finally:
+        # Whatever happened above, leave the DB stamped at head for the
+        # other tests / later phase tasks.
+        _run(["stamp", "head"])
+        engine.dispose()
+
+
+# ---------------------------------------------------------------------------
 # Tokenizer parity: the migration inlines a copy of match_panel_token_full /
 # _panel_label (to avoid importing app.services.mosaic_detection, which pulls
 # in fitsio via mosaic_composite purely for unrelated helpers). Guard against
@@ -225,8 +278,24 @@ def test_migration_tokenizer_matches_mosaic_detection_tokenizer():
     from app.services.mosaic_detection import match_panel_token_full as real_match
     from app.services.mosaic_detection import _panel_label as real_label
 
+    import app.services.mosaic_detection as detection
+
     module = _migration_module()
     keywords = ["Panel", "P"]
+
+    # Structural parity: the regex pattern strings themselves must be
+    # byte-identical, so any tokenizer drift fails for ALL inputs, not just
+    # the sampled cases below.
+    assert module._TILE_RE.pattern == detection._TILE_RE.pattern
+    assert module._TILE_RE.flags == detection._TILE_RE.flags
+    assert (
+        module._keyword_regex(keywords).pattern
+        == detection._keyword_regex(keywords).pattern
+    )
+    assert (
+        module._keyword_regex(keywords).flags
+        == detection._keyword_regex(keywords).flags
+    )
 
     cases = [
         "M31 Panel 3",

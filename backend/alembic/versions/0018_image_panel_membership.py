@@ -27,9 +27,13 @@ such panel exists for that target, since the target-id match is unambiguous
 in that case. This mirrors the lookup Task 2's ingest-time hook applies so
 backfilled and newly-ingested rows agree.
 
-The backfill is batched (500 rows/commit, keyset-paginated by id so forward
-progress does not depend on row outcomes) and safe to call again: rows that
-already have panel_label or panel_id set are skipped by the selection query.
+The backfill is batched (500-row keyset pages by id, run in an alembic
+``autocommit_block`` so no long transaction is held on a large catalog) and
+safe to call again: rows that already have panel_label or panel_id set are
+skipped by the selection query. The schema changes carry one-off existence
+guards for the same reason -- a crash mid-backfill leaves the DDL committed
+with alembic_version still at 0017, and the re-run must not fail on
+DuplicateColumn.
 """
 import re
 
@@ -51,21 +55,49 @@ _SETTINGS_ROW_ID = "00000000-0000-4000-8000-000000000001"
 
 
 def upgrade() -> None:
-    op.add_column("images", sa.Column("panel_label", sa.String(100), nullable=True))
-    op.add_column("images", sa.Column("panel_id", UUID(as_uuid=True), nullable=True))
-    op.create_foreign_key(
-        "fk_images_panel_id_mosaic_panels",
-        "images", "mosaic_panels",
-        ["panel_id"], ["id"],
-        ondelete="SET NULL",
-    )
-    op.create_index("ix_images_panel_id", "images", ["panel_id"])
-    op.create_index(
-        "ix_images_target_panel_label", "images",
-        ["resolved_target_id", "panel_label"],
-    )
+    # One-off existence guards, NOT a return to the pre-v2.0 defensive
+    # default: the batched backfill below commits per batch, and those
+    # commits also persist this migration's DDL before alembic stamps 0018.
+    # A crash mid-backfill therefore leaves the columns in place with
+    # alembic_version still at 0017, and a plain re-run would fail with
+    # DuplicateColumn. Guarding the schema changes makes the whole migration
+    # safely re-runnable after such a crash (the backfill itself is already
+    # idempotent and resumes where it stopped).
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    existing_columns = {col["name"] for col in inspector.get_columns("images")}
+    existing_indexes = {ix["name"] for ix in inspector.get_indexes("images")}
+    existing_fks = {fk["name"] for fk in inspector.get_foreign_keys("images")}
 
-    backfill_panel_membership(op.get_bind())
+    if "panel_label" not in existing_columns:
+        op.add_column("images", sa.Column("panel_label", sa.String(100), nullable=True))
+    if "panel_id" not in existing_columns:
+        op.add_column("images", sa.Column("panel_id", UUID(as_uuid=True), nullable=True))
+    if "fk_images_panel_id_mosaic_panels" not in existing_fks:
+        op.create_foreign_key(
+            "fk_images_panel_id_mosaic_panels",
+            "images", "mosaic_panels",
+            ["panel_id"], ["id"],
+            ondelete="SET NULL",
+        )
+    if "ix_images_panel_id" not in existing_indexes:
+        op.create_index("ix_images_panel_id", "images", ["panel_id"])
+    if "ix_images_target_panel_label" not in existing_indexes:
+        op.create_index(
+            "ix_images_target_panel_label", "images",
+            ["resolved_target_id", "panel_label"],
+        )
+
+    # Run the backfill outside alembic's migration transaction. Calling
+    # connection.commit() mid-migration (the naive per-batch approach) kills
+    # the transaction alembic later uses to stamp alembic_version -- the DDL
+    # and backfill persist but the version stamp is silently lost, so every
+    # subsequent `alembic upgrade head` re-runs this migration forever.
+    # autocommit_block() commits the pending DDL, runs the block in
+    # autocommit (each UPDATE durable immediately, no long transaction on a
+    # large catalog), then opens a fresh transaction for the version stamp.
+    with op.get_context().autocommit_block():
+        backfill_panel_membership(bind)
 
 
 def downgrade() -> None:
@@ -125,17 +157,19 @@ def _load_mosaic_keywords(bind) -> list[str]:
     """Read ``user_settings.general['mosaic_keywords']`` via raw SQL.
 
     Deliberately does not import the async ``load_mosaic_keywords`` helper
-    (wrong execution context for a sync migration) -- reads the row directly,
-    same default as every other call site.
+    (wrong execution context for a sync migration) -- reads the row directly
+    and replicates that helper's exact semantics
+    (``general.get("mosaic_keywords", ["Panel", "P"]) or []``): a MISSING key
+    falls back to the default, but an explicitly-configured falsy value
+    (e.g. an empty list) means "no keywords" and returns [] so the backfill
+    tokenizes the same way runtime code does for that install.
     """
     row = bind.execute(
         text("SELECT general FROM user_settings WHERE id = :id"),
         {"id": _SETTINGS_ROW_ID},
     ).first()
-    if row is None or not row[0]:
-        return list(_DEFAULT_KEYWORDS)
-    keywords = row[0].get("mosaic_keywords")
-    return list(keywords) if keywords else list(_DEFAULT_KEYWORDS)
+    general = row[0] if row is not None and row[0] else {}
+    return general.get("mosaic_keywords", list(_DEFAULT_KEYWORDS)) or []
 
 
 def _load_panel_maps(bind) -> tuple[dict[tuple[str, str], str], dict[str, str]]:
@@ -171,8 +205,10 @@ def backfill_panel_membership(bind) -> int:
     Idempotent and resumable: only rows with both columns still NULL are
     selected, keyset-paginated by ``id`` (not OFFSET, since already-processed
     rows drop out of a naive WHERE-based page) so forward progress is
-    guaranteed even for rows that end up with no match. Commits every
-    ``BATCH_SIZE`` rows so a large catalog does not hold one long transaction.
+    guaranteed even for rows that end up with no match. Issues no commits of
+    its own: under ``upgrade()`` it runs inside ``autocommit_block()`` (each
+    UPDATE durable immediately, no long transaction on a large catalog);
+    a direct caller (tests) owns the transaction and commits afterwards.
     Returns the number of rows updated (for test/observability use).
     """
     keywords = _load_mosaic_keywords(bind)
@@ -223,6 +259,5 @@ def backfill_panel_membership(bind) -> int:
                 updated += 1
 
         last_id = rows[-1][0]
-        bind.commit()
 
     return updated
