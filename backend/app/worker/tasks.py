@@ -21,7 +21,7 @@ from app.services.simbad import (
 )
 from app.services.target_resolver import resolve_target, normalize_sql_expr, match_target_by_identity
 from app.services.simbad_repair import repair_corrupted_simbad_cache
-from app.services.mosaic_detection import resolve_panel_membership
+from app.services.mosaic_detection import resolve_panel_membership, prune_stale_panel_sessions
 from app.services import catalog_cache as cc
 from app.services.thumbnail import generate_thumbnail
 from app.services.xisf_parser import extract_xisf_metadata, generate_xisf_thumbnail
@@ -367,25 +367,43 @@ def run_scan(self, include_calibration: bool = True, force_orphan_cleanup: bool 
             # (protects against unmounted shares / unreachable storage), unless an
             # admin forced a one-time cleanup to reflect a deliberate bulk deletion.
             with Session(_sync_engine) as session:
+                # Capture each deleted row's panel_id before the delete fires --
+                # ON DELETE SET NULL on images.panel_id means it can't be read
+                # back off the images table afterward. Pruning of stale
+                # MosaicPanelSession rows for these panels runs once after the
+                # whole orphan pass (not per 500-row batch): a single pass is
+                # cheaper and avoids redundant work while more deletes in the
+                # same run are still happening.
+                affected_panel_ids: set = set()
                 for batch_start in range(0, len(orphaned_paths), 500):
                     batch = list(orphaned_paths)[batch_start:batch_start + 500]
                     rows = session.execute(
-                        select(Image.id, Image.thumbnail_path).where(
+                        select(Image.id, Image.thumbnail_path, Image.panel_id).where(
                             Image.file_path.in_(batch)
                         )
                     ).all()
-                    for img_id, thumb_path in rows:
+                    for img_id, thumb_path, panel_id in rows:
                         if thumb_path:
                             try:
                                 Path(thumb_path).unlink(missing_ok=True)
                             except OSError:
                                 pass
+                        if panel_id is not None:
+                            affected_panel_ids.add(panel_id)
                         session.execute(
                             text("DELETE FROM images WHERE id = :id"),
                             {"id": img_id},
                         )
                         removed += 1
                     session.commit()
+
+                if affected_panel_ids:
+                    pruned = prune_stale_panel_sessions(session, affected_panel_ids)
+                    if pruned:
+                        logger.info(
+                            "Pruned %d stale mosaic panel session row%s after orphan cleanup",
+                            pruned, "s" if pruned != 1 else "",
+                        )
             if removed:
                 logger.info("Removed %d orphaned image records (files deleted from disk)", removed)
                 with _activity_session() as _db:

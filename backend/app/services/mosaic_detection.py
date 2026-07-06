@@ -22,7 +22,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from sqlalchemy import select, delete
+from sqlalchemy import select, delete, exists, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
@@ -30,6 +30,7 @@ from app.models import Target, UserSettings, SETTINGS_ROW_ID
 from app.models.image import Image
 from app.models.mosaic import Mosaic
 from app.models.mosaic_panel import MosaicPanel
+from app.models.mosaic_panel_session import MosaicPanelSession
 from app.models.mosaic_suggestion import MosaicSuggestion
 from app.services.mosaic_composite import _parse_ra, _parse_coord
 
@@ -324,6 +325,95 @@ def resolve_panel_membership(
     ).scalars().all()
     panel_id = simple_ids[0] if len(simple_ids) == 1 else None
     return None, panel_id
+
+
+def prune_stale_panel_sessions(session: Session, panel_ids) -> int:
+    """Remove ``MosaicPanelSession`` rows whose (panel_id, session_date) no
+    longer has any backing ``Image`` row, for the given set of panels touched
+    by orphan-cleanup Image deletion.
+
+    Synchronous (plain ``Session``), called once after a whole orphan-cleanup
+    pass (not per 500-row delete batch) from ``run_scan``. Deliberately a
+    per-(panel_id, session_date) check, not a per-panel-total-emptiness check:
+    a panel can lose every Image for one session_date while retaining Images
+    for other dates, and only that one date's session row should be pruned.
+    The ``MosaicPanel`` row itself is never deleted here -- an admin may have
+    manually configured grid position/rotation for it, or it may simply be
+    between imaging sessions with no data locally yet (see Task 5 brief).
+    """
+    panel_ids = {p for p in panel_ids if p is not None}
+    if not panel_ids:
+        return 0
+
+    stale = ~exists().where(
+        Image.panel_id == MosaicPanelSession.panel_id,
+        Image.session_date == MosaicPanelSession.session_date,
+    )
+    result = session.execute(
+        delete(MosaicPanelSession)
+        .where(MosaicPanelSession.panel_id.in_(panel_ids))
+        .where(stale)
+    )
+    session.commit()
+    return result.rowcount or 0
+
+
+async def recompute_panel_membership_for_images(session: AsyncSession, image_ids) -> None:
+    """Recompute ``Image.panel_id`` for images whose ``resolved_target_id``
+    just changed outside ingest (target unmerge, merge-candidate revert,
+    orphan-to-target attach, custom-target retro-link), keeping ``panel_id``
+    in agreement with ``resolve_panel_membership``'s ``(target_id,
+    panel_label)`` lookup semantics.
+
+    Does not re-tokenize OBJECT headers: ``Image.panel_label`` is already
+    parsed and stored at ingest time and is independent of target assignment,
+    so only the ``panel_id`` lookup (keyed on the image's *current*
+    ``resolved_target_id`` and its unchanged ``panel_label``) needs to be
+    redone. Mirrors ``resolve_panel_membership``'s two branches (token-bearing
+    label vs. the unambiguous simple-panel fallback) exactly, driven by the
+    already-stored label instead of re-parsing ``object_name``.
+
+    Call this after any bulk update that changes ``Image.resolved_target_id``
+    for a set of images -- including setting it to ``NULL``, in which case
+    ``panel_id`` is cleared to match (no target means no valid panel
+    membership). When the image's current target has no matching panel for
+    its stored label, ``panel_id`` is cleared rather than left stale.
+    """
+    ids = [i for i in image_ids if i is not None]
+    if not ids:
+        return
+
+    rows = (await session.execute(
+        select(Image.id, Image.resolved_target_id, Image.panel_label)
+        .where(Image.id.in_(ids))
+    )).all()
+
+    groups: dict[tuple, list] = {}
+    for img_id, target_id, panel_label in rows:
+        groups.setdefault((target_id, panel_label), []).append(img_id)
+
+    for (target_id, panel_label), group_ids in groups.items():
+        new_panel_id = None
+        if target_id is not None:
+            if panel_label is not None:
+                new_panel_id = (await session.execute(
+                    select(MosaicPanel.id).where(
+                        MosaicPanel.target_id == target_id,
+                        MosaicPanel.panel_label == panel_label,
+                    )
+                )).scalars().first()
+            else:
+                simple_ids = (await session.execute(
+                    select(MosaicPanel.id).where(
+                        MosaicPanel.target_id == target_id,
+                        MosaicPanel.object_pattern.is_(None),
+                    )
+                )).scalars().all()
+                new_panel_id = simple_ids[0] if len(simple_ids) == 1 else None
+
+        await session.execute(
+            update(Image).where(Image.id.in_(group_ids)).values(panel_id=new_panel_id)
+        )
 
 
 # ---------------------------------------------------------------------------

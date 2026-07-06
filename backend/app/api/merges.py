@@ -23,6 +23,7 @@ from app.services.target_merge import (
     apply_merge_manifest_restore,
 )
 from app.services.cache import invalidate_stats_and_analysis_cache
+from app.services.mosaic_detection import recompute_panel_membership_for_images
 
 router = APIRouter(prefix="/targets", tags=["merges"])
 
@@ -309,14 +310,18 @@ async def orphan_create(
     session.add(target)
     await session.flush()
 
-    await session.execute(
+    resolved_rows = (await session.execute(
         update(Image)
         .where(
             Image.raw_headers["OBJECT"].astext == candidate.source_name,
             Image.resolved_target_id.is_(None),
         )
         .values(resolved_target_id=target.id)
-    )
+        .returning(Image.id)
+    )).scalars().all()
+    # These images were unresolved at ingest, so panel membership was never
+    # attempted; recompute now that they have a target.
+    await recompute_panel_membership_for_images(session, resolved_rows)
 
     candidate.suggested_target_id = target.id
     candidate.status = "accepted"
@@ -408,19 +413,28 @@ async def create_custom_target(
 
     now = datetime.now(timezone.utc)
     linked_images = 0
+    linked_image_ids: list = []
     for cand in pending:
-        result = await session.execute(
+        rows = (await session.execute(
             update(Image)
             .where(
                 Image.raw_headers["OBJECT"].astext == cand.source_name,
                 Image.resolved_target_id.is_(None),
             )
             .values(resolved_target_id=target.id)
-        )
-        linked_images += result.rowcount or 0
+            .returning(Image.id)
+        )).scalars().all()
+        linked_images += len(rows)
+        linked_image_ids.extend(rows)
         cand.suggested_target_id = target.id
         cand.status = "accepted"
         cand.resolved_at = now
+
+    if linked_image_ids:
+        # These images were unresolved at ingest, so panel membership was
+        # never attempted (the "never-parsed images gain a target" case);
+        # recompute now that they have a target.
+        await recompute_panel_membership_for_images(session, linked_image_ids)
 
     try:
         await session.commit()
@@ -515,14 +529,18 @@ async def revert_merge_candidate(
     source_name = candidate.source_name
 
     if candidate.method == "orphan":
-        await session.execute(
+        unresolved_rows = (await session.execute(
             update(Image)
             .where(
                 Image.resolved_target_id == winner.id,
                 Image.raw_headers["OBJECT"].astext == source_name,
             )
             .values(resolved_target_id=None)
-        )
+            .returning(Image.id)
+        )).scalars().all()
+        # Losing their target means panel_id is no longer valid membership;
+        # clear it in step.
+        await recompute_panel_membership_for_images(session, unresolved_rows)
         remaining = await session.execute(
             select(func.count(Image.id)).where(Image.resolved_target_id == winner.id)
         )
@@ -559,31 +577,44 @@ async def revert_merge_candidate(
                 .limit(1)
             )).scalars().first()
             if manifest is not None:
-                await apply_merge_manifest_restore(manifest, loser, winner, session)
+                moved_ids = await apply_merge_manifest_restore(manifest, loser, winner, session)
                 await session.delete(manifest)
             else:
+                moved_ids = []
                 for name in loser_names:
-                    await session.execute(
+                    rows = (await session.execute(
                         update(Image)
                         .where(
                             Image.resolved_target_id == winner.id,
                             Image.raw_headers["OBJECT"].astext == name,
                         )
                         .values(resolved_target_id=loser.id)
-                    )
+                        .returning(Image.id)
+                    )).scalars().all()
+                    moved_ids.extend(rows)
+            # This endpoint's manifest/legacy-fallback restore does not move
+            # MosaicPanel rows back to the loser (unlike unmerge_target), so
+            # there is no panel-reversion ordering to wait for here: recompute
+            # immediately. If the loser's panel wasn't moved back by any other
+            # path, this correctly clears panel_id rather than leaving it
+            # pointing at a panel still owned by the winner.
+            if moved_ids:
+                await recompute_panel_membership_for_images(session, moved_ids)
             winner.aliases = [a for a in (winner.aliases or []) if a not in loser_names]
             loser.merged_into_id = None
             loser.merged_at = None
         else:
             winner.aliases = [a for a in (winner.aliases or []) if a != source_name]
-            await session.execute(
+            unresolved_rows = (await session.execute(
                 update(Image)
                 .where(
                     Image.resolved_target_id == winner.id,
                     Image.raw_headers["OBJECT"].astext == source_name,
                 )
                 .values(resolved_target_id=None)
-            )
+                .returning(Image.id)
+            )).scalars().all()
+            await recompute_panel_membership_for_images(session, unresolved_rows)
 
         candidate.status = "pending"
         candidate.resolved_at = None

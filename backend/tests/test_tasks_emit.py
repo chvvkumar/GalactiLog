@@ -127,7 +127,7 @@ def _drive_run_scan(force, known_paths, disk_paths):
 
     known_rows = [(p, 100, 1.0) for p in known_paths]
     orphaned = set(known_paths) - set(disk_paths)
-    orphan_rows = [(i, None) for i, _ in enumerate(sorted(orphaned))]
+    orphan_rows = [(i, None, None) for i, _ in enumerate(sorted(orphaned))]
 
     emit_calls = []
 
