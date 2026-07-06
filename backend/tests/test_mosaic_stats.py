@@ -1,15 +1,17 @@
-"""Focused tests for app/services/mosaic_stats.py aggregation (PERF-6).
+"""Focused tests for app/services/mosaic_stats.py aggregation (PERF-6, Phase 5 Task 3).
 
-These verify that the optimized pattern-panel aggregation in
-list_mosaic_summaries (which moved SUM/COUNT into a grouped SQL query) yields
-the SAME per-mosaic stats as the previous per-frame Python aggregation, for a
+These verify that the pattern-panel aggregation in list_mosaic_summaries
+(grouped SQL on the exact Image.panel_id join, Phase 5 Task 3) yields the
+same per-mosaic stats the previous ILIKE/regex-based aggregation did, for a
 representative dataset covering unscoped, scoped, excluded, NULL-date, and
 multi-session panels.
 
 The DB is stubbed: a fake AsyncSession dispatches each .execute() call to canned
 result rows by matching distinctive tokens in the compiled SQL. This keeps the
 test independent of a live PostgreSQL while exercising the real Python
-aggregation path in the service.
+aggregation path in the service. The grouped-query rows are now keyed
+directly by panel_id (Image.panel_id) instead of (resolved_target_id,
+object_name), matching the exact-join rewrite.
 """
 
 import datetime
@@ -96,8 +98,8 @@ class _FakeSession:
         sql = str(statement).lower()
         if "from mosaics" in sql and "mosaic_panels" not in sql:
             return _Result(self._mosaics)
-        # bulk simple-panel aggregation (has min + max session_date, no object header)
-        if "min(" in sql and "object" not in sql:
+        # bulk simple-panel aggregation (has min + max session_date)
+        if "min(" in sql:
             return _Result(self._simple_bulk_rows)
         # distinct panel ids that have membership
         if "distinct" in sql and "mosaic_panel_sessions" in sql:
@@ -105,8 +107,10 @@ class _FakeSession:
         # included membership rows (panel_id, session_date) where status included
         if "mosaic_panel_sessions" in sql and "status" in sql:
             return _Result(self._membership_rows)
-        # grouped pattern aggregation (groups on the OBJECT header expression)
-        if "->>" in sql or "object" in sql:
+        # grouped pattern-panel aggregation: exact Image.panel_id join, grouped
+        # by (panel_id, session_date) -- distinguished by the coalesce() used
+        # only in this query (all-NULL-exposure-safe SUM).
+        if "coalesce" in sql:
             return _Result(self._grouped_rows)
         # custom column values
         if "custom_column" in sql:
@@ -150,21 +154,17 @@ async def test_pattern_panel_aggregation_matches_reference():
     d2 = datetime.date(2026, 1, 2)
     d3 = datetime.date(2026, 1, 3)
 
-    # Grouped rows: (resolved_target_id, object_name, session_date, integration, frames)
-    # These are pre-aggregated per (target, object, session) as the service now queries.
+    # Grouped rows: (panel_id, session_date, integration, frames) -- pre-
+    # aggregated per (panel_id, session_date) via the exact Image.panel_id
+    # join, as the service now queries.
     grouped_rows = [
-        # Panel A (t1, matches %Veil%Panel%1%): two sessions + one NULL-date group
-        _row(resolved_target_id=t1, object_name="Veil Panel 1",
-             session_date=d1, integration=300.0, frames=3),
-        _row(resolved_target_id=t1, object_name="Veil Panel 1",
-             session_date=d2, integration=200.0, frames=2),
-        _row(resolved_target_id=t1, object_name="Veil Panel 1",
-             session_date=None, integration=100.0, frames=1),
-        # Panel B (t2, matches %Veil%Panel%2%): d1 included, d3 NOT included (excluded)
-        _row(resolved_target_id=t2, object_name="Veil Panel 2",
-             session_date=d1, integration=600.0, frames=6),
-        _row(resolved_target_id=t2, object_name="Veil Panel 2",
-             session_date=d3, integration=900.0, frames=9),
+        # Panel A (unscoped): two sessions + one NULL-date group
+        _row(panel_id=pa.id, session_date=d1, integration=300.0, frames=3),
+        _row(panel_id=pa.id, session_date=d2, integration=200.0, frames=2),
+        _row(panel_id=pa.id, session_date=None, integration=100.0, frames=1),
+        # Panel B: d1 included, d3 NOT included (excluded)
+        _row(panel_id=pb.id, session_date=d1, integration=600.0, frames=6),
+        _row(panel_id=pb.id, session_date=d3, integration=900.0, frames=9),
     ]
 
     # Panel B has membership records; only d1 is "included".
@@ -221,8 +221,7 @@ async def test_scoped_panel_with_no_included_dates_contributes_zero():
 
     d1 = datetime.date(2026, 2, 1)
     grouped_rows = [
-        _row(resolved_target_id=t1, object_name="M31 Panel 1",
-             session_date=d1, integration=500.0, frames=5),
+        _row(panel_id=pa.id, session_date=d1, integration=500.0, frames=5),
     ]
 
     # Panel has membership but NO included rows -> all sessions excluded.
@@ -262,10 +261,8 @@ async def test_all_null_exposure_group_integration_is_zero():
     # d1 group: all frames NULL exposure -> coalesced SUM is 0.0, but 4 frames.
     # d2 group: normal exposure to confirm mixed mosaics still sum correctly.
     grouped_rows = [
-        _row(resolved_target_id=t1, object_name="Rosette Panel 1",
-             session_date=d1, integration=0.0, frames=4),
-        _row(resolved_target_id=t1, object_name="Rosette Panel 1",
-             session_date=d2, integration=120.0, frames=1),
+        _row(panel_id=pa.id, session_date=d1, integration=0.0, frames=4),
+        _row(panel_id=pa.id, session_date=d2, integration=120.0, frames=1),
     ]
 
     session = _FakeSession(

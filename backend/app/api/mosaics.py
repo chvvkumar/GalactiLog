@@ -952,7 +952,17 @@ async def get_panel_sessions(
     session: AsyncSession = Depends(get_session),
     user: User = Depends(get_current_user),
 ):
-    """List all sessions (included + available) for a panel with stats."""
+    """List all sessions (included + available) for a panel with stats.
+
+    Pattern panels (object_pattern set) are scoped by the exact
+    `Image.panel_id == panel.id` join (Phase 5 Task 3) instead of an
+    ILIKE-against-OBJECT prefilter plus a Python object_matches_panel recheck
+    (AUD-008) -- Image.panel_id is assigned at ingest time / by the 0018
+    backfill from the same tokenizer that built object_pattern, so the join
+    is exact by construction. Simple panels (no object_pattern) are
+    unchanged: they still count every LIGHT frame of the target via
+    resolved_target_id alone, preserving existing behavior.
+    """
     panel_q = (
         select(MosaicPanel)
         .where(MosaicPanel.id == panel_id, MosaicPanel.mosaic_id == mosaic_id)
@@ -974,69 +984,34 @@ async def get_panel_sessions(
         Image.image_type == "LIGHT",
     ]
     if panel.object_pattern:
-        base_filter.append(Image.raw_headers["OBJECT"].astext.ilike(panel.object_pattern))
+        base_filter.append(Image.panel_id == panel.id)
 
-    if panel.object_pattern:
-        # ILIKE is a cheap pre-filter only (also matches sibling panels for
-        # which this panel's number is a prefix, e.g. "1" matching "Panel
-        # 12"), so fetch per-frame rows including OBJECT and re-parse before
-        # aggregating in Python (AUD-008).
-        keywords = await load_mosaic_keywords(session)
-        expected_num = panel_number_from_label(panel.panel_label)
-        img_q = (
-            select(
-                Image.session_date,
-                Image.filter_used,
-                Image.exposure_time,
-                Image.raw_headers["OBJECT"].astext.label("obj"),
-            )
-            .where(*base_filter)
-            .where(Image.session_date.isnot(None))
+    img_q = (
+        select(
+            Image.session_date,
+            Image.filter_used,
+            func.count(Image.id).label("frames"),
+            func.sum(Image.exposure_time).label("integration"),
         )
-        frame_rows = [
-            r for r in (await session.execute(img_q)).all()
-            if object_matches_panel(r.obj, keywords, expected_num)
-        ]
-        date_data: dict[str, dict] = {}
-        for row in frame_rows:
-            ds = str(row.session_date)
-            if ds not in date_data:
-                date_data[ds] = {"frames": 0, "integration": 0.0, "filters": {}}
-            date_data[ds]["frames"] += 1
-            date_data[ds]["integration"] += row.exposure_time or 0
-            if row.filter_used:
-                f = date_data[ds]["filters"].setdefault(
-                    row.filter_used, {"frames": 0, "integration": 0.0}
-                )
-                f["frames"] += 1
-                f["integration"] += row.exposure_time or 0
-    else:
-        img_q = (
-            select(
-                Image.session_date,
-                Image.filter_used,
-                func.count(Image.id).label("frames"),
-                func.sum(Image.exposure_time).label("integration"),
-            )
-            .where(*base_filter)
-            .where(Image.session_date.isnot(None))
-            .group_by(Image.session_date, Image.filter_used)
-        )
-        rows = (await session.execute(img_q)).all()
+        .where(*base_filter)
+        .where(Image.session_date.isnot(None))
+        .group_by(Image.session_date, Image.filter_used)
+    )
+    rows = (await session.execute(img_q)).all()
 
-        # Aggregate by session_date
-        date_data: dict[str, dict] = {}
-        for row in rows:
-            ds = str(row.session_date)
-            if ds not in date_data:
-                date_data[ds] = {"frames": 0, "integration": 0.0, "filters": {}}
-            date_data[ds]["frames"] += row.frames
-            date_data[ds]["integration"] += row.integration or 0
-            if row.filter_used:
-                date_data[ds]["filters"][row.filter_used] = {
-                    "frames": row.frames,
-                    "integration": row.integration or 0,
-                }
+    # Aggregate by session_date
+    date_data: dict[str, dict] = {}
+    for row in rows:
+        ds = str(row.session_date)
+        if ds not in date_data:
+            date_data[ds] = {"frames": 0, "integration": 0.0, "filters": {}}
+        date_data[ds]["frames"] += row.frames
+        date_data[ds]["integration"] += row.integration or 0
+        if row.filter_used:
+            date_data[ds]["filters"][row.filter_used] = {
+                "frames": row.frames,
+                "integration": row.integration or 0,
+            }
 
     sessions_list = []
     for ds in sorted(date_data.keys(), reverse=True):
