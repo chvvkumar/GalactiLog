@@ -329,7 +329,11 @@ def enrich_target_from_vizier(session: Session, target: "Target") -> bool:
     """Enrich a target from VizieR. Checks cache first, queries if needed.
 
     HTTP call is made outside any open transaction to avoid holding DB
-    connections during network I/O.
+    connections during network I/O. A cache-miss fetch goes through the
+    cache wrapper's get_or_fetch, so a transient VizieR failure is retried
+    with backoff and, if every attempt fails, negative-cached (returns
+    False) rather than raising; a non-transient failure (e.g. a 4xx) raises
+    NonTransientError uncaught, matching hyperleda/gaia.
 
     Returns True if any fields were updated.
     """
@@ -367,12 +371,13 @@ def enrich_target_from_vizier(session: Session, target: "Target") -> bool:
             updated = True
         return updated
 
-    # Cache miss or expired - Query VizieR (HTTP call - outside transaction)
-    viz_id = determine_vizier_catalog(target.catalog_id)[0]
-    data = query_vizier(target.catalog_id)
+    # Cache miss or expired - Query VizieR via the cache wrapper (handles
+    # retry/backoff and negative caching). The HTTP call happens outside any
+    # open transaction.
+    def fetch() -> dict[str, Any] | None:
+        return query_vizier(target.catalog_id)
 
-    # Cache the result in its own mini-transaction (even if None - negative cache)
-    save_vizier_cache(session, target.catalog_id, viz_id, data)
+    data = cc.get_or_fetch(session, "vizier", target.catalog_id, fetch)
     session.commit()
 
     if data is None:
