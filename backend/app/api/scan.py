@@ -320,14 +320,14 @@ async def db_summary(session: AsyncSession = Depends(get_session), user: User = 
              WHERE resolved_target_id IS NULL AND image_type = 'LIGHT'
                AND raw_headers->>'OBJECT' IS NOT NULL
                AND raw_headers->>'OBJECT' != '') AS unresolved_images,
-            (SELECT COUNT(*) FROM simbad_cache) AS cached_simbad,
-            (SELECT COUNT(*) FROM simbad_cache WHERE main_id IS NULL) AS cached_negative,
+            (SELECT COUNT(*) FROM catalog_cache WHERE source = 'simbad') AS cached_simbad,
+            (SELECT COUNT(*) FROM catalog_cache WHERE source = 'simbad' AND negative) AS cached_negative,
             (SELECT COUNT(*) FROM merge_candidates WHERE status = 'pending') AS pending_merges,
             (SELECT COUNT(*) FROM images WHERE detected_stars IS NOT NULL) AS csv_enriched,
-            (SELECT COUNT(*) FROM vizier_cache) AS cached_vizier,
-            (SELECT COUNT(*) FROM vizier_cache WHERE size_major IS NULL AND size_minor IS NULL) AS cached_vizier_negative,
-            (SELECT COUNT(*) FROM sesame_cache) AS cached_sesame,
-            (SELECT COUNT(*) FROM sesame_cache WHERE main_id IS NULL) AS cached_sesame_negative
+            (SELECT COUNT(*) FROM catalog_cache WHERE source = 'vizier') AS cached_vizier,
+            (SELECT COUNT(*) FROM catalog_cache WHERE source = 'vizier' AND negative) AS cached_vizier_negative,
+            (SELECT COUNT(*) FROM catalog_cache WHERE source = 'sesame') AS cached_sesame,
+            (SELECT COUNT(*) FROM catalog_cache WHERE source = 'sesame' AND negative) AS cached_sesame_negative
     """))
     row = result.one()
     return {

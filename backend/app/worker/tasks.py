@@ -21,6 +21,7 @@ from app.services.simbad import (
 )
 from app.services.target_resolver import resolve_target, normalize_sql_expr, match_target_by_identity
 from app.services.simbad_repair import repair_corrupted_simbad_cache
+from app.services import catalog_cache as cc
 from app.services.thumbnail import generate_thumbnail
 from app.services.xisf_parser import extract_xisf_metadata, generate_xisf_thumbnail
 from app.services.session_date import (
@@ -1490,8 +1491,15 @@ def rebuild_targets(self) -> dict:
                 logger.info("rebuild_targets: cancelled after %d/%d", i, total)
                 return {"status": "cancelled", **details}
 
-            with Session(_sync_engine) as session:
-                target_id = resolve_target(obj_name, session, redis=_redis)
+            try:
+                with Session(_sync_engine) as session:
+                    target_id = resolve_target(obj_name, session, redis=_redis)
+            except cc.NonTransientError as exc:
+                target_id = None
+                logger.warning(
+                    "rebuild_targets: non-transient resolve failure for '%s', skipping: %s",
+                    obj_name, exc,
+                )
 
             if target_id:
                 with Session(_sync_engine) as session:
@@ -1643,8 +1651,15 @@ def retry_unresolved(self) -> dict:
                 logger.info("retry_unresolved: cancelled after %d/%d", i, total)
                 return {"status": "cancelled", **details}
 
-            with Session(_sync_engine) as session:
-                target_id = resolve_target(obj_name, session, redis=_redis)
+            try:
+                with Session(_sync_engine) as session:
+                    target_id = resolve_target(obj_name, session, redis=_redis)
+            except cc.NonTransientError as exc:
+                target_id = None
+                logger.warning(
+                    "retry_unresolved: non-transient resolve failure for '%s', skipping: %s",
+                    obj_name, exc,
+                )
 
             if target_id:
                 with Session(_sync_engine) as session:

@@ -367,6 +367,46 @@ class TestRebuildFamilyTimeout:
         assert "paused" in captured["message"].lower()
 
 
+class TestRebuildFamilyNonTransientError:
+    """A single bad name's NonTransientError (4xx from sesame/vizier) must not
+    abort the whole batch or strand the rebuild status at "running" -- it is
+    counted as a failure and the loop continues to the next name."""
+
+    def test_rebuild_targets_skips_non_transient_failure_and_continues(self):
+        tasks = _bootstrap_tasks()
+
+        def resolve(obj_name, *a, **k):
+            if obj_name == "BadName":
+                raise tasks.cc.NonTransientError("400 client error")
+            return "target-id-123"
+
+        result, captured = _run_rebuild_family(
+            tasks, tasks.rebuild_targets,
+            [("BadName", 3), ("M31", 10)], resolve,
+        )
+        assert result["status"] == "complete"
+        assert result["resolved"] == 1
+        assert result["failed"] == 1
+        assert result["total"] == 2
+
+    def test_retry_unresolved_skips_non_transient_failure_and_continues(self):
+        tasks = _bootstrap_tasks()
+
+        def resolve(obj_name, *a, **k):
+            if obj_name == "BadName":
+                raise tasks.cc.NonTransientError("400 client error")
+            return "target-id-123"
+
+        result, captured = _run_rebuild_family(
+            tasks, tasks.retry_unresolved,
+            [("BadName", 3), ("M31", 10)], resolve,
+        )
+        assert result["status"] == "complete"
+        assert result["resolved"] == 1
+        assert result["failed"] == 1
+        assert result["total"] == 2
+
+
 # ---------------------------------------------------------------------------
 # AUD-035: run_data_migrations survives SoftTimeLimitExceeded with durable state
 # ---------------------------------------------------------------------------

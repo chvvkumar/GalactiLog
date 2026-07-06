@@ -80,8 +80,18 @@ def enrich_new_target(session: Session, target) -> dict:
         and get_cached_gaia(target.id, session) is None
     ):
         result["queried_network"] = True
-    if enrich_target_from_gaia(session, target):
-        result["gaia"] = True
+    try:
+        if enrich_target_from_gaia(session, target):
+            result["gaia"] = True
+    except SoftTimeLimitExceeded:
+        # Must propagate so a batch runner can roll back its uncommitted tail
+        # and write a terminal state instead of running on to the hard kill.
+        raise
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "Gaia enrichment failed for %s: %s",
+            target.catalog_id or target.primary_name, exc,
+        )
 
     # 4. HyperLEDA morphology/inclination (galaxy gate + cache pre-check inside).
     if (
