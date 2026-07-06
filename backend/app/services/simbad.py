@@ -471,41 +471,19 @@ def _get_simbad_id(object_name: str) -> str:
 
 def get_cached_simbad(query_name: str, db_session) -> dict[str, Any] | None:
     """Look up a cached SIMBAD result. Returns raw dict or None."""
-    from app.models.simbad_cache import SimbadCache
-    row = db_session.execute(
-        __import__("sqlalchemy").select(SimbadCache).where(SimbadCache.query_name == query_name)
-    ).scalar_one_or_none()
-    if row is None:
-        return None
-    if row.main_id is None:
-        return {"_negative": True}  # Cached negative result
-    return {
-        "main_id": row.main_id,
-        "raw_aliases": row.raw_aliases or [],
-        "ra": row.ra,
-        "dec": row.dec,
-        "object_type": row.object_type,
-    }
+    from app.services import catalog_cache as cc
+
+    cached = cc.get_cached(db_session, "simbad", query_name)
+    if cached is cc.NEGATIVE:
+        return {"_negative": True}
+    return cached
 
 
 def save_simbad_cache(query_name: str, raw: dict[str, Any] | None, db_session) -> None:
     """Persist a SIMBAD result (or negative) to the cache table."""
-    from app.models.simbad_cache import SimbadCache
-    from sqlalchemy.dialects.postgresql import insert as pg_insert
+    from app.services import catalog_cache as cc
 
-    values = {
-        "query_name": query_name,
-        "main_id": raw["main_id"] if raw else None,
-        "raw_aliases": raw.get("raw_aliases", []) if raw else [],
-        "ra": raw.get("ra") if raw else None,
-        "dec": raw.get("dec") if raw else None,
-        "object_type": raw.get("object_type") if raw else None,
-    }
-    stmt = pg_insert(SimbadCache).values(**values).on_conflict_do_update(
-        index_elements=["query_name"],
-        set_=values,
-    )
-    db_session.execute(stmt)
+    cc.save_cached(db_session, "simbad", query_name, raw)
 
 
 async def resolve_target_name(object_name: str) -> dict[str, Any] | None:

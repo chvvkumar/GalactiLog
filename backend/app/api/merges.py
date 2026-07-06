@@ -14,7 +14,6 @@ from app.models.image import Image
 from app.models.merge_candidate import MergeCandidate
 from app.schemas.target import MergeCandidateResponse, MergedTargetResponse, MergeRequest, OrphanPreviewRequest, OrphanPreviewResponse, OrphanCreateRequest, MergePreviewRequest, MergePreviewResponse, TargetIdentityRequest, TargetIdentityResponse, StatusResponse, DuplicateDetectionResponse, OrphanCreateResponse, CustomTargetCreateRequest, CustomTargetCreateResponse
 from app.services.simbad import normalize_catalog_id, normalize_object_name
-from app.models.simbad_cache import SimbadCache
 from app.models.sesame_cache import SesameCache
 from app.config import async_redis
 from app.models.merge_manifest import MergeManifest
@@ -116,19 +115,14 @@ async def orphan_preview(
     source = body.source_name
     normalized = normalize_object_name(source)
 
-    # Clear negative caches so the name gets a fresh attempt
-    await session.execute(
-        delete(SimbadCache).where(SimbadCache.query_name == normalized, SimbadCache.main_id.is_(None))
-    )
-    await session.commit()
-
     async with async_redis() as redis:
         await redis.srem("target_resolver:negative", normalized)
 
     def _resolve_sync():
         from app.services import catalog_cache as cc
         with SyncSession(sync_engine) as sync_db:
-            # Clear SESAME negative cache for this key so it gets a fresh attempt
+            # Clear negative caches so the name gets a fresh attempt
+            cc.clear_negative(sync_db, "simbad", normalized)
             cc.clear_negative(sync_db, "sesame", normalized)
             result = resolve_target_name_cached(source, sync_db)
             if result is None:
@@ -630,12 +624,6 @@ async def update_target_identity(
         for name in all_names:
             n = normalize_object_name(name)
             await session.execute(
-                delete(SimbadCache).where(
-                    SimbadCache.query_name == n,
-                    SimbadCache.main_id.is_(None),
-                )
-            )
-            await session.execute(
                 delete(SesameCache).where(
                     SesameCache.query_name == n,
                     SesameCache.main_id.is_(None),
@@ -649,7 +637,10 @@ async def update_target_identity(
                 await redis.srem("target_resolver:negative", n)
 
         def _resolve_sync():
+            from app.services import catalog_cache as cc
             with SyncSession(sync_engine) as sync_db:
+                for name in all_names:
+                    cc.clear_negative(sync_db, "simbad", normalize_object_name(name))
                 return resolve_target_name_cached(lookup_name, sync_db)
 
         result = await asyncio.to_thread(_resolve_sync)

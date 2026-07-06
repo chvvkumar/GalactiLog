@@ -1584,9 +1584,11 @@ def retry_unresolved(self) -> dict:
     )
 
     # Phase 1: Clear negative caches so names get a fresh shot
+    from app.services import catalog_cache as cc
+
     with Session(_sync_engine) as session:
-        session.execute(text("DELETE FROM simbad_cache WHERE main_id IS NULL"))
-        session.execute(text("DELETE FROM sesame_cache"))
+        cc.clear_negative(session, "simbad")
+        cc.invalidate(session, "sesame")
         session.commit()
     _redis.delete("target_resolver:negative")
     logger.info("retry_unresolved: cleared SIMBAD negatives and SESAME cache")

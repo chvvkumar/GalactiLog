@@ -464,6 +464,23 @@ class TestResolveTargetNameCached:
         assert result["catalog_id"] == "NGC 7000"
         assert mock_get_cache.call_count == 2
 
+    def test_negative_cache_suppresses_refetch_without_http_call(self):
+        """A negative-cached row (no mapped name, skip_simbad not set) returns None
+        without ever calling _query_simbad_raw -- the cache must short-circuit the
+        network path entirely, not merely skip it because skip_simbad was passed."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+        from app.services.simbad import resolve_target_name_cached
+
+        mock_session = MagicMock()
+
+        with patch("app.services.simbad.get_cached_simbad", return_value={"_negative": True}), \
+             patch("app.services.simbad._get_simbad_id", return_value="XYZNOTREAL"), \
+             patch("app.services.simbad._query_simbad_raw", new_callable=AsyncMock) as mock_net:
+            result = resolve_target_name_cached("XYZNOTREAL", mock_session)
+
+        assert result is None
+        mock_net.assert_not_called()
+
 
 # ---------------------------------------------------------------------------
 # _get_simbad_id (override map + Stellarium integration)
