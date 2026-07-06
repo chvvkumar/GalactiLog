@@ -299,6 +299,11 @@ export interface ScanStatus {
   removed: number;
   skipped_calibration: number;
   failed_files?: FailedFile[];
+  task?: string;
+  step?: number;
+  total_steps?: number;
+  percent?: number;
+  message?: string;
 }
 
 export type ActivitySeverity = "info" | "warning" | "error";
@@ -361,6 +366,9 @@ export interface RebuildStatus {
   started_at: number | null;
   completed_at: number | null;
   details: Record<string, number>;
+  step?: number;
+  total_steps?: number;
+  percent?: number;
 }
 
 export interface DbSummary {

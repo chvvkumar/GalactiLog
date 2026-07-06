@@ -18,6 +18,7 @@ const MaintenanceSection: Component<MaintenanceSectionProps> = (props) => {
   const [activeOp, setActiveOp] = createSignal<string | null>(null);
   const [statusMessage, setStatusMessage] = createSignal("");
   const [statusDetails, setStatusDetails] = createSignal<Record<string, number>>({});
+  const [statusPercent, setStatusPercent] = createSignal<number | undefined>(undefined);
   const [errorMessage, setErrorMessage] = createSignal("");
   const [showRebuildConfirm, setShowRebuildConfirm] = createSignal(false);
 
@@ -34,6 +35,7 @@ const MaintenanceSection: Component<MaintenanceSectionProps> = (props) => {
         const status: RebuildStatus = await api.getRebuildStatus();
         setStatusMessage(status.message);
         setStatusDetails(status.details);
+        setStatusPercent(status.percent);
 
         if (status.state === "complete") {
           stopPolling();
@@ -46,6 +48,7 @@ const MaintenanceSection: Component<MaintenanceSectionProps> = (props) => {
               setActiveOp(null);
               setStatusMessage("");
               setStatusDetails({});
+              setStatusPercent(undefined);
             }
           }, 4000);
         } else if (status.state === "error") {
@@ -63,6 +66,7 @@ const MaintenanceSection: Component<MaintenanceSectionProps> = (props) => {
               setActiveOp(null);
               setStatusMessage("");
               setStatusDetails({});
+              setStatusPercent(undefined);
             }
           }, 4000);
         }
@@ -94,6 +98,7 @@ const MaintenanceSection: Component<MaintenanceSectionProps> = (props) => {
     setActiveOp(opName);
     setStatusMessage("");
     setStatusDetails({});
+    setStatusPercent(undefined);
     setErrorMessage("");
 
     startPolling();
@@ -174,6 +179,20 @@ const MaintenanceSection: Component<MaintenanceSectionProps> = (props) => {
   const isError = (op: string) => opState() === "error" && activeOp() === op;
   const anyRunning = () => opState() === "running";
 
+  /** Numeric progress bar, shown alongside the spinner once the backend
+   *  reports a percent (undefined keeps the section spinner-only, e.g.
+   *  before the first poll response or against an older backend). */
+  const ProgressBar: Component = () => (
+    <Show when={statusPercent() !== undefined}>
+      <div class="w-full h-1.5 bg-theme-base rounded-full overflow-hidden mt-2">
+        <div
+          class="h-full bg-theme-accent rounded-full transition-all duration-300"
+          style={{ width: `${statusPercent() ?? 0}%` }}
+        />
+      </div>
+    </Show>
+  );
+
   /** Format detail counts from rebuild status into a readable string */
   const formatDetails = (): string => {
     const d = statusDetails();
@@ -233,6 +252,7 @@ const MaintenanceSection: Component<MaintenanceSectionProps> = (props) => {
                 <Show when={formatDetails()}>
                   <p class="text-theme-text-tertiary mt-0.5">{formatDetails()}</p>
                 </Show>
+                <ProgressBar />
               </div>
             </div>
           </Show>
@@ -282,6 +302,7 @@ const MaintenanceSection: Component<MaintenanceSectionProps> = (props) => {
                 <Show when={formatDetails()}>
                   <p class="text-theme-text-tertiary mt-0.5">{formatDetails()}</p>
                 </Show>
+                <ProgressBar />
               </div>
             </div>
           </Show>
@@ -330,6 +351,7 @@ const MaintenanceSection: Component<MaintenanceSectionProps> = (props) => {
                 <Show when={formatDetails()}>
                   <p class="text-theme-text-tertiary mt-0.5">{formatDetails()}</p>
                 </Show>
+                <ProgressBar />
               </div>
             </div>
           </Show>
@@ -400,6 +422,7 @@ const MaintenanceSection: Component<MaintenanceSectionProps> = (props) => {
                 <Show when={formatDetails()}>
                   <p class="text-theme-text-tertiary mt-0.5">{formatDetails()}</p>
                 </Show>
+                <ProgressBar />
               </div>
             </div>
           </Show>
