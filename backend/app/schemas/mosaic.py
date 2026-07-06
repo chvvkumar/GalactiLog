@@ -94,6 +94,11 @@ class MosaicDetailResponse(BaseModel):
     default_filter: str | None = None
     needs_review: bool = False
     custom_values: dict[str, str] | None = None
+    # Panel labels parsed at ingest (Image.panel_label) for this mosaic's
+    # targets that have no backing MosaicPanel row yet (Image.panel_id IS
+    # NULL). Read-only surfacing of newly-ingested panel tokens on an already
+    # -accepted mosaic; does not itself create a MosaicPanel.
+    available_panel_labels: list[str] = []
 
 
 class SuggestionPanelSession(BaseModel):

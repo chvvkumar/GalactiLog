@@ -969,6 +969,10 @@ export interface MosaicDetailResponse {
   default_filter: string | null;
   needs_review?: boolean;
   custom_values?: Record<string, string> | null;
+  /** Panel labels parsed at ingest for this mosaic's targets that have no
+   * backing MosaicPanel row yet -- surfaced so an admin can see a new panel
+   * label exists without the offline detection job re-running. */
+  available_panel_labels?: string[];
 }
 
 export interface PanelThumbnailResponse {

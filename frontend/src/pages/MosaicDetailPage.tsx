@@ -398,6 +398,31 @@ const MosaicDetailPage: Component = () => {
               </div>
             </Show>
 
+            {/* Available Panel Labels Banner */}
+            <Show when={(mosaic()?.available_panel_labels?.length ?? 0) > 0}>
+              <div class="rounded-[var(--radius-sm)] bg-theme-accent/10 border border-theme-accent/30 p-4">
+                <div class="flex items-center gap-2">
+                  <p class="text-sm font-medium text-theme-accent">New panel labels available</p>
+                  <HelpPopover>
+                    <p class="text-sm text-theme-text-secondary">
+                      These panel labels were seen in newly-ingested images for this mosaic's targets,
+                      but no panel has been configured for them yet. They will not appear in the panel
+                      grid or stats until a panel is created for the label.
+                    </p>
+                  </HelpPopover>
+                </div>
+                <div class="flex flex-wrap gap-2 mt-2">
+                  <For each={mosaic()?.available_panel_labels ?? []}>
+                    {(label) => (
+                      <span class="px-2 py-1 text-xs bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded-[var(--radius-sm)]">
+                        {label}
+                      </span>
+                    )}
+                  </For>
+                </div>
+              </div>
+            </Show>
+
             {/* Panel Thumbnails Grid */}
             <Show when={data().panels.some((p: PanelStats) => p.thumbnail_url)}>
               <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">

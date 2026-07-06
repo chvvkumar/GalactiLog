@@ -596,6 +596,40 @@ async def get_mosaic_detail(
     cv_rows = (await session.execute(cv_q)).all()
     custom_values = {slug: val for _, slug, val in cv_rows} if cv_rows else None
 
+    # Panel labels parsed at ingest for this mosaic's targets that have no
+    # backing MosaicPanel row yet. This is the "accepted mosaics frozen" fix:
+    # the offline detection job skips targets already in a MosaicPanel, but
+    # ingest-time parsing (Task 1/2) still stamps Image.panel_label on every
+    # new frame, leaving Image.panel_id NULL when no MosaicPanel matches. Read
+    # -only surfacing; does not create a MosaicPanel row.
+    target_ids = {p.target_id for p in sorted_panels}
+    existing_labels_by_target: dict[uuid.UUID, set[str]] = defaultdict(set)
+    for p in sorted_panels:
+        existing_labels_by_target[p.target_id].add(p.panel_label)
+
+    available_panel_labels: list[str] = []
+    if target_ids:
+        avail_q = (
+            select(Image.resolved_target_id, Image.panel_label)
+            .where(
+                Image.resolved_target_id.in_(target_ids),
+                Image.panel_id.is_(None),
+                Image.panel_label.isnot(None),
+            )
+            .distinct()
+        )
+        avail_rows = (await session.execute(avail_q)).all()
+        labels = set()
+        for target_id, panel_label in avail_rows:
+            # Defensive guard: panel_id IS NULL should already imply no
+            # MosaicPanel matched this (target_id, panel_label), but skip any
+            # exact duplicate of an existing panel's label rather than
+            # double-counting it as "available".
+            if panel_label in existing_labels_by_target.get(target_id, ()):
+                continue
+            labels.add(panel_label)
+        available_panel_labels = sorted(labels)
+
     return MosaicDetailResponse(
         id=str(mosaic.id),
         name=mosaic.name,
@@ -609,6 +643,7 @@ async def get_mosaic_detail(
         default_filter=default_filter,
         needs_review=mosaic.needs_review,
         custom_values=custom_values,
+        available_panel_labels=available_panel_labels,
     )
 
 
