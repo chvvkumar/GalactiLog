@@ -9,10 +9,16 @@ import createClient from "openapi-fetch";
 import type { paths } from "./schema";
 import { authMiddleware } from "../authMiddleware";
 
-const API_BASE = import.meta.env.VITE_API_URL || "/api";
-
+// NOTE: unlike the old hand-written client.ts (whose fetchJson prepended
+// `API_BASE = VITE_API_URL || "/api"` to path strings like "/scan/status"),
+// the generated `paths` type's keys already embed the full server-mounted
+// prefix (e.g. "/api/scan/status" -- see backend/app/api/router.py's
+// `APIRouter(prefix="/api")`). Setting baseUrl to "/api" here would double
+// it to "/api/api/scan/status". baseUrl is therefore "" (relative to the
+// current origin), which the vite dev proxy and production nginx both
+// already route correctly for "/api/..." paths.
 export const apiClient = createClient<paths>({
-  baseUrl: API_BASE,
+  baseUrl: "",
   credentials: "same-origin",
 });
 

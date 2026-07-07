@@ -1,5 +1,6 @@
 import { showToast } from "../components/Toast";
-import { api } from "../api/client";
+import { apiClient } from "../api/generated/client";
+import { unwrap } from "../api/unwrap";
 
 const LS_KEY = "galactilog_last_error_ts";
 
@@ -36,7 +37,9 @@ function onVisibilityChange(): void {
 async function checkErrors(): Promise<void> {
   const since = getLastSeenTs();
   try {
-    const res = await api.fetchActivityErrorsSince(since);
+    const res = await apiClient
+      .GET("/api/activity", { params: { query: { severity: ["error"], since } } })
+      .then(unwrap);
     if (res.items.length === 0) return;
 
     setLastSeenTs(res.items[0].timestamp);
