@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 from sqlalchemy import select, delete
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 
 from app.models import Target, UserSettings, SETTINGS_ROW_ID
 from app.models.image import Image
@@ -617,15 +617,15 @@ def compute_dedup_signature(
 # DB orchestrator
 # ---------------------------------------------------------------------------
 
-async def _gather_target_records(session: AsyncSession) -> list[dict]:
+def _gather_target_records(session: Session) -> list[dict]:
     """Build per-target records (object names, median center, FOV) for all
     unmerged targets not already assigned to a mosaic panel.
     """
     in_mosaic_q = select(MosaicPanel.target_id)
-    in_mosaic = {r[0] for r in (await session.execute(in_mosaic_q)).all()}
+    in_mosaic = {r[0] for r in session.execute(in_mosaic_q).all()}
 
     targets_q = select(Target.id).where(Target.merged_into_id.is_(None))
-    target_ids = [r[0] for r in (await session.execute(targets_q)).all()]
+    target_ids = [r[0] for r in session.execute(targets_q).all()]
     target_ids = [tid for tid in target_ids if tid not in in_mosaic]
     if not target_ids:
         return []
@@ -650,7 +650,7 @@ async def _gather_target_records(session: AsyncSession) -> list[dict]:
         )
     )
     by_target_headers: dict = defaultdict(list)
-    for row in (await session.execute(rows_q)).all():
+    for row in session.execute(rows_q).all():
         headers = {k: getattr(row, k) for k in _HEADER_KEYS if getattr(row, k) is not None}
         if headers:
             by_target_headers[row.resolved_target_id].append(headers)
@@ -704,14 +704,15 @@ async def _gather_target_records(session: AsyncSession) -> list[dict]:
     return records
 
 
-async def detect_mosaic_panels(session: AsyncSession, gap_days: int = 0) -> int:
+def detect_mosaic_panels(session: Session, gap_days: int = 0) -> int:
     """Scan targets for mosaic panels (name + position) and create suggestions.
 
-    Entry point used by the API (with gap_days from settings) and the Celery
-    task (gap_days defaults to 0). Reads mosaic_keywords and
-    mosaic_position_tolerance_arcmin from user settings.
+    Entry point used exclusively by the Celery task (`detect_mosaic_panels_task`
+    in `app.worker.tasks_mosaics`), which resolves `gap_days` from user settings
+    before calling in. Reads mosaic_keywords and mosaic_position_tolerance_arcmin
+    from user settings.
     """
-    settings = await session.get(UserSettings, SETTINGS_ROW_ID)
+    settings = session.get(UserSettings, SETTINGS_ROW_ID)
     general = settings.general if settings else {}
     keywords = general.get("mosaic_keywords", ["Panel", "P"])
     tolerance_arcmin = general.get("mosaic_position_tolerance_arcmin", 0) or 0
@@ -719,7 +720,7 @@ async def detect_mosaic_panels(session: AsyncSession, gap_days: int = 0) -> int:
     if not keywords:
         keywords = []
 
-    records = await _gather_target_records(session)
+    records = _gather_target_records(session)
     if not records:
         return 0
 
@@ -748,7 +749,7 @@ async def detect_mosaic_panels(session: AsyncSession, gap_days: int = 0) -> int:
         MosaicSuggestion.dedup_signature.is_not(None),
     )
     rejected_signatures: dict[str, set[str]] = {}
-    for sig, dates_by_label in (await session.execute(rejected_q)).all():
+    for sig, dates_by_label in session.execute(rejected_q).all():
         if not sig:
             continue
         flat_dates: set[str] = set()
@@ -762,14 +763,14 @@ async def detect_mosaic_panels(session: AsyncSession, gap_days: int = 0) -> int:
     # This drops stale rows from prior runs AND legacy rows from the old code
     # (which have NULL base_name/geometry and would otherwise coexist as
     # no-preview duplicates). Rejected/dismissed and accepted rows are untouched.
-    await session.execute(
+    session.execute(
         delete(MosaicSuggestion).where(MosaicSuggestion.status == "pending")
     )
 
     # Skip base names already represented by an existing mosaic.
     existing_mosaic_q = select(Mosaic.name)
     existing_mosaic_names = {
-        r[0].upper() for r in (await session.execute(existing_mosaic_q)).all()
+        r[0].upper() for r in session.execute(existing_mosaic_q).all()
     }
     accepted_bases: set[str] = set()
     for base in new_base_names:
@@ -813,7 +814,7 @@ async def detect_mosaic_panels(session: AsyncSession, gap_days: int = 0) -> int:
                 )
                 .distinct()
             )
-            raw_rows = (await session.execute(dates_q)).all()
+            raw_rows = session.execute(dates_q).all()
             date_strs = sorted(
                 {
                     d.strftime("%Y-%m-%d") if hasattr(d, "strftime") else str(d)
@@ -863,12 +864,12 @@ async def detect_mosaic_panels(session: AsyncSession, gap_days: int = 0) -> int:
                     rejected_signatures=rejected_signatures,
                 )
 
-    await session.commit()
+    session.commit()
     return count
 
 
 def _add_suggestion(
-    session: AsyncSession,
+    session: Session,
     group: PanelGroup,
     raw_id: dict,
     panel_patterns: list[str],

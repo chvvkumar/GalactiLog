@@ -1,10 +1,11 @@
 """Mosaic panel detection: detect_mosaic_panels_task."""
 import logging
 
-from app.config import settings
+from sqlalchemy.orm import Session
+
 from app.models.user_settings import UserSettings, SETTINGS_ROW_ID
 from app.worker.celery_app import celery_app
-from app.worker.tasks_common import _redis, _activity_session
+from app.worker.tasks_common import _sync_engine, _redis, _activity_session
 from app.services.activity import emit_sync as _emit_activity_sync
 
 logger = logging.getLogger(__name__)
@@ -21,26 +22,17 @@ def detect_mosaic_panels_task(parent_activity_id: int | None = None):
         return {"status": "skipped", "reason": "already running"}
 
     try:
-        import asyncio
-        from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-
         from app.services.mosaic_detection import detect_mosaic_panels
 
-        async def _run():
-            engine = create_async_engine(settings.database_url, pool_pre_ping=True)
-            async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-            async with async_session() as session:
-                # Use the campaign-split setting so scan-triggered detection
-                # produces the same suggestions as the manual /detect endpoint.
-                settings_row = await session.get(UserSettings, SETTINGS_ROW_ID)
-                general = settings_row.general if settings_row else {}
-                gap_days = general.get("mosaic_campaign_gap_days", 0)
-                count = await detect_mosaic_panels(session, gap_days=gap_days)
-                await session.commit()
-            await engine.dispose()
-            return count
+        with Session(_sync_engine) as session:
+            # Use the campaign-split setting so scan-triggered detection
+            # produces the same suggestions as the manual /detect endpoint.
+            settings_row = session.get(UserSettings, SETTINGS_ROW_ID)
+            general = settings_row.general if settings_row else {}
+            gap_days = general.get("mosaic_campaign_gap_days", 0)
+            count = detect_mosaic_panels(session, gap_days=gap_days)
+            session.commit()
 
-        count = asyncio.run(_run())
         logger.info("detect_mosaic_panels_task: found %d new suggestions", count)
         try:
             with _activity_session() as _db:

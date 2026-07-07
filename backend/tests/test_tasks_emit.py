@@ -389,10 +389,26 @@ def test_mosaic_detection_complete_emits():
     mock_redis.set.return_value = True
     mock_redis.delete = MagicMock()
 
+    import app.services.mosaic_detection as md
+
+    class FakeSession:
+        def get(self, *a, **k):
+            return None
+
+        def commit(self):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
     with patch.object(tasks_mod, "_redis", mock_redis), \
          patch.object(tasks_mod, "_emit_activity_sync", fake_emit_sync), \
          patch.object(tasks_mod, "_activity_session") as mf, \
-         patch("asyncio.run", return_value=7):
+         patch.object(tasks_mod, "Session", lambda engine: FakeSession()), \
+         patch.object(md, "detect_mosaic_panels", lambda session, gap_days=0: 7):
         mctx = MagicMock()
         mctx.__enter__ = lambda s, *a: MagicMock()
         mctx.__exit__ = lambda s, *a: None
@@ -409,33 +425,29 @@ def test_mosaic_detection_complete_emits():
 def test_detection_task_passes_campaign_gap_days_from_settings():
     """The scan-triggered task must read mosaic_campaign_gap_days from settings
     and pass it to detect_mosaic_panels, matching the manual /detect endpoint."""
-    import contextlib
-    from unittest.mock import AsyncMock
-
     tasks_mod = _bootstrap_real_tasks("app.worker.tasks_mosaics")
     detect_mosaic_panels_task = tasks_mod.detect_mosaic_panels_task
 
-    # Fake async session: get(UserSettings, ...) returns general with gap=7.
+    # Fake sync session: get(UserSettings, ...) returns general with gap=7.
     settings_row = MagicMock()
     settings_row.general = {"mosaic_campaign_gap_days": 7}
 
-    fake_session = AsyncMock()
-    fake_session.get = AsyncMock(return_value=settings_row)
-    fake_session.commit = AsyncMock()
+    class FakeSession:
+        def get(self, *a, **k):
+            return settings_row
 
-    @contextlib.asynccontextmanager
-    async def _session_cm():
-        yield fake_session
+        def commit(self):
+            pass
 
-    def _sessionmaker(*a, **k):
-        return lambda: _session_cm()
+        def __enter__(self):
+            return self
 
-    fake_engine = MagicMock()
-    fake_engine.dispose = AsyncMock()
+        def __exit__(self, *a):
+            return False
 
     captured = {}
 
-    async def fake_detect(session, gap_days=0):
+    def fake_detect(session, gap_days=0):
         captured["gap_days"] = gap_days
         return 3
 
@@ -452,9 +464,8 @@ def test_detection_task_passes_campaign_gap_days_from_settings():
     with patch.object(tasks_mod, "_redis", mock_redis), \
          patch.object(tasks_mod, "_emit_activity_sync", lambda *a, **k: None), \
          patch.object(tasks_mod, "_activity_session", lambda: mctx), \
-         patch.object(md, "detect_mosaic_panels", fake_detect), \
-         patch("sqlalchemy.ext.asyncio.create_async_engine", return_value=fake_engine), \
-         patch("sqlalchemy.ext.asyncio.async_sessionmaker", _sessionmaker):
+         patch.object(tasks_mod, "Session", lambda engine: FakeSession()), \
+         patch.object(md, "detect_mosaic_panels", fake_detect):
         result = detect_mosaic_panels_task.run()
 
     assert result["status"] == "complete"
