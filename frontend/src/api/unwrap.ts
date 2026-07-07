@@ -55,7 +55,15 @@ export function toApiError(error: unknown, status: number): ApiError {
  *   queryFn: ({ signal }) => apiClient.GET("/x", { params, signal }).then(unwrap)
  */
 export function unwrap<T>(result: { data?: T; error?: unknown; response: Response }): T {
-  if (result.error !== undefined) {
+  // Throw whenever the response is non-2xx, matching the old client.ts
+  // fetchJson which threw unconditionally on `!resp.ok`. openapi-fetch leaves
+  // `result.error` undefined for a non-2xx response with an EMPTY body (an
+  // nginx 502/504 during a backend restart, or a bare 204) because it never
+  // parses a body -- gating only on `result.error` would let those infra
+  // failures through as a fake success with undefined data. Gate on
+  // `response.ok` instead; `toApiError` falls back to the per-status message
+  // table when there is no parseable detail body.
+  if (!result.response.ok) {
     throw toApiError(result.error, result.response.status);
   }
   return result.data as T;

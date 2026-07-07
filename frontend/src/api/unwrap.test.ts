@@ -65,14 +65,31 @@ describe("unwrap", () => {
     }
   });
 
-  it("does not throw when error is undefined, even for a non-2xx-looking status", () => {
-    // Mirrors openapi-fetch's contract: `unwrap` only throws when `error` is
-    // present. A caller that constructs a result with no error must get its
-    // (possibly undefined) `data` back rather than a spurious throw.
+  it("throws on a non-2xx response even when error is undefined (empty-body infra failure)", () => {
+    // openapi-fetch leaves `error` undefined for a non-2xx response with an
+    // empty body (e.g. an nginx 502/504 during a backend restart). unwrap must
+    // still throw -- matching old client.ts's unconditional throw on !resp.ok --
+    // rather than returning undefined data as a fake success.
+    try {
+      unwrap({
+        data: undefined,
+        error: undefined,
+        response: new Response(null, { status: 502 }),
+      });
+      expect.unreachable("unwrap should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(ApiError);
+      expect((err as ApiError).status).toBe(502);
+      // 502 is not in the per-status table -> generic status-only fallback.
+      expect((err as ApiError).message).toBe("Something went wrong");
+    }
+  });
+
+  it("does not throw on a 2xx response with undefined data (e.g. a 204 no-content success)", () => {
     const result = unwrap({
       data: undefined,
       error: undefined,
-      response: new Response(null, { status: 418 }),
+      response: new Response(null, { status: 204 }),
     });
     expect(result).toBeUndefined();
   });
