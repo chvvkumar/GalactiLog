@@ -1,6 +1,7 @@
 import { createSignal, createResource } from "solid-js";
-import { api } from "../api/client";
-import type { EquipmentList } from "../types";
+import { apiClient } from "../api/generated/client";
+import { unwrap } from "../api/unwrap";
+import type { EquipmentList } from "../api/types";
 
 const [shouldFetchEquipment, setShouldFetchEquipment] = createSignal(false);
 
@@ -14,7 +15,7 @@ const [equipment, { mutate: mutateEquipment }] = createResource(
       pendingEquipmentSeed = null;
       return s;
     }
-    return api.getEquipment();
+    return apiClient.GET("/api/targets/equipment", {}).then(unwrap);
   },
 );
 
