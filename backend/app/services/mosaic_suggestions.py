@@ -218,7 +218,7 @@ async def list_pending_suggestions(session: AsyncSession) -> list[MosaicSuggesti
             # Fallback for legacy suggestions without panel_patterns
             base = r.base_name or r.suggested_name
             for label in r.panel_labels:
-                obj_pattern = object_pattern_for_label(label, base, r.panel_labels, r.panel_patterns)
+                obj_pattern = object_pattern_for_label(label, base, r.panel_labels, None)
                 pattern_map.setdefault(obj_pattern, []).append((idx, label))
 
     # Run one query with all patterns OR'd together

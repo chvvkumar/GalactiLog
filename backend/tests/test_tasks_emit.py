@@ -69,7 +69,7 @@ def test_append_activity_sync_not_imported_in_tasks():
             if node.module and "scan_state" in node.module:
                 names = [a.name for a in node.names]
                 assert "append_activity_sync" not in names, \
-                    "append_activity_sync still imported in tasks.py"
+                    "append_activity_sync still imported in tasks_scan.py"
 
 
 def test_emit_sync_imported_in_tasks():
@@ -82,7 +82,7 @@ def test_emit_sync_imported_in_tasks():
                 names = [a.name for a in node.names]
                 if "emit_sync" in names:
                     found = True
-    assert found, "emit_sync not imported from app.services.activity in tasks.py"
+    assert found, "emit_sync not imported from app.services.activity in tasks_scan.py"
 
 
 def _bootstrap_real_tasks(modname="app.worker.tasks_scan"):
