@@ -1,7 +1,7 @@
 import { Component, Show, For, createMemo } from "solid-js";
 import { useDashboardFilters, type SortKey } from "./DashboardFilterProvider";
 import TargetTable from "./TargetTable";
-import type { ActiveFilters } from "../types";
+import type { ActiveFilters } from "../api/types";
 
 const SkeletonRow: Component = () => (
   <tr class="border-b border-theme-border">
