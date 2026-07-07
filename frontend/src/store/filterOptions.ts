@@ -1,6 +1,7 @@
 import { createSignal, createResource } from "solid-js";
-import { api } from "../api/client";
-import type { ObjectTypeCount } from "../types";
+import { apiClient } from "../api/generated/client";
+import { unwrap } from "../api/unwrap";
+import type { ObjectTypeCount } from "../api/types";
 
 const [shouldFetch, setShouldFetch] = createSignal(false);
 // Set once bootstrap has seeded fits keys / object types so those resources
@@ -18,7 +19,7 @@ const [fitsKeys, { refetch: refetchFitsKeys, mutate: mutateFitsKeys }] = createR
       pendingFitsSeed = null;
       return s;
     }
-    return api.getFitsKeys();
+    return apiClient.GET("/api/targets/fits-keys", {}).then(unwrap);
   },
 );
 const [objectTypes, { refetch: refetchObjectTypes, mutate: mutateObjectTypes }] = createResource(
@@ -29,14 +30,18 @@ const [objectTypes, { refetch: refetchObjectTypes, mutate: mutateObjectTypes }] 
       pendingObjectTypesSeed = null;
       return s;
     }
-    return api.getObjectTypes();
+    return apiClient.GET("/api/targets/object-types", {}).then(unwrap);
   },
 );
 // Discovered filters are not part of the bootstrap payload and stay gated on an
 // actual consumer so they are not fetched at startup.
 const [discoveredFilters, { refetch: refetchDiscoveredFilters }] = createResource(
   () => shouldFetch() || undefined,
-  () => api.getDiscovered("filters").then((r) => r.items),
+  () =>
+    apiClient
+      .GET("/api/settings/discovered/{section}", { params: { path: { section: "filters" } } })
+      .then(unwrap)
+      .then((r) => r.items),
 );
 
 export function seedFilterOptions(fitsKeysData: string[], objectTypesData: ObjectTypeCount[]) {

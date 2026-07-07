@@ -3,11 +3,28 @@ import { useSettings, getFilterColorMap, getFilterAliasMap, enableSettingsFetch,
 import { seedEquipment } from "../store/catalog";
 import { seedFilterOptions } from "../store/filterOptions";
 import { useGraphSettings } from "../store/graphSettings";
-import type { SettingsResponse, GeneralSettings, FilterConfig, EquipmentConfig, DisplaySettings, GraphSettings, CustomColumn, ColumnVisibility } from "../types";
+import type { ColumnVisibility } from "../api/types";
+// Deliberately kept on the OLD hand-written settings/custom-column types
+// (required `FilterConfig.aliases`, `GeneralSettings.nina_instances`/
+// `stellarium_instances` typed as `IntegrationInstance[]`, literal-union
+// `CustomColumn.column_type`/`applies_to`, etc.) rather than the
+// generated-schema aliases in `../api/types`, which loosen these fields to
+// optional/untyped (backend Pydantic defaults/enums collapsed by the OpenAPI
+// dump). `store/settings.ts` and `store/graphSettings.ts` (Slice 2) already
+// depend on this narrower shape, and SettingsContextValue is consumed by
+// nearly every page (CustomColumnsTab/TargetTable/SessionTable/MosaicsTab/
+// FiltersTab/EquipmentTab/AstroBinTab/...), none of which are in this
+// slice's scope. Repointing here would ripple required->optional and
+// string->literal-union breaks well outside this slice. Same precedent as
+// store/stats.ts and store/graphSettings.ts. The backend always populates
+// the full shape, so the casts at the apiClient call sites below reflect
+// actual runtime data, not a behavior change.
+import type { SettingsResponse, GeneralSettings, FilterConfig, EquipmentConfig, DisplaySettings, GraphSettings, CustomColumn } from "../types";
 import type { Resource } from "solid-js";
 import type { FilterBadgeStyle } from "../utils/filterStyles";
 import { applyTheme, applyTextSize, DEFAULT_THEME_ID, DEFAULT_TEXT_SIZE } from "../themes";
-import { api } from "../api/client";
+import { apiClient } from "../api/generated/client";
+import { unwrap } from "../api/unwrap";
 import { useAuth } from "./AuthProvider";
 
 interface SettingsContextValue {
@@ -52,7 +69,7 @@ export const SettingsProvider: ParentComponent = (props) => {
         pendingCustomColumnsSeed = null;
         return s;
       }
-      return api.getCustomColumns();
+      return apiClient.GET("/api/custom-columns", {}).then(unwrap) as Promise<CustomColumn[]>;
     },
   );
   const refetchCustomColumns = () => startTransition(() => rawRefetchCustomColumns());
@@ -66,13 +83,24 @@ export const SettingsProvider: ParentComponent = (props) => {
   // fetching each store on demand.
   createEffect(() => {
     if (!auth.user()) return;
-    api.getBootstrap()
+    apiClient
+      .GET("/api/bootstrap", {})
+      .then(unwrap)
       .then((b) => {
-        seedSettings(b.settings);
+        // The generated BootstrapResponse types `settings` as a loose
+        // Record<string, unknown> (FastAPI response model looseness) and
+        // `custom_columns` as BootstrapCustomColumn[] with a few fields
+        // optional (created_at, display_order) where SettingsResponse/
+        // CustomColumn require them. The backend always populates the full
+        // shape here (same endpoint the old hand-written client called), so
+        // these casts reflect actual runtime data, not a behavior change --
+        // see api/types.ts's discrepancy note.
+        seedSettings(b.settings as unknown as SettingsResponse);
         seedEquipment(b.equipment);
         seedFilterOptions(b.fits_keys, b.object_types);
-        pendingCustomColumnsSeed = b.custom_columns;
-        mutateCustomColumns(b.custom_columns);
+        const customColumns = b.custom_columns as unknown as CustomColumn[];
+        pendingCustomColumnsSeed = customColumns;
+        mutateCustomColumns(customColumns);
         setCCGate(true);
       })
       .catch(() => {
@@ -85,7 +113,11 @@ export const SettingsProvider: ParentComponent = (props) => {
   createEffect(() => {
     const u = auth.user();
     if (u?.id) {
-      api.getColumnVisibility(u.id).then(setColumnVisibility).catch(() => {});
+      apiClient
+        .GET("/api/settings/column-visibility/{user_id}", { params: { path: { user_id: u.id } } })
+        .then(unwrap)
+        .then((vis) => setColumnVisibility(vis as ColumnVisibility))
+        .catch(() => {});
     }
   });
 
@@ -121,7 +153,7 @@ export const SettingsProvider: ParentComponent = (props) => {
     refetchCustomColumns,
     columnVisibility,
     saveColumnVisibility: async (vis: ColumnVisibility) => {
-      await api.updateColumnVisibility(vis);
+      await apiClient.PUT("/api/settings/column-visibility", { body: vis }).then(unwrap);
       setColumnVisibility(vis);
     },
   };
