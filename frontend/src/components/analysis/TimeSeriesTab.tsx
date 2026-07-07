@@ -1,6 +1,16 @@
-import { Component, createSignal, createResource, createMemo } from "solid-js";
-import { api } from "../../api/client";
+import { Component, createSignal, createMemo } from "solid-js";
+import { useQuery, keepPreviousData } from "@tanstack/solid-query";
+import { apiClient } from "../../api/generated/client";
+import { unwrap } from "../../api/unwrap";
+import { queryKeys } from "../../api/queryKeys";
 import type { SharedFilters } from "../../pages/AnalysisPage";
+// Deliberately kept on the OLD hand-written `TimeSeriesResponse` (whose
+// `TimeSeriesPoint.target_name` is `string | null`, no `undefined`) for the
+// cast below -- same schema-optionality gap as CorrelationTab's
+// `CorrelationPoint.target_id` cast. Sole consumer is `TimeSeriesChart`,
+// out of this slice's scope, still importing the old type. Flagged for
+// Slice 15.
+import type { TimeSeriesResponse } from "../../types";
 import TimeSeriesChart from "./TimeSeriesChart";
 import { MIN_GROUP, type MetricBaseline } from "../../utils/frameQuality";
 
@@ -54,25 +64,26 @@ const TimeSeriesTab: Component<Props> = (props) => {
   const [metric, setMetric] = createSignal("hfr");
   const [smoothing, setSmoothing] = createSignal<"raw" | "ma7" | "ma30">("raw");
 
-  const dataKey = () =>
-    props.active
-      ? `ts-${metric()}-${props.filters.telescope}-${props.filters.camera}-${props.filters.filterUsed}-${props.filters.dateFrom}-${props.filters.dateTo}`
-      : null;
+  const params = () => ({
+    metric: metric(),
+    telescope: props.filters.telescope,
+    camera: props.filters.camera,
+    filter_used: props.filters.filterUsed,
+    date_from: props.filters.dateFrom,
+    date_to: props.filters.dateTo,
+  });
 
-  const [data] = createResource(dataKey, () =>
-    api.getTimeSeries({
-      metric: metric(),
-      telescope: props.filters.telescope,
-      camera: props.filters.camera,
-      filter_used: props.filters.filterUsed,
-      date_from: props.filters.dateFrom,
-      date_to: props.filters.dateTo,
-    })
-  );
+  const dataQuery = useQuery(() => ({
+    queryKey: queryKeys.timeseries(params()),
+    queryFn: ({ signal }: { signal: AbortSignal }) =>
+      apiClient.GET("/api/analysis/timeseries", { params: { query: params() }, signal }).then(unwrap),
+    enabled: props.active,
+    placeholderData: keepPreviousData,
+  }));
 
   // Baseline computed client-side over the displayed nightly-median points.
   const baseline = createMemo<MetricBaseline | null>(() => {
-    const pts = data.latest?.points;
+    const pts = dataQuery.data?.points;
     if (!pts || pts.length === 0) return null;
     return baselineFromValues(pts.map((p) => p.value));
   });
@@ -101,8 +112,8 @@ const TimeSeriesTab: Component<Props> = (props) => {
       </div>
       <div style={{ height: "500px" }} class="relative">
         <TimeSeriesChart
-          data={data.latest}
-          loading={data.loading}
+          data={dataQuery.data as TimeSeriesResponse | undefined}
+          loading={dataQuery.isFetching}
           smoothing={smoothing()}
           metricLabel={ALL_METRICS.find((m) => m.value === metric())?.label}
           baseline={baseline()}

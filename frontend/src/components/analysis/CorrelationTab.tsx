@@ -1,6 +1,20 @@
-import { Component, createSignal, createResource, createEffect, Show } from "solid-js";
-import { api } from "../../api/client";
+import { Component, createSignal, createEffect, Show } from "solid-js";
+import { useQuery, keepPreviousData } from "@tanstack/solid-query";
+import { apiClient } from "../../api/generated/client";
+import { unwrap } from "../../api/unwrap";
+import { queryKeys } from "../../api/queryKeys";
 import type { SharedFilters } from "../../pages/AnalysisPage";
+// Deliberately kept on the OLD hand-written `CorrelationResponse` (whose
+// `CorrelationPoint.target_id` is `string | null`, no `undefined`) for the
+// cast below -- the generated-schema alias in `../../api/types` types
+// `target_id` as `string | null | undefined` because the field is optional
+// in the OpenAPI schema (a real backend/OpenAPI schema gap, not a runtime
+// difference; the field is always present in the actual response). Sole
+// consumer is `CorrelationChart`, which is out of this slice's scope and
+// still imports the old type -- cast at this boundary rather than rippling
+// the schema gap into it. Same precedent as `DashboardFilterProvider.tsx`'s
+// `TargetAggregationResponse` cast from Slice 4/5. Flagged for Slice 15.
+import type { CorrelationResponse } from "../../types";
 import CorrelationChart from "./CorrelationChart";
 import StatsCard from "./StatsCard";
 
@@ -60,28 +74,32 @@ const CorrelationTab: Component<Props> = (props) => {
     }
   });
 
-  // Gate the fetch on tab visibility: hidden tabs return a null source so no
-  // request fires until the tab is revealed.
-  const chartKey = () =>
-    props.active
-      ? `${props.filters.telescope}-${props.filters.camera}-${props.filters.filterUsed}-${props.filters.granularity}-${props.filters.dateFrom}-${props.filters.dateTo}-${customX()}-${customY()}`
-      : null;
+  // Gate the fetch on tab visibility: while the tab is hidden the query is
+  // disabled so no request fires until the tab is revealed.
+  const params = () => ({
+    x_metric: customX(),
+    y_metric: customY(),
+    telescope: props.filters.telescope,
+    camera: props.filters.camera,
+    filter_used: props.filters.filterUsed,
+    granularity: props.filters.granularity,
+    date_from: props.filters.dateFrom,
+    date_to: props.filters.dateTo,
+  });
 
-  const [data] = createResource(chartKey, () =>
-    api.getCorrelation({
-      x_metric: customX(),
-      y_metric: customY(),
-      telescope: props.filters.telescope,
-      camera: props.filters.camera,
-      filter_used: props.filters.filterUsed,
-      granularity: props.filters.granularity,
-      date_from: props.filters.dateFrom,
-      date_to: props.filters.dateTo,
-    })
-  );
+  const dataQuery = useQuery(() => ({
+    queryKey: queryKeys.correlation(params()),
+    queryFn: ({ signal }: { signal: AbortSignal }) =>
+      apiClient.GET("/api/analysis/correlation", { params: { query: params() }, signal }).then(unwrap),
+    enabled: props.active,
+    // Retain the last successfully-resolved value across a refetch (matching
+    // the old createResource's `.latest` behavior) so the chart doesn't flash
+    // empty while a filter-driven refetch is in flight.
+    placeholderData: keepPreviousData,
+  }));
 
   const filteredData = () => {
-    const d = data.latest;
+    const d = dataQuery.data;
     if (!d || !hideOutliers()) return d;
     const pts = d.points.filter((p) => !p.outlier);
     return { ...d, points: pts };
@@ -91,7 +109,7 @@ const CorrelationTab: Component<Props> = (props) => {
   // Read defensively so the note stays hidden until the backend supplies the
   // total/sampled counts.
   const samplingNote = (): string | null => {
-    const d = data.latest as (typeof data.latest & { total?: number; sampled?: number }) | undefined;
+    const d = dataQuery.data as (typeof dataQuery.data & { total?: number; sampled?: number }) | undefined;
     if (!d) return null;
     const total = d.total_count ?? d.total;
     const sampled = d.sampled_count ?? d.sampled;
@@ -172,14 +190,14 @@ const CorrelationTab: Component<Props> = (props) => {
       </Show>
 
       <div style={{ height: "500px" }} class="relative">
-        <CorrelationChart data={filteredData()} loading={data.loading} />
+        <CorrelationChart data={filteredData() as CorrelationResponse | undefined} loading={dataQuery.isFetching} />
       </div>
 
       {/* Stats cards */}
-      <Show when={data.latest?.x_stats && data.latest?.y_stats}>
+      <Show when={dataQuery.data?.x_stats && dataQuery.data?.y_stats}>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-2 mt-3">
-          <StatsCard stats={data.latest!.x_stats!} label={`X: ${X_OPTIONS.find((o) => o.value === customX())?.label}`} />
-          <StatsCard stats={data.latest!.y_stats!} label={`Y: ${Y_OPTIONS.find((o) => o.value === customY())?.label}`} />
+          <StatsCard stats={dataQuery.data!.x_stats!} label={`X: ${X_OPTIONS.find((o) => o.value === customX())?.label}`} />
+          <StatsCard stats={dataQuery.data!.y_stats!} label={`Y: ${Y_OPTIONS.find((o) => o.value === customY())?.label}`} />
         </div>
       </Show>
     </div>

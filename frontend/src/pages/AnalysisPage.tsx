@@ -1,5 +1,8 @@
-import { Component, createSignal, createResource, createEffect, createMemo, For, Show, Suspense, onMount, onCleanup } from "solid-js";
-import { api } from "../api/client";
+import { Component, createSignal, createEffect, createMemo, For, Show, Suspense, onMount, onCleanup } from "solid-js";
+import { useQuery } from "@tanstack/solid-query";
+import { apiClient } from "../api/generated/client";
+import { unwrap } from "../api/unwrap";
+import { queryKeys } from "../api/queryKeys";
 import { useSettingsContext } from "../components/SettingsProvider";
 import { contentWidthClass } from "../utils/format";
 import { useStats } from "../store/stats";
@@ -70,7 +73,12 @@ const AnalysisPage: Component = () => {
   onMount(() => window.addEventListener("analysis-navigate", handleMatrixNav));
   onCleanup(() => window.removeEventListener("analysis-navigate", handleMatrixNav));
 
-  const [filters] = createResource(() => api.getAnalysisFilters());
+  const filtersQuery = useQuery(() => ({
+    queryKey: queryKeys.analysisFilters(),
+    queryFn: ({ signal }: { signal: AbortSignal }) =>
+      apiClient.GET("/api/analysis/filters", { signal }).then(unwrap),
+  }));
+  const filters = () => filtersQuery.data;
 
   const shared = (): SharedFilters => ({
     telescope: telescope(),
