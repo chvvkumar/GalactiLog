@@ -76,6 +76,8 @@ export type ObjectTypeCount = Schemas["ObjectTypeCount"];
 export type BootstrapResponse = Schemas["BootstrapResponse"];
 
 export type MergeCandidateResponse = Schemas["MergeCandidateResponse"];
+export type MergePreviewResponse = Schemas["MergePreviewResponse"];
+export type MergePreviewSide = Schemas["MergePreviewSide"];
 export type OrphanPreviewResponse = Schemas["OrphanPreviewResponse"];
 export type OrphanCreateRequest = Schemas["OrphanCreateRequest"];
 export type CustomTargetCreateRequest = Schemas["CustomTargetCreateRequest"];

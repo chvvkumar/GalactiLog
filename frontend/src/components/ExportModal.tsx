@@ -1,6 +1,9 @@
-import { Component, For, Show, createSignal, createResource } from "solid-js";
-import { api } from "../api/client";
-import type { ExportResponse, SessionOverview } from "../types";
+import { Component, For, Show, createSignal } from "solid-js";
+import { useQuery } from "@tanstack/solid-query";
+import { apiClient } from "../api/generated/client";
+import { unwrap } from "../api/unwrap";
+import { queryKeys } from "../api/queryKeys";
+import type { ExportResponse, SessionOverview } from "../api/types";
 
 import { formatIntegration } from "../utils/format";
 import { showToast } from "./Toast";
@@ -51,8 +54,8 @@ function aggregateByFilterExposure(data: ExportResponse): AggregatedRow[] {
         frames: row.frames,
         exposure: row.exposure,
         total: row.total_seconds,
-        gain: row.gain,
-        temp: row.sensor_temp,
+        gain: row.gain ?? null,
+        temp: row.sensor_temp ?? null,
       });
     }
   }
@@ -177,10 +180,19 @@ const ExportModal: Component<Props> = (props) => {
   const [copied, setCopied] = createSignal(false);
 
   const sessionList = () => selectedDates().size > 0 ? [...selectedDates()] : undefined;
-  const [exportData] = createResource(
-    () => sessionList()?.join(",") ?? "all",
-    () => api.getExport(props.targetId, sessionList()),
-  );
+  const exportDataQuery = useQuery(() => ({
+    queryKey: queryKeys.targetExport(props.targetId, sessionList()),
+    queryFn: () =>
+      apiClient
+        .GET("/api/targets/{target_id}/export", {
+          params: {
+            path: { target_id: props.targetId },
+            query: { sessions: sessionList()?.length ? sessionList()!.join(",") : undefined },
+          },
+        })
+        .then(unwrap),
+  }));
+  const exportData = () => exportDataQuery.data;
 
   const toggleDate = (date: string) => {
     const s = new Set(selectedDates());
@@ -294,7 +306,7 @@ const ExportModal: Component<Props> = (props) => {
             )}
           </Show>
 
-          <Show when={exportData.loading}>
+          <Show when={exportDataQuery.isFetching}>
             <div class="bg-theme-elevated rounded p-3 space-y-2">
               <div class="h-3 w-3/4 bg-theme-surface rounded animate-pulse" />
               <div class="h-3 w-1/2 bg-theme-surface rounded animate-pulse" />

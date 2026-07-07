@@ -1,7 +1,23 @@
 import { Component, Show, For, createResource, createSignal, createEffect, createMemo, on, onMount, onCleanup } from "solid-js";
 import { A, useParams, useSearchParams } from "@solidjs/router";
-import { api } from "../api/client";
-import type { TargetDetailResponse, SessionDetail, TargetSearchResultFuzzy, MergedTargetResponse } from "../types";
+import { useQuery } from "@tanstack/solid-query";
+import { apiClient } from "../api/generated/client";
+import { unwrap } from "../api/unwrap";
+import { queryKeys } from "../api/queryKeys";
+// TargetDetailResponse/SessionDetail are deliberately kept on the OLD
+// hand-written `../types` (not the generated-schema alias in `../api/types`)
+// -- the generated schema marks many numeric/string fields as merely
+// optional (`T | null | undefined`) where the hand-written types declare
+// them required-nullable (`T | null`), which this file's formatting helpers
+// (formatCoord/formatSize/buildRows) and SessionOverview/SessionDetail
+// assignments rely on throughout. Same precedent as
+// DashboardFilterProvider.tsx's TargetAggregationResponse cast and
+// TargetRow.tsx's TargetAggregation cast (both Slice 4/5): cast the
+// apiClient result to the old type at the two fetch boundaries below rather
+// than rippling the schema-gap `| undefined` into this whole file. Flagged
+// for Slice 15.
+import type { TargetDetailResponse, SessionDetail } from "../types";
+import type { TargetSearchResultFuzzy, MergedTargetResponse } from "../api/types";
 import SessionAccordionCard from "../components/SessionAccordionCard";
 import { showToast } from "../components/Toast";
 import FilterBadges from "../components/FilterBadges";
@@ -72,7 +88,11 @@ const MergeFromDetailFlow: Component<MergeFromDetailFlowProps> = (props) => {
     searchTimeout = setTimeout(async () => {
       setSearching(true);
       try {
-        const results = await api.searchTargets(q.trim(), true);
+        const results = await apiClient
+          .GET("/api/targets/search", {
+            params: { query: { q: q.trim(), include_unresolved: true } },
+          })
+          .then(unwrap);
         setSearchResults(results.filter((t) => t.id !== props.winnerId));
       } catch {
         setSearchResults([]);
@@ -190,10 +210,28 @@ const TargetDetailPage: Component = () => {
   const visible = (group: Parameters<typeof isFieldVisible>[1], field: string) =>
     isFieldVisible(displaySettings(), group, field);
 
-  const [targetDetail, { refetch: refetchDetail }] = createResource(
-    () => params.targetId,
-    (id) => api.getTargetDetail(id),
-  );
+  const targetDetailQuery = useQuery(() => ({
+    queryKey: queryKeys.targetDetail(params.targetId),
+    queryFn: () =>
+      apiClient
+        .GET("/api/targets/{target_id}/detail", {
+          params: { path: { target_id: params.targetId } },
+        })
+        .then(unwrap) as Promise<TargetDetailResponse>,
+  }));
+  // Solid `createResource`-shaped accessor kept for source compatibility with
+  // this file's many `targetDetail()` / `.loading` / `.error` call sites and
+  // with `on(targetDetail, ...)` below (same technique as
+  // DashboardFilterProvider.tsx's `targetData`). `.loading` maps to
+  // `isFetching` (not `isLoading`) so it stays true during refetches too,
+  // matching Solid's `resource.loading` semantics used by the old code.
+  const targetDetail = (() => targetDetailQuery.data) as (() => TargetDetailResponse | undefined) & {
+    readonly loading: boolean;
+    readonly error: unknown;
+  };
+  Object.defineProperty(targetDetail, "loading", { enumerable: true, get: () => targetDetailQuery.isFetching });
+  Object.defineProperty(targetDetail, "error", { enumerable: true, get: () => targetDetailQuery.error });
+  const refetchDetail = async () => { await targetDetailQuery.refetch(); };
 
   const [showExport, setShowExport] = createSignal(false);
   const [showMerge, setShowMerge] = createSignal(false);
@@ -203,11 +241,20 @@ const TargetDetailPage: Component = () => {
   const [targetChartExpanded, setTargetChartExpanded] = createSignal(graphSettings().target_chart_expanded);
   const [selectedChartDates, setSelectedChartDates] = createSignal<string[]>([]);
 
-  const [mergeHistory, { refetch: refetchMergeHistory }] = createResource(
-    () => params.targetId,
-    (id): Promise<MergedTargetResponse[]> | MergedTargetResponse[] =>
-      id.startsWith("obj:") ? [] : api.getMergeHistory(id).catch(() => []),
-  );
+  const mergeHistoryQuery = useQuery(() => ({
+    queryKey: queryKeys.targetMergeHistory(params.targetId),
+    queryFn: (): Promise<MergedTargetResponse[]> =>
+      params.targetId.startsWith("obj:")
+        ? Promise.resolve([])
+        : apiClient
+            .GET("/api/targets/{target_id}/merge-history", {
+              params: { path: { target_id: params.targetId } },
+            })
+            .then(unwrap)
+            .catch(() => []),
+  }));
+  const mergeHistory = () => mergeHistoryQuery.data;
+  const refetchMergeHistory = async () => { await mergeHistoryQuery.refetch(); };
   const [mergeHistoryExpanded, setMergeHistoryExpanded] = createSignal(false);
   const [undoingMerge, setUndoingMerge] = createSignal<string | null>(null);
 
@@ -216,10 +263,24 @@ const TargetDetailPage: Component = () => {
   // The DSS reference thumbnail is an auth-gated binary, so it is loaded as a
   // blob via fetchWithRefresh (matching getMosaicCompositeBlob) rather than a
   // raw <img src>, which would have no 401-refresh path.
+  // Kept as `createResource` (not `useQuery`) deliberately: this preserves the
+  // existing, already-correct object-URL create/revoke lifecycle below
+  // exactly as-is (per the migration plan's blob-endpoint hazard note, the
+  // priority for blob fetches is preserving that lifecycle, not uniformity
+  // with the rest of the file's reads). Only the fetch itself moves onto
+  // apiClient -- `parseAs: "blob"` (openapi-fetch) matches the old
+  // `fetchWithRefresh(...).blob()` behavior; the generated schema types this
+  // endpoint's success body as `unknown` (FastAPI's streaming response isn't
+  // declared with a content schema), so the unwrap result is cast to `Blob`.
   const [referenceThumbnailUrl] = createResource(
     () => (skyViewExpanded() && targetDetail()?.reference_thumbnail_path ? params.targetId : null),
     async (id: string) => {
-      const blob = await api.getReferenceThumbnailBlob(id);
+      const blob = await apiClient
+        .GET("/api/targets/{target_id}/reference-thumbnail", {
+          params: { path: { target_id: id } },
+          parseAs: "blob",
+        })
+        .then(unwrap) as Blob;
       return URL.createObjectURL(blob);
     },
   );
@@ -238,7 +299,14 @@ const TargetDetailPage: Component = () => {
   const [notesExpanded, setNotesExpanded] = createSignal(false);
   const { notes: targetNotes, onInput: onNotesInput, saving: notesSaving } = useNotesAutosave({
     serverValue: () => targetDetail()?.notes,
-    save: async (text) => { await api.updateTargetNotes(params.targetId, text || null); },
+    save: async (text) => {
+      await apiClient
+        .PUT("/api/targets/{target_id}/notes", {
+          params: { path: { target_id: params.targetId } },
+          body: { notes: text || null },
+        })
+        .then(unwrap);
+    },
     errorLabel: "Failed to save notes",
   });
 
@@ -255,7 +323,12 @@ const TargetDetailPage: Component = () => {
     if (!detail) return;
     setSavingObjectType(true);
     try {
-      await api.updateTargetIdentity(detail.target_id, { object_type: value });
+      await apiClient
+        .PUT("/api/targets/{target_id}/identity", {
+          params: { path: { target_id: detail.target_id } },
+          body: { object_type: value, re_resolve: false },
+        })
+        .then(unwrap);
       setEditingObjectType(false);
       await refetchDetail();
     } catch (e: unknown) {
@@ -280,7 +353,12 @@ const TargetDetailPage: Component = () => {
     }
     setSavingIdentity(true);
     try {
-      await api.updateTargetIdentity(detail.target_id, { primary_name: name });
+      await apiClient
+        .PUT("/api/targets/{target_id}/identity", {
+          params: { path: { target_id: detail.target_id } },
+          body: { primary_name: name, re_resolve: false },
+        })
+        .then(unwrap);
       setEditing(false);
       await refetchDetail();
     } catch (e: unknown) {
@@ -295,7 +373,12 @@ const TargetDetailPage: Component = () => {
     if (!detail) return;
     setSavingIdentity(true);
     try {
-      await api.updateTargetIdentity(detail.target_id, { re_resolve: true });
+      await apiClient
+        .PUT("/api/targets/{target_id}/identity", {
+          params: { path: { target_id: detail.target_id } },
+          body: { re_resolve: true },
+        })
+        .then(unwrap);
       await refetchDetail();
       showToast("Re-resolve queued");
     } catch (e: unknown) {
@@ -308,7 +391,11 @@ const TargetDetailPage: Component = () => {
   const handleUndoMerge = async (merged: MergedTargetResponse) => {
     setUndoingMerge(merged.id);
     try {
-      await api.unmergeTarget(merged.id);
+      await apiClient
+        .POST("/api/targets/{target_id}/unmerge", {
+          params: { path: { target_id: merged.id } },
+        })
+        .then(unwrap);
       showToast(`Unmerged "${merged.primary_name}"`);
       await Promise.all([refetchMergeHistory(), refetchDetail()]);
       // Unmerging moves frames off this night, so drop the cache and re-load
@@ -366,7 +453,13 @@ const TargetDetailPage: Component = () => {
       setCsvLoading(true);
       try {
         const results = await Promise.all(
-          missingDates.map((d) => api.getSessionDetail(params.targetId, d))
+          missingDates.map((d) =>
+            apiClient
+              .GET("/api/targets/{target_id}/sessions/{date}", {
+                params: { path: { target_id: params.targetId, date: d } },
+              })
+              .then(unwrap) as Promise<SessionDetail>
+          )
         );
         const newCache = { ...sessionCache() };
         missingDates.forEach((d, i) => {
@@ -461,7 +554,11 @@ const TargetDetailPage: Component = () => {
       const date = loadQueue.shift()!;
       if (sessionCache()[date] || pendingLoads.has(date)) continue;
       pendingLoads.add(date);
-      api.getSessionDetail(params.targetId, date)
+      (apiClient
+        .GET("/api/targets/{target_id}/sessions/{date}", {
+          params: { path: { target_id: params.targetId, date } },
+        })
+        .then(unwrap) as Promise<SessionDetail>)
         .then((detail) => {
           setSessionCache((prev) => ({ ...prev, [date]: detail }));
         })
