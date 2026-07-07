@@ -216,14 +216,7 @@ const UnresolvedSection: Component<UnresolvedSectionProps> = (props) => {
             when={resolveMode() === "merge"}
             fallback={
               <CreateTargetFromOrphanModal
-                // CreateTargetFromOrphanModal (Slice 13, out of scope here)
-                // still takes the OLD hand-written MergeCandidateResponse
-                // (`suggested_target_id?: string | null`, no `undefined`).
-                // The generated-schema alias used in this file allows
-                // `undefined` too. Structurally identical field names --
-                // cast at this single boundary rather than reverting this
-                // whole file off the generated types. Flag for Slice 13/15.
-                candidate={c() as unknown as import("../../types").MergeCandidateResponse}
+                candidate={c()}
                 onClose={() => setResolveCandidate(null)}
                 onResolved={handleResolved}
               />

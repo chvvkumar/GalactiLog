@@ -1,7 +1,8 @@
 import { Component, Show, createSignal, onMount } from "solid-js";
-import { api } from "../../api/client";
+import { apiClient } from "../../api/generated/client";
+import { unwrap } from "../../api/unwrap";
 import { showToast } from "../Toast";
-import type { MergeCandidateResponse, OrphanPreviewResponse } from "../../types";
+import type { MergeCandidateResponse, OrphanPreviewResponse } from "../../api/types";
 import Dialog from "../Dialog";
 import TargetCreateForm, { TargetFormValues } from "./TargetCreateForm";
 import { getErrorMessage } from "../../utils/errors";
@@ -19,7 +20,9 @@ const CreateTargetFromOrphanModal: Component<Props> = (props) => {
 
   onMount(async () => {
     try {
-      const res = await api.orphanPreview(props.candidate.source_name);
+      const res = await apiClient
+        .POST("/api/targets/orphan-preview", { body: { source_name: props.candidate.source_name } })
+        .then(unwrap);
       setPreview(res);
     } catch {
       showToast("Failed to load preview", "error");
@@ -31,10 +34,11 @@ const CreateTargetFromOrphanModal: Component<Props> = (props) => {
   const handleCreate = async (values: TargetFormValues) => {
     setCreating(true);
     try {
-      await api.orphanCreate({
-        candidate_id: props.candidate.id,
-        ...values,
-      });
+      await apiClient
+        .POST("/api/targets/orphan-create", {
+          body: { candidate_id: props.candidate.id, ...values },
+        })
+        .then(unwrap);
       showToast(`Created target "${values.primary_name}"`);
       props.onResolved();
     } catch (e: unknown) {
