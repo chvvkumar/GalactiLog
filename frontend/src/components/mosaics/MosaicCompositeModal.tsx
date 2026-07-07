@@ -1,5 +1,6 @@
 import { Component, Show, createResource, onCleanup } from "solid-js";
-import { api } from "../../api/client";
+import { apiClient } from "../../api/generated/client";
+import { unwrap } from "../../api/unwrap";
 import { getErrorMessage } from "../../utils/errors";
 import Dialog from "../Dialog";
 
@@ -18,10 +19,19 @@ interface Props {
  * for the generated JPEG.
  */
 const MosaicCompositeModal: Component<Props> = (props) => {
+  // The generated schema types this endpoint's success body as `unknown`
+  // (FastAPI's streaming JPEG response has no declared content schema), so
+  // the unwrap result is cast to `Blob` -- same pattern as
+  // TargetDetailPage.tsx's reference-thumbnail blob fetch.
   const [composite, { refetch }] = createResource(
     () => props.filter ?? "__default__",
     async (): Promise<string> => {
-      const blob = await api.getMosaicCompositeBlob(props.mosaicId, props.filter);
+      const blob = await apiClient
+        .GET("/api/mosaics/{mosaic_id}/composite", {
+          params: { path: { mosaic_id: props.mosaicId }, query: { filter: props.filter } },
+          parseAs: "blob",
+        })
+        .then(unwrap) as Blob;
       return URL.createObjectURL(blob);
     },
   );
