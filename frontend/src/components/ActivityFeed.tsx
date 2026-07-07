@@ -10,14 +10,15 @@ import {
 } from "solid-js";
 import { A } from "@solidjs/router";
 import { activeJobs, hasActiveJobs } from "../store/activeJobs";
-import { api } from "../api/client";
+import { apiClient } from "../api/generated/client";
+import { unwrap } from "../api/unwrap";
 import { useSettingsContext } from "./SettingsProvider";
 import type {
   ActivityEvent,
   ActivityCategory,
   ActivitySeverity,
   ActiveJob,
-} from "../types";
+} from "../api/types";
 import FailedFilesList from "./activity/FailedFilesList";
 import EnrichmentFailureList from "./activity/EnrichmentFailureList";
 import DetailsJsonFallback from "./activity/DetailsJsonFallback";
@@ -257,13 +258,13 @@ const HistoryRow: Component<{ event: ActivityEvent }> = (props) => {
           {hhmm()}
         </span>
         <span
-          class={`flex-shrink-0 w-4 text-center ${SEVERITY_CLASS[props.event.severity]}`}
+          class={`flex-shrink-0 w-4 text-center ${SEVERITY_CLASS[props.event.severity as ActivitySeverity]}`}
           title={props.event.severity}
         >
-          {SEVERITY_ICON[props.event.severity]}
+          {SEVERITY_ICON[props.event.severity as ActivitySeverity]}
         </span>
         <span class="flex-shrink-0 w-[3.5rem] text-theme-text-secondary truncate">
-          {CATEGORY_LABELS[props.event.category]}
+          {CATEGORY_LABELS[props.event.category as ActivityCategory]}
         </span>
         <span class="flex-1 text-theme-text-primary min-w-0">
           <Show
@@ -376,22 +377,28 @@ const ActivityFeed: Component = () => {
   let listRef: HTMLDivElement | undefined;
   let pollTimer: ReturnType<typeof setInterval> | null = null;
 
-  const buildParams = (extra: Record<string, unknown> = {}) => {
-    const p: Record<string, unknown> = { limit: 50, ...extra };
+  const buildQuery = (extra: { cursor?: string } = {}) => {
+    const query: { limit: number; cursor?: string; severity?: string[]; category?: string[] } = {
+      limit: 50,
+      ...extra,
+    };
     const sv = severityFilter();
-    if (sv !== "all") p.severity = sv;
+    if (sv !== "all") query.severity = [sv];
     const cat = categoryFilter();
-    if (cat !== "all") p.category = cat;
-    return p;
+    if (cat !== "all") query.category = [cat];
+    return query;
   };
+
+  const fetchActivity = (extra: { cursor?: string } = {}) =>
+    apiClient.GET("/api/activity", { params: { query: buildQuery(extra) } }).then(unwrap);
 
   const loadInitial = async () => {
     setLoading(true);
     try {
-      const res = await api.fetchActivity(buildParams());
+      const res = await fetchActivity();
       batch(() => {
         setItems(res.items);
-        setNextCursor(res.next_cursor);
+        setNextCursor(res.next_cursor ?? null);
         setTotal(res.total);
         setNewCount(0);
         if (res.items.length > 0) setLatestId(res.items[0].id);
@@ -406,10 +413,10 @@ const ActivityFeed: Component = () => {
     if (!cursor || loadingMore()) return;
     setLoadingMore(true);
     try {
-      const res = await api.fetchActivity(buildParams({ cursor }));
+      const res = await fetchActivity({ cursor });
       batch(() => {
         setItems((prev) => [...prev, ...res.items]);
-        setNextCursor(res.next_cursor);
+        setNextCursor(res.next_cursor ?? null);
       });
     } catch { /* ignore */ } finally {
       setLoadingMore(false);
@@ -420,7 +427,7 @@ const ActivityFeed: Component = () => {
     const top = latestId();
     if (top === null) { await loadInitial(); return; }
     try {
-      const res = await api.fetchActivity(buildParams({ limit: 50 }));
+      const res = await fetchActivity();
       if (res.items.length === 0) return;
       const newItems = res.items.filter((e) => e.id > top);
       if (newItems.length === 0) return;
@@ -471,7 +478,7 @@ const ActivityFeed: Component = () => {
     setShowClearConfirm(false);
     setClearing(true);
     try {
-      await api.clearActivityLog();
+      await apiClient.DELETE("/api/activity", {}).then(unwrap);
       batch(() => {
         setItems([]);
         setNextCursor(null);

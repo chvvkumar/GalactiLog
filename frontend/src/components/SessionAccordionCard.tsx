@@ -1,6 +1,15 @@
 import { Component, Show, For, createSignal, createEffect, createMemo } from "solid-js";
+// Kept on the OLD hand-written session/frame types rather than the generated
+// `../api/types` alias: the generated schema's optional numeric baseline
+// fields type as `number | null | undefined` (vs. this file's hand-written
+// `number | null`), and this component's frame-quality math
+// (utils/frameQuality.ts's `GroupBaseline`/`MetricBaseline`) is written
+// against the stricter shape. Switching would cascade into that unrelated
+// utility. Flagged for Slice 15 per the migration plan's documented-cast
+// allowance.
 import type { SessionOverview, SessionDetail, FrameRecord, IntegrationInstance } from "../types";
-import { api } from "../api/client";
+import { apiClient } from "../api/generated/client";
+import { unwrap } from "../api/unwrap";
 import ReferenceThumbnail from "./ReferenceThumbnail";
 import RawHeaderAccordion from "./RawHeaderAccordion";
 import FilterBadges from "./FilterBadges";
@@ -121,7 +130,12 @@ const SessionAccordionCard: Component<{
     noteTimer = setTimeout(async () => {
       setNoteSaving(true);
       try {
-        await api.updateSessionNotes(props.targetId!, props.session.session_date, text || null);
+        await apiClient
+          .PUT("/api/targets/{target_id}/sessions/{date}/notes", {
+            params: { path: { target_id: props.targetId!, date: props.session.session_date } },
+            body: { notes: text || null },
+          })
+          .then(unwrap);
         showToast("Session notes saved");
       } catch {
         showToast("Failed to save session notes", "error");
@@ -202,7 +216,11 @@ const SessionAccordionCard: Component<{
     const key = `nina:${inst.name}`;
     setSendingInstance(key);
     try {
-      const res = await api.sendToNina(inst.url, props.ra!, props.dec!, props.position_angle);
+      const res = await apiClient
+        .POST("/api/integrations/nina/send-coordinates", {
+          body: { url: inst.url, ra: props.ra!, dec: props.dec!, position_angle: props.position_angle },
+        })
+        .then(unwrap);
       if (res.ok) {
         showToast(`Sent to NINA: ${inst.name}`);
       } else {
@@ -220,7 +238,11 @@ const SessionAccordionCard: Component<{
     const key = `stel:${inst.name}`;
     setSendingInstance(key);
     try {
-      const res = await api.sendToStellarium(inst.url, props.ra!, props.dec!, props.targetName ?? null);
+      const res = await apiClient
+        .POST("/api/integrations/stellarium/send-coordinates", {
+          body: { url: inst.url, ra: props.ra!, dec: props.dec!, target_name: props.targetName ?? null },
+        })
+        .then(unwrap);
       if (res.ok) {
         showToast(`Sent to Stellarium: ${inst.name}`);
       } else {
@@ -683,12 +705,18 @@ const SessionAccordionCard: Component<{
                 columnType={col.column_type}
                 value={props.session.custom_values?.[col.slug]}
                 dropdownOptions={col.dropdown_options}
-                onSave={(v) => api.setCustomValue({
-                  column_id: col.id,
-                  target_id: props.targetId!,
-                  session_date: props.session.session_date,
-                  value: v,
-                })}
+                onSave={async (v) => {
+                  await apiClient
+                    .PUT("/api/custom-columns/values", {
+                      body: {
+                        column_id: col.id,
+                        target_id: props.targetId!,
+                        session_date: props.session.session_date,
+                        value: v,
+                      },
+                    })
+                    .then(unwrap);
+                }}
               />
             </td>
           )}
@@ -911,13 +939,19 @@ const SessionAccordionCard: Component<{
                                         columnType={col.column_type}
                                         value={val()?.value}
                                         dropdownOptions={col.dropdown_options}
-                                        onSave={(v) => api.setCustomValue({
-                                          column_id: col.id,
-                                          target_id: props.targetId!,
-                                          session_date: detail().session_date,
-                                          rig_label: rig.rig_label,
-                                          value: v,
-                                        })}
+                                        onSave={async (v) => {
+                                          await apiClient
+                                            .PUT("/api/custom-columns/values", {
+                                              body: {
+                                                column_id: col.id,
+                                                target_id: props.targetId!,
+                                                session_date: detail().session_date,
+                                                rig_label: rig.rig_label,
+                                                value: v,
+                                              },
+                                            })
+                                            .then(unwrap);
+                                        }}
                                       />
                                     </div>
                                   );
