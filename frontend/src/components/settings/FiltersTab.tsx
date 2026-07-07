@@ -5,8 +5,17 @@ import { useAuth } from "../AuthProvider";
 import { SuggestionsBanner } from "./SuggestionsBanner";
 import { GroupingEditor, type GroupEntry } from "./GroupingEditor";
 import HelpPopover from "../HelpPopover";
-import type { FilterConfig, SuggestionsResponse, DiscoveredItem, SuggestionGroup } from "../../types";
-import { api } from "../../api/client";
+// FilterConfig stays on the OLD hand-written type: it feeds
+// useSettingsContext().saveFilters, whose signature in SettingsProvider.tsx
+// is deliberately pinned to the old, narrower-optional settings types (same
+// precedent as store/settings.ts) -- out of this slice's scope to change.
+// SuggestionsResponse/DiscoveredItem/SuggestionGroup come straight back from
+// apiClient responses below, so they're repointed to the generated alias
+// (closes the Slice 12 SuggestionGroup deferral).
+import type { FilterConfig } from "../../types";
+import type { SuggestionsResponse, DiscoveredItem, SuggestionGroup } from "../../api/types";
+import { apiClient } from "../../api/generated/client";
+import { unwrap } from "../../api/unwrap";
 import { getFilterColorMap } from "../../store/settings";
 
 export const FiltersTab: Component = () => {
@@ -42,8 +51,8 @@ export const FiltersTab: Component = () => {
   onMount(async () => {
     try {
       const [disc, sugg] = await Promise.all([
-        api.getDiscovered("filters"),
-        api.getFilterSuggestions(),
+        apiClient.GET("/api/settings/discovered/{section}", { params: { path: { section: "filters" } } }).then(unwrap),
+        apiClient.GET("/api/settings/suggestions/filters", {}).then(unwrap),
       ]);
       setDiscovered(disc.items);
       setSuggestions(sugg);
@@ -70,7 +79,7 @@ export const FiltersTab: Component = () => {
     }
   });
 
-  const handleMerge = (canonical: string, aliases: string[], _section?: string) => {
+  const handleMerge = (canonical: string, aliases: string[], _section?: string | null) => {
     setGroups((prev) => {
       const existingIdx = prev.findIndex((g) => g.canonical === canonical);
       if (existingIdx >= 0) {
@@ -144,9 +153,9 @@ export const FiltersTab: Component = () => {
         }
       }
       await saveFilters(filtersPayload);
-      await api.updateDismissedSuggestions(dismissed());
+      await apiClient.PUT("/api/settings/dismissed-suggestions", { body: dismissed() }).then(unwrap);
       showToast("Filter settings saved");
-      const data = await api.getFilterSuggestions();
+      const data = await apiClient.GET("/api/settings/suggestions/filters", {}).then(unwrap);
       setSuggestions(data);
     } catch {
       showToast("Failed to save filter settings", "error");

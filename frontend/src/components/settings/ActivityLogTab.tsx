@@ -8,13 +8,14 @@ import {
   onCleanup,
   onMount,
 } from "solid-js";
-import {
-  api,
-  type AppLogItem,
-  type AppLogLevel,
-  type AppLogSource,
-  type LogQueryParams,
-} from "../../api/client";
+import { apiClient } from "../../api/generated/client";
+import { unwrap } from "../../api/unwrap";
+import type {
+  AppLogItem as GeneratedAppLogItem,
+  AppLogLevel,
+  AppLogSource,
+  LogQueryParams,
+} from "../../api/types";
 import { useAuth } from "../AuthProvider";
 import { showToast } from "../Toast";
 import HelpPopover from "../HelpPopover";
@@ -41,6 +42,57 @@ const LEVEL_ORDER: Record<AppLogLevel, number> = {
 // localStorage keys so the view filter persists across reloads.
 const LS_MIN_LEVEL = "galactilog.applog.minLevel";
 const LS_SOURCE = "galactilog.applog.source";
+
+// The generated AppLogItem types `level`/`source` as loose `string`
+// (OpenAPI drops the backend's Literal/Enum constraint); the backend only
+// ever emits the AppLogLevel/AppLogSource literals, matching the old
+// hand-written client.ts's AppLogItem. Re-narrowed here so the rest of this
+// file (LevelBadge, LEVEL_ORDER lookups, etc.) keeps its existing typing.
+type AppLogItem = Omit<GeneratedAppLogItem, "level" | "source"> & {
+  level: AppLogLevel;
+  source: AppLogSource;
+};
+
+// Mirrors AuthProvider.tsx's API_BASE derivation -- the download link is a
+// plain <a href>, not a fetch through apiClient, so it needs the full base
+// path (apiClient's generated paths already embed "/api", but this string is
+// built by hand and was never routed through apiClient).
+const API_BASE = import.meta.env.VITE_API_URL || "/api";
+
+// openapi-fetch's query param shape wants `level`/`source` as arrays;
+// LogQueryParams (client-only convenience type) allows a single value or an
+// array, matching the old fetchLogs/logsDownloadUrl normalization.
+function toLogsQuery(params: LogQueryParams) {
+  const level = Array.isArray(params.level)
+    ? params.level
+    : params.level
+      ? [params.level]
+      : undefined;
+  const source = Array.isArray(params.source)
+    ? params.source
+    : params.source
+      ? [params.source]
+      : undefined;
+  return {
+    level,
+    source,
+    q: params.q,
+    since: params.since,
+    limit: params.limit,
+    cursor: params.cursor,
+  };
+}
+
+function buildLogsDownloadUrl(params: LogQueryParams): string {
+  const qs = new URLSearchParams();
+  const levels = Array.isArray(params.level) ? params.level : params.level ? [params.level] : [];
+  levels.forEach((l) => qs.append("level", l));
+  const sources = Array.isArray(params.source) ? params.source : params.source ? [params.source] : [];
+  sources.forEach((s) => qs.append("source", s));
+  if (params.q) qs.set("q", params.q);
+  const q = qs.toString();
+  return `${API_BASE}/logs/download${q ? `?${q}` : ""}`;
+}
 
 // Severity text color, shared by the level column and the level selector so the
 // two stay consistent.
@@ -156,10 +208,13 @@ const ActivityLogTab: Component = () => {
 
   onMount(async () => {
     try {
-      const s = await api.getActivitySettings();
+      const s = await apiClient.GET("/api/settings/activity", {}).then(unwrap);
       batch(() => {
         setRetentionDays(s.activity_retention_days);
-        setCaptureLevel(s.app_log_capture_level);
+        // Generated schema types this field as a loose `string` (FastAPI
+        // response model looseness); the backend always returns one of the
+        // AppLogLevel literals, matching the old hand-written client.ts type.
+        setCaptureLevel(s.app_log_capture_level as AppLogLevel);
         setLogRetentionDays(s.app_log_retention_days);
         setLogMaxRows(s.app_log_max_rows);
       });
@@ -197,12 +252,14 @@ const ActivityLogTab: Component = () => {
   };
 
   // Reactive so the href tracks the current level/source/search filters
-  const downloadUrl = () => api.logsDownloadUrl(buildParams());
+  const downloadUrl = () => buildLogsDownloadUrl(buildParams());
 
   const loadInitial = async () => {
     setLoadingLogs(true);
     try {
-      const res = await api.fetchLogs(buildParams());
+      const res = (await apiClient
+        .GET("/api/logs", { params: { query: toLogsQuery(buildParams()) } })
+        .then(unwrap)) as { items: AppLogItem[]; next_cursor: string | null; total: number };
       batch(() => {
         setLogs(res.items);
         setNextCursor(res.next_cursor);
@@ -220,7 +277,9 @@ const ActivityLogTab: Component = () => {
     if (!cur || loadingMore()) return;
     setLoadingMore(true);
     try {
-      const res = await api.fetchLogs(buildParams({ cursor: cur }));
+      const res = (await apiClient
+        .GET("/api/logs", { params: { query: toLogsQuery(buildParams({ cursor: cur })) } })
+        .then(unwrap)) as { items: AppLogItem[]; next_cursor: string | null; total: number };
       batch(() => {
         setLogs((prev) => [...prev, ...res.items]);
         setNextCursor(res.next_cursor);
@@ -268,7 +327,9 @@ const ActivityLogTab: Component = () => {
           return;
         }
         try {
-          const res = await api.fetchLogs(buildParams({ since: newest, limit: 100 }));
+          const res = (await apiClient
+            .GET("/api/logs", { params: { query: toLogsQuery(buildParams({ since: newest, limit: 100 })) } })
+            .then(unwrap)) as { items: AppLogItem[]; next_cursor: string | null; total: number };
           if (res.items.length) {
             batch(() => {
               setLogs((prev) => [...res.items, ...prev]);
@@ -304,8 +365,10 @@ const ActivityLogTab: Component = () => {
     const previous = captureLevel();
     setCaptureLevel(level);
     try {
-      const res = await api.setActivitySettings({ app_log_capture_level: level });
-      setCaptureLevel(res.app_log_capture_level);
+      const res = await apiClient
+        .PUT("/api/settings/activity", { body: { app_log_capture_level: level } })
+        .then(unwrap);
+      setCaptureLevel(res.app_log_capture_level as AppLogLevel);
       showToast(`Capture level set to ${level}`, "success", 3000);
     } catch {
       setCaptureLevel(previous);
@@ -317,11 +380,15 @@ const ActivityLogTab: Component = () => {
     if (savingSettings() || !isAdmin()) return;
     setSavingSettings(true);
     try {
-      const res = await api.setActivitySettings({
-        retention_days: retentionDays(),
-        app_log_retention_days: logRetentionDays(),
-        app_log_max_rows: logMaxRows(),
-      });
+      const res = await apiClient
+        .PUT("/api/settings/activity", {
+          body: {
+            retention_days: retentionDays(),
+            app_log_retention_days: logRetentionDays(),
+            app_log_max_rows: logMaxRows(),
+          },
+        })
+        .then(unwrap);
       batch(() => {
         setRetentionDays(res.activity_retention_days);
         setLogRetentionDays(res.app_log_retention_days);
@@ -340,7 +407,7 @@ const ActivityLogTab: Component = () => {
     setShowClearActivityConfirm(false);
     setClearingActivity(true);
     try {
-      await api.clearActivityLog();
+      await apiClient.DELETE("/api/activity", {}).then(unwrap);
       showToast("Activity log cleared", "success", 3000);
     } catch {
       showToast("Failed to clear activity log", "error", 0);
@@ -354,7 +421,7 @@ const ActivityLogTab: Component = () => {
     setShowClearLogsConfirm(false);
     setClearingLogs(true);
     try {
-      await api.clearLogs();
+      await apiClient.DELETE("/api/logs", {}).then(unwrap);
       batch(() => {
         setLogs([]);
         setNextCursor(null);

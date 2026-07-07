@@ -1,10 +1,33 @@
 import { type Component, createEffect, createSignal, For, onCleanup, Show } from "solid-js";
-import { api } from "../../api/client";
-import type { ValidateResponse, RestoreResponse } from "../../api/client";
+import { apiClient } from "../../api/generated/client";
+import { unwrap } from "../../api/unwrap";
+import type {
+  ValidateResponse as GeneratedValidateResponse,
+  RestoreResponse as GeneratedRestoreResponse,
+  SectionPreview,
+} from "../../api/types";
 import { showToast } from "../Toast";
 import HelpPopover from "../HelpPopover";
 import { useSettingsContext } from "../SettingsProvider";
 import { formatDateTime } from "../../utils/dateTime";
+
+// The generated ValidateResponse/RestoreResponse type `preview`/`warnings`/
+// `applied`/`temporary_passwords` as optional (OpenAPI drops the backend's
+// Pydantic defaults). The backend always populates them when
+// `valid`/`success` is true, matching the old hand-written client.ts's
+// required-field versions that this component's rendering logic
+// (`validation()!.preview[section]`, `.warnings.length`, etc.) depends on.
+// Re-narrowed here; casts at the two fetch call sites below reflect actual
+// runtime data, not a behavior change.
+type ValidateResponse = Omit<GeneratedValidateResponse, "preview" | "warnings"> & {
+  preview: Record<string, SectionPreview>;
+  warnings: string[];
+};
+type RestoreResponse = Omit<GeneratedRestoreResponse, "applied" | "temporary_passwords" | "warnings"> & {
+  applied: Record<string, SectionPreview>;
+  temporary_passwords: Record<string, string>;
+  warnings: string[];
+};
 
 const SECTION_LABELS: Record<string, string> = {
   settings: "Settings",
@@ -52,7 +75,14 @@ export const BackupRestoreTab: Component = () => {
   const handleCreateBackup = async () => {
     setCreating(true);
     try {
-      const blob = await api.createBackup();
+      // The generated schema types this endpoint's success body as `unknown`
+      // (FastAPI's StreamingResponse download isn't declared with a content
+      // schema); `parseAs: "blob"` matches the old fetchWithRefresh(...).blob()
+      // behavior -- same pattern as TargetDetailPage.tsx's reference-thumbnail
+      // fetch and MosaicCompositeModal.tsx's composite fetch.
+      const blob = (await apiClient
+        .POST("/api/backup/create", { parseAs: "blob" })
+        .then(unwrap)) as Blob;
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -87,7 +117,30 @@ export const BackupRestoreTab: Component = () => {
     setValidating(true);
 
     try {
-      const result = await api.validateBackup(f, "merge", ALL_SECTIONS);
+      // The generated ValidateResponse types `preview`/`warnings` as optional
+      // (OpenAPI drops FastAPI's Pydantic defaults); the backend always
+      // populates them when `valid` is true, matching the old hand-written
+      // client.ts's required-field ValidateResponse that this component's
+      // logic (`validation()!.preview[section]`, `.warnings.length`, etc.)
+      // depends on. Cast reflects actual runtime data, not a behavior change
+      // -- same precedent as SettingsProvider.tsx's bootstrap cast.
+      const result = (await apiClient
+        .POST("/api/backup/validate", {
+          // The generated Body_validate_backup_endpoint_..._post schema types
+          // `file` as `string` (OpenAPI's binary-format looseness); a real
+          // File is passed at runtime and handed to bodySerializer below,
+          // which builds actual multipart FormData -- see openapi-fetch docs
+          // on bodySerializer for multipart/form-data.
+          body: { file: f, mode: "merge", sections: ALL_SECTIONS.join(",") } as unknown as never,
+          bodySerializer(body) {
+            const fd = new FormData();
+            for (const [key, value] of Object.entries(body as Record<string, unknown>)) {
+              fd.append(key, value as string | Blob);
+            }
+            return fd;
+          },
+        })
+        .then(unwrap)) as ValidateResponse;
       setValidation(result);
       if (result.valid) {
         setSelectedSections(new Set(Object.keys(result.preview)));
@@ -119,7 +172,26 @@ export const BackupRestoreTab: Component = () => {
     if (!f) return;
 
     try {
-      const result = await api.restoreBackup(f, mode(), [...selectedSections()]);
+      // Same discrepancy as validateBackup above: generated RestoreResponse
+      // types `applied`/`temporary_passwords`/`warnings` as optional; the
+      // backend always populates them when `success` is true. Cast reflects
+      // actual runtime data.
+      const result = (await apiClient
+        .POST("/api/backup/restore", {
+          body: {
+            file: f,
+            mode: mode(),
+            sections: [...selectedSections()].join(","),
+          } as unknown as never,
+          bodySerializer(body) {
+            const fd = new FormData();
+            for (const [key, value] of Object.entries(body as Record<string, unknown>)) {
+              fd.append(key, value as string | Blob);
+            }
+            return fd;
+          },
+        })
+        .then(unwrap)) as RestoreResponse;
       setRestoreResult(result);
       if (result.success) {
         showToast("Backup restored successfully");

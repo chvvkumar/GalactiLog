@@ -1,4 +1,15 @@
-import { fetchJson } from "./client";
+// Migrated off the old hand-written fetchJson/client.ts (Slice 14) so this
+// module no longer blocks Slice 15's teardown of api/client.ts. ScanFilters*
+// interfaces are kept as hand-written (not repointed to api/types' generated
+// ScanFiltersIn/Out) because they precisely match this module's own request/
+// response shapes and are the source of truth for ScanFiltersPanel.tsx's
+// createStore-driven editing. The generated ScanFiltersIn/ValidateRegexOut
+// types mark several backend-Pydantic-default fields optional (OpenAPI drops
+// the defaults); the backend always populates them, so responses are cast at
+// the boundary below -- same precedent as SettingsProvider.tsx's bootstrap
+// cast, not a behavior change.
+import { apiClient } from "./generated/client";
+import { unwrap } from "./unwrap";
 
 export type RuleAction = "include" | "exclude";
 export type RuleType = "glob" | "substring" | "regex";
@@ -55,37 +66,28 @@ export interface ValidateRegexResult {
 
 export const scanFilters = {
   get: (): Promise<ScanFiltersResponse> =>
-    fetchJson<ScanFiltersResponse>("/scan/filters"),
+    apiClient.GET("/api/scan/filters", {}).then(unwrap).then((r) => r as unknown as ScanFiltersResponse),
 
   put: (filters: ScanFilters): Promise<ScanFiltersResponse> =>
-    fetchJson<ScanFiltersResponse>("/scan/filters", {
-      method: "PUT",
-      body: JSON.stringify(filters),
-    }),
+    apiClient.PUT("/api/scan/filters", { body: filters }).then(unwrap).then((r) => r as unknown as ScanFiltersResponse),
 
   test: (
     path: string,
     targetKind: "auto" | "file" | "folder" = "auto",
   ): Promise<TestResult> =>
-    fetchJson<TestResult>("/scan/filters/test", {
-      method: "POST",
-      body: JSON.stringify({ path, target_kind: targetKind }),
-    }),
+    apiClient.POST("/api/scan/filters/test", { body: { path, target_kind: targetKind } }).then(unwrap),
 
   validateRegex: (pattern: string): Promise<ValidateRegexResult> =>
-    fetchJson<ValidateRegexResult>("/scan/filters/validate-regex", {
-      method: "POST",
-      body: JSON.stringify({ pattern }),
-    }),
+    apiClient
+      .POST("/api/scan/filters/validate-regex", { body: { pattern } })
+      .then(unwrap)
+      .then((r) => r as ValidateRegexResult),
 
   applyNow: (dryRun: boolean): Promise<ApplyNowResult> =>
-    fetchJson<ApplyNowResult>(
-      `/scan/filters/apply-now?dry_run=${dryRun}`,
-      { method: "POST" },
-    ),
+    apiClient
+      .POST("/api/scan/filters/apply-now", { params: { query: { dry_run: dryRun } } })
+      .then(unwrap),
 
-  browse: (path?: string): Promise<BrowseEntry[]> => {
-    const q = path ? `?path=${encodeURIComponent(path)}` : "";
-    return fetchJson<BrowseEntry[]>(`/scan/browse${q}`);
-  },
+  browse: (path?: string): Promise<BrowseEntry[]> =>
+    apiClient.GET("/api/scan/browse", { params: { query: { path } } }).then(unwrap),
 };

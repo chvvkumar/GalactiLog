@@ -1,5 +1,6 @@
 import { Component, Show, createSignal } from "solid-js";
-import { api, ApiError } from "../../api/client";
+import { apiClient } from "../../api/generated/client";
+import { unwrap, ApiError } from "../../api/unwrap";
 import { showToast } from "../Toast";
 import { useAuth } from "../AuthProvider";
 import { getErrorMessage } from "../../utils/errors";
@@ -37,7 +38,11 @@ export const AccountTab: Component = () => {
     }
     setSaving(true);
     try {
-      await api.changePassword(current(), next());
+      await apiClient
+        .PUT("/api/auth/password", {
+          body: { current_password: current(), new_password: next() },
+        })
+        .then(unwrap);
       showToast("Password changed");
       reset();
     } catch (err) {

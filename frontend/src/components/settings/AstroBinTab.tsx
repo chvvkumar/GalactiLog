@@ -1,6 +1,7 @@
 import { createSignal, createResource, createMemo, For } from "solid-js";
 import { useSettingsContext } from "../SettingsProvider";
-import { api } from "../../api/client";
+import { apiClient } from "../../api/generated/client";
+import { unwrap } from "../../api/unwrap";
 import HelpPopover from "../HelpPopover";
 
 interface Instance {
@@ -181,7 +182,10 @@ export default function AstroBinTab() {
   const ctx = useSettingsContext();
 
   const [discovered] = createResource(() =>
-    api.getDiscovered("filters").then((r) => r.items)
+    apiClient
+      .GET("/api/settings/discovered/{section}", { params: { path: { section: "filters" } } })
+      .then(unwrap)
+      .then((r) => r.items)
   );
 
   const allFilterNames = createMemo(() => {
