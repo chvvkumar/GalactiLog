@@ -40,6 +40,19 @@ def _sync_session_factory():
     return sessionmaker(bind=engine), engine
 
 
+# Tasks now live in per-domain app.worker.tasks_* modules (Phase 6 Task 3
+# split); app.worker.tasks is a thin facade that only imports/re-exports them
+# so every task this file (and its cross-file isolation helper below) must
+# treat as one "family" for reimport/deregistration purposes.
+_TASKS_MODULES = {
+    "app.worker.tasks", "app.worker.tasks_common", "app.worker.tasks_scan",
+    "app.worker.tasks_thumbnails", "app.worker.tasks_target_dedup",
+    "app.worker.tasks_target_rebuild", "app.worker.tasks_mosaics",
+    "app.worker.tasks_csv", "app.worker.tasks_migrations",
+    "app.worker.tasks_filenames", "app.worker.tasks_sessions",
+}
+
+
 def _load_real_tasks_module():
     """Return app.worker.tasks bound to a REAL engine, importing it fresh at
     most once for this file.
@@ -54,21 +67,25 @@ def _load_real_tasks_module():
     their own commit, and this file's assertions depend on those commits
     actually landing in Postgres.
 
-    Reimporting the module is not enough on its own: app.worker.celery_app
-    is a process-wide singleton that is never reloaded, and Celery's
-    Celery.task() decorator returns the ALREADY-registered Task object for a
-    name it has seen before instead of rebinding it to the freshly defined
-    function (celery/app/base.py::_task_from_fun: `if name not in
-    self._tasks: create ... else: task = self._tasks[name]`). So if another
-    test file already imported this module (even with a mocked engine), a
-    naive reimport here would silently leave tasks_mod.run_data_migrations
-    bound to that OTHER module's stale function/globals, and patching
-    *this* module's attributes would have no effect. Deregister every task
-    this module owns first so the decorator rebuilds all of them fresh. Some
-    tasks in this module use a bare custom `name=` (e.g. "regenerate_missing_
-    thumbnails", not "app.worker.tasks.regenerate_missing_thumbnails"), so
-    matching by the registered Task's owning module - not by a name prefix -
-    is required to catch every one of them.
+    Reimporting the facade alone is not enough: app.worker.celery_app is a
+    process-wide singleton that is never reloaded, and Celery's Celery.task()
+    decorator returns the ALREADY-registered Task object for a name it has
+    seen before instead of rebinding it to the freshly defined function
+    (celery/app/base.py::_task_from_fun: `if name not in self._tasks:
+    create ... else: task = self._tasks[name]`). The actual `@celery_app.task`
+    decorators now execute inside the tasks_*.py domain modules, not inside
+    the tasks.py facade itself, so merely popping/reimporting "app.worker.
+    tasks" would just re-run the facade's import statements against whatever
+    (possibly stale, possibly mock-engine-bound) submodules are still cached
+    in sys.modules -- no decorator re-runs, no fresh Task objects. Deregister
+    every task owned by any module in _TASKS_MODULES AND pop every one of
+    those modules from sys.modules first, so reimporting the facade forces
+    every domain module's top-level code (including its `@celery_app.task`
+    decorators) to re-execute from scratch. Some tasks in this family use a
+    bare custom `name=` (e.g. "regenerate_missing_thumbnails", not
+    "app.worker.tasks.regenerate_missing_thumbnails"), so matching by the
+    registered Task's owning module - not by a name prefix - is required to
+    catch every one of them.
     """
     from unittest.mock import MagicMock as _MM
 
@@ -78,7 +95,8 @@ def _load_real_tasks_module():
 
     _deregister_tasks_module()
 
-    sys.modules.pop("app.worker.tasks", None)
+    for modname in _TASKS_MODULES:
+        sys.modules.pop(modname, None)
     import app.worker.tasks as tasks_mod
     return tasks_mod
 
@@ -86,15 +104,16 @@ def _load_real_tasks_module():
 def _deregister_tasks_module():
     """Undo _load_real_tasks_module's registration so later test files that
     expect the mocked-engine convention (see module docstring) rebuild their
-    own fresh, mocked-engine module instead of inheriting this file's real
-    one via the "already real, just reuse it" fast path their bootstrap
+    own fresh, mocked-engine modules instead of inheriting this file's real
+    ones via the "already real, just reuse it" fast path their bootstrap
     helpers use."""
     from app.worker.celery_app import celery_app
 
     for name, task in list(celery_app.tasks.items()):
-        if getattr(task, "__module__", None) == "app.worker.tasks":
+        if getattr(task, "__module__", None) in _TASKS_MODULES:
             del celery_app.tasks[name]
-    sys.modules.pop("app.worker.tasks", None)
+    for modname in _TASKS_MODULES:
+        sys.modules.pop(modname, None)
 
 
 @pytest.fixture(scope="module")
@@ -112,6 +131,26 @@ def tasks_mod(_tasks_module):
     _tasks_module._redis.delete(_tasks_module.DATA_MIGRATION_LOCK)
     yield _tasks_module
     _tasks_module._redis.delete(_tasks_module.DATA_MIGRATION_LOCK)
+
+
+@pytest.fixture
+def tasks_migrations_mod(tasks_mod):
+    """The real app.worker.tasks_migrations submodule.
+
+    run_data_migrations and its job-row helpers (_update_data_migration_job,
+    _data_migration_job_session, _emit_activity_sync) live here since the
+    Phase 6 Task 3 module split. A test that wants to patch one of those
+    names so run_data_migrations actually observes the patch must target
+    this module, not the app.worker.tasks facade: patch.object() rebinds an
+    attribute on whichever module object you pass it, and run_data_migrations
+    only reads its own module's globals (tasks_migrations.__dict__), not the
+    facade's. Task objects themselves (run_data_migrations,
+    smart_rebuild_targets, detect_mosaic_panels_task) are the same object via
+    either module, so patching e.g. `.apply_async` on
+    `tasks_mod.smart_rebuild_targets` still works fine and is left as-is.
+    """
+    import sys as _sys
+    return _sys.modules["app.worker.tasks_migrations"]
 
 
 @pytest.fixture
@@ -509,7 +548,7 @@ class TestFreshRunHappyPath:
         yield
         _cleanup_job_and_metadata(db, [self.JOB_KEY], ["data_version"])
 
-    def test_pending_versions_run_in_order_with_incrementing_step(self, tasks_mod, db):
+    def test_pending_versions_run_in_order_with_incrementing_step(self, tasks_mod, tasks_migrations_mod, db):
         order = []
 
         def fn_v1(session):
@@ -526,7 +565,7 @@ class TestFreshRunHappyPath:
         }
 
         step_snapshots = []
-        original_update = tasks_mod._update_data_migration_job
+        original_update = tasks_migrations_mod._update_data_migration_job
 
         def spy(job_key, **values):
             original_update(job_key, **values)
@@ -535,7 +574,7 @@ class TestFreshRunHappyPath:
 
         with patch.multiple(
             "app.services.data_migrations", DATA_VERSION=self.V2, MIGRATIONS=migrations,
-        ), patch.object(tasks_mod, "_update_data_migration_job", side_effect=spy), \
+        ), patch.object(tasks_migrations_mod, "_update_data_migration_job", side_effect=spy), \
                 patch.object(tasks_mod.smart_rebuild_targets, "apply_async"), \
                 patch.object(tasks_mod.detect_mosaic_panels_task, "apply_async"):
             result = tasks_mod.run_data_migrations.run(from_version=self.BASE_VERSION)
@@ -622,7 +661,7 @@ class TestBookkeepingFailuresDoNotAffectOutcome:
             "app.services.data_migrations", DATA_VERSION=self.V2, MIGRATIONS=migrations,
         )
 
-    def test_success_path_bookkeeping_failure_does_not_demote_run(self, tasks_mod, db):
+    def test_success_path_bookkeeping_failure_does_not_demote_run(self, tasks_mod, tasks_migrations_mod, db):
         """Pickup succeeds, then every later job-row write hits a DB error.
         The run must still complete: both versions committed to app_metadata,
         no failed job status, and no data_upgrade_failed activity emitted for
@@ -631,7 +670,7 @@ class TestBookkeepingFailuresDoNotAffectOutcome:
 
         migrations, order = self._migrations()
 
-        real_session_factory = tasks_mod._data_migration_job_session
+        real_session_factory = tasks_migrations_mod._data_migration_job_session
         call_count = {"n": 0}
 
         def flaky_job_session():
@@ -643,8 +682,8 @@ class TestBookkeepingFailuresDoNotAffectOutcome:
         emit_spy = MagicMock()
 
         with self._patched(migrations), \
-                patch.object(tasks_mod, "_data_migration_job_session", flaky_job_session), \
-                patch.object(tasks_mod, "_emit_activity_sync", emit_spy), \
+                patch.object(tasks_migrations_mod, "_data_migration_job_session", flaky_job_session), \
+                patch.object(tasks_migrations_mod, "_emit_activity_sync", emit_spy), \
                 patch.object(tasks_mod.smart_rebuild_targets, "apply_async"), \
                 patch.object(tasks_mod.detect_mosaic_panels_task, "apply_async"):
             result = tasks_mod.run_data_migrations.run(from_version=self.BASE_VERSION)
@@ -668,7 +707,7 @@ class TestBookkeepingFailuresDoNotAffectOutcome:
         assert row["status"] == "running"  # stale, but never "failed"
         assert row["last_error"] is None
 
-    def test_pickup_failure_does_not_block_migrations(self, tasks_mod, db):
+    def test_pickup_failure_does_not_block_migrations(self, tasks_mod, tasks_migrations_mod, db):
         """If the pickup upsert itself raises, the run proceeds without any
         job-row tracking and still migrates to completion."""
         migrations, order = self._migrations()
@@ -677,7 +716,7 @@ class TestBookkeepingFailuresDoNotAffectOutcome:
             raise RuntimeError("data_jobs table unreachable")
 
         with self._patched(migrations), \
-                patch.object(tasks_mod, "_data_migration_job_session", broken_job_session), \
+                patch.object(tasks_migrations_mod, "_data_migration_job_session", broken_job_session), \
                 patch.object(tasks_mod.smart_rebuild_targets, "apply_async"), \
                 patch.object(tasks_mod.detect_mosaic_panels_task, "apply_async"):
             result = tasks_mod.run_data_migrations.run(from_version=self.BASE_VERSION)

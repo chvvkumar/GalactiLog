@@ -23,15 +23,25 @@ for _mod in ("fitsio",):
         sys.modules[_mod] = MagicMock()
 
 
-def _bootstrap_tasks():
-    """Import app.worker.tasks with the sync engine mocked (no DB needed)."""
-    mod = sys.modules.get("app.worker.tasks")
+def _bootstrap_tasks(modname="app.worker.tasks"):
+    """Import the real target module with the sync engine mocked (no DB
+    needed).
+
+    Tasks now live in per-domain app.worker.tasks_* modules (app.worker.tasks
+    is a thin facade -- see app/worker/tasks.py). Every helper below that
+    patches an internal name (Session, _redis, clear_cancel_sync, etc.) must
+    bootstrap the module that actually owns the task under test, since a
+    patch.object() on the facade does not affect a function whose __globals__
+    point at a different, real module.
+    """
+    mod = sys.modules.get(modname)
     if mod is not None and not isinstance(mod, MagicMock):
         return mod
-    sys.modules.pop("app.worker.tasks", None)
+    sys.modules.pop(modname, None)
     with patch("sqlalchemy.create_engine", return_value=MagicMock()):
-        import app.worker.tasks as tasks_mod
-    return tasks_mod
+        import importlib
+        mod = importlib.import_module(modname)
+    return mod
 
 
 # ---------------------------------------------------------------------------
@@ -247,7 +257,7 @@ def _run_thumbnails(tasks, targets, fetch):
 
 class TestThumbnailPartialProgress:
     def test_commits_in_chunks(self):
-        tasks = _bootstrap_tasks()
+        tasks = _bootstrap_tasks("app.worker.tasks_thumbnails")
         targets = _thumbnail_targets(25)
         result, session, captured = _run_thumbnails(
             tasks, targets, fetch=lambda t, d: "thumb.png"
@@ -259,7 +269,7 @@ class TestThumbnailPartialProgress:
         assert result["timed_out"] is False
 
     def test_soft_time_limit_leaves_terminal_state_and_partial_progress(self):
-        tasks = _bootstrap_tasks()
+        tasks = _bootstrap_tasks("app.worker.tasks_thumbnails")
         targets = _thumbnail_targets(25)
         calls = {"n": 0}
 
@@ -281,7 +291,7 @@ class TestThumbnailPartialProgress:
         """A paused run must report progress as the actual processed count,
         not the full total -- otherwise the progress bar reads 100% while
         the message says "paused"."""
-        tasks = _bootstrap_tasks()
+        tasks = _bootstrap_tasks("app.worker.tasks_thumbnails")
         targets = _thumbnail_targets(25)
         calls = {"n": 0}
 
@@ -300,7 +310,7 @@ class TestThumbnailPartialProgress:
     def test_resume_query_skips_targets_with_thumbnails(self):
         """Non-force runs only select targets whose thumbnail path is NULL, so a
         re-run after a partial kill continues instead of starting over."""
-        tasks = _bootstrap_tasks()
+        tasks = _bootstrap_tasks("app.worker.tasks_thumbnails")
         targets = _thumbnail_targets(3)
         _run_thumbnails(tasks, targets, fetch=lambda t, d: "thumb.png")
         # Every fetched target got its path recorded, so the next run's
@@ -343,7 +353,7 @@ def _run_rebuild_family(tasks, task, object_names, resolve_side_effect):
 
 class TestRebuildFamilyTimeout:
     def test_rebuild_targets_timeout_sets_complete(self):
-        tasks = _bootstrap_tasks()
+        tasks = _bootstrap_tasks("app.worker.tasks_target_rebuild")
 
         def resolve(*a, **k):
             raise tasks.SoftTimeLimitExceeded()
@@ -355,7 +365,7 @@ class TestRebuildFamilyTimeout:
         assert "paused" in captured["message"].lower()
 
     def test_retry_unresolved_timeout_sets_complete(self):
-        tasks = _bootstrap_tasks()
+        tasks = _bootstrap_tasks("app.worker.tasks_target_rebuild")
 
         def resolve(*a, **k):
             raise tasks.SoftTimeLimitExceeded()
@@ -373,7 +383,7 @@ class TestRebuildFamilyNonTransientError:
     counted as a failure and the loop continues to the next name."""
 
     def test_rebuild_targets_skips_non_transient_failure_and_continues(self):
-        tasks = _bootstrap_tasks()
+        tasks = _bootstrap_tasks("app.worker.tasks_target_rebuild")
 
         def resolve(obj_name, *a, **k):
             if obj_name == "BadName":
@@ -390,7 +400,7 @@ class TestRebuildFamilyNonTransientError:
         assert result["total"] == 2
 
     def test_retry_unresolved_skips_non_transient_failure_and_continues(self):
-        tasks = _bootstrap_tasks()
+        tasks = _bootstrap_tasks("app.worker.tasks_target_rebuild")
 
         def resolve(obj_name, *a, **k):
             if obj_name == "BadName":
@@ -439,7 +449,7 @@ def _run_migrations(tasks, pending):
 
 class TestDataMigrationTimeout:
     def test_soft_time_limit_pauses_without_stamping_version(self):
-        tasks = _bootstrap_tasks()
+        tasks = _bootstrap_tasks("app.worker.tasks_migrations")
 
         def timeout_migration(session):
             raise tasks.SoftTimeLimitExceeded()
@@ -457,7 +467,7 @@ class TestDataMigrationTimeout:
         assert "data_upgrade_paused" in events
 
     def test_prior_committed_migration_persists_before_timeout(self):
-        tasks = _bootstrap_tasks()
+        tasks = _bootstrap_tasks("app.worker.tasks_migrations")
 
         def ok_migration(session):
             return "ok"
@@ -509,7 +519,7 @@ class TestSoftLimitPropagation:
         still produces the terminal data_upgrade_paused activity event."""
         from celery.exceptions import SoftTimeLimitExceeded
         import app.services.data_migrations as dm
-        tasks = _bootstrap_tasks()
+        tasks = _bootstrap_tasks("app.worker.tasks_migrations")
 
         target = MagicMock()
         target.object_type = "G"

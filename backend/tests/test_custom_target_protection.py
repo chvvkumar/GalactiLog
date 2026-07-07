@@ -12,12 +12,17 @@ from app.services.hyperleda import enrich_target_from_hyperleda
 def _rebuild_targets_source() -> str:
     """Return the body of the rebuild_targets task without importing tasks.py.
 
-    tasks.py imports fitsio (not installed in CI), so read the source directly
-    and slice out the rebuild_targets function.
+    rebuild_targets lives in tasks_target_rebuild.py since the Phase 6 Task 3
+    module split (tasks.py is now a thin facade). tasks_target_rebuild.py
+    imports fitsio-free dependencies but the module tree still pulls in
+    fitsio transitively (not installed in CI), so read the source directly
+    and slice out the rebuild_targets function rather than importing it.
+    retry_unresolved -- the next @celery_app.task-decorated function in the
+    file -- is still the delimiter that ends this slice.
     """
     src = (
         pathlib.Path(__file__).resolve().parent.parent
-        / "app" / "worker" / "tasks.py"
+        / "app" / "worker" / "tasks_target_rebuild.py"
     ).read_text(encoding="utf-8")
     start = src.index("def rebuild_targets(")
     end = src.index("@celery_app.task", start)

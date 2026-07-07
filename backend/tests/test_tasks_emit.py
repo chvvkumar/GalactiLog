@@ -14,7 +14,9 @@ for _mod in ("fitsio",):
         sys.modules[_mod] = MagicMock()
 
 
-TASKS_PATH = pathlib.Path("app/worker/tasks.py")
+# run_scan lives in tasks_scan.py since the Phase 6 Task 3 module split;
+# tasks.py is now a thin facade that only imports/re-exports it.
+TASKS_PATH = pathlib.Path("app/worker/tasks_scan.py")
 ORPHAN_CLEANUP_PATH = pathlib.Path("app/services/orphan_cleanup.py")
 
 
@@ -24,7 +26,7 @@ def _run_scan_source() -> str:
     for node in ast.walk(tree):
         if isinstance(node, ast.FunctionDef) and node.name == "run_scan":
             return ast.get_source_segment(src, node)
-    raise AssertionError("run_scan not found in tasks.py")
+    raise AssertionError("run_scan not found in tasks_scan.py")
 
 
 def test_run_scan_uses_emit_sync_not_append_activity_sync():
@@ -83,30 +85,41 @@ def test_emit_sync_imported_in_tasks():
     assert found, "emit_sync not imported from app.services.activity in tasks.py"
 
 
-def _bootstrap_real_tasks():
-    """Replace the conftest MagicMock stub with the real app.worker.tasks module."""
+def _bootstrap_real_tasks(modname="app.worker.tasks_scan"):
+    """Load the real target module, patching create_engine so it doesn't need
+    a live DB connection at import time.
+
+    run_scan lives in tasks_scan.py and detect_mosaic_panels_task lives in
+    tasks_mosaics.py since the Phase 6 Task 3 module split; every patch below
+    targets whichever module actually owns the function under test (a
+    patch.object() on the app.worker.tasks facade would not affect a function
+    whose __globals__ point at a different, real module).
+    """
     import sys as _sys
-    mod = _sys.modules.get("app.worker.tasks")
+    mod = _sys.modules.get(modname)
     if mod is not None and not isinstance(mod, MagicMock):
         return mod
-    _sys.modules.pop("app.worker.tasks", None)
+    _sys.modules.pop(modname, None)
     mock_engine = MagicMock()
     mock_engine.connect.return_value.__enter__ = MagicMock(return_value=mock_engine)
     mock_engine.connect.return_value.__exit__ = MagicMock(return_value=False)
     with patch("sqlalchemy.create_engine", return_value=mock_engine):
-        import app.worker.tasks as tasks_mod
-    return tasks_mod
+        import importlib
+        mod = importlib.import_module(modname)
+    return mod
 
 
 def test_enrichment_query_failed_emits_after_rebuild():
     import pathlib
-    src = pathlib.Path("app/worker/tasks.py").read_text()
+    # rebuild_targets/retry_unresolved now live in tasks_target_rebuild.py.
+    src = pathlib.Path("app/worker/tasks_target_rebuild.py").read_text()
     assert "enrichment_query_failed" in src
 
 
 def test_filename_candidate_failed_event_type_present():
     import pathlib
-    src = pathlib.Path("app/worker/tasks.py").read_text()
+    # _do_ingest now lives in tasks_scan.py.
+    src = pathlib.Path("app/worker/tasks_scan.py").read_text()
     assert "filename_candidate_failed" in src
 
 
@@ -365,7 +378,7 @@ def test_run_scan_rebuilds_skipped_paths_dropping_missing_files():
 
 
 def test_mosaic_detection_complete_emits():
-    tasks_mod = _bootstrap_real_tasks()
+    tasks_mod = _bootstrap_real_tasks("app.worker.tasks_mosaics")
     detect_mosaic_panels_task = tasks_mod.detect_mosaic_panels_task
     emit_calls = []
 
@@ -399,7 +412,7 @@ def test_detection_task_passes_campaign_gap_days_from_settings():
     import contextlib
     from unittest.mock import AsyncMock
 
-    tasks_mod = _bootstrap_real_tasks()
+    tasks_mod = _bootstrap_real_tasks("app.worker.tasks_mosaics")
     detect_mosaic_panels_task = tasks_mod.detect_mosaic_panels_task
 
     # Fake async session: get(UserSettings, ...) returns general with gap=7.

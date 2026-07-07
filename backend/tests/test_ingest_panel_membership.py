@@ -51,17 +51,23 @@ def _cleanup(session):
 
 
 def _bootstrap_tasks():
-    """Load the real app.worker.tasks module, patching create_engine at import
-    time so it doesn't attempt a live DB connection before we swap in the
-    real test-DB engine below (same pattern as test_tasks.py)."""
+    """Load the real app.worker.tasks_scan module (owns _do_ingest and
+    reingest_changed_file since the Phase 6 Task 3 module split), patching
+    create_engine at import time so it doesn't attempt a live DB connection
+    before we swap in the real test-DB engine below (same pattern as
+    test_tasks.py). Every patch.object() call in this file must target the
+    module that actually owns the function under test -- see
+    test_tasks.py::_bootstrap_tasks for why the facade doesn't work here."""
     import sys as _sys
-    mod = _sys.modules.get("app.worker.tasks")
+    modname = "app.worker.tasks_scan"
+    mod = _sys.modules.get(modname)
     if mod is not None and not isinstance(mod, MagicMock):
         return mod
-    _sys.modules.pop("app.worker.tasks", None)
+    _sys.modules.pop(modname, None)
     mock_engine = MagicMock()
     with patch("sqlalchemy.create_engine", return_value=mock_engine):
-        import app.worker.tasks as tasks_mod
+        import importlib
+        tasks_mod = importlib.import_module(modname)
     return tasks_mod
 
 

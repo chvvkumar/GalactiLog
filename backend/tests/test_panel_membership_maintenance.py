@@ -724,30 +724,60 @@ async def test_orphan_create_clears_stale_panel_id(api_client, db):
 import contextlib
 
 
+_TASKS_FAMILY = (
+    "app.worker.tasks", "app.worker.tasks_common", "app.worker.tasks_scan",
+    "app.worker.tasks_thumbnails", "app.worker.tasks_target_dedup",
+    "app.worker.tasks_target_rebuild", "app.worker.tasks_mosaics",
+    "app.worker.tasks_csv", "app.worker.tasks_migrations",
+    "app.worker.tasks_filenames", "app.worker.tasks_sessions",
+)
+
+
 @contextlib.contextmanager
 def _real_tasks_module_with_live_db():
-    """Temporarily swap ``sys.modules["app.worker.tasks"]`` for a freshly
-    imported copy whose ``_sync_engine`` is a genuine connection to the test
-    Postgres DB, then restore whatever was cached there before.
+    """Temporarily swap the whole app.worker.tasks_* module family for freshly
+    imported copies whose shared ``_sync_engine`` (in tasks_common) is a
+    genuine connection to the test Postgres DB, then restore whatever was
+    cached there before. Yields the app.worker.tasks_target_rebuild submodule,
+    which owns ``_smart_rebuild_inner`` since the Phase 6 Task 3 module split
+    (popping only the "app.worker.tasks" facade would not force it, or
+    tasks_common's engine, to rebuild -- Python does not re-execute a module
+    that is still cached in sys.modules under a different name).
 
     Unlike ``tests.test_tasks_emit._bootstrap_real_tasks`` (which mocks
-    ``sqlalchemy.create_engine`` for its DB-free unit tests and leaves that
-    mock-engine module cached in ``sys.modules`` for the rest of the pytest
-    session -- polluting every other test that imports ``app.worker.tasks``
+    ``sqlalchemy.create_engine`` for its DB-free unit tests and leaves those
+    mock-engine modules cached in ``sys.modules`` for the rest of the pytest
+    session -- polluting every other test that imports this module family
     afterward, e.g. ``test_tasks.py`` / ``test_rebuild_robustness.py``), this
     always imports fresh with the real, unpatched ``create_engine`` AND puts
-    the previous module object back afterward so this test's DB-backed import
-    cannot leak into any other test in the session.
+    the previous module objects back afterward so this test's DB-backed
+    import cannot leak into any other test in the session. Celery task
+    registrations for the whole family are also torn down and rebuilt so the
+    freshly imported functions are the ones actually registered.
     """
     import sys as _sys
-    previous = _sys.modules.pop("app.worker.tasks", None)
+    from app.worker.celery_app import celery_app
+
+    previous = {name: _sys.modules.pop(name, None) for name in _TASKS_FAMILY}
+    removed_tasks = {}
+    for name, task in list(celery_app.tasks.items()):
+        if getattr(task, "__module__", None) in _TASKS_FAMILY:
+            removed_tasks[name] = task
+            del celery_app.tasks[name]
     try:
-        import app.worker.tasks as tasks_mod
+        import app.worker.tasks_target_rebuild as tasks_mod
         yield tasks_mod
     finally:
-        _sys.modules.pop("app.worker.tasks", None)
-        if previous is not None:
-            _sys.modules["app.worker.tasks"] = previous
+        for name in _TASKS_FAMILY:
+            _sys.modules.pop(name, None)
+        for name, task in list(celery_app.tasks.items()):
+            if getattr(task, "__module__", None) in _TASKS_FAMILY:
+                del celery_app.tasks[name]
+        for name, mod in previous.items():
+            if mod is not None:
+                _sys.modules[name] = mod
+        for name, task in removed_tasks.items():
+            celery_app.tasks.setdefault(name, task)
 
 
 def _normalize_alias(value: str) -> str:

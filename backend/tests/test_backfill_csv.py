@@ -30,14 +30,15 @@ if "fitsio" not in sys.modules:
 
 
 def _bootstrap_tasks_module():
-    """Import app.worker.tasks with DB engine mocked out."""
+    """Import app.worker.tasks_csv (owns backfill_csv_metrics since the
+    Phase 6 Task 3 module split) with the DB engine mocked out."""
+    modname = "app.worker.tasks_csv"
     # If already imported and it's the real module (not a conftest MagicMock), return it
-    cached = sys.modules.get("app.worker.tasks")
+    cached = sys.modules.get(modname)
     if cached is not None and not isinstance(cached, MagicMock):
         return cached
 
-    # Remove the conftest stub so we can import the real module
-    sys.modules.pop("app.worker.tasks", None)
+    sys.modules.pop(modname, None)
 
     # Patch sqlalchemy create_engine to return a mock, preventing DB connection
     mock_engine = MagicMock()
@@ -45,7 +46,8 @@ def _bootstrap_tasks_module():
     mock_engine.connect.return_value.__exit__ = MagicMock(return_value=False)
 
     with patch("sqlalchemy.create_engine", return_value=mock_engine):
-        import app.worker.tasks as tasks_mod
+        import importlib
+        tasks_mod = importlib.import_module(modname)
     return tasks_mod
 
 
@@ -72,7 +74,6 @@ def test_backfill_csv_metrics_no_csv_dirs(tmp_path):
     with patch.object(_redis_module, "from_url") as mock_from_url, \
          patch.object(_tasks, "settings") as mock_settings, \
          patch.object(_tasks, "set_idle_sync") as mock_idle, \
-         patch.object(_tasks, "start_scanning_sync") as mock_start, \
          patch.object(_tasks, "parse_image_metadata_csv") as mock_image_csv:
 
         mock_settings.fits_data_path = str(tmp_path)
@@ -84,7 +85,6 @@ def test_backfill_csv_metrics_no_csv_dirs(tmp_path):
 
     assert result == {"updated": 0, "dirs": 0}
     mock_idle.assert_called_once_with(mock_redis_conn)
-    mock_start.assert_not_called()
     mock_image_csv.assert_not_called()
 
 
@@ -154,7 +154,6 @@ def test_backfill_csv_metrics_handles_exception(tmp_path):
          patch.object(_tasks, "settings") as mock_settings, \
          patch.object(_tasks, "_sync_engine") as mock_engine, \
          patch.object(_tasks, "set_idle_sync") as mock_idle, \
-         patch.object(_tasks, "start_scanning_sync") as mock_start, \
          patch.object(_tasks, "increment_failed_sync") as mock_failed, \
          patch.object(_tasks, "parse_image_metadata_csv") as mock_image_csv, \
          patch.object(_tasks, "parse_weather_csv") as mock_weather_csv:
@@ -190,7 +189,6 @@ def test_backfill_csv_metrics_skips_empty_image_data(tmp_path):
          patch.object(_tasks, "settings") as mock_settings, \
          patch.object(_tasks, "_sync_engine") as mock_engine, \
          patch.object(_tasks, "set_idle_sync") as mock_idle, \
-         patch.object(_tasks, "start_scanning_sync") as mock_start, \
          patch.object(_tasks, "increment_completed_sync") as mock_increment, \
          patch.object(_tasks, "parse_image_metadata_csv") as mock_image_csv, \
          patch.object(_tasks, "parse_weather_csv") as mock_weather_csv:
@@ -229,7 +227,6 @@ def test_backfill_csv_metrics_no_file_name_match(tmp_path):
          patch.object(_tasks, "settings") as mock_settings, \
          patch.object(_tasks, "_sync_engine") as mock_engine, \
          patch.object(_tasks, "set_idle_sync") as mock_idle, \
-         patch.object(_tasks, "start_scanning_sync") as mock_start, \
          patch.object(_tasks, "increment_completed_sync") as mock_increment, \
          patch.object(_tasks, "parse_image_metadata_csv") as mock_image_csv, \
          patch.object(_tasks, "parse_weather_csv") as mock_weather_csv:

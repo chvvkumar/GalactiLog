@@ -19,18 +19,31 @@ from app.services.thumbnail import generate_thumbnail
 # helpers
 # ---------------------------------------------------------------------------
 
-def _bootstrap_tasks():
-    """Load the real app.worker.tasks, patching create_engine so it doesn't
-    need a live DB connection at import time."""
+def _bootstrap_tasks(modname="app.worker.tasks"):
+    """Load the real target module, patching create_engine so it doesn't
+    need a live DB connection at import time.
+
+    Tasks now live in per-domain app.worker.tasks_* modules (app.worker.tasks
+    is a thin facade that re-exports them for external call sites -- see
+    app/worker/tasks.py). A test that patches an internal name (Session,
+    _redis, a helper function, etc.) must bootstrap the module that actually
+    OWNS the function under test, since patch.object() rebinds an attribute on
+    one module's namespace and a function only sees patches made on the
+    module it was defined in (its __globals__), not on the facade that merely
+    re-exports the same function object. Callers pass e.g.
+    modname="app.worker.tasks_scan" for _do_ingest/reingest_changed_file, or
+    "app.worker.tasks_thumbnails" for the chunked thumbnail tasks.
+    """
     import sys as _sys
-    mod = _sys.modules.get("app.worker.tasks")
+    mod = _sys.modules.get(modname)
     if mod is not None and not isinstance(mod, MagicMock):
         return mod
-    _sys.modules.pop("app.worker.tasks", None)
+    _sys.modules.pop(modname, None)
     mock_engine = MagicMock()
     with patch("sqlalchemy.create_engine", return_value=mock_engine):
-        import app.worker.tasks as tasks_mod
-    return tasks_mod
+        import importlib
+        mod = importlib.import_module(modname)
+    return mod
 
 
 def _make_partition_result(chunks: list[list]):
@@ -117,7 +130,7 @@ class TestRegenerateMissingThumbnailsChunked:
         return result, mock_regen
 
     def test_no_rows_returns_complete(self):
-        tasks_mod = _bootstrap_tasks()
+        tasks_mod = _bootstrap_tasks("app.worker.tasks_thumbnails")
         result, mock_regen = self._run(tasks_mod, chunks=[], tmp_path=None)
         assert result["status"] == "complete"
         assert result["checked"] == 0
@@ -125,7 +138,7 @@ class TestRegenerateMissingThumbnailsChunked:
         mock_regen.delay.assert_not_called()
 
     def test_all_present_returns_complete(self, tmp_path):
-        tasks_mod = _bootstrap_tasks()
+        tasks_mod = _bootstrap_tasks("app.worker.tasks_thumbnails")
         # Create two real thumbnail files so _check_missing returns False
         t1 = tmp_path / "t1.jpg"
         t2 = tmp_path / "t2.jpg"
@@ -142,7 +155,7 @@ class TestRegenerateMissingThumbnailsChunked:
         mock_regen.delay.assert_not_called()
 
     def test_missing_thumbnails_queued_across_chunks(self, tmp_path):
-        tasks_mod = _bootstrap_tasks()
+        tasks_mod = _bootstrap_tasks("app.worker.tasks_thumbnails")
         # t1 exists on disk; t2 and t3 do not
         t1 = tmp_path / "t1.jpg"
         t1.write_bytes(b"x")
@@ -165,7 +178,7 @@ class TestRegenerateMissingThumbnailsChunked:
 
     def test_row_without_file_path_skipped(self, tmp_path):
         """Rows where file_path is falsy must not be queued even if thumb is missing."""
-        tasks_mod = _bootstrap_tasks()
+        tasks_mod = _bootstrap_tasks("app.worker.tasks_thumbnails")
         t_missing = str(tmp_path / "missing.jpg")
 
         chunks = [
@@ -244,7 +257,7 @@ class TestPurgeAndRegenerateThumbnailsChunked:
         return result, mock_regen
 
     def test_no_images_returns_complete(self):
-        tasks_mod = _bootstrap_tasks()
+        tasks_mod = _bootstrap_tasks("app.worker.tasks_thumbnails")
         result, mock_regen = self._run(tasks_mod, total_count=0, chunks_data=[], tmp_path=None)
         assert result["status"] == "complete"
         assert result["deleted"] == 0
@@ -252,7 +265,7 @@ class TestPurgeAndRegenerateThumbnailsChunked:
         mock_regen.delay.assert_not_called()
 
     def test_images_queued_across_chunks(self, tmp_path):
-        tasks_mod = _bootstrap_tasks()
+        tasks_mod = _bootstrap_tasks("app.worker.tasks_thumbnails")
         t1 = tmp_path / "t1.jpg"
         t1.write_bytes(b"x")
         t2 = tmp_path / "t2.jpg"
@@ -267,7 +280,7 @@ class TestPurgeAndRegenerateThumbnailsChunked:
         assert mock_regen.delay.call_count == 2
 
     def test_rows_without_file_path_not_queued(self, tmp_path):
-        tasks_mod = _bootstrap_tasks()
+        tasks_mod = _bootstrap_tasks("app.worker.tasks_thumbnails")
         chunks = [
             [("id1", None, str(tmp_path / "t1.jpg")), ("id2", "/fits/b.fits", None)],
         ]
@@ -286,7 +299,9 @@ class TestDetectDuplicatesPass2JoinQuery:
 
     def test_pass2_query_uses_left_join_not_correlated_subquery(self):
         import pathlib
-        src = pathlib.Path("app/worker/tasks.py").read_text()
+        # detect_duplicate_targets now lives in tasks_target_dedup.py (Phase 6
+        # Task 3 split), not directly in tasks.py.
+        src = pathlib.Path("app/worker/tasks_target_dedup.py").read_text()
         # Find the active_targets_query block used in Pass 2
         assert "LEFT JOIN" in src, "Pass 2 query must use LEFT JOIN aggregate"
         assert "COALESCE(ic.img_count, 0)" in src, "Pass 2 must use COALESCE for 0-image targets"
@@ -331,7 +346,7 @@ class TestReingestValidatesBeforeDelete:
     """A truncated/corrupt file must NOT delete the existing catalog row."""
 
     def test_corrupt_file_does_not_delete_existing_row(self):
-        tasks_mod = _bootstrap_tasks()
+        tasks_mod = _bootstrap_tasks("app.worker.tasks_scan")
 
         bad_fitsio = MagicMock()
         bad_fitsio.read_header.side_effect = ValueError("SIMPLE card")
@@ -355,7 +370,7 @@ class TestReingestValidatesBeforeDelete:
         mock_do_ingest.assert_not_called()
 
     def test_valid_file_proceeds_to_ingest(self):
-        tasks_mod = _bootstrap_tasks()
+        tasks_mod = _bootstrap_tasks("app.worker.tasks_scan")
 
         ok_fitsio = MagicMock()
         ok_fitsio.read_header.return_value = MagicMock()  # readable header
@@ -477,7 +492,7 @@ class TestDuplicateIngestPreservesThumbnail:
 
     def test_integrity_error_preserves_thumbnail(self, tmp_path):
         """Duplicate path -> IntegrityError on commit -> thumbnail is kept."""
-        tasks_mod = _bootstrap_tasks()
+        tasks_mod = _bootstrap_tasks("app.worker.tasks_scan")
         exc = IntegrityError("INSERT", {}, Exception("duplicate key"))
         raised, thumb_path = self._run_do_ingest(tasks_mod, tmp_path, exc)
         assert isinstance(raised, IntegrityError)
@@ -485,7 +500,7 @@ class TestDuplicateIngestPreservesThumbnail:
 
     def test_orphaned_insert_removes_unreferenced_thumbnail(self, tmp_path):
         """Genuine insert failure with no row referencing the thumb -> deleted."""
-        tasks_mod = _bootstrap_tasks()
+        tasks_mod = _bootstrap_tasks("app.worker.tasks_scan")
         exc = RuntimeError("boom")
         raised, thumb_path = self._run_do_ingest(
             tasks_mod, tmp_path, exc, thumb_referenced=False
@@ -495,7 +510,7 @@ class TestDuplicateIngestPreservesThumbnail:
 
     def test_orphaned_insert_keeps_referenced_thumbnail(self, tmp_path):
         """Insert failure but another row references the thumb -> kept (defensive)."""
-        tasks_mod = _bootstrap_tasks()
+        tasks_mod = _bootstrap_tasks("app.worker.tasks_scan")
         exc = RuntimeError("boom")
         raised, thumb_path = self._run_do_ingest(
             tasks_mod, tmp_path, exc, thumb_referenced=True
@@ -651,7 +666,7 @@ class TestIngestFilenameCandidateNoDetach:
         return state, captured_logs, ASSIGNED_ID
 
     def test_filename_candidate_created_without_detached_instance_error(self, tmp_path):
-        tasks_mod = _bootstrap_tasks()
+        tasks_mod = _bootstrap_tasks("app.worker.tasks_scan")
         state, captured_logs, assigned_id = self._run(tasks_mod, tmp_path)
 
         # No "Failed to create filename candidate" warning was emitted.

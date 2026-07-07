@@ -5,13 +5,17 @@ from unittest.mock import MagicMock, patch
 
 
 def _bootstrap_tasks():
-    mod = sys.modules.get("app.worker.tasks")
+    """Load app.worker.tasks_target_dedup (owns backfill_catalog_identity
+    since the Phase 6 Task 3 module split), with the sync engine mocked."""
+    modname = "app.worker.tasks_target_dedup"
+    mod = sys.modules.get(modname)
     if mod is not None and not isinstance(mod, MagicMock):
         return mod
-    sys.modules.pop("app.worker.tasks", None)
+    sys.modules.pop(modname, None)
     with patch("sqlalchemy.create_engine", return_value=MagicMock()):
-        import app.worker.tasks as tasks_mod
-    return tasks_mod
+        import importlib
+        mod = importlib.import_module(modname)
+    return mod
 
 
 class TestBackfillCatalogIdentity:
