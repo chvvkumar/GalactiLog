@@ -1,19 +1,18 @@
 import { createSignal, createResource, startTransition } from "solid-js";
 import { apiClient } from "../api/generated/client";
 import { unwrap } from "../api/unwrap";
-// Deliberately kept on the OLD hand-written settings types (required
+// SettingsResponse/GeneralSettings/FilterConfig/EquipmentConfig/DisplaySettings
+// are the hand-written definitions in `../api/types` (required
 // `FilterConfig.aliases`, `GeneralSettings.nina_instances`/
-// `stellarium_instances` typed as `IntegrationInstance[]`, etc.) rather than
-// the generated-schema aliases in `../api/types`, which loosen several of
-// these fields to optional/untyped (backend Pydantic defaults collapsed by
-// the OpenAPI dump). `store/graphSettings.ts` (Slice 2) already depends on
-// `SettingsResponse.graph` carrying the old, required-field `GraphSettings`
-// shape, and this store is consumed by nearly every page -- repointing here
-// would ripple a required->optional break into files well outside this
-// slice's scope. Same precedent as store/stats.ts and store/graphSettings.ts.
-// The backend always populates the full shape, so the casts below reflect
-// actual runtime data, not a behavior change.
-import type { SettingsResponse, GeneralSettings, FilterConfig, EquipmentConfig, DisplaySettings } from "../types";
+// `stellarium_instances` typed as `IntegrationInstance[]`, etc.), rather
+// than the generated schema, which loosens several of these fields to
+// optional/untyped (backend Pydantic defaults collapsed by the OpenAPI
+// dump). `store/graphSettings.ts` depends on `SettingsResponse.graph`
+// carrying this required-field `GraphSettings` shape, and this store is
+// consumed by nearly every page. The backend always populates the full
+// shape, so the casts below reflect actual runtime data, not a behavior
+// change.
+import type { SettingsResponse, GeneralSettings, FilterConfig, EquipmentConfig, DisplaySettings } from "../api/types";
 // The generated GeneralSettings schema marks several Pydantic-default fields
 // (activity_retention_days, app_log_*, mosaic_position_tolerance_arcmin) as
 // required, even though the backend model supplies defaults for them and
@@ -21,7 +20,7 @@ import type { SettingsResponse, GeneralSettings, FilterConfig, EquipmentConfig, 
 // type -- and every caller of saveGeneral -- has never included these
 // fields). Cast at the request boundary only; this preserves the exact
 // request body the old fetchJson-based client sent.
-import type { GeneralSettings as GeneratedGeneralSettings } from "../api/types";
+import type { GeneratedGeneralSettings } from "../api/types";
 
 const [settingsGate, setSettingsGate] = createSignal(false);
 export function enableSettingsFetch() { setSettingsGate(true); }

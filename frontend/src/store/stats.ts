@@ -13,7 +13,7 @@ import { unwrap } from "../api/unwrap";
 // Slice 1. The backend always populates these fields, so the cast reflects
 // actual runtime shape; a later slice that migrates the Statistics page can
 // drop the cast alongside repointing its consumers to `../api/types`.
-import type { StatsResponse } from "../types";
+import type { StatsResponse } from "../api/types";
 
 const [stats, { refetch: refetchStats }] = createResource(() =>
   apiClient.GET("/api/stats", {}).then(unwrap) as Promise<StatsResponse>,

@@ -1,7 +1,7 @@
 import { Component, createEffect, onCleanup } from "solid-js";
 import { Chart } from "chart.js";
 import "../../utils/chartRegistry";
-import type { CorrelationResponse } from "../../types";
+import type { CorrelationResponse } from "../../api/types";
 import { chartFontSize } from "../../utils/chartConfig";
 import { ARCSEC } from "../../utils/format";
 

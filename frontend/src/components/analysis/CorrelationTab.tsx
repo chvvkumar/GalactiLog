@@ -4,17 +4,16 @@ import { apiClient } from "../../api/generated/client";
 import { unwrap } from "../../api/unwrap";
 import { queryKeys } from "../../api/queryKeys";
 import type { SharedFilters } from "../../pages/AnalysisPage";
-// Deliberately kept on the OLD hand-written `CorrelationResponse` (whose
-// `CorrelationPoint.target_id` is `string | null`, no `undefined`) for the
-// cast below -- the generated-schema alias in `../../api/types` types
-// `target_id` as `string | null | undefined` because the field is optional
-// in the OpenAPI schema (a real backend/OpenAPI schema gap, not a runtime
-// difference; the field is always present in the actual response). Sole
-// consumer is `CorrelationChart`, which is out of this slice's scope and
-// still imports the old type -- cast at this boundary rather than rippling
-// the schema gap into it. Same precedent as `DashboardFilterProvider.tsx`'s
-// `TargetAggregationResponse` cast from Slice 4/5. Flagged for Slice 15.
-import type { CorrelationResponse } from "../../types";
+// CorrelationResponse is the hand-written definition in `../../api/types`
+// (`CorrelationPoint.target_id` is `string | null`, no `undefined`) for the
+// cast below -- the generated schema types `target_id` as
+// `string | null | undefined` because the field is optional in the OpenAPI
+// schema (a real backend/OpenAPI schema gap, not a runtime difference; the
+// field is always present in the actual response). Sole consumer is
+// `CorrelationChart`, which imports this same type -- cast at this
+// boundary. Same precedent as `DashboardFilterProvider.tsx`'s
+// `TargetAggregationResponse` cast.
+import type { CorrelationResponse } from "../../api/types";
 import CorrelationChart from "./CorrelationChart";
 import StatsCard from "./StatsCard";
 

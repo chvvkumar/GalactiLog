@@ -18,7 +18,7 @@ import type { DbSummary } from "../api/types";
 // identical to the generated `RebuildStatusResponse`, so narrowing the
 // fetch result via a runtime-safe cast preserves both the migration and the
 // existing contract. See store/scan.ts for the matching ScanStatus deferral.
-import type { RebuildStatus } from "../types";
+import type { RebuildStatus } from "../api/types";
 import type { ScanFiltersResponse } from "../api/scanFilters";
 import DatabaseOverview from "./DatabaseOverview";
 import CaptureActivity from "./CaptureActivity";

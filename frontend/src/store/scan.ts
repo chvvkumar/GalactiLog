@@ -1,16 +1,14 @@
 import { createSignal, onCleanup, onMount } from "solid-js";
 import { apiClient } from "../api/generated/client";
 import { unwrap } from "../api/unwrap";
-// Deliberately kept on the OLD hand-written `ScanStatus` (narrow `state`
-// literal union) rather than the generated-schema alias in `../api/types`
-// (`ScanStateResponse`, which types `state` as a plain `string`). This store's
-// signal is consumed outside Slice 1 (store/activeJobs.ts's
-// wireActiveJobSources, itself consumed by ScanManager.tsx in Slice 12) via a
-// literal-union contract; repointing here would ripple a type break into
-// files this slice does not touch. The field names are otherwise identical
-// to the generated ScanStateResponse, so narrowing the fetch result via a
-// runtime-safe cast preserves both the migration and the existing contract.
-import type { ScanStatus } from "../types";
+// ScanStatus is the hand-written definition in `../api/types` (narrow
+// `state` literal union, vs. the generated `ScanStateResponse`'s plain
+// `string`). This store's signal is consumed by store/activeJobs.ts's
+// wireActiveJobSources (itself consumed by ScanManager.tsx) via the
+// literal-union contract; the field names are otherwise identical to the
+// generated ScanStateResponse, so casting the fetch result preserves both
+// the migration and the existing contract.
+import type { ScanStatus } from "../api/types";
 
 const defaultStatus: ScanStatus = {
   state: "idle",

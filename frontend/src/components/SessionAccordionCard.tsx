@@ -1,13 +1,11 @@
 import { Component, Show, For, createSignal, createEffect, createMemo } from "solid-js";
-// Kept on the OLD hand-written session/frame types rather than the generated
-// `../api/types` alias: the generated schema's optional numeric baseline
-// fields type as `number | null | undefined` (vs. this file's hand-written
-// `number | null`), and this component's frame-quality math
-// (utils/frameQuality.ts's `GroupBaseline`/`MetricBaseline`) is written
-// against the stricter shape. Switching would cascade into that unrelated
-// utility. Flagged for Slice 15 per the migration plan's documented-cast
-// allowance.
-import type { SessionOverview, SessionDetail, FrameRecord, IntegrationInstance } from "../types";
+// SessionOverview/SessionDetail/FrameRecord/IntegrationInstance are the
+// hand-written definitions in `../api/types` (Slice 15 moved them there
+// verbatim rather than aliasing the generated schema, which loosens
+// numeric baseline fields to `number | null | undefined` and would cascade
+// into this component's frame-quality math, utils/frameQuality.ts's
+// `GroupBaseline`/`MetricBaseline`).
+import type { SessionOverview, SessionDetail, FrameRecord, IntegrationInstance } from "../api/types";
 import { apiClient } from "../api/generated/client";
 import { unwrap } from "../api/unwrap";
 import ReferenceThumbnail from "./ReferenceThumbnail";

@@ -2,16 +2,13 @@ import { createSignal, createEffect } from "solid-js";
 import { apiClient } from "../api/generated/client";
 import { unwrap } from "../api/unwrap";
 import { useSettings } from "./settings";
-// Deliberately kept on the OLD hand-written `GraphSettings` (required
-// `enabled_metrics`/`enabled_filters` arrays) rather than the generated-schema
-// alias in `../api/types`, which types both fields as optional (backend
-// Pydantic defaults). This store always holds a fully-populated object
-// (seeded from DEFAULT_GRAPH_SETTINGS, merged via spread on every update), so
-// the narrower required-field contract is accurate for every local read
-// (`.includes`, `.filter`) and matches the scan.ts precedent from Slice 1. The
-// PUT request body still accepts this narrower object structurally, since a
-// required-field object satisfies a type where those fields are optional.
-import type { GraphSettings } from "../types";
+// GraphSettings is the hand-written definition in `../api/types` (required
+// `enabled_metrics`/`enabled_filters` arrays, vs. the generated schema's
+// optional fields -- backend Pydantic defaults). This store always holds a
+// fully-populated object (seeded from DEFAULT_GRAPH_SETTINGS, merged via
+// spread on every update), so the required-field contract is accurate for
+// every local read (`.includes`, `.filter`).
+import type { GraphSettings } from "../api/types";
 
 const DEFAULT_GRAPH_SETTINGS: GraphSettings = {
   enabled_metrics: ["hfr", "eccentricity", "fwhm", "guiding_rms"],

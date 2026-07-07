@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { render, fireEvent } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
 import DataTable, { type DataTableColumn } from "./DataTable";
-import type { ColumnVisibility } from "../types";
+import type { ColumnVisibility } from "../api/types";
 
 interface Row {
   id: string;

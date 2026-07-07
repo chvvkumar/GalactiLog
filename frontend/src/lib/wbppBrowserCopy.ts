@@ -5,7 +5,7 @@
 // no generated script, no server involvement in the byte transfer. Supported
 // only in Chromium browsers over a secure context (HTTPS or localhost).
 
-import type { WbppCopyOperation } from "../types";
+import type { WbppCopyOperation } from "../api/types";
 
 // Handles are typed loosely: lib.dom may not declare showDirectoryPicker on all
 // TS versions, so we avoid coupling to specific FileSystem* interfaces.

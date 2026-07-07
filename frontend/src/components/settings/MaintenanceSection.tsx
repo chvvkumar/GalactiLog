@@ -32,7 +32,7 @@ const MaintenanceSection: Component<MaintenanceSectionProps> = (props) => {
     if (pollTimer) clearInterval(pollTimer);
     pollTimer = setInterval(async () => {
       try {
-        const status: RebuildStatus = await apiClient.GET("/api/scan/rebuild-status").then(unwrap);
+        const status = await apiClient.GET("/api/scan/rebuild-status").then(unwrap) as RebuildStatus;
         setStatusMessage(status.message);
         // Generated schema types `details` as a loose `Record<string, unknown>`
         // (backend serializes numeric counters into it); narrow to the numeric

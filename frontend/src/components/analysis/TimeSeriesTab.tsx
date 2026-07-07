@@ -4,13 +4,12 @@ import { apiClient } from "../../api/generated/client";
 import { unwrap } from "../../api/unwrap";
 import { queryKeys } from "../../api/queryKeys";
 import type { SharedFilters } from "../../pages/AnalysisPage";
-// Deliberately kept on the OLD hand-written `TimeSeriesResponse` (whose
-// `TimeSeriesPoint.target_name` is `string | null`, no `undefined`) for the
-// cast below -- same schema-optionality gap as CorrelationTab's
+// TimeSeriesResponse is the hand-written definition in `../../api/types`
+// (`TimeSeriesPoint.target_name` is `string | null`, no `undefined`) for
+// the cast below -- same schema-optionality gap as CorrelationTab's
 // `CorrelationPoint.target_id` cast. Sole consumer is `TimeSeriesChart`,
-// out of this slice's scope, still importing the old type. Flagged for
-// Slice 15.
-import type { TimeSeriesResponse } from "../../types";
+// which imports this same type.
+import type { TimeSeriesResponse } from "../../api/types";
 import TimeSeriesChart from "./TimeSeriesChart";
 import { MIN_GROUP, type MetricBaseline } from "../../utils/frameQuality";
 

@@ -1,5 +1,5 @@
 import { Component, Show } from "solid-js";
-import type { SummaryStats } from "../../types";
+import type { SummaryStats } from "../../api/types";
 
 interface Props {
   stats: SummaryStats;

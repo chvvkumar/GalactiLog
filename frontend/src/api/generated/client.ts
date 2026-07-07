@@ -2,9 +2,9 @@
 //
 // T2 attaches the single 401-refresh middleware here (see ../authMiddleware.ts
 // for the implementation -- kept in its own hand-written module so a
-// `npm run gen:api` regeneration of this file never clobbers it). T3
-// migrates the ~90 hand-written api.xxx() call sites in ../client.ts over to
-// this client; until then this module is exported but unused by page code.
+// `npm run gen:api` regeneration of this file never clobbers it). All call
+// sites now go through this client; the old hand-written ../client.ts was
+// removed in T3+T5 Slice 15.
 import createClient from "openapi-fetch";
 import type { paths } from "./schema";
 import { authMiddleware } from "../authMiddleware";

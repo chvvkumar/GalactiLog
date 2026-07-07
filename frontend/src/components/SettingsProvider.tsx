@@ -4,22 +4,19 @@ import { seedEquipment } from "../store/catalog";
 import { seedFilterOptions } from "../store/filterOptions";
 import { useGraphSettings } from "../store/graphSettings";
 import type { ColumnVisibility } from "../api/types";
-// Deliberately kept on the OLD hand-written settings/custom-column types
-// (required `FilterConfig.aliases`, `GeneralSettings.nina_instances`/
+// SettingsResponse/GeneralSettings/FilterConfig/EquipmentConfig/GraphSettings/
+// CustomColumn are the hand-written definitions in `../api/types` (required
+// `FilterConfig.aliases`, `GeneralSettings.nina_instances`/
 // `stellarium_instances` typed as `IntegrationInstance[]`, literal-union
-// `CustomColumn.column_type`/`applies_to`, etc.) rather than the
-// generated-schema aliases in `../api/types`, which loosen these fields to
-// optional/untyped (backend Pydantic defaults/enums collapsed by the OpenAPI
-// dump). `store/settings.ts` and `store/graphSettings.ts` (Slice 2) already
-// depend on this narrower shape, and SettingsContextValue is consumed by
-// nearly every page (CustomColumnsTab/TargetTable/SessionTable/MosaicsTab/
-// FiltersTab/EquipmentTab/AstroBinTab/...), none of which are in this
-// slice's scope. Repointing here would ripple required->optional and
-// string->literal-union breaks well outside this slice. Same precedent as
-// store/stats.ts and store/graphSettings.ts. The backend always populates
-// the full shape, so the casts at the apiClient call sites below reflect
-// actual runtime data, not a behavior change.
-import type { SettingsResponse, GeneralSettings, FilterConfig, EquipmentConfig, DisplaySettings, GraphSettings, CustomColumn } from "../types";
+// `CustomColumn.column_type`/`applies_to`, etc.), rather than the generated
+// schema, which loosens these fields to optional/untyped (backend Pydantic
+// defaults/enums collapsed by the OpenAPI dump). SettingsContextValue is
+// consumed by nearly every page (CustomColumnsTab/TargetTable/SessionTable/
+// MosaicsTab/FiltersTab/EquipmentTab/AstroBinTab/...) against this shape.
+// The backend always populates the full shape, so the casts at the
+// apiClient call sites below reflect actual runtime data, not a behavior
+// change.
+import type { SettingsResponse, GeneralSettings, FilterConfig, EquipmentConfig, DisplaySettings, GraphSettings, CustomColumn } from "../api/types";
 import type { Resource } from "solid-js";
 import type { FilterBadgeStyle } from "../utils/filterStyles";
 import { applyTheme, applyTextSize, DEFAULT_THEME_ID, DEFAULT_TEXT_SIZE } from "../themes";

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { wireActiveJobSources, activeJobs } from "./activeJobs";
-import type { ScanStatus, RebuildStatus } from "../types";
+import type { ScanStatus, RebuildStatus } from "../api/types";
 
 const baseScanStatus: ScanStatus = {
   state: "idle",

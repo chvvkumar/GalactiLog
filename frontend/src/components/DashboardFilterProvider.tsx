@@ -7,18 +7,15 @@ import { unwrap } from "../api/unwrap";
 import { queryKeys } from "../api/queryKeys";
 import { useSettingsContext } from "./SettingsProvider";
 import type { ActiveFilters } from "../api/types";
-// Deliberately kept on the OLD hand-written `TargetAggregationResponse` (whose
-// nested `TargetAggregation.catalog_id` is required) rather than the
-// generated-schema alias in `../api/types`, which omits `catalog_id` entirely
-// (a real backend/OpenAPI schema gap -- the field IS returned by
-// GET /api/targets, it's just missing from the Pydantic response model's
-// declared fields). `targetData` is consumed by Slice 5's TargetFeed ->
-// TargetTable (and by Sidebar/DateRangePicker), none of which are in this
-// slice's scope and all still expect the full old shape. Same precedent as
-// store/stats.ts (Slice 2) and SettingsProvider.tsx (Slice 3): cast the
-// apiClient result to this type at the boundary rather than rippling the
-// schema gap into out-of-scope consumers.
-import type { TargetAggregationResponse } from "../types";
+// TargetAggregationResponse is the hand-written definition in `../api/types`
+// (nested `TargetAggregation.catalog_id` is required), rather than the
+// generated schema, which omits `catalog_id` entirely (a real
+// backend/OpenAPI schema gap -- the field IS returned by GET /api/targets,
+// it's just missing from the Pydantic response model's declared fields).
+// `targetData` is consumed by TargetFeed -> TargetTable (and by
+// Sidebar/DateRangePicker) against this shape: cast the apiClient result to
+// this type at the fetch boundary below.
+import type { TargetAggregationResponse } from "../api/types";
 
 export type SortKey = "name" | "integration" | "lastSession" | "equipment";
 export type SortDir = "asc" | "desc";

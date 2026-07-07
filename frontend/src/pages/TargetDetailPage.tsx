@@ -4,19 +4,16 @@ import { useQuery } from "@tanstack/solid-query";
 import { apiClient } from "../api/generated/client";
 import { unwrap } from "../api/unwrap";
 import { queryKeys } from "../api/queryKeys";
-// TargetDetailResponse/SessionDetail are deliberately kept on the OLD
-// hand-written `../types` (not the generated-schema alias in `../api/types`)
-// -- the generated schema marks many numeric/string fields as merely
-// optional (`T | null | undefined`) where the hand-written types declare
-// them required-nullable (`T | null`), which this file's formatting helpers
+// TargetDetailResponse/SessionDetail are the hand-written definitions in
+// `../api/types` -- the generated schema marks many numeric/string fields
+// as merely optional (`T | null | undefined`) where these declare them
+// required-nullable (`T | null`), which this file's formatting helpers
 // (formatCoord/formatSize/buildRows) and SessionOverview/SessionDetail
 // assignments rely on throughout. Same precedent as
 // DashboardFilterProvider.tsx's TargetAggregationResponse cast and
-// TargetRow.tsx's TargetAggregation cast (both Slice 4/5): cast the
-// apiClient result to the old type at the two fetch boundaries below rather
-// than rippling the schema-gap `| undefined` into this whole file. Flagged
-// for Slice 15.
-import type { TargetDetailResponse, SessionDetail } from "../types";
+// TargetRow.tsx's TargetAggregation cast: cast the apiClient result to
+// this type at the two fetch boundaries below.
+import type { TargetDetailResponse, SessionDetail } from "../api/types";
 import type { TargetSearchResultFuzzy, MergedTargetResponse } from "../api/types";
 import SessionAccordionCard from "../components/SessionAccordionCard";
 import { showToast } from "../components/Toast";

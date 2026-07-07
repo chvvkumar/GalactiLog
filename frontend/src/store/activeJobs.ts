@@ -1,5 +1,5 @@
 import { createSignal } from "solid-js";
-import type { ActiveJob, ScanStatus, RebuildStatus } from "../types";
+import type { ActiveJob, ScanStatus, RebuildStatus } from "../api/types";
 
 const [celeryJobs, setCeleryJobs] = createSignal<Map<string, ActiveJob>>(new Map());
 

@@ -1,13 +1,12 @@
 import { createSignal, For, Show } from "solid-js";
 import { apiClient } from "../api/generated/client";
 import { unwrap } from "../api/unwrap";
-// Kept on the OLD hand-written CustomColumn (literal-union `column_type`/
-// `applies_to`) rather than the generated `../api/types` alias (which
-// loosens both fields to `string`), matching SettingsProvider.tsx's
-// documented precedent -- `ctx.customColumns` (this component's data
-// source) is typed against the old shape for the same schema-gap reason.
-// Flagged for Slice 15.
-import type { CustomColumn } from "../types";
+// CustomColumn is the hand-written definition (literal-union `column_type`/
+// `applies_to`) in `../api/types` -- Slice 15 moved it there verbatim
+// rather than aliasing the generated schema, which loosens both fields to
+// `string`; `ctx.customColumns` (this component's data source) is typed
+// against this shape.
+import type { CustomColumn } from "../api/types";
 import type { components } from "../api/generated/schema";
 import { useSettingsContext } from "./SettingsProvider";
 import HelpPopover from "./HelpPopover";

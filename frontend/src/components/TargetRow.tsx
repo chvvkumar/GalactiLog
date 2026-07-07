@@ -1,12 +1,12 @@
 import { Component, Show, For, createMemo } from "solid-js";
 import { A, useNavigate } from "@solidjs/router";
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
-// Kept on the OLD hand-written TargetAggregation (optional `user_defined`,
-// present `catalog_id`) rather than the generated `../api/types` alias, per
-// DashboardFilterProvider.tsx's documented cast -- `targetData()` (this
-// component's data source) is typed against the old shape for the same
-// schema-gap reason. Flagged for Slice 15.
-import type { TargetAggregation } from "../types";
+// TargetAggregation is the hand-written definition in `../api/types`
+// (optional `user_defined`, present `catalog_id`) -- Slice 15 moved it
+// there verbatim rather than aliasing the generated schema; `targetData()`
+// (this component's data source, via DashboardFilterProvider.tsx) is typed
+// against this shape.
+import type { TargetAggregation } from "../api/types";
 import { useCatalog } from "../store/catalog";
 import { useSettingsContext } from "./SettingsProvider";
 import { isColumnVisible } from "../utils/displaySettings";

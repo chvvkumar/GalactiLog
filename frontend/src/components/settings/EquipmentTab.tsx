@@ -5,14 +5,14 @@ import { useAuth } from "../AuthProvider";
 import { SuggestionsBanner } from "./SuggestionsBanner";
 import { GroupingEditor, type GroupEntry } from "./GroupingEditor";
 import HelpPopover from "../HelpPopover";
-// EquipmentConfig stays on the OLD hand-written type: it feeds
-// useSettingsContext().saveEquipment, whose signature in SettingsProvider.tsx
-// is deliberately pinned to the old, narrower-optional settings types (same
-// precedent as store/settings.ts) -- out of this slice's scope to change.
+// EquipmentConfig is the hand-written definition in `../../api/types`: it
+// feeds useSettingsContext().saveEquipment, whose signature in
+// SettingsProvider.tsx is pinned to the hand-written, narrower-optional
+// settings types (same precedent as store/settings.ts).
 // SuggestionsResponse/DiscoveredItem/SuggestionGroup come straight back from
 // apiClient responses below, so they're repointed to the generated alias
 // (closes the Slice 12 SuggestionGroup deferral).
-import type { EquipmentConfig } from "../../types";
+import type { EquipmentConfig } from "../../api/types";
 import type { SuggestionsResponse, DiscoveredItem, SuggestionGroup } from "../../api/types";
 import { apiClient } from "../../api/generated/client";
 import { unwrap } from "../../api/unwrap";
