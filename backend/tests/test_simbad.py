@@ -404,17 +404,17 @@ class TestFetchTapAliases:
         # Common name is extracted from NAME entry
         assert "Whirlpool Galaxy" in curated
 
-    def test_returns_empty_on_http_error(self):
-        """On HTTP error, should log warning and return empty list."""
+    def test_raises_on_http_error(self):
+        """An HTTP/network error propagates (for catalog_cache's retry
+        wrapper) instead of being swallowed to an empty list."""
         mock_client = MagicMock()
         mock_client.get = MagicMock(side_effect=httpx.HTTPError("timeout"))
         mock_client.__enter__ = MagicMock(return_value=mock_client)
         mock_client.__exit__ = MagicMock(return_value=False)
 
         with patch("app.services.simbad.httpx.Client", return_value=mock_client):
-            result = _fetch_tap_aliases("M 31")
-
-        assert result == []
+            with pytest.raises(httpx.HTTPError):
+                _fetch_tap_aliases("M 31")
 
 
 class TestResolveTargetNameCached:
@@ -546,6 +546,46 @@ class TestResolveTargetNameCachedRetry:
 
             assert result is None
             assert get_cached_simbad("TRANSIENTFAIL", session) == {"_negative": True}
+
+    def test_retry_fires_end_to_end_through_real_query_simbad_raw(self):
+        """Prove the retry actually reaches the HTTP layer: mock httpx.Client
+        (not _query_simbad_raw) so the transient failure propagates out of the
+        REAL _query_simbad_raw -- which must no longer swallow httpx.HTTPError
+        -- and get_or_fetch retries into a successful second attempt."""
+        from app.database import sync_engine
+        from sqlalchemy.orm import Session
+        from app.services.simbad import resolve_target_name_cached, get_cached_simbad
+        from app.services import catalog_cache as cc
+
+        script_resp = MagicMock()
+        script_resp.text = "::data::\nNGC  7000|HII|314.75|44.37\n"
+        script_resp.raise_for_status = MagicMock()
+
+        tap_resp = MagicMock()
+        tap_resp.text = 'id\n"NGC 7000"\n"NAME North America Nebula"\n'
+        tap_resp.raise_for_status = MagicMock()
+
+        mock_client = MagicMock()
+        # Attempt 1: sim-script POST raises a transient network error.
+        # Attempt 2: sim-script POST succeeds.
+        mock_client.post = MagicMock(side_effect=[httpx.ConnectError("boom"), script_resp])
+        # TAP alias GET (only reached on the successful attempt).
+        mock_client.get = MagicMock(return_value=tap_resp)
+        mock_client.__enter__ = MagicMock(return_value=mock_client)
+        mock_client.__exit__ = MagicMock(return_value=False)
+
+        with Session(sync_engine) as session:
+            with patch("app.services.simbad.httpx.Client", return_value=mock_client), \
+                 patch("app.services.simbad._get_simbad_id", return_value="NGC 7000"), \
+                 patch.object(cc.time, "sleep"):
+                result = resolve_target_name_cached("NGC 7000", session)
+            session.commit()
+
+            assert result is not None
+            assert result["catalog_id"] == "NGC 7000"
+            assert result["common_name"] == "North America Nebula"
+            assert mock_client.post.call_count == 2
+            assert get_cached_simbad("NGC 7000", session)["main_id"] == "NGC  7000"
 
 
 # ---------------------------------------------------------------------------

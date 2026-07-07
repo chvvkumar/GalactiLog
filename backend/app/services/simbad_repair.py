@@ -16,6 +16,7 @@ corrupted rows the ported code has since written to catalog_cache.
 import logging
 import time
 
+import httpx
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -26,8 +27,18 @@ logger = logging.getLogger(__name__)
 
 
 def _query_simbad_raw_sync(main_id: str):
-    """Thin wrapper over the (now plain-sync) SIMBAD raw query."""
-    return _query_simbad_raw(main_id)
+    """SIMBAD raw query with HTTP failures swallowed to None.
+
+    _query_simbad_raw raises httpx.HTTPError so catalog_cache's get_or_fetch
+    can retry it, but this repair loop calls it directly (no wrapper) and
+    treats any failed re-fetch as "count it and move on" -- one flaky row
+    must not abort the whole rate-limited repair pass.
+    """
+    try:
+        return _query_simbad_raw(main_id)
+    except httpx.HTTPError as e:
+        logger.warning("simbad_repair: HTTP failure re-fetching '%s': %s", main_id, e)
+        return None
 
 
 def _row_is_corrupted(row: CatalogCache) -> bool:

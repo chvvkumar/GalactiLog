@@ -8,6 +8,7 @@ Also backfills resolved_target_id for unresolved images.
 import asyncio
 import logging
 
+import httpx
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
@@ -26,6 +27,21 @@ from app.services.simbad import (
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 log = logging.getLogger(__name__)
+
+
+def _fetch_tap_aliases_safe(name: str) -> list[str]:
+    """_fetch_tap_aliases with HTTP failures swallowed to [].
+
+    The service function raises httpx.HTTPError so catalog_cache's retry
+    wrapper can handle it; this script calls it directly and must keep its
+    old behavior of falling through to the next lookup strategy (and
+    continuing with the remaining targets) when SIMBAD is unreachable.
+    """
+    try:
+        return _fetch_tap_aliases(name)
+    except httpx.HTTPError as e:
+        log.warning("  TAP alias query failed for %s: %s", name, e)
+        return []
 
 
 async def backfill_existing_targets():
@@ -56,14 +72,14 @@ async def backfill_existing_targets():
             # from a previous backfill run - strip everything after " - " to get "IC 1805".
             raw_lookup = target.catalog_id or target.primary_name
             lookup_name = raw_lookup.split(" - ")[0].strip()
-            raw_aliases = _fetch_tap_aliases(lookup_name)
+            raw_aliases = _fetch_tap_aliases_safe(lookup_name)
 
             if not raw_aliases:
                 # TAP failed - try with normalized name
-                raw_aliases = _fetch_tap_aliases(normalize_object_name(lookup_name, upper=False))
+                raw_aliases = _fetch_tap_aliases_safe(normalize_object_name(lookup_name, upper=False))
             if not raw_aliases and lookup_name != raw_lookup:
                 # Try the full value as last resort
-                raw_aliases = _fetch_tap_aliases(raw_lookup)
+                raw_aliases = _fetch_tap_aliases_safe(raw_lookup)
 
             if raw_aliases:
                 catalog_id = extract_catalog_id(raw_aliases, lookup_name)
@@ -134,7 +150,15 @@ async def backfill_unresolved():
 
             if not target:
                 # Query SIMBAD
-                simbad_result = resolve_target_name(obj_name)
+                # HTTP failures used to be swallowed inside the service; it
+                # now raises for the retry wrapper's benefit, so preserve
+                # this script's old "count as failed and continue" behavior
+                # at the call site.
+                try:
+                    simbad_result = resolve_target_name(obj_name)
+                except httpx.HTTPError as e:
+                    log.warning("  SIMBAD query failed for %s: %s", obj_name, e)
+                    simbad_result = None
 
                 if simbad_result:
                     # Check if this target already exists by catalog_id

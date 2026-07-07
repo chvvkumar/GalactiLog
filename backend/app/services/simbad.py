@@ -197,7 +197,15 @@ def build_primary_name(catalog_id: str | None, common_name: str | None) -> str:
 
 
 def _fetch_tap_aliases(object_name: str) -> list[str]:
-    """Fetch aliases via SIMBAD TAP (returns one alias per row)."""
+    """Fetch aliases via SIMBAD TAP (returns one alias per row).
+
+    Raises httpx.HTTPError on HTTP/network failures so catalog_cache's
+    get_or_fetch wrapper can apply retry+backoff, matching sesame/vizier/
+    hyperleda/gaia. A parse-level ValueError is swallowed and returns []
+    ("queried fine, no usable aliases"). Callers outside get_or_fetch must
+    handle httpx.HTTPError at their own call site if they need the old
+    swallow-and-continue behavior.
+    """
     import string
     safe_chars = string.printable.replace('\n', '').replace('\r', '').replace('\t', '')
     sanitized = ''.join(c for c in object_name if c in safe_chars).strip()
@@ -221,13 +229,21 @@ def _fetch_tap_aliases(object_name: str) -> list[str]:
             if len(lines) <= 1:
                 return []
             return [line.strip().strip('"') for line in lines[1:] if line.strip()]
-    except (httpx.HTTPError, ValueError) as e:
+    except ValueError as e:
         logger.warning("SIMBAD TAP alias query failed for '%s': %s", object_name, e)
         return []
 
 
 def _query_simbad_raw(object_name: str) -> dict[str, Any] | None:
-    """Query SIMBAD for raw data (main_id, aliases, coords, type). No curation."""
+    """Query SIMBAD for raw data (main_id, aliases, coords, type). No curation.
+
+    Raises httpx.HTTPError on HTTP/network failures so catalog_cache's
+    get_or_fetch wrapper can apply retry+backoff, matching sesame/vizier/
+    hyperleda/gaia. Parse-level failures (ValueError/IndexError) mean
+    "queried fine, no usable result" and return None (negative-cacheable).
+    Callers outside get_or_fetch must handle httpx.HTTPError at their own
+    call site if they need the old swallow-and-continue behavior.
+    """
     import string
     safe_chars = string.printable.replace('\n', '').replace('\r', '').replace('\t', '')
     sanitized = ''.join(c for c in object_name if c in safe_chars).strip()
@@ -277,7 +293,7 @@ def _query_simbad_raw(object_name: str) -> dict[str, Any] | None:
             "object_type": obj_type,
         }
 
-    except (httpx.HTTPError, ValueError, IndexError) as e:
+    except (ValueError, IndexError) as e:
         logger.warning("SIMBAD query failed for '%s': %s", sanitized, e)
         return None
 
