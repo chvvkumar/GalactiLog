@@ -67,7 +67,7 @@ const EquipmentTable: Component<{ title: string; items: EquipmentItem[] }> = (pr
         columns={columns}
         rows={props.items}
         rowKey={(item) => item.name}
-        class="text-xs table-fixed"
+        class="text-xs"
         emptyMessage="No equipment data"
       />
     </div>
