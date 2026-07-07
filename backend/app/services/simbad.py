@@ -1,32 +1,10 @@
-import asyncio
 import re
 import logging
-import threading
 from typing import Any
 
 import httpx
 
 logger = logging.getLogger(__name__)
-
-# Thread-local storage for persistent event loops.  Celery workers may run on
-# different threads; each thread gets its own loop that is created once and
-# reused across all calls from that thread, avoiding per-call setup/teardown.
-_tls = threading.local()
-
-
-def _get_or_create_loop() -> asyncio.AbstractEventLoop:
-    """Return this thread's persistent event loop, creating it if necessary."""
-    loop = getattr(_tls, "loop", None)
-    if loop is None or loop.is_closed():
-        loop = asyncio.new_event_loop()
-        _tls.loop = loop
-    return loop
-
-
-def _run_async(coro):
-    """Run *coro* on this thread's persistent event loop."""
-    return _get_or_create_loop().run_until_complete(coro)
-
 
 SIMBAD_TAP_URL = "https://simbad.cds.unistra.fr/simbad/sim-tap/sync"
 
@@ -218,7 +196,7 @@ def build_primary_name(catalog_id: str | None, common_name: str | None) -> str:
     return "Unknown"
 
 
-async def _fetch_tap_aliases(object_name: str) -> list[str]:
+def _fetch_tap_aliases(object_name: str) -> list[str]:
     """Fetch aliases via SIMBAD TAP (returns one alias per row)."""
     import string
     safe_chars = string.printable.replace('\n', '').replace('\r', '').replace('\t', '')
@@ -226,8 +204,8 @@ async def _fetch_tap_aliases(object_name: str) -> list[str]:
 
     query = f"SELECT id FROM ident JOIN basic ON ident.oidref = basic.oid WHERE basic.main_id = '{_escape_adql_string(sanitized)}'"
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.get(
+        with httpx.Client(timeout=15.0) as client:
+            resp = client.get(
                 SIMBAD_TAP_URL,
                 params={
                     "request": "doQuery",
@@ -248,7 +226,7 @@ async def _fetch_tap_aliases(object_name: str) -> list[str]:
         return []
 
 
-async def _query_simbad_raw(object_name: str) -> dict[str, Any] | None:
+def _query_simbad_raw(object_name: str) -> dict[str, Any] | None:
     """Query SIMBAD for raw data (main_id, aliases, coords, type). No curation."""
     import string
     safe_chars = string.printable.replace('\n', '').replace('\r', '').replace('\t', '')
@@ -257,12 +235,12 @@ async def _query_simbad_raw(object_name: str) -> dict[str, Any] | None:
         return None
 
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        with httpx.Client(timeout=15.0) as client:
             script = f"""
                 format object "%MAIN_ID|%OTYPELIST|%COO(d;A)|%COO(d;D)"
                 query id {sanitized}
             """
-            resp = await client.post(
+            resp = client.post(
                 "https://simbad.cds.unistra.fr/simbad/sim-script",
                 data={"script": script},
                 timeout=15.0,
@@ -289,7 +267,7 @@ async def _query_simbad_raw(object_name: str) -> dict[str, Any] | None:
             ra = float(parts[2].strip()) if parts[2].strip() else None
             dec = float(parts[3].strip()) if parts[3].strip() else None
 
-        raw_aliases = await _fetch_tap_aliases(main_id)
+        raw_aliases = _fetch_tap_aliases(main_id)
 
         return {
             "main_id": main_id,
@@ -328,9 +306,9 @@ def curate_simbad_result(
     }
 
 
-async def _query_simbad(object_name: str) -> dict[str, Any] | None:
+def _query_simbad(object_name: str) -> dict[str, Any] | None:
     """Query SIMBAD, cache result, return curated data."""
-    raw = await _query_simbad_raw(object_name)
+    raw = _query_simbad_raw(object_name)
     if raw is None:
         return None
     return curate_simbad_result(raw)
@@ -486,10 +464,10 @@ def save_simbad_cache(query_name: str, raw: dict[str, Any] | None, db_session) -
     cc.save_cached(db_session, "simbad", query_name, raw)
 
 
-async def resolve_target_name(object_name: str) -> dict[str, Any] | None:
+def resolve_target_name(object_name: str) -> dict[str, Any] | None:
     """Resolve an object name via SIMBAD. Returns curated dict or None."""
     # Try direct query first
-    result = await _query_simbad(object_name)
+    result = _query_simbad(object_name)
     if result:
         return result
 
@@ -497,7 +475,7 @@ async def resolve_target_name(object_name: str) -> dict[str, Any] | None:
     mapped = _get_simbad_id(object_name)
     if mapped != object_name:
         logger.info("Trying mapped name: '%s' -> '%s'", object_name, mapped)
-        result = await _query_simbad(mapped)
+        result = _query_simbad(mapped)
         if result:
             return result
 
@@ -510,7 +488,15 @@ def resolve_target_name_cached(
     """Resolve with persistent DB cache. Sync version for Celery workers.
 
     If skip_simbad=True, only returns cached data (for smart rebuild).
+
+    Routed through catalog_cache's get_or_fetch so a transient SIMBAD network
+    failure during the leaf fetch is retried with backoff (closing the
+    "SIMBAD retry-wrapper port" ledger item -- see the fetch() closure below
+    for how the dual-key original/mapped-name resolution shape is preserved
+    across a wrapper that only tracks one (source, key) pair at a time).
     """
+    from app.services import catalog_cache as cc
+
     normalized = normalize_object_name(object_name)
     mapped = _get_simbad_id(object_name)
     mapped_norm = normalize_object_name(mapped) if mapped != object_name else None
@@ -535,24 +521,35 @@ def resolve_target_name_cached(
     if skip_simbad:
         return None
 
-    # Query SIMBAD - try mapped name first (more likely to resolve), fall back to original
-    async def _resolve_both(mapped_name, original_name):
-        if mapped_name:
-            result = await _query_simbad_raw(mapped_name)
-            if result:
-                return result, True
-        result = await _query_simbad_raw(original_name)
-        return result, False
+    # Query SIMBAD - try mapped name first (more likely to resolve), fall back
+    # to original. get_or_fetch only manages a single (source, key) pair (it
+    # adds retry/backoff around whichever network call fetch() ends up
+    # making), so the leaf fetch below is always keyed on `normalized` --
+    # matching today's unconditional save under that key regardless of which
+    # name actually resolved. If the mapped name is the one that resolved it,
+    # mirror today's *additional* write under `mapped_norm` directly
+    # afterward: that's a second cache write of data already fetched, not a
+    # second network call, so it doesn't need (and can't get, since
+    # get_or_fetch only tracks one key at a time) its own retry wrapper. This
+    # preserves the original dual-key resolution/write shape exactly while
+    # adding retry/backoff to the actual network fetch.
+    used_mapped = False
 
-    raw, used_mapped = _run_async(
-        _resolve_both(mapped if mapped_norm else None, object_name)
-    )
+    def fetch() -> dict[str, Any] | None:
+        nonlocal used_mapped
+        if mapped_norm:
+            result = _query_simbad_raw(mapped)
+            if result:
+                used_mapped = True
+                return result
+        used_mapped = False
+        return _query_simbad_raw(object_name)
+
+    raw = cc.get_or_fetch(db_session, "simbad", normalized, fetch)
 
     if used_mapped and raw:
         save_simbad_cache(mapped_norm, raw, db_session)
 
-    # Cache the result (positive or negative)
-    save_simbad_cache(normalized, raw, db_session)
     if raw is None:
         return None
     return curate_simbad_result(raw)

@@ -20,14 +20,14 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.catalog_cache import CatalogCache
-from app.services.simbad import _query_simbad_raw, save_simbad_cache, _run_async
+from app.services.simbad import _query_simbad_raw, save_simbad_cache
 
 logger = logging.getLogger(__name__)
 
 
 def _query_simbad_raw_sync(main_id: str):
-    """Sync wrapper over the async SIMBAD raw query (for Celery workers)."""
-    return _run_async(_query_simbad_raw(main_id))
+    """Thin wrapper over the (now plain-sync) SIMBAD raw query."""
+    return _query_simbad_raw(main_id)
 
 
 def _row_is_corrupted(row: CatalogCache) -> bool:

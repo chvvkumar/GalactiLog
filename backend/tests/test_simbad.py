@@ -1,6 +1,6 @@
 import pytest
 import httpx
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import patch, MagicMock
 
 from app.services.simbad import (
     resolve_target_name,
@@ -26,8 +26,7 @@ def test_normalize_object_name():
 class TestResolveTargetName:
     """Tests for SIMBAD resolution with mocked external API."""
 
-    @pytest.mark.asyncio
-    async def test_resolve_known_messier_object(self):
+    def test_resolve_known_messier_object(self):
         mock_result = {
             "primary_name": "M 31 - Andromeda Galaxy",
             "catalog_id": "M 31",
@@ -37,8 +36,8 @@ class TestResolveTargetName:
             "dec": 41.2687,
             "object_type": "Galaxy",
         }
-        with patch("app.services.simbad._query_simbad", new_callable=AsyncMock, return_value=mock_result):
-            result = await resolve_target_name("m 31")
+        with patch("app.services.simbad._query_simbad", return_value=mock_result):
+            result = resolve_target_name("m 31")
 
         assert result is not None
         assert result["primary_name"] == "M 31 - Andromeda Galaxy"
@@ -47,10 +46,9 @@ class TestResolveTargetName:
         assert "NGC 224" in result["aliases"]
         assert result["ra"] == pytest.approx(10.6847, abs=0.01)
 
-    @pytest.mark.asyncio
-    async def test_resolve_unknown_object_returns_none(self):
-        with patch("app.services.simbad._query_simbad", new_callable=AsyncMock, return_value=None):
-            result = await resolve_target_name("XYZNOTREAL123")
+    def test_resolve_unknown_object_returns_none(self):
+        with patch("app.services.simbad._query_simbad", return_value=None):
+            result = resolve_target_name("XYZNOTREAL123")
         assert result is None
 
 
@@ -345,57 +343,54 @@ class TestBuildPrimaryName:
 # ---------------------------------------------------------------------------
 
 class TestFetchTapAliases:
-    @pytest.mark.asyncio
-    async def test_parses_tsv_response(self):
+    def test_parses_tsv_response(self):
         """TAP returns TSV with header row; function should skip header and return alias rows."""
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.text = "id\nM 31\nNGC 224\nNAME Andromeda Galaxy\n"
         mock_resp.raise_for_status = MagicMock()
 
-        mock_client = AsyncMock()
-        mock_client.get = AsyncMock(return_value=mock_resp)
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client = MagicMock()
+        mock_client.get = MagicMock(return_value=mock_resp)
+        mock_client.__enter__ = MagicMock(return_value=mock_client)
+        mock_client.__exit__ = MagicMock(return_value=False)
 
-        with patch("app.services.simbad.httpx.AsyncClient", return_value=mock_client):
-            result = await _fetch_tap_aliases("M  31")
+        with patch("app.services.simbad.httpx.Client", return_value=mock_client):
+            result = _fetch_tap_aliases("M  31")
 
         assert result == ["M 31", "NGC 224", "NAME Andromeda Galaxy"]
 
-    @pytest.mark.asyncio
-    async def test_returns_empty_on_no_results(self):
+    def test_returns_empty_on_no_results(self):
         """When TAP returns only a header, result should be empty."""
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.text = "id\n"
         mock_resp.raise_for_status = MagicMock()
 
-        mock_client = AsyncMock()
-        mock_client.get = AsyncMock(return_value=mock_resp)
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client = MagicMock()
+        mock_client.get = MagicMock(return_value=mock_resp)
+        mock_client.__enter__ = MagicMock(return_value=mock_client)
+        mock_client.__exit__ = MagicMock(return_value=False)
 
-        with patch("app.services.simbad.httpx.AsyncClient", return_value=mock_client):
-            result = await _fetch_tap_aliases("NONEXISTENT")
+        with patch("app.services.simbad.httpx.Client", return_value=mock_client):
+            result = _fetch_tap_aliases("NONEXISTENT")
 
         assert result == []
 
-    @pytest.mark.asyncio
-    async def test_strips_quotes_from_tap_response(self):
+    def test_strips_quotes_from_tap_response(self):
         """TAP responses quote each value; function must strip those quotes."""
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.text = 'id\n"M  51"\n"NGC  5194"\n"NAME Whirlpool Galaxy"\n"[OKM2018] SWIFT J1329.9+4719"\n'
         mock_resp.raise_for_status = MagicMock()
 
-        mock_client = AsyncMock()
-        mock_client.get = AsyncMock(return_value=mock_resp)
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client = MagicMock()
+        mock_client.get = MagicMock(return_value=mock_resp)
+        mock_client.__enter__ = MagicMock(return_value=mock_client)
+        mock_client.__exit__ = MagicMock(return_value=False)
 
-        with patch("app.services.simbad.httpx.AsyncClient", return_value=mock_client):
-            result = await _fetch_tap_aliases("M  51")
+        with patch("app.services.simbad.httpx.Client", return_value=mock_client):
+            result = _fetch_tap_aliases("M  51")
 
         assert result == ["M  51", "NGC  5194", "NAME Whirlpool Galaxy", "[OKM2018] SWIFT J1329.9+4719"]
         # Verify quotes are not present in any alias
@@ -409,16 +404,15 @@ class TestFetchTapAliases:
         # Common name is extracted from NAME entry
         assert "Whirlpool Galaxy" in curated
 
-    @pytest.mark.asyncio
-    async def test_returns_empty_on_http_error(self):
+    def test_returns_empty_on_http_error(self):
         """On HTTP error, should log warning and return empty list."""
-        mock_client = AsyncMock()
-        mock_client.get = AsyncMock(side_effect=httpx.HTTPError("timeout"))
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client = MagicMock()
+        mock_client.get = MagicMock(side_effect=httpx.HTTPError("timeout"))
+        mock_client.__enter__ = MagicMock(return_value=mock_client)
+        mock_client.__exit__ = MagicMock(return_value=False)
 
-        with patch("app.services.simbad.httpx.AsyncClient", return_value=mock_client):
-            result = await _fetch_tap_aliases("M 31")
+        with patch("app.services.simbad.httpx.Client", return_value=mock_client):
+            result = _fetch_tap_aliases("M 31")
 
         assert result == []
 
@@ -468,18 +462,90 @@ class TestResolveTargetNameCached:
         """A negative-cached row (no mapped name, skip_simbad not set) returns None
         without ever calling _query_simbad_raw -- the cache must short-circuit the
         network path entirely, not merely skip it because skip_simbad was passed."""
-        from unittest.mock import AsyncMock, MagicMock, patch
+        from unittest.mock import MagicMock, patch
         from app.services.simbad import resolve_target_name_cached
 
         mock_session = MagicMock()
 
         with patch("app.services.simbad.get_cached_simbad", return_value={"_negative": True}), \
              patch("app.services.simbad._get_simbad_id", return_value="XYZNOTREAL"), \
-             patch("app.services.simbad._query_simbad_raw", new_callable=AsyncMock) as mock_net:
+             patch("app.services.simbad._query_simbad_raw") as mock_net:
             result = resolve_target_name_cached("XYZNOTREAL", mock_session)
 
         assert result is None
         mock_net.assert_not_called()
+
+
+class TestResolveTargetNameCachedRetry:
+    """Prove resolve_target_name_cached is actually routed through
+    catalog_cache.get_or_fetch: a transient httpx failure on the first fetch
+    attempt is retried (with backoff) and a subsequent success is still
+    returned/cached, rather than being negative-cached after just one
+    failure. This is the SIMBAD side of the Phase 4 retry-wrapper port that
+    Phase 7 closes -- SIMBAD was the one catalog_cache-backed source left
+    doing a manual single-attempt fetch."""
+
+    @pytest.fixture(autouse=True)
+    def setup(self):
+        from app.database import sync_engine
+        from app.models.catalog_cache import CatalogCache
+        from sqlalchemy.orm import Session
+
+        with Session(sync_engine) as session:
+            session.query(CatalogCache).filter(CatalogCache.source == "simbad").delete()
+            session.commit()
+        yield
+        with Session(sync_engine) as session:
+            session.query(CatalogCache).filter(CatalogCache.source == "simbad").delete()
+            session.commit()
+
+    def test_success_after_transient_retry_is_cached_and_curated(self):
+        from app.database import sync_engine
+        from sqlalchemy.orm import Session
+        from app.services.simbad import resolve_target_name_cached, get_cached_simbad
+        from app.services import catalog_cache as cc
+
+        raw = {
+            "main_id": "NGC 7000",
+            "raw_aliases": ["NGC 7000", "NAME North America Nebula"],
+            "ra": 314.0,
+            "dec": 44.0,
+            "object_type": "HII",
+        }
+
+        with Session(sync_engine) as session:
+            with patch(
+                "app.services.simbad._query_simbad_raw",
+                side_effect=[httpx.ConnectError("boom"), raw],
+            ) as mock_query, \
+                 patch("app.services.simbad._get_simbad_id", return_value="NGC 7000"), \
+                 patch.object(cc.time, "sleep"):
+                result = resolve_target_name_cached("NGC 7000", session)
+            session.commit()
+
+            assert result is not None
+            assert result["catalog_id"] == "NGC 7000"
+            assert mock_query.call_count == 2
+            assert get_cached_simbad("NGC 7000", session)["main_id"] == "NGC 7000"
+
+    def test_transient_failure_exhausting_retries_negative_caches(self):
+        from app.database import sync_engine
+        from sqlalchemy.orm import Session
+        from app.services.simbad import resolve_target_name_cached, get_cached_simbad
+        from app.services import catalog_cache as cc
+
+        with Session(sync_engine) as session:
+            with patch(
+                "app.services.simbad._query_simbad_raw",
+                side_effect=httpx.ConnectTimeout("timed out"),
+            ), \
+                 patch("app.services.simbad._get_simbad_id", return_value="TRANSIENTFAIL"), \
+                 patch.object(cc.time, "sleep"):
+                result = resolve_target_name_cached("TRANSIENTFAIL", session)
+            session.commit()
+
+            assert result is None
+            assert get_cached_simbad("TRANSIENTFAIL", session) == {"_negative": True}
 
 
 # ---------------------------------------------------------------------------
@@ -544,8 +610,7 @@ class TestEscapeAdqlString:
     def test_multiple_quotes(self):
         assert _escape_adql_string("a'b'c") == "a''b''c"
 
-    @pytest.mark.asyncio
-    async def test_tap_query_escapes_injected_quote(self):
+    def test_tap_query_escapes_injected_quote(self):
         """A single quote in the object name is doubled in the constructed ADQL."""
         captured = {}
 
@@ -556,131 +621,19 @@ class TestEscapeAdqlString:
                 pass
 
         class _FakeClient:
-            async def __aenter__(self):
+            def __enter__(self):
                 return self
 
-            async def __aexit__(self, *a):
+            def __exit__(self, *a):
                 return False
 
-            async def get(self, url, params=None, timeout=None):
+            def get(self, url, params=None, timeout=None):
                 captured["query"] = params["query"]
                 return _FakeResp()
 
-        with patch("app.services.simbad.httpx.AsyncClient", return_value=_FakeClient()):
-            await _fetch_tap_aliases("M31'; DROP TABLE x--")
+        with patch("app.services.simbad.httpx.Client", return_value=_FakeClient()):
+            _fetch_tap_aliases("M31'; DROP TABLE x--")
 
         # The injected quote must be doubled and not break out of the literal.
         assert "main_id = 'M31''; DROP TABLE x--'" in captured["query"]
         assert "main_id = 'M31'; DROP" not in captured["query"]
-
-
-# ---------------------------------------------------------------------------
-# _get_or_create_loop / _run_async -- persistent loop reuse
-# ---------------------------------------------------------------------------
-
-class TestPersistentEventLoop:
-    """Verify that resolve_target_name_cached reuses a single loop per thread."""
-
-    def _make_positive_cache_entry(self, name="NGC 7000"):
-        return {
-            "main_id": name,
-            "raw_aliases": [name],
-            "ra": 314.0,
-            "dec": 44.0,
-            "object_type": "HII",
-        }
-
-    def test_loop_is_reused_across_calls(self):
-        """The same loop object is returned on repeated calls from the same thread."""
-        from app.services.simbad import _get_or_create_loop, _tls
-        import threading
-
-        # Reset any loop stored from a prior test run in this thread.
-        if hasattr(_tls, "loop"):
-            del _tls.loop
-
-        loop1 = _get_or_create_loop()
-        loop2 = _get_or_create_loop()
-        assert loop1 is loop2, "expected the same loop object to be returned"
-        assert not loop1.is_closed()
-
-    def test_loop_recreated_after_close(self):
-        """If the stored loop is closed, a new one is created automatically."""
-        from app.services.simbad import _get_or_create_loop, _tls
-
-        old_loop = _get_or_create_loop()
-        old_loop.close()
-        new_loop = _get_or_create_loop()
-        assert new_loop is not old_loop
-        assert not new_loop.is_closed()
-
-    def test_cache_hit_skips_network(self):
-        """A cache hit returns immediately without touching _query_simbad_raw."""
-        from app.services.simbad import resolve_target_name_cached
-
-        mock_session = MagicMock()
-        cached = self._make_positive_cache_entry("NGC 7000")
-
-        with patch("app.services.simbad.get_cached_simbad", return_value=cached), \
-             patch("app.services.simbad._query_simbad_raw", new_callable=AsyncMock) as mock_net:
-            result = resolve_target_name_cached("NGC 7000", mock_session)
-
-        assert result is not None
-        assert result["catalog_id"] == "NGC 7000"
-        mock_net.assert_not_called()
-
-    def test_multiple_sequential_resolutions_reuse_loop(self):
-        """Two sequential uncached resolutions both succeed and share the thread loop."""
-        from app.services.simbad import resolve_target_name_cached, _get_or_create_loop, _tls
-
-        mock_session = MagicMock()
-
-        ngc7000_raw = self._make_positive_cache_entry("NGC 7000")
-        ngc1499_raw = self._make_positive_cache_entry("NGC 1499")
-
-        call_count = {"n": 0}
-
-        async def fake_query_raw(name):
-            call_count["n"] += 1
-            if "7000" in name:
-                return ngc7000_raw
-            if "1499" in name:
-                return ngc1499_raw
-            return None
-
-        # Neither name is cached.
-        with patch("app.services.simbad.get_cached_simbad", return_value=None), \
-             patch("app.services.simbad.save_simbad_cache"), \
-             patch("app.services.simbad._query_simbad_raw", side_effect=fake_query_raw):
-            # Capture the loop before the first call.
-            if hasattr(_tls, "loop"):
-                del _tls.loop
-            loop_before = _get_or_create_loop()
-
-            result1 = resolve_target_name_cached("NGC 7000", mock_session)
-            result2 = resolve_target_name_cached("NGC 1499", mock_session)
-
-            loop_after = _get_or_create_loop()
-
-        assert result1 is not None
-        assert result2 is not None
-        assert loop_before is loop_after, "loop must be reused across sequential calls"
-        assert call_count["n"] == 2
-
-    def test_cache_hit_does_not_create_loop_if_none_exists(self):
-        """A pure cache hit never touches the event loop at all."""
-        from app.services.simbad import resolve_target_name_cached, _tls
-
-        # Remove any existing loop so we can detect if one was created.
-        if hasattr(_tls, "loop"):
-            del _tls.loop
-
-        mock_session = MagicMock()
-        cached = self._make_positive_cache_entry("M 31")
-
-        with patch("app.services.simbad.get_cached_simbad", return_value=cached):
-            result = resolve_target_name_cached("M 31", mock_session)
-
-        assert result is not None
-        # No loop should have been created since the cache path never calls _run_async.
-        assert not hasattr(_tls, "loop") or True  # acceptable either way — main point is no error

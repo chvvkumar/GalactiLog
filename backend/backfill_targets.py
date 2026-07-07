@@ -56,14 +56,14 @@ async def backfill_existing_targets():
             # from a previous backfill run - strip everything after " - " to get "IC 1805".
             raw_lookup = target.catalog_id or target.primary_name
             lookup_name = raw_lookup.split(" - ")[0].strip()
-            raw_aliases = await _fetch_tap_aliases(lookup_name)
+            raw_aliases = _fetch_tap_aliases(lookup_name)
 
             if not raw_aliases:
                 # TAP failed - try with normalized name
-                raw_aliases = await _fetch_tap_aliases(normalize_object_name(lookup_name, upper=False))
+                raw_aliases = _fetch_tap_aliases(normalize_object_name(lookup_name, upper=False))
             if not raw_aliases and lookup_name != raw_lookup:
                 # Try the full value as last resort
-                raw_aliases = await _fetch_tap_aliases(raw_lookup)
+                raw_aliases = _fetch_tap_aliases(raw_lookup)
 
             if raw_aliases:
                 catalog_id = extract_catalog_id(raw_aliases, lookup_name)
@@ -134,7 +134,7 @@ async def backfill_unresolved():
 
             if not target:
                 # Query SIMBAD
-                simbad_result = await resolve_target_name(obj_name)
+                simbad_result = resolve_target_name(obj_name)
 
                 if simbad_result:
                     # Check if this target already exists by catalog_id

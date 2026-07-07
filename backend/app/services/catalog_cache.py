@@ -14,13 +14,16 @@ batch backfill, filename_resolver.py/target_resolver.py, and api/merges.py's
 FastAPI routes -- which already open their own sync ``Session`` against
 ``sync_engine`` before calling sync service functions, a pre-existing
 blocking-the-loop pattern that is out of scope to fix here) operates in a
-plain synchronous DB+HTTP context. simbad.py's genuinely async core
-(``_query_simbad``/``resolve_target_name``) has no external caller that
-needs caching -- it stays internal to simbad.py and is invoked from that
-module's own sync wrapper via its existing thread-local-event-loop
-``_run_async`` helper, exactly as today. No async surface is provided here;
-if one is ever needed, mirror that same pattern rather than inventing a
-second concurrency model.
+plain synchronous DB+HTTP context. simbad.py's query core
+(``_query_simbad``/``_query_simbad_raw``/``resolve_target_name``) is plain
+synchronous ``httpx.Client`` code, same as every other source here -- no
+thread-local event loop remains anywhere in the codebase. simbad.py's
+``resolve_target_name_cached`` is ported onto ``get_or_fetch`` like every
+other source (it retains its own dual-key original/mapped-name cache-check
+step before the leaf fetch, since ``get_or_fetch`` only tracks a single
+(source, key) pair and SIMBAD, unlike every other source here, may need to
+resolve either of two distinct cache keys for one lookup). No async surface
+is provided by this module.
 
 New behavior introduced by this wrapper (see docs/retrofit-roadmap.md Phase 4
 and the coordinator's task-2 brief for full rationale -- none of this existed
