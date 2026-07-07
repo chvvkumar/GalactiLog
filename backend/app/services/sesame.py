@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 SESAME_URL = "https://cds.unistra.fr/cgi-bin/nph-sesame"
 
 
-async def _query_sesame_raw(
+def _query_sesame_raw(
     object_name: str, *, resolvers: str = "SNV",
 ) -> dict[str, Any] | None:
     """Query SESAME and parse the XML response.
@@ -33,8 +33,8 @@ async def _query_sesame_raw(
     encoded_name = object_name.replace(" ", "+")
     url = f"{SESAME_URL}/-ox/{resolvers}?{encoded_name}"
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.get(url)
+        with httpx.Client(timeout=15.0) as client:
+            resp = client.get(url)
             resp.raise_for_status()
 
         root = ET.fromstring(resp.text)
@@ -116,15 +116,8 @@ def resolve_sesame_cached(
 
     def fetch() -> dict[str, Any] | None:
         # Query SESAME (NED + VizieR only - skip SIMBAD since we already
-        # tried it). Own event loop since this runs on a sync/worker thread.
-        import asyncio
-        loop = asyncio.new_event_loop()
-        try:
-            return loop.run_until_complete(
-                _query_sesame_raw(object_name, resolvers="NV")
-            )
-        finally:
-            loop.close()
+        # tried it). Plain sync call, no event loop needed.
+        return _query_sesame_raw(object_name, resolvers="NV")
 
     raw = cc.get_or_fetch(db_session, "sesame", normalized, fetch)
 

@@ -1,7 +1,7 @@
 """Unit tests for app.services.sesame - XML parsing, cache helpers, and resolution."""
 import pytest
 import xml.etree.ElementTree as ET
-from unittest.mock import AsyncMock, MagicMock, patch, Mock
+from unittest.mock import MagicMock, patch, Mock
 
 from app.services.sesame import (
     _query_sesame_raw,
@@ -12,7 +12,7 @@ from app.services.sesame import (
 
 
 # ---------------------------------------------------------------------------
-# _query_sesame_raw (async, HTTP mocked)
+# _query_sesame_raw (sync, HTTP mocked)
 # ---------------------------------------------------------------------------
 
 _SESAME_XML_HIT = """\
@@ -39,27 +39,26 @@ _SESAME_XML_MISS = """\
 """
 
 
-def _make_async_client(text, raise_error=None):
+def _make_client(text, raise_error=None):
     resp = MagicMock()
     resp.text = text
     resp.raise_for_status = MagicMock()
 
-    client = AsyncMock()
+    client = MagicMock()
     if raise_error:
-        client.get = AsyncMock(side_effect=raise_error)
+        client.get = MagicMock(side_effect=raise_error)
     else:
-        client.get = AsyncMock(return_value=resp)
-    client.__aenter__ = AsyncMock(return_value=client)
-    client.__aexit__ = AsyncMock(return_value=False)
+        client.get = MagicMock(return_value=resp)
+    client.__enter__ = MagicMock(return_value=client)
+    client.__exit__ = MagicMock(return_value=False)
     return client
 
 
 class TestQuerySesameRaw:
-    @pytest.mark.asyncio
-    async def test_parses_successful_response(self):
-        client = _make_async_client(_SESAME_XML_HIT)
-        with patch("app.services.sesame.httpx.AsyncClient", return_value=client):
-            result = await _query_sesame_raw("M 42")
+    def test_parses_successful_response(self):
+        client = _make_client(_SESAME_XML_HIT)
+        with patch("app.services.sesame.httpx.Client", return_value=client):
+            result = _query_sesame_raw("M 42")
 
         assert result is not None
         assert result["main_id"] == "M 42"
@@ -69,32 +68,28 @@ class TestQuerySesameRaw:
         assert "NGC 1976" in result["raw_aliases"]
         assert "Orion Nebula" in result["raw_aliases"]
 
-    @pytest.mark.asyncio
-    async def test_returns_none_when_no_resolver_matches(self):
-        client = _make_async_client(_SESAME_XML_MISS)
-        with patch("app.services.sesame.httpx.AsyncClient", return_value=client):
-            result = await _query_sesame_raw("XYZNOTREAL")
+    def test_returns_none_when_no_resolver_matches(self):
+        client = _make_client(_SESAME_XML_MISS)
+        with patch("app.services.sesame.httpx.Client", return_value=client):
+            result = _query_sesame_raw("XYZNOTREAL")
 
         assert result is None
 
-    @pytest.mark.asyncio
-    async def test_raises_on_http_error(self):
+    def test_raises_on_http_error(self):
         import httpx
-        client = _make_async_client("", raise_error=httpx.HTTPError("timeout"))
-        with patch("app.services.sesame.httpx.AsyncClient", return_value=client):
+        client = _make_client("", raise_error=httpx.HTTPError("timeout"))
+        with patch("app.services.sesame.httpx.Client", return_value=client):
             with pytest.raises(httpx.HTTPError):
-                await _query_sesame_raw("M 42")
+                _query_sesame_raw("M 42")
 
-    @pytest.mark.asyncio
-    async def test_returns_none_on_parse_error(self):
-        client = _make_async_client("THIS IS NOT XML")
-        with patch("app.services.sesame.httpx.AsyncClient", return_value=client):
-            result = await _query_sesame_raw("M 42")
+    def test_returns_none_on_parse_error(self):
+        client = _make_client("THIS IS NOT XML")
+        with patch("app.services.sesame.httpx.Client", return_value=client):
+            result = _query_sesame_raw("M 42")
 
         assert result is None
 
-    @pytest.mark.asyncio
-    async def test_skips_resolver_with_no_coordinates(self):
+    def test_skips_resolver_with_no_coordinates(self):
         # Resolver element with no jradeg/jdedeg should be skipped
         xml = """\
 <?xml version="1.0" encoding="UTF-8"?>
@@ -106,14 +101,13 @@ class TestQuerySesameRaw:
   </Target>
 </Sesame>
 """
-        client = _make_async_client(xml)
-        with patch("app.services.sesame.httpx.AsyncClient", return_value=client):
-            result = await _query_sesame_raw("M 42")
+        client = _make_client(xml)
+        with patch("app.services.sesame.httpx.Client", return_value=client):
+            result = _query_sesame_raw("M 42")
 
         assert result is None
 
-    @pytest.mark.asyncio
-    async def test_uses_object_name_as_fallback_for_oname(self):
+    def test_uses_object_name_as_fallback_for_oname(self):
         xml = """\
 <?xml version="1.0" encoding="UTF-8"?>
 <Sesame>
@@ -125,9 +119,9 @@ class TestQuerySesameRaw:
   </Target>
 </Sesame>
 """
-        client = _make_async_client(xml)
-        with patch("app.services.sesame.httpx.AsyncClient", return_value=client):
-            result = await _query_sesame_raw("some object")
+        client = _make_client(xml)
+        with patch("app.services.sesame.httpx.Client", return_value=client):
+            result = _query_sesame_raw("some object")
 
         assert result is not None
         assert result["main_id"] == "some object"
@@ -366,7 +360,7 @@ class TestResolveSesameErrorHandling:
 
         attempts = []
 
-        async def _flaky(object_name, *, resolvers="SNV"):
+        def _flaky(object_name, *, resolvers="SNV"):
             attempts.append(1)
             if len(attempts) < 2:
                 raise httpx.ConnectError("boom")
