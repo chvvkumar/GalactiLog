@@ -1,5 +1,5 @@
 import { Component, For, Show, createMemo, createSignal } from "solid-js";
-import type { EquipmentComboMetrics, EquipmentFilterMetrics } from "../types";
+import type { EquipmentComboMetrics, EquipmentFilterMetrics } from "../api/types";
 import FilterBadges from "./FilterBadges";
 
 import { formatIntegration, ARCSEC } from "../utils/format";
@@ -141,7 +141,7 @@ const ComboRow: Component<{ combo: EquipmentComboMetrics; baselines: ComboBaseli
         <td class="text-right text-theme-text-secondary py-1.5 px-2 tabular-nums">
           {props.combo.frame_count.toLocaleString()}
         </td>
-        <td class={`text-right py-1.5 px-2 tabular-nums ${metricClass(props.combo.avg_session_seconds)}`}>
+        <td class={`text-right py-1.5 px-2 tabular-nums ${metricClass(props.combo.avg_session_seconds ?? null)}`}>
           {props.combo.avg_session_seconds !== null && props.combo.avg_session_seconds !== undefined
             ? formatIntegration(props.combo.avg_session_seconds)
             : "—"}

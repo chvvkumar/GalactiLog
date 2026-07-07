@@ -2,6 +2,11 @@ import { Component, For, Show, createEffect, createSignal, on, onCleanup } from 
 import { useDashboardFilters } from "./DashboardFilterProvider";
 import { useSettingsContext } from "./SettingsProvider";
 import { debounce } from "../utils/debounce";
+// Kept on the OLD hand-written CustomColumn (literal-union `column_type`/
+// `applies_to`) matching SettingsProvider.tsx's documented precedent --
+// `useSettingsContext().customColumns` (this component's data source) is
+// typed against the old shape for the same schema-gap reason. Flagged for
+// Slice 15.
 import type { CustomColumn } from "../types";
 
 const BooleanFilter: Component<{
