@@ -1,9 +1,9 @@
 import { Component, Show, createSignal, onCleanup } from "solid-js";
-import { api } from "../../api/client";
-import { showToast } from "../Toast";
+import { apiClient } from "../../api/generated/client";
+import { unwrap } from "../../api/unwrap";
 import { useAuth } from "../AuthProvider";
 import { emitWithToast } from "../../lib/emitWithToast";
-import type { RebuildStatus } from "../../types";
+import type { RebuildStatus } from "../../api/types";
 
 type OpState = "idle" | "running" | "complete" | "error";
 
@@ -32,10 +32,13 @@ const MaintenanceSection: Component<MaintenanceSectionProps> = (props) => {
     if (pollTimer) clearInterval(pollTimer);
     pollTimer = setInterval(async () => {
       try {
-        const status: RebuildStatus = await api.getRebuildStatus();
+        const status: RebuildStatus = await apiClient.GET("/api/scan/rebuild-status").then(unwrap);
         setStatusMessage(status.message);
-        setStatusDetails(status.details);
-        setStatusPercent(status.percent);
+        // Generated schema types `details` as a loose `Record<string, unknown>`
+        // (backend serializes numeric counters into it); narrow to the numeric
+        // shape this component actually reads, matching the old hand-written type.
+        setStatusDetails(status.details as Record<string, number>);
+        setStatusPercent(status.percent ?? undefined);
 
         if (status.state === "complete") {
           stopPolling();
@@ -127,7 +130,7 @@ const MaintenanceSection: Component<MaintenanceSectionProps> = (props) => {
   const handleRepairLinks = () =>
     runOperation(
       "repair",
-      () => api.smartRebuildTargets() as Promise<{ task_id: string }>,
+      () => apiClient.POST("/api/scan/smart-rebuild-targets").then(unwrap) as Promise<{ task_id: string }>,
       "Repairing target links...",
       "Target links repaired",
       "Repair failed",
@@ -139,7 +142,7 @@ const MaintenanceSection: Component<MaintenanceSectionProps> = (props) => {
   const handleRetryLookups = () =>
     runOperation(
       "retry",
-      () => api.retryUnresolved() as Promise<{ task_id: string }>,
+      () => apiClient.POST("/api/scan/retry-unresolved").then(unwrap) as Promise<{ task_id: string }>,
       "Retrying failed lookups...",
       "Retry complete",
       "Retry failed",
@@ -151,7 +154,7 @@ const MaintenanceSection: Component<MaintenanceSectionProps> = (props) => {
   const handleBackfillIdentity = () =>
     runOperation(
       "backfill",
-      () => api.backfillCatalogIdentity() as Promise<{ task_id: string }>,
+      () => apiClient.POST("/api/scan/backfill-catalog-identity").then(unwrap) as Promise<{ task_id: string }>,
       "Re-linking catalog orphans...",
       "Catalog orphans re-linked",
       "Backfill failed",
@@ -164,7 +167,7 @@ const MaintenanceSection: Component<MaintenanceSectionProps> = (props) => {
     setShowRebuildConfirm(false);
     runOperation(
       "rebuild",
-      () => api.rebuildTargets() as Promise<{ task_id: string }>,
+      () => apiClient.POST("/api/scan/rebuild-targets").then(unwrap) as Promise<{ task_id: string }>,
       "Starting Full Rebuild...",
       "Full Rebuild complete",
       "Full Rebuild failed",

@@ -1,11 +1,12 @@
 import { Component, For, Show, createSignal } from "solid-js";
 import type { Accessor } from "solid-js";
 import { A } from "@solidjs/router";
-import { api } from "../../api/client";
+import { apiClient } from "../../api/generated/client";
+import { unwrap } from "../../api/unwrap";
 import { showToast } from "../Toast";
 import { useAuth } from "../AuthProvider";
 import { useSettingsContext } from "../SettingsProvider";
-import type { MergeCandidateResponse } from "../../types";
+import type { MergeCandidateResponse } from "../../api/types";
 import { formatDate } from "../../utils/dateTime";
 
 interface MergeHistorySectionProps {
@@ -20,7 +21,11 @@ const MergeHistorySection: Component<MergeHistorySectionProps> = (props) => {
 
   const handleUndo = async (candidateId: string) => {
     try {
-      await api.revertMergeCandidate(candidateId);
+      await apiClient
+        .POST("/api/targets/merge-candidates/{candidate_id}/revert", {
+          params: { path: { candidate_id: candidateId } },
+        })
+        .then(unwrap);
       showToast("Merge reverted");
       props.onAction();
       window.dispatchEvent(new Event("merges-changed"));

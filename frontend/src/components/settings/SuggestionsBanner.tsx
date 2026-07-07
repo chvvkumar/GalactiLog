@@ -1,5 +1,12 @@
 // frontend/src/components/settings/SuggestionsBanner.tsx
 import { For, Show, createSignal, type Component } from "solid-js";
+// Deliberately kept on the OLD hand-written `SuggestionGroup` (`section?: string`)
+// rather than the generated-schema alias in `../../api/types`
+// (`section?: string | null`). This component's props are also consumed by
+// `settings/EquipmentTab.tsx` and `settings/FiltersTab.tsx` (Slice 14, out of
+// scope here) which still import the old type -- repointing here would
+// ripple a type break into those files. Flagged for Slice 14/15 to repoint
+// together.
 import type { SuggestionGroup } from "../../types";
 
 interface Props {

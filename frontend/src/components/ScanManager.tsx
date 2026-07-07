@@ -3,8 +3,21 @@ import { useScan } from "../store/scan";
 import { useSettingsContext } from "./SettingsProvider";
 import { useAuth } from "./AuthProvider";
 import { useStats } from "../store/stats";
-import { api } from "../api/client";
+import { apiClient } from "../api/generated/client";
+import { unwrap } from "../api/unwrap";
 import { scanFilters as scanFiltersApi } from "../api/scanFilters";
+import type { DbSummary } from "../api/types";
+// Deliberately kept on the OLD hand-written `RebuildStatus` (narrow `state`
+// literal union, `details: Record<string, number>`) rather than the
+// generated-schema alias in `../api/types` (`RebuildStatusResponse`, which
+// types `state` as a plain `string` and `details` as `Record<string, unknown>`).
+// This component's `rebuildState` signal is threaded into
+// `store/activeJobs.ts`'s `wireActiveJobSources` (out of scope for this
+// slice) via the old type's literal-union contract; repointing here would
+// ripple a type break into that file. The field names are otherwise
+// identical to the generated `RebuildStatusResponse`, so narrowing the
+// fetch result via a runtime-safe cast preserves both the migration and the
+// existing contract. See store/scan.ts for the matching ScanStatus deferral.
 import type { RebuildStatus } from "../types";
 import type { ScanFiltersResponse } from "../api/scanFilters";
 import DatabaseOverview from "./DatabaseOverview";
@@ -39,7 +52,7 @@ const ScanManager: Component = () => {
   // One-time force orphan cleanup. Not persisted; resets each render/session.
   const [forceOrphanCleanup, setForceOrphanCleanup] = createSignal(false);
   const [forceCleanupConfirmOpen, setForceCleanupConfirmOpen] = createSignal(false);
-  const [dbSummary, setDbSummary] = createSignal<import("../types").DbSummary | null>(null);
+  const [dbSummary, setDbSummary] = createSignal<DbSummary | null>(null);
   const [rebuildState, setRebuildState] = createSignal<RebuildStatus>({
     state: "idle", mode: "", message: "", started_at: null, completed_at: null, details: {},
   });
@@ -67,7 +80,7 @@ const ScanManager: Component = () => {
 
   // --- DB Summary ---
   const refreshDbSummary = async () => {
-    try { setDbSummary(await api.getDbSummary()); } catch { /* ignore */ }
+    try { setDbSummary(await apiClient.GET("/api/scan/db-summary").then(unwrap)); } catch { /* ignore */ }
   };
 
   // Track previous composite state (scan + rebuild) to only fetch db summary
@@ -156,7 +169,7 @@ const ScanManager: Component = () => {
   // --- Rebuild polling ---
   const fetchRebuildStatus = async () => {
     try {
-      const status = await api.getRebuildStatus();
+      const status = await apiClient.GET("/api/scan/rebuild-status").then(unwrap) as RebuildStatus;
       const prev = rebuildState().state;
       setRebuildState(status);
       if (status.state !== "running") {
