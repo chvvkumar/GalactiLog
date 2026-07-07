@@ -2,12 +2,14 @@
 import { render } from "solid-js/web";
 import { lazy, Suspense } from "solid-js";
 import { Router, Route } from "@solidjs/router";
+import { QueryClientProvider } from "@tanstack/solid-query";
 import "./index.css";
 import App from "./App";
 const DashboardPage = lazy(() => import("./pages/DashboardPage"));
 import { SettingsProvider } from "./components/SettingsProvider";
 import { AuthProvider } from "./components/AuthProvider";
 import ProtectedRoute from "./components/ProtectedRoute";
+import { queryClient } from "./lib/queryClient";
 
 const LoginPage = lazy(() => import("./pages/LoginPage"));
 const StatisticsPage = lazy(() => import("./pages/StatisticsPage"));
@@ -24,22 +26,24 @@ const Protected = (Page: any) => () => (
 const root = document.getElementById("root");
 render(
   () => (
-    <AuthProvider>
-      <SettingsProvider>
-        <Suspense fallback={<div class="flex items-center justify-center min-h-screen"><span class="text-theme-text-secondary text-sm">Loading...</span></div>}>
-          <Router root={App}>
-            <Route path="/login" component={LoginPage} />
-            <Route path="/" component={Protected(DashboardPage)} />
-            <Route path="/targets/:targetId" component={Protected(TargetDetailPage)} />
-            <Route path="/statistics" component={Protected(StatisticsPage)} />
-            <Route path="/analysis" component={Protected(AnalysisPage)} />
-            <Route path="/mosaics" component={Protected(MosaicsPage)} />
-            <Route path="/mosaics/:mosaicId" component={Protected(MosaicDetailPage)} />
-            <Route path="/settings" component={Protected(SettingsPage)} />
-          </Router>
-        </Suspense>
-      </SettingsProvider>
-    </AuthProvider>
+    <QueryClientProvider client={queryClient}>
+      <AuthProvider>
+        <SettingsProvider>
+          <Suspense fallback={<div class="flex items-center justify-center min-h-screen"><span class="text-theme-text-secondary text-sm">Loading...</span></div>}>
+            <Router root={App}>
+              <Route path="/login" component={LoginPage} />
+              <Route path="/" component={Protected(DashboardPage)} />
+              <Route path="/targets/:targetId" component={Protected(TargetDetailPage)} />
+              <Route path="/statistics" component={Protected(StatisticsPage)} />
+              <Route path="/analysis" component={Protected(AnalysisPage)} />
+              <Route path="/mosaics" component={Protected(MosaicsPage)} />
+              <Route path="/mosaics/:mosaicId" component={Protected(MosaicDetailPage)} />
+              <Route path="/settings" component={Protected(SettingsPage)} />
+            </Router>
+          </Suspense>
+        </SettingsProvider>
+      </AuthProvider>
+    </QueryClientProvider>
   ),
   root!,
 );

@@ -1,5 +1,6 @@
 import { createContext, createSignal, useContext, onMount, onCleanup, Show, type ParentProps, type Component } from "solid-js";
 import { api } from "../api/client";
+import { refreshSession } from "../api/authRefresh";
 import type { AuthUser } from "../types";
 
 interface AuthContextValue {
@@ -33,11 +34,8 @@ async function probeAuth(): Promise<AuthUser | null> {
   let resp = await fetch(`${API_BASE}/auth/me`, { credentials: "same-origin" });
 
   if (resp.status === 401) {
-    const refreshResp = await fetch(`${API_BASE}/auth/refresh`, {
-      method: "POST",
-      credentials: "same-origin",
-    });
-    if (refreshResp.ok) {
+    const ok = await refreshSession();
+    if (ok) {
       resp = await fetch(`${API_BASE}/auth/me`, { credentials: "same-origin" });
     }
   }

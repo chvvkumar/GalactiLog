@@ -34,6 +34,8 @@ import type {
   ActivityPageResponse,
 } from "../types";
 
+import { refreshSession } from "./authRefresh";
+
 const API_BASE = import.meta.env.VITE_API_URL || "/api";
 
 export interface BackupMeta {
@@ -100,20 +102,6 @@ export class ApiError extends Error {
   }
 }
 
-let refreshPromise: Promise<boolean> | null = null;
-
-async function doRefresh(): Promise<boolean> {
-  try {
-    const resp = await fetch(`${API_BASE}/auth/refresh`, {
-      method: "POST",
-      credentials: "same-origin",
-    });
-    return resp.ok;
-  } catch {
-    return false;
-  }
-}
-
 async function fetchWithRefresh(path: string, init: RequestInit): Promise<Response> {
   let resp = await fetch(`${API_BASE}${path}`, {
     credentials: "same-origin",
@@ -125,10 +113,7 @@ async function fetchWithRefresh(path: string, init: RequestInit): Promise<Respon
     !path.startsWith("/auth/refresh") &&
     !path.startsWith("/auth/login")
   ) {
-    if (!refreshPromise) {
-      refreshPromise = doRefresh().finally(() => { refreshPromise = null; });
-    }
-    const ok = await refreshPromise;
+    const ok = await refreshSession();
     if (ok) {
       resp = await fetch(`${API_BASE}${path}`, {
         credentials: "same-origin",
@@ -176,10 +161,7 @@ export async function fetchJson<T>(path: string, init?: RequestInit, signal?: Ab
     !path.startsWith("/auth/refresh") &&
     !path.startsWith("/auth/login")
   ) {
-    if (!refreshPromise) {
-      refreshPromise = doRefresh().finally(() => { refreshPromise = null; });
-    }
-    const ok = await refreshPromise;
+    const ok = await refreshSession();
     if (ok) {
       return fetchJson<T>(path, init);
     }
