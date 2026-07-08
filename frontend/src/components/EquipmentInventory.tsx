@@ -8,6 +8,7 @@ const EquipmentTable: Component<{ title: string; items: EquipmentItem[] }> = (pr
     {
       key: "name",
       label: props.title,
+      width: "20%",
       render: (item) => (
         <>
           {item.name}
@@ -67,7 +68,7 @@ const EquipmentTable: Component<{ title: string; items: EquipmentItem[] }> = (pr
         columns={columns}
         rows={props.items}
         rowKey={(item) => item.name}
-        class="text-xs"
+        class="table-fixed text-xs"
         emptyMessage="No equipment data"
       />
     </div>
