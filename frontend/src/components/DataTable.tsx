@@ -5,6 +5,9 @@ export interface DataTableColumn<T> {
   key: string;
   label: string;
   align?: "left" | "right";
+  /** Fixed column width (any CSS length/%), applied via <colgroup>. Requires the table
+   *  to use `table-fixed` (pass it through `class`) for widths to be honored. */
+  width?: string;
   /** Header becomes clickable and shows a sort arrow; click fires onSort(key). */
   sortable?: boolean;
   /** Column is always rendered, ignoring the visibility record. */
@@ -65,6 +68,16 @@ function DataTable<T>(props: DataTableProps<T>) {
 
   return (
     <table class={`w-full text-sm border-collapse${props.class ? ` ${props.class}` : ""}`}>
+      <Show when={visibleColumns().some((c) => c.width)}>
+        <colgroup>
+          <For each={visibleColumns()}>
+            {(col) => <col style={col.width ? { width: col.width } : undefined} />}
+          </For>
+          <Show when={props.columnPicker}>
+            <col />
+          </Show>
+        </colgroup>
+      </Show>
       <thead>
         <tr class="border-b border-theme-border-em text-theme-text-tertiary text-label uppercase tracking-wider">
           <For each={visibleColumns()}>
@@ -124,7 +137,7 @@ function DataTable<T>(props: DataTableProps<T>) {
                   >
                     <For each={visibleColumns()}>
                       {(col) => (
-                        <td class={`py-2 px-3 text-${col.align ?? "left"} text-theme-text-primary tabular-nums`}>
+                        <td class={`py-2 px-3 text-${col.align ?? "left"} text-theme-text-primary tabular-nums${col.align === "right" ? " whitespace-nowrap" : ""}`}>
                           {col.render(row)}
                         </td>
                       )}
