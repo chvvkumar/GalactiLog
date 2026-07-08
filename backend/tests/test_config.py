@@ -9,6 +9,7 @@ from app.config import (
     get_jwt_secret,
     jwt_secret_persisted,
     load_or_create_jwt_secret,
+    missing_all_credentials,
 )
 
 
@@ -153,6 +154,110 @@ def test_jwt_secret_persisted_false_when_file_unreadable(tmp_path):
     # cannot read it back (e.g. owned by a different user).
     secret_file = tmp_path / "does-not-exist" / ".jwt_secret"
     assert jwt_secret_persisted(str(secret_file), "some-secret") is False
+
+
+# ---------------------------------------------------------------------------
+# Phase 9 Task 1: startup credential fail-fast gate decision function
+# ---------------------------------------------------------------------------
+
+def test_missing_all_credentials_refuses_when_all_three_absent():
+    assert missing_all_credentials(
+        admin_password_env="",
+        jwt_secret_env="",
+        jwt_secret_file_exists=False,
+        has_admin_user=False,
+    ) is True
+
+
+def test_missing_all_credentials_boots_when_admin_password_env_present():
+    assert missing_all_credentials(
+        admin_password_env="hunter2",
+        jwt_secret_env="",
+        jwt_secret_file_exists=False,
+        has_admin_user=False,
+    ) is False
+
+
+def test_missing_all_credentials_boots_when_admin_user_present():
+    assert missing_all_credentials(
+        admin_password_env="",
+        jwt_secret_env="",
+        jwt_secret_file_exists=False,
+        has_admin_user=True,
+    ) is False
+
+
+def test_missing_all_credentials_boots_when_jwt_secret_env_present():
+    assert missing_all_credentials(
+        admin_password_env="",
+        jwt_secret_env="some-secret",
+        jwt_secret_file_exists=False,
+        has_admin_user=False,
+    ) is False
+
+
+def test_missing_all_credentials_boots_when_jwt_secret_file_present():
+    assert missing_all_credentials(
+        admin_password_env="",
+        jwt_secret_env="",
+        jwt_secret_file_exists=True,
+        has_admin_user=False,
+    ) is False
+
+
+def test_missing_all_credentials_boots_when_password_and_admin_user_present():
+    assert missing_all_credentials(
+        admin_password_env="hunter2",
+        jwt_secret_env="",
+        jwt_secret_file_exists=False,
+        has_admin_user=True,
+    ) is False
+
+
+def test_missing_all_credentials_boots_when_password_and_jwt_env_present():
+    assert missing_all_credentials(
+        admin_password_env="hunter2",
+        jwt_secret_env="some-secret",
+        jwt_secret_file_exists=False,
+        has_admin_user=False,
+    ) is False
+
+
+def test_missing_all_credentials_boots_when_admin_user_and_jwt_file_present():
+    assert missing_all_credentials(
+        admin_password_env="",
+        jwt_secret_env="",
+        jwt_secret_file_exists=True,
+        has_admin_user=True,
+    ) is False
+
+
+def test_missing_all_credentials_boots_when_all_three_present():
+    assert missing_all_credentials(
+        admin_password_env="hunter2",
+        jwt_secret_env="some-secret",
+        jwt_secret_file_exists=True,
+        has_admin_user=True,
+    ) is False
+
+
+def test_missing_all_credentials_file_existence_check_does_not_create_file(tmp_path):
+    """The signal-3 check must be a pure existence check (os.path.exists),
+    never get_jwt_secret()/load_or_create_jwt_secret(), which would create
+    the file as a side effect and mask a genuinely absent signal on the
+    very boot that is trying to detect its absence."""
+    secret_file = tmp_path / ".jwt_secret"
+    assert not secret_file.exists()
+
+    result = missing_all_credentials(
+        admin_password_env="",
+        jwt_secret_env="",
+        jwt_secret_file_exists=secret_file.exists(),
+        has_admin_user=False,
+    )
+
+    assert result is True
+    assert not secret_file.exists()  # the check itself created nothing
 
 
 def test_get_jwt_secret_generates_lazily_not_on_import(monkeypatch, tmp_path):

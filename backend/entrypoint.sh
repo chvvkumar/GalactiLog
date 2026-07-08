@@ -297,6 +297,51 @@ fi
 
 echo "Migrations complete."
 
+# Refuse to start a brand-new, credential-less install: if there is no
+# GALACTILOG_ADMIN_PASSWORD, no admin user row, and no persisted/explicit JWT
+# secret, there is no way for anyone to log in once the container is up.
+# Runs after alembic upgrade head (above) so the users table is guaranteed to
+# exist, and before any Celery jobs are dispatched below so a bad boot leaves
+# nothing to clean up. An existing install with any one of the three signals
+# present boots unchanged - no new log lines, no behavior change.
+HAS_ADMIN_USER=$(run_db_probe "admin user existence check" "
+from sqlalchemy import create_engine, text
+from app.config import settings
+url = settings.database_url.replace('+asyncpg', '+psycopg2')
+eng = create_engine(url)
+with eng.connect() as c:
+    r = c.execute(text(\"SELECT EXISTS (SELECT 1 FROM users WHERE role = 'admin')\"))
+    print('yes' if r.scalar() else 'no')
+eng.dispose()
+")
+
+MISSING_ALL_CREDS=$(python -c "
+import os
+from app.config import settings, missing_all_credentials
+print('yes' if missing_all_credentials(
+    admin_password_env=settings.admin_password,
+    jwt_secret_env=os.environ.get('GALACTILOG_JWT_SECRET', ''),
+    jwt_secret_file_exists=os.path.exists('$JWT_SECRET_FILE'),
+    has_admin_user=('$HAS_ADMIN_USER' == 'yes'),
+) else 'no')
+" 2>/dev/null || echo "no")
+
+if [ "$MISSING_ALL_CREDS" = "yes" ]; then
+    echo "ERROR: No credentials found for a fresh install."
+    echo ""
+    echo "The database has NOT been modified."
+    echo ""
+    echo "This is a brand-new install with nothing to log in with:"
+    echo "  - GALACTILOG_ADMIN_PASSWORD is not set"
+    echo "  - no admin user exists in the database"
+    echo "  - no session secret has been generated or configured"
+    echo ""
+    echo "Set GALACTILOG_ADMIN_PASSWORD in your .env file and restart."
+    echo ""
+    echo "Refusing to start with no way to log in."
+    exit 1
+fi
+
 # Check stored data version against this release's minimum supported data
 # version before touching anything else. A fresh install (no app_metadata
 # table, or no data_version row yet) has nothing to gate on and proceeds

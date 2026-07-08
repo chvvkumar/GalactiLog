@@ -165,6 +165,34 @@ def get_jwt_secret() -> str:
             settings.jwt_secret = load_or_create_jwt_secret(settings.jwt_secret_file)
     return settings.jwt_secret
 
+
+def missing_all_credentials(
+    *,
+    admin_password_env: str,
+    jwt_secret_env: str,
+    jwt_secret_file_exists: bool,
+    has_admin_user: bool,
+) -> bool:
+    """True iff no credential signal exists at all (fresh, unusable install).
+
+    Refuses iff ALL of:
+      - admin_password_env is empty (GALACTILOG_ADMIN_PASSWORD unset)
+      - has_admin_user is False (no role='admin' row in users)
+      - jwt_secret_env is empty AND jwt_secret_file_exists is False
+        (no persisted or explicit JWT secret)
+
+    Pure function: takes primitives, does no DB/file I/O itself, so callers
+    (entrypoint.sh via a python -c snippet, or tests directly) supply the
+    three signals already computed. Callers must compute
+    jwt_secret_file_exists via a plain existence check (e.g. os.path.exists)
+    rather than get_jwt_secret()/load_or_create_jwt_secret(), which would
+    create the file as a side effect and mask a genuinely absent signal.
+    """
+    has_admin_password = bool(admin_password_env)
+    has_jwt_secret = bool(jwt_secret_env) or jwt_secret_file_exists
+    return not (has_admin_password or has_admin_user or has_jwt_secret)
+
+
 import redis.asyncio as aioredis
 import redis as sync_redis
 from contextlib import asynccontextmanager
