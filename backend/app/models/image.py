@@ -21,6 +21,17 @@ class Image(Base):
         UUID(as_uuid=True), ForeignKey("targets.id"), nullable=True
     )
 
+    # Panel membership: which mosaic panel (if any) this frame's OBJECT token
+    # resolves to. panel_label is the parsed token (e.g. "Panel 3") in the
+    # same format as MosaicPanel.panel_label, set independent of whether a
+    # MosaicPanel row exists yet. panel_id links to an existing MosaicPanel
+    # once one matches (resolved_target_id, panel_label), or via the simple
+    # one-target-one-panel fallback when the OBJECT carries no panel token.
+    panel_label: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    panel_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("mosaic_panels.id", ondelete="SET NULL"), nullable=True
+    )
+
     # Extracted structured metadata for fast filtering
     exposure_time: Mapped[float | None] = mapped_column(Float, nullable=True)
     filter_used: Mapped[str | None] = mapped_column(String(50), nullable=True)
@@ -34,6 +45,10 @@ class Image(Base):
 
     # Quality metrics
     median_hfr: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # FWHM parsed from FITS/XISF headers (FWHM/MEANFWHM keywords). Kept separate
+    # from median_hfr because HFR and FWHM are different metrics on different
+    # scales, and separate from the CSV-sourced `fwhm` column below.
+    median_fwhm: Mapped[float | None] = mapped_column(Float, nullable=True)
     eccentricity: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     # --- CSV metrics (N.I.N.A. ImageMetaData) ---
@@ -82,9 +97,12 @@ class Image(Base):
     raw_headers: Mapped[dict | None] = mapped_column(JSONB, nullable=True, default=dict)
 
     target: Mapped["Target | None"] = relationship(back_populates="images")
+    panel: Mapped["MosaicPanel | None"] = relationship(foreign_keys=[panel_id])
 
     __table_args__ = (
         Index("ix_images_capture_date", "capture_date"),
+        Index("ix_images_panel_id", "panel_id"),
+        Index("ix_images_target_panel_label", "resolved_target_id", "panel_label"),
         Index("ix_images_session_date", "session_date"),
         Index("ix_images_filter_used", "filter_used"),
         Index("ix_images_resolved_target_id", "resolved_target_id"),
@@ -93,4 +111,13 @@ class Image(Base):
         Index("ix_images_raw_headers", "raw_headers", postgresql_using="gin"),
         Index("ix_images_telescope", "telescope"),
         Index("ix_images_camera", "camera"),
+        Index("ix_images_median_hfr", "median_hfr"),
+        Index("ix_images_fwhm", "fwhm"),
+        Index("ix_images_eccentricity", "eccentricity"),
+        Index("ix_images_detected_stars", "detected_stars"),
+        Index("ix_images_guiding_rms_arcsec", "guiding_rms_arcsec"),
+        Index("ix_images_focuser_temp", "focuser_temp"),
+        Index("ix_images_ambient_temp", "ambient_temp"),
+        Index("ix_images_humidity", "humidity"),
+        Index("ix_images_airmass", "airmass"),
     )

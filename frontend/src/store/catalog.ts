@@ -1,13 +1,29 @@
 import { createSignal, createResource } from "solid-js";
-import { api } from "../api/client";
-import type { EquipmentList } from "../types";
+import { apiClient } from "../api/generated/client";
+import { unwrap } from "../api/unwrap";
+import type { EquipmentList } from "../api/types";
 
 const [shouldFetchEquipment, setShouldFetchEquipment] = createSignal(false);
 
-const [equipment] = createResource(
+// One-shot seed consumed by the resource's first run (see settings store).
+let pendingEquipmentSeed: EquipmentList | null = null;
+const [equipment, { mutate: mutateEquipment }] = createResource(
   () => shouldFetchEquipment() || undefined,
-  () => api.getEquipment(),
+  async () => {
+    if (pendingEquipmentSeed) {
+      const s = pendingEquipmentSeed;
+      pendingEquipmentSeed = null;
+      return s;
+    }
+    return apiClient.GET("/api/targets/equipment", {}).then(unwrap);
+  },
 );
+
+export function seedEquipment(data: EquipmentList) {
+  pendingEquipmentSeed = data;
+  mutateEquipment(data);
+  setShouldFetchEquipment(true);
+}
 const [expandedTargets, setExpandedTargets] = createSignal<Set<string>>(new Set());
 
 export function useCatalog() {

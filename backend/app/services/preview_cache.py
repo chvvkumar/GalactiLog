@@ -2,6 +2,7 @@ import time
 from pathlib import Path
 
 import redis as sync_redis
+import redis.asyncio as async_redis
 
 
 LRU_KEY = "preview:lru"
@@ -112,3 +113,63 @@ class PreviewCache:
             "removed_orphan_files": len(orphan_files),
             "total_bytes": total,
         }
+
+
+class AsyncPreviewCache:
+    """Async mirror of :class:`PreviewCache` for use on the request event loop.
+
+    Identical LRU accounting, but every Redis operation is awaited against the
+    shared async client instead of a per-request sync connection. The disk
+    reads/writes themselves are done by the caller (in a worker thread); the
+    small metadata operations here are cheap awaits.
+    """
+
+    def __init__(self, redis: "async_redis.Redis", cache_dir: Path, cap_bytes: int):
+        self.redis = redis
+        self.cache_dir = cache_dir
+        self.cap_bytes = cap_bytes
+
+    async def has(self, key: str) -> bool:
+        return (await self.redis.zscore(LRU_KEY, key)) is not None
+
+    async def touch(self, key: str) -> None:
+        await self.redis.zadd(LRU_KEY, {key: time.time()})
+
+    async def total_bytes(self) -> int:
+        val = await self.redis.get(TOTAL_KEY)
+        return int(val) if val else 0
+
+    async def record(self, key: str, size: int) -> None:
+        await self.ensure_capacity_for(size)
+        old = await self.redis.hget(SIZES_KEY, key)
+        old_size = int(old) if old else 0
+        pipe = self.redis.pipeline()
+        pipe.zadd(LRU_KEY, {key: time.time()})
+        pipe.hset(SIZES_KEY, key, size)
+        pipe.incrby(TOTAL_KEY, size - old_size)
+        await pipe.execute()
+
+    async def ensure_capacity_for(self, new_size: int) -> None:
+        while (await self.total_bytes()) + new_size > self.cap_bytes:
+            oldest = await self.redis.zrange(LRU_KEY, 0, 0)
+            if not oldest:
+                return
+            key = oldest[0]
+            before = await self.total_bytes()
+            await self._evict(key)
+            if (await self.total_bytes()) >= before:
+                return
+
+    async def _evict(self, key: str) -> None:
+        size_str = await self.redis.hget(SIZES_KEY, key)
+        size = int(size_str) if size_str else 0
+        path = self.cache_dir / key
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        pipe = self.redis.pipeline()
+        pipe.zrem(LRU_KEY, key)
+        pipe.hdel(SIZES_KEY, key)
+        pipe.decrby(TOTAL_KEY, size)
+        await pipe.execute()

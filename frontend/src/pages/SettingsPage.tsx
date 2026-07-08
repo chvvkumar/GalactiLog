@@ -39,6 +39,7 @@ const AstroBinTab = lazy(() => import("../components/settings/AstroBinTab"));
 const CustomColumnsTab = lazy(() => import("../components/CustomColumnsTab"));
 const ActivityLogTab = lazy(() => import("../components/settings/ActivityLogTab"));
 const MetricsTab = lazy(() => import("../components/settings/MetricsTab").then(m => ({ default: m.MetricsTab })));
+const AccountTab = lazy(() => import("../components/settings/AccountTab").then(m => ({ default: m.AccountTab })));
 
 const ALL_TABS = [
   { id: "scan", label: "Library" },
@@ -47,6 +48,7 @@ const ALL_TABS = [
   { id: "astrobin", label: "External Tools" },
   { id: "targets", label: "Target Management" },
   { id: "custom-columns", label: "Custom Columns" },
+  { id: "account", label: "Account" },
   { id: "backup", label: "Backup & Restore", adminOnly: true },
   { id: "users", label: "Users", adminOnly: true },
   { id: "activity-log", label: "Activity Log", adminOnly: true },
@@ -148,6 +150,11 @@ export const SettingsPage: Component = () => {
         <Show when={activeTab() === "custom-columns"}>
           <div class="tab-fade-in">
             <CustomColumnsTab />
+          </div>
+        </Show>
+        <Show when={activeTab() === "account"}>
+          <div class="tab-fade-in rounded-[var(--radius-md)] bg-theme-surface border border-theme-border p-4 space-y-6">
+            <AccountTab />
           </div>
         </Show>
         <Show when={activeTab() === "backup" && isAdmin()}>

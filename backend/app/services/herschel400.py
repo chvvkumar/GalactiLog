@@ -7,7 +7,9 @@ from pathlib import Path
 from sqlalchemy.orm import Session
 
 from app.models.herschel400_catalog import Herschel400Entry
-from app.services.catalog_base import load_catalog_csv, match_ngc_catalog, parse_float
+from app.services.catalog_base import (
+    load_catalog_csv, match_ngc_catalog, match_ngc_catalog_for_target, parse_float,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -58,4 +60,21 @@ def match_herschel400_targets(session: Session) -> int:
         label="Herschel 400",
         logger=logger,
         require_ngc=False,
+    )
+
+
+def match_herschel400_for_target(session: Session, target) -> int:
+    """Match Herschel 400 entries to a single target. Returns matches created."""
+    return match_ngc_catalog_for_target(
+        session,
+        target,
+        model=Herschel400Entry,
+        catalog_name="herschel400",
+        ngc_field="ngc_id",
+        get_catalog_number=lambda entry: "H400",
+        build_metadata=lambda entry: {
+            "constellation": entry.constellation,
+            "type": entry.object_type,
+            "magnitude": entry.magnitude,
+        },
     )

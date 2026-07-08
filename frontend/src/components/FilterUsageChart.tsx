@@ -1,16 +1,13 @@
 import { Component, For, Show } from "solid-js";
 import { useSettingsContext } from "./SettingsProvider";
-import { getFilterBadgeStyle } from "../utils/filterStyles";
+import { getFilterBadgeStyle, getFilterColor } from "../utils/filterStyles";
 import { formatIntegration } from "../utils/format";
 
 const FilterUsageChart: Component<{ usage: Record<string, number> }> = (props) => {
   const { filterColorMap, filterAliasMap, filterBadgeStyle } = useSettingsContext();
 
   function getColor(name: string): string {
-    const colorMap = filterColorMap();
-    const aliasMap = filterAliasMap();
-    const canonical = aliasMap[name] || name;
-    return colorMap[canonical] || colorMap[name] || "#6b7280";
+    return getFilterColor(name, filterColorMap(), filterAliasMap());
   }
 
   const entries = () => Object.entries(props.usage).sort(([, a], [, b]) => b - a);

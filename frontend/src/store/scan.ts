@@ -1,6 +1,14 @@
 import { createSignal, onCleanup, onMount } from "solid-js";
-import { api } from "../api/client";
-import type { ScanStatus } from "../types";
+import { apiClient } from "../api/generated/client";
+import { unwrap } from "../api/unwrap";
+// ScanStatus is the hand-written definition in `../api/types` (narrow
+// `state` literal union, vs. the generated `ScanStateResponse`'s plain
+// `string`). This store's signal is consumed by store/activeJobs.ts's
+// wireActiveJobSources (itself consumed by ScanManager.tsx) via the
+// literal-union contract; the field names are otherwise identical to the
+// generated ScanStateResponse, so casting the fetch result preserves both
+// the migration and the existing contract.
+import type { ScanStatus } from "../api/types";
 
 const defaultStatus: ScanStatus = {
   state: "idle",
@@ -26,7 +34,7 @@ let pollInterval: ReturnType<typeof setInterval> | null = null;
 
 async function fetchStatus() {
   try {
-    const status = await api.getScanStatus();
+    const status = await apiClient.GET("/api/scan/status", {}).then(unwrap) as ScanStatus;
     setScanStatus(status);
     setScanError(null);
 
@@ -89,7 +97,16 @@ export function useScan() {
       // Immediately show scanning state so the UI responds instantly
       setScanStatus((prev) => ({ ...prev, state: "scanning", completed: 0, failed: 0, total: 0, discovered: 0 }));
       try {
-        await api.triggerScan(options);
+        await apiClient
+          .POST("/api/scan", {
+            params: {
+              query: {
+                include_calibration: options?.includeCalibration === false ? false : undefined,
+                force_orphan_cleanup: options?.forceOrphanCleanup ? true : undefined,
+              },
+            },
+          })
+          .then(unwrap);
       } catch {
         // POST /scan may timeout on large directories, but scan still starts server-side
       }
@@ -102,7 +119,15 @@ export function useScan() {
       setScanError(null);
       setScanStatus((prev) => ({ ...prev, state: "scanning", completed: 0, failed: 0, total: 0 }));
       try {
-        await api.regenerateThumbnails(opts);
+        await apiClient
+          .POST("/api/scan/regenerate-thumbnails", {
+            params: {
+              query: {
+                purge: opts.purge ? true : undefined,
+              },
+            },
+          })
+          .then(unwrap);
       } catch {
         // POST may timeout but regeneration still starts server-side
       }
@@ -111,7 +136,7 @@ export function useScan() {
 
     resetScan: async () => {
       try {
-        await api.resetScan();
+        await apiClient.POST("/api/scan/reset", {}).then(unwrap);
         setScanStatus({ ...defaultStatus });
         setScanError(null);
       } catch {
@@ -122,7 +147,7 @@ export function useScan() {
     stopScan: async () => {
       setStopping(true);
       try {
-        await api.stopScan();
+        await apiClient.POST("/api/scan/stop", {}).then(unwrap);
       } catch {
         setStopping(false);
         setScanError("Failed to stop scan");

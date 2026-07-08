@@ -160,7 +160,7 @@ class TestQueryClusterDistance:
 
         assert result is None
 
-    def test_returns_none_on_http_error(self):
+    def test_raises_on_http_error(self):
         import httpx
         client = MagicMock()
         client.__enter__ = MagicMock(return_value=client)
@@ -168,9 +168,8 @@ class TestQueryClusterDistance:
         client.post = MagicMock(side_effect=httpx.HTTPError("timeout"))
 
         with patch("app.services.gaia.httpx.Client", return_value=client):
-            result = query_cluster_distance(83.82, -5.39, 0.15)
-
-        assert result is None
+            with pytest.raises(httpx.HTTPError):
+                query_cluster_distance(83.82, -5.39, 0.15)
 
     def test_rejects_implausible_distance(self):
         # parallax of 0.000001 -> distance > 100000 pc -> rejected
@@ -248,15 +247,21 @@ class TestEnrichTargetFromGaia:
         target.dec = -5.39
         target.size_major = None
         target.distance_pc = None
+        target.id = "test-uuid"
 
+        payload = {"distance_pc": 450.0, "parallax_count": 20}
         with patch("app.services.gaia.get_cached_gaia", return_value=None), \
-             patch("app.services.gaia.query_cluster_distance", return_value=(450.0, 20)), \
-             patch("app.services.gaia.save_gaia_cache") as mock_save:
+             patch("app.services.gaia.cc.get_or_fetch", return_value=payload) as mock_get_or_fetch:
             result = enrich_target_from_gaia(session, target)
 
         assert result is True
         assert target.distance_pc == pytest.approx(450.0)
-        mock_save.assert_called_once()
+        # Verify get_or_fetch was called with correct args
+        mock_get_or_fetch.assert_called_once()
+        call_args = mock_get_or_fetch.call_args
+        assert call_args[0][1] == "gaia"  # source
+        assert call_args[0][2] == "test-uuid"  # key
+        session.commit.assert_called_once()
 
     def test_returns_false_when_gaia_query_empty(self):
         session = MagicMock()
@@ -266,10 +271,41 @@ class TestEnrichTargetFromGaia:
         target.dec = -5.39
         target.size_major = None
         target.distance_pc = None
+        target.id = "test-uuid"
 
         with patch("app.services.gaia.get_cached_gaia", return_value=None), \
-             patch("app.services.gaia.query_cluster_distance", return_value=None), \
-             patch("app.services.gaia.save_gaia_cache"):
+             patch("app.services.gaia.cc.get_or_fetch", return_value=None) as mock_get_or_fetch:
             result = enrich_target_from_gaia(session, target)
 
         assert result is False
+        mock_get_or_fetch.assert_called_once()
+        session.commit.assert_called_once()
+
+    def test_negative_cache_suppresses_refetch(self):
+        """Verify that a negatively cached row (distance_pc is None) prevents refetch.
+
+        This is the "negative cache still suppresses refetch" verification bar.
+        A target with a negative cache entry should return False without making
+        an HTTP call to query_cluster_distance.
+        """
+        session = MagicMock()
+        target = MagicMock()
+        target.object_type = "OpC"
+        target.ra = 83.82
+        target.dec = -5.39
+        target.distance_pc = None
+
+        # Return a cached object with distance_pc=None (negative cache)
+        from app.services.gaia import _CachedPayload
+        mock_cache = _CachedPayload(distance_pc=None)
+
+        with patch("app.services.gaia.get_cached_gaia", return_value=mock_cache), \
+             patch("app.services.gaia.query_cluster_distance") as mock_query:
+            result = enrich_target_from_gaia(session, target)
+
+        # Should return False (no update, no distance data)
+        assert result is False
+        # Should NOT call query_cluster_distance (negative cache suppresses refetch)
+        mock_query.assert_not_called()
+        # Should NOT commit (didn't cache anything new)
+        session.commit.assert_not_called()

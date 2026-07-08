@@ -1,6 +1,10 @@
-import { Component, For, createSignal, createResource, createMemo, Show } from "solid-js";
-import { api } from "../api/client";
-import type { CalendarEntry } from "../types";
+import { Component, For, createSignal, createMemo, Show } from "solid-js";
+import { useQuery } from "@tanstack/solid-query";
+import { apiClient } from "../api/generated/client";
+import { unwrap } from "../api/unwrap";
+import { queryKeys } from "../api/queryKeys";
+import type { CalendarEntry } from "../api/types";
+import { parseLocalDateKey } from "../utils/format";
 
 const CELL = 13;
 const GAP = 3;
@@ -70,10 +74,20 @@ const ImagingCalendar: Component = () => {
   const [selectedYear, setSelectedYear] = createSignal<number | null>(null);
   const [tooltip, setTooltip] = createSignal<{ x: number; y: number; text: string } | null>(null);
 
-  const [data] = createResource(
-    () => ({ year: selectedYear() }),
-    ({ year }) => api.getCalendar(year ?? undefined),
-  );
+  const calendarQuery = useQuery(() => ({
+    queryKey: queryKeys.calendar(selectedYear() ?? undefined),
+    queryFn: ({ signal }) =>
+      apiClient
+        .GET("/api/stats/calendar", { params: { query: { year: selectedYear() ?? undefined } }, signal })
+        .then(unwrap) as Promise<CalendarEntry[]>,
+  }));
+  // Solid `createResource`-shaped accessor kept for source compatibility with
+  // this file's `data()` / `data.loading` call sites (same technique as
+  // TargetDetailPage.tsx's `targetDetail`).
+  const data = (() => calendarQuery.data) as (() => CalendarEntry[] | undefined) & {
+    readonly loading: boolean;
+  };
+  Object.defineProperty(data, "loading", { enumerable: true, get: () => calendarQuery.isFetching });
 
   const weeks = createMemo(() => {
     const entries = data();
@@ -87,7 +101,7 @@ const ImagingCalendar: Component = () => {
     const labels: { label: string; col: number }[] = [];
     let lastMonth = "";
     for (let i = 0; i < w.length; i++) {
-      const d = new Date(w[i][0].date);
+      const d = parseLocalDateKey(w[i][0].date);
       const m = d.toLocaleString("en", { month: "short" });
       if (m !== lastMonth) {
         labels.push({ label: m, col: i });

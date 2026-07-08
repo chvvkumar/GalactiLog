@@ -2,7 +2,7 @@ import { createMemo, createEffect, createSignal, onCleanup, Show, untrack } from
 import { Chart } from "chart.js";
 import type { ChartDataset, ScriptableLineSegmentContext, CartesianScaleOptions, GridLineOptions } from "chart.js";
 import "../utils/chartRegistry";
-import type { SessionDetail, FrameRecord } from "../types";
+import type { SessionDetail, FrameRecord } from "../api/types";
 import { useSettingsContext } from "./SettingsProvider";
 import { formatTime } from "../utils/dateTime";
 import { METRIC_DEFINITIONS, getMetricColor, getMetricDef, chartFontSize } from "../utils/chartConfig";

@@ -2,7 +2,7 @@ import { Component, createEffect, onCleanup } from "solid-js";
 import { Chart } from "chart.js";
 import "../../utils/chartRegistry";
 import "chartjs-adapter-date-fns";
-import type { TimeSeriesResponse } from "../../types";
+import type { TimeSeriesResponse } from "../../api/types";
 import { chartFontSize } from "../../utils/chartConfig";
 import { madZ, bandForZ, type MetricBaseline } from "../../utils/frameQuality";
 

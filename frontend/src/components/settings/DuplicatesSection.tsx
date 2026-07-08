@@ -1,8 +1,9 @@
 import { Component, For, Show, createSignal } from "solid-js";
-import { api } from "../../api/client";
+import { apiClient } from "../../api/generated/client";
+import { unwrap } from "../../api/unwrap";
 import { showToast } from "../Toast";
 import { useAuth } from "../AuthProvider";
-import type { MergeCandidateResponse } from "../../types";
+import type { MergeCandidateResponse } from "../../api/types";
 import MergePreviewModal from "../MergePreviewModal";
 
 interface DuplicatesSectionProps {
@@ -44,7 +45,7 @@ function methodBadge(candidate: MergeCandidateResponse): BadgeInfo {
       subtitle: pct
         ? `Names are ${pct} similar by text matching`
         : "Names are similar by text matching",
-      colorClasses: "text-yellow-400 bg-yellow-500/10 border border-yellow-500/20",
+      colorClasses: "text-theme-warning bg-theme-warning/10 border border-theme-warning/20",
     };
   }
 
@@ -79,7 +80,11 @@ const DuplicatesSection: Component<DuplicatesSectionProps> = (props) => {
 
   const handleDismiss = async (candidateId: string) => {
     try {
-      await api.dismissMergeCandidate(candidateId);
+      await apiClient
+        .POST("/api/targets/merge-candidates/{candidate_id}/dismiss", {
+          params: { path: { candidate_id: candidateId } },
+        })
+        .then(unwrap);
       props.onAction();
       window.dispatchEvent(new Event("merges-changed"));
     } catch {

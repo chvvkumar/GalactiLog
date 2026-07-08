@@ -42,6 +42,12 @@ class CorrelationResponse(BaseModel):
     x_stats: SummaryStats | None = None
     y_stats: SummaryStats | None = None
     target_names: dict[str, str] = {}
+    # total_count is the number of points that matched the query; sampled_count
+    # is how many are actually returned in `points`. When total_count >
+    # sampled_count the point set was downsampled for payload size, but trend
+    # and x/y stats are still computed over the full set. Equal otherwise.
+    total_count: int = 0
+    sampled_count: int = 0
 
 
 class HistogramBin(BaseModel):

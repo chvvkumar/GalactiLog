@@ -1,7 +1,6 @@
 """Nightly Celery beat task: prune activity_events rows older than retention window."""
 import logging
 
-from celery.schedules import crontab
 from sqlalchemy import create_engine, select, text
 from sqlalchemy.orm import Session
 
@@ -84,6 +83,31 @@ def _prune_app_logs(redis) -> dict:
                 actor="system",
             )
     return {"deleted_by_age": by_age or 0, "deleted_by_count": by_count or 0}
+
+
+@celery_app.task(name="app.worker.prune_activity.prune_refresh_tokens", ignore_result=True)
+def prune_refresh_tokens() -> dict:
+    """Delete refresh_tokens rows that are expired or revoked.
+
+    Production accumulates hundreds of stale rows per user (login/refresh
+    rotation keeps every superseded token around indefinitely). Runs daily;
+    failures here must not affect the activity/app_log prune tasks.
+    """
+    try:
+        with Session(_sync_engine) as session:
+            deleted = session.execute(
+                text(
+                    "DELETE FROM refresh_tokens "
+                    "WHERE revoked = true OR expires_at < now()"
+                )
+            ).rowcount
+            session.commit()
+
+        logger.info("prune_refresh_tokens: deleted %d rows", deleted or 0)
+        return {"status": "complete", "deleted": deleted or 0}
+    except Exception as exc:
+        logger.exception("prune_refresh_tokens: failed - %s", exc)
+        return {"status": "error", "error": str(exc)}
 
 
 @celery_app.task(name="app.worker.prune_activity.prune_activity_events")

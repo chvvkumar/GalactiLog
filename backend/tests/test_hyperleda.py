@@ -1,14 +1,6 @@
 """Unit tests for app.services.hyperleda - galaxy detection, name normalization, HTML parsing."""
-import sys
-from unittest.mock import MagicMock
-
-# hyperleda.py imports HyperLEDACache at module level; stub it out so the
-# import succeeds even when the model file doesn't exist on this branch.
-if "app.models.hyperleda_cache" not in sys.modules:
-    sys.modules["app.models.hyperleda_cache"] = MagicMock()
-
 import pytest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from app.services.hyperleda import (
     _is_galaxy_type,
@@ -152,16 +144,15 @@ class TestQueryHyperleda:
 
         assert result is None
 
-    def test_returns_none_on_http_error(self):
+    def test_raises_on_http_error(self):
         import httpx
         client = MagicMock()
         client.__enter__ = MagicMock(return_value=client)
         client.__exit__ = MagicMock(return_value=False)
         client.get = MagicMock(side_effect=httpx.HTTPError("connection refused"))
         with patch("app.services.hyperleda.httpx.Client", return_value=client):
-            result = query_hyperleda("NGC 224")
-
-        assert result is None
+            with pytest.raises(httpx.HTTPError):
+                query_hyperleda("NGC 224")
 
     def test_partial_result_returned(self):
         # Only inclination available, t_type absent
@@ -206,9 +197,7 @@ class TestEnrichTargetFromHyperleda:
         target.hubble_t_type = None
         target.inclination = None
 
-        mock_cache = MagicMock()
-        mock_cache.t_type = 3.0
-        mock_cache.inclination = 55.0
+        mock_cache = {"t_type": 3.0, "inclination": 55.0}
 
         with patch("app.services.hyperleda.get_cached_hyperleda", return_value=mock_cache):
             result = enrich_target_from_hyperleda(session, target)
@@ -226,9 +215,7 @@ class TestEnrichTargetFromHyperleda:
         target.hubble_t_type = 5.0  # already set
         target.inclination = None
 
-        mock_cache = MagicMock()
-        mock_cache.t_type = 3.0
-        mock_cache.inclination = 55.0
+        mock_cache = {"t_type": 3.0, "inclination": 55.0}
 
         with patch("app.services.hyperleda.get_cached_hyperleda", return_value=mock_cache):
             result = enrich_target_from_hyperleda(session, target)
@@ -243,9 +230,7 @@ class TestEnrichTargetFromHyperleda:
         target.object_type = "G"
         target.catalog_id = "NGC 224"
 
-        mock_cache = MagicMock()
-        mock_cache.t_type = None
-        mock_cache.inclination = None
+        mock_cache = {"t_type": None, "inclination": None}
 
         with patch("app.services.hyperleda.get_cached_hyperleda", return_value=mock_cache):
             result = enrich_target_from_hyperleda(session, target)
@@ -264,12 +249,12 @@ class TestEnrichTargetFromHyperleda:
         data = {"t_type": 3.0, "inclination": 55.0}
 
         with patch("app.services.hyperleda.get_cached_hyperleda", return_value=None), \
-             patch("app.services.hyperleda.query_hyperleda", return_value=data), \
-             patch("app.services.hyperleda.save_hyperleda_cache") as mock_save:
+             patch("app.services.hyperleda.cc.get_or_fetch", return_value=data):
             result = enrich_target_from_hyperleda(session, target)
 
         assert result is True
-        mock_save.assert_called_once()
+        assert target.hubble_t_type == pytest.approx(3.0)
+        assert target.inclination == pytest.approx(55.0)
 
 
 # ---------------------------------------------------------------------------
@@ -281,9 +266,6 @@ class TestEnrichTargetFromHyperleda:
 
 class TestEnrichRealTargetInstance:
     def _make_target(self):
-        # Import lazily so the module-level MagicMock stub of
-        # app.models.hyperleda_cache (set at the top of this file) does not
-        # interfere with importing the real Target model.
         from app.models.target import Target
 
         return Target(
@@ -296,9 +278,7 @@ class TestEnrichRealTargetInstance:
         session = MagicMock()
         target = self._make_target()
 
-        mock_cache = MagicMock()
-        mock_cache.t_type = 3.0
-        mock_cache.inclination = 67.3
+        mock_cache = {"t_type": 3.0, "inclination": 67.3}
 
         with patch(
             "app.services.hyperleda.get_cached_hyperleda",
@@ -319,9 +299,7 @@ class TestEnrichRealTargetInstance:
         with patch(
             "app.services.hyperleda.get_cached_hyperleda", return_value=None
         ), patch(
-            "app.services.hyperleda.query_hyperleda", return_value=data
-        ), patch(
-            "app.services.hyperleda.save_hyperleda_cache"
+            "app.services.hyperleda.cc.get_or_fetch", return_value=data
         ):
             result = enrich_target_from_hyperleda(session, target)
 
@@ -344,3 +322,28 @@ class TestEnrichRealTargetInstance:
         assert result is False
         assert target.hubble_t_type is None
         assert target.inclination is None
+
+
+# ---------------------------------------------------------------------------
+# Negative cache suppression (verification bar for the phase)
+# ---------------------------------------------------------------------------
+
+class TestNegativeCacheSuppression:
+    def test_negative_cache_suppresses_refetch(self):
+        """A negative-cached row must suppress refetch, even via the wrapper."""
+        session = MagicMock()
+        target = MagicMock()
+        target.user_defined = False
+        target.object_type = "G"
+        target.catalog_id = "NGC 999999"  # non-existent object
+        target.hubble_t_type = None
+        target.inclination = None
+
+        negative_cache = {"t_type": None, "inclination": None}
+
+        with patch("app.services.hyperleda.get_cached_hyperleda", return_value=negative_cache), \
+             patch("app.services.hyperleda.query_hyperleda") as mock_query:
+            result = enrich_target_from_hyperleda(session, target)
+
+        assert result is False
+        mock_query.assert_not_called()

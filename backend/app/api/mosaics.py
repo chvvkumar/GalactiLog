@@ -1,11 +1,10 @@
 import asyncio
-import re
 import uuid
 from collections import defaultdict
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
-from sqlalchemy import select, func, or_, text
+from sqlalchemy import select, func, or_, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -18,63 +17,77 @@ from app.models.mosaic_panel_session import MosaicPanelSession
 from app.models.mosaic_suggestion import MosaicSuggestion
 from app.schemas.mosaic import (
     AcceptSuggestionRequest,
-    MosaicCreate, MosaicUpdate, MosaicPanelCreate, MosaicPanelUpdate,
+    AvailablePanelLabel,
+    MosaicCreate, MosaicUpdate, MosaicPanelCreate,
     MosaicPanelBatchItem, MosaicPanelBatchRequest,
     MosaicSummary, MosaicDetailResponse, PanelStats, MosaicSuggestionResponse,
-    SuggestionPreviewPanel,
     PanelThumbnail,
     PanelSessionsResponse, PanelSessionInfo, SessionStatusUpdate,
-    StatusResponse, OkResponse, DetectionResponse, PanelCreateResponse,
+    StatusResponse, OkResponse, PanelCreateResponse,
+    DetectionStartedResponse, DetectionStatusResponse,
 )
 from app.api.deps import get_current_user, require_admin
 from app.services.mosaic_composite import build_mosaic_composite, find_default_filter
+from app.services.mosaic_detection import (
+    load_mosaic_keywords,
+    retro_link_panel_images as _retro_link_panel_images,
+)
 from app.services.mosaic_stats import (
     get_panel_included_dates as _get_panel_included_dates,
     panel_stats as _panel_stats,
     batch_panel_stats as _batch_panel_stats,
     list_mosaic_summaries,
 )
+from app.services.mosaic_suggestions import (
+    strip_year_suffix,
+    object_pattern_for_label,
+    list_pending_suggestions,
+    accept_suggestion_panels,
+    _ilike_pattern_matches,
+)
 
 router = APIRouter(prefix="/mosaics", tags=["mosaics"])
 
 
-def _ilike_pattern_matches(pattern: str, value: str) -> bool:
-    """Match an SQL ILIKE pattern against a value with the SAME semantics SQL
-    uses: '%' is an ordered, possibly-empty gap and '_' a single char. Literal
-    segments must appear in order and contiguously (no reordering).
-
-    A naive "split on % and check each segment is a substring" test is wrong:
-    for "%Sh2 119%1%" the segments are ["sh2 119", "1"], and "Sh2 119 Panel 2"
-    contains both ("1" lives inside "119"), so it would falsely match Panel 1.
-    Translating to an anchored regex preserves order and avoids that.
-    """
-    if value is None:
-        return False
-    regex_parts = []
-    for ch in pattern:
-        if ch == "%":
-            regex_parts.append(".*")
-        elif ch == "_":
-            regex_parts.append(".")
-        else:
-            regex_parts.append(re.escape(ch))
-    regex = "^" + "".join(regex_parts) + "$"
-    return re.match(regex, value, re.IGNORECASE | re.DOTALL) is not None
-
-
-@router.post("/detect", response_model=DetectionResponse)
+@router.post("/detect", response_model=DetectionStartedResponse, status_code=202)
 async def trigger_detection(
-    session: AsyncSession = Depends(get_session),
     user: User = Depends(require_admin),
 ):
-    from app.services.mosaic_detection import detect_mosaic_panels
+    """Dispatch mosaic panel detection to Celery and return immediately.
 
-    settings = await session.get(UserSettings, SETTINGS_ROW_ID)
-    general = settings.general if settings else {}
-    gap_days = general.get("mosaic_campaign_gap_days", 0)
+    Detection loads the LIGHT-frame headers of the whole catalog and does
+    CPU-bound grouping, so running it inline blocked the event loop and could
+    race the scan-triggered detection task (both delete and re-insert pending
+    suggestions). It now runs in the worker under MOSAIC_DETECT_LOCK, which
+    serializes it against the scan-triggered run. The caller polls
+    ``GET /mosaics/detect/status`` with the returned task id.
+    """
+    from app.worker.tasks import detect_mosaic_panels_task
 
-    count = await detect_mosaic_panels(session, gap_days=gap_days)
-    return {"status": "ok", "new_suggestions": count}
+    task = detect_mosaic_panels_task.delay()
+    return {"status": "started", "task_id": task.id}
+
+
+@router.get("/detect/status", response_model=DetectionStatusResponse)
+async def detection_status(
+    task_id: str,
+    user: User = Depends(get_current_user),
+):
+    """Report the state of a dispatched detection task.
+
+    Returns the Celery task state; once SUCCESS, ``new_suggestions`` carries the
+    count the task found so the UI can refresh its suggestion list.
+    """
+    from app.worker.celery_app import celery_app
+
+    result = celery_app.AsyncResult(task_id)
+    state = result.state
+    new_suggestions: int | None = None
+    if state == "SUCCESS":
+        payload = result.result
+        if isinstance(payload, dict):
+            new_suggestions = payload.get("new_suggestions")
+    return {"state": state, "new_suggestions": new_suggestions}
 
 
 # NOTE: This endpoint MUST be defined BEFORE the /{mosaic_id} routes
@@ -84,221 +97,7 @@ async def get_suggestions(
     session: AsyncSession = Depends(get_session),
     user: User = Depends(get_current_user),
 ):
-    from app.schemas.mosaic import SuggestionPanelSession
-
-    q = select(MosaicSuggestion).where(MosaicSuggestion.status == "pending")
-    all_pending = (await session.execute(q)).scalars().all()
-
-    # Filter out suggestions whose name already matches an existing mosaic
-    existing_mosaic_names_q = select(Mosaic.name)
-    existing_mosaic_names = {
-        r[0].upper() for r in (await session.execute(existing_mosaic_names_q)).all()
-    }
-    rows = [r for r in all_pending if r.suggested_name.upper() not in existing_mosaic_names]
-
-    # Resolve target names in batch
-    all_ids = {t for r in rows for t in r.target_ids}
-    name_map: dict[str, str] = {}
-    if all_ids:
-        tq = select(Target.id, Target.primary_name).where(Target.id.in_(all_ids))
-        for tid, tname in (await session.execute(tq)).all():
-            name_map[str(tid)] = tname
-
-    def _thumb_url(thumbnail_path: str | None) -> str | None:
-        if not thumbnail_path:
-            return None
-        filename = thumbnail_path.split("/")[-1].split("\\")[-1]
-        return f"/thumbnails/{filename}"
-
-    # Per-target fallback thumbnail in one query (avoid N+1). Reuses the panel
-    # stats scheme: the most recent LIGHT frame with a thumbnail_path becomes
-    # /thumbnails/{filename}. DISTINCT ON keeps one row per target. Used when a
-    # panel has no object_pattern or no pattern-matching frame.
-    thumb_map: dict[str, str] = {}
-    if all_ids:
-        thumb_q = (
-            select(
-                Image.resolved_target_id,
-                Image.thumbnail_path,
-            )
-            .where(
-                Image.resolved_target_id.in_(all_ids),
-                Image.image_type == "LIGHT",
-                Image.thumbnail_path.is_not(None),
-            )
-            .distinct(Image.resolved_target_id)
-            .order_by(Image.resolved_target_id, Image.capture_date.desc())
-        )
-        for tid, thumb_path in (await session.execute(thumb_q)).all():
-            url = _thumb_url(thumb_path)
-            if url:
-                thumb_map[str(tid)] = url
-
-    # Per-(target, object_pattern) thumbnail resolution. Two panels can share one
-    # target_id (SIMBAD merges "Veil Nebula Panel 1"/"Panel 2" into NGC 6960);
-    # the per-target fallback would give both the same image. Resolve each panel
-    # by the same (resolved_target_id + OBJECT ILIKE pattern) frame selection
-    # that mosaic_stats/mosaic_composite use for accepted panels. Collect the
-    # distinct pairs first so each is queried once (LIMIT 1, bounded by panel
-    # count across pending suggestions).
-    def _pattern_for_label(r, label: str) -> str | None:
-        """Object pattern for a panel label, mirroring accept_suggestion."""
-        if r.panel_patterns and label in r.panel_labels:
-            idx = r.panel_labels.index(label)
-            if idx < len(r.panel_patterns):
-                return r.panel_patterns[idx]
-        base = r.base_name or r.suggested_name
-        num = label.split()[-1] if label.startswith("Panel ") else label
-        return f"%{base}%Panel%{num}%"
-
-    pattern_thumb_pairs: set[tuple[str, str]] = set()
-    for r in rows:
-        geometry = r.geometry or {}
-        for gp in geometry.get("panels", []):
-            tid = gp.get("target_id")
-            if tid is None:
-                continue
-            pattern = _pattern_for_label(r, gp.get("label") or "")
-            if pattern:
-                pattern_thumb_pairs.add((str(tid), pattern))
-
-    pattern_thumb_map: dict[tuple[str, str], str] = {}
-    obj_col_thumb = Image.raw_headers["OBJECT"].astext
-    for tid_str, pattern in pattern_thumb_pairs:
-        pq = (
-            select(Image.thumbnail_path)
-            .where(
-                Image.resolved_target_id == tid_str,
-                Image.image_type == "LIGHT",
-                Image.thumbnail_path.is_not(None),
-                obj_col_thumb.ilike(pattern),
-            )
-            .order_by(Image.capture_date.desc())
-            .limit(1)
-        )
-        thumb_path = (await session.execute(pq)).scalars().first()
-        url = _thumb_url(thumb_path)
-        if url:
-            pattern_thumb_map[(tid_str, pattern)] = url
-
-    # Build all OBJECT ILIKE patterns across every suggestion+panel,
-    # then fetch session summaries in a single query instead of N queries.
-    # Each pattern maps back to (suggestion index, panel label).
-    pattern_map: dict[str, list[tuple[int, str]]] = {}  # pattern -> [(row_idx, label)]
-    for idx, r in enumerate(rows):
-        if r.panel_patterns:
-            # Use pre-computed patterns stored at detection time
-            for label, pattern in zip(r.panel_labels, r.panel_patterns):
-                pattern_map.setdefault(pattern, []).append((idx, label))
-        else:
-            # Fallback for legacy suggestions without panel_patterns
-            base = r.base_name or r.suggested_name
-            for label in r.panel_labels:
-                num = label.split()[-1] if label.startswith("Panel ") else label
-                obj_pattern = f"%{base}%Panel%{num}%"
-                pattern_map.setdefault(obj_pattern, []).append((idx, label))
-
-    # Run one query with all patterns OR'd together
-    all_patterns = list(pattern_map.keys())
-    obj_col = Image.raw_headers["OBJECT"].astext
-    session_rows_by_idx: dict[int, list[SuggestionPanelSession]] = defaultdict(list)
-
-    if all_patterns:
-        sq = (
-            select(
-                obj_col.label("obj"),
-                Image.session_date.label("night"),
-                Image.filter_used,
-                func.count(Image.id).label("frames"),
-                func.sum(Image.exposure_time).label("integration"),
-            )
-            .where(
-                Image.image_type == "LIGHT",
-                or_(*(obj_col.ilike(p) for p in all_patterns)),
-            )
-            .group_by("obj", "night", Image.filter_used)
-            .order_by("obj", "night")
-        )
-        all_session_rows = (await session.execute(sq)).all()
-
-        # Distribute each result row back to the suggestions whose pattern matches
-        for row in all_session_rows:
-            obj_val = row.obj or ""
-            for pattern, mappings in pattern_map.items():
-                # Match the ILIKE pattern with ordered, contiguous semantics so
-                # "%Sh2 119%1%" hits "Sh2 119 Panel 1" but NOT "...Panel 2".
-                if _ilike_pattern_matches(pattern, obj_val):
-                    for row_idx, label in mappings:
-                        session_rows_by_idx[row_idx].append(SuggestionPanelSession(
-                            panel_label=label,
-                            object_name=obj_val,
-                            date=str(row.night) if row.night else "",
-                            frames=row.frames,
-                            integration_seconds=row.integration or 0,
-                            filter_used=row.filter_used,
-                        ))
-
-    results = []
-    for idx, r in enumerate(rows):
-        all_sessions = session_rows_by_idx.get(idx, [])
-        filtered_sessions = all_sessions
-        other_count = 0
-
-        if r.session_dates:
-            campaign_dates = set()
-            for dates in r.session_dates.values():
-                campaign_dates.update(dates)
-            filtered_sessions = [s for s in all_sessions if s.date in campaign_dates]
-            other_count = len(all_sessions) - len(filtered_sessions)
-
-        # Build preview panels from stored geometry. The frontend arranger
-        # auto-arranges tiles, so grid_row/grid_col are left null here; only
-        # thumbnail_url is resolved (batched above, no per-panel compute).
-        preview_panels: list[SuggestionPreviewPanel] = []
-        geometry = r.geometry or {}
-        for gp in geometry.get("panels", []):
-            tid = gp.get("target_id")
-            if tid is None:
-                continue
-            tid_str = str(tid)
-            label = gp.get("label") or ""
-            pattern = _pattern_for_label(r, label)
-            # Prefer the per-(target, pattern) frame so merged-target panels get
-            # distinct thumbnails; fall back to the per-target latest thumbnail.
-            thumb = None
-            if pattern is not None:
-                thumb = pattern_thumb_map.get((tid_str, pattern))
-            if thumb is None:
-                thumb = thumb_map.get(tid_str)
-            preview_panels.append(SuggestionPreviewPanel(
-                target_id=tid_str,
-                panel_label=label,
-                ra=gp.get("ra"),
-                dec=gp.get("dec"),
-                thumbnail_url=thumb,
-                grid_row=None,
-                grid_col=None,
-            ))
-
-        results.append(MosaicSuggestionResponse(
-            id=str(r.id),
-            suggested_name=r.suggested_name,
-            base_name=r.base_name,
-            target_ids=[str(t) for t in r.target_ids],
-            panel_labels=r.panel_labels,
-            panel_patterns=r.panel_patterns,
-            target_names={str(t): name_map.get(str(t), "Unknown") for t in set(r.target_ids)},
-            sessions=filtered_sessions,
-            session_dates=r.session_dates,
-            other_session_count=other_count,
-            status=r.status,
-            confidence=r.confidence,
-            discovery_source=r.discovery_source,
-            flags=list(r.flags) if r.flags else [],
-            preview_panels=preview_panels,
-        ))
-
-    return results
+    return await list_pending_suggestions(session)
 
 
 @router.post("/suggestions/{suggestion_id}/accept", response_model=MosaicSummary)
@@ -313,6 +112,7 @@ async def accept_suggestion(
         raise HTTPException(404, "Suggestion not found or already resolved")
 
     selected = set(body.selected_panels) if body.selected_panels is not None else None
+    keywords = await load_mosaic_keywords(session)
 
     # Guard against a duplicate mosaic name BEFORE inserting. A stale bulk
     # "accept all" can have a sibling suggestion that already created this
@@ -329,75 +129,7 @@ async def accept_suggestion(
             detail=f"A mosaic named '{suggestion.suggested_name}' already exists",
         )
 
-    # Create the mosaic
-    mosaic = Mosaic(name=suggestion.suggested_name)
-    session.add(mosaic)
-    await session.flush()
-
-    from datetime import date as date_type
-
-    # Create panels - multiple panels may share the same target_id
-    # (SIMBAD often merges panel variants into one target)
-    panel_num = 0
-    created = 0
-    for target_id, label in zip(suggestion.target_ids, suggestion.panel_labels):
-        if selected is not None and label not in selected:
-            continue
-        # Use pre-computed pattern if available, else derive from base_name
-        panel_idx = None
-        for pi, pl in enumerate(suggestion.panel_labels):
-            if pl == label:
-                panel_idx = pi
-                break
-        if suggestion.panel_patterns and panel_idx is not None and panel_idx < len(suggestion.panel_patterns):
-            obj_pattern = suggestion.panel_patterns[panel_idx]
-        else:
-            base = suggestion.base_name or suggestion.suggested_name
-            num = label.split()[-1] if label.startswith("Panel ") else label
-            obj_pattern = f"%{base}%Panel%{num}%"
-        panel = MosaicPanel(
-            mosaic_id=mosaic.id,
-            target_id=target_id,
-            panel_label=label,
-            sort_order=panel_num,
-            object_pattern=obj_pattern,
-        )
-        session.add(panel)
-        await session.flush()  # get panel.id
-
-        # Seed session membership from suggestion's session_dates
-        campaign_dates = set()
-        if suggestion.session_dates and label in suggestion.session_dates:
-            for ds in suggestion.session_dates[label]:
-                d = date_type.fromisoformat(ds)
-                campaign_dates.add(d)
-                session.add(MosaicPanelSession(
-                    panel_id=panel.id,
-                    session_date=d,
-                    status="included",
-                ))
-
-        # Find additional sessions outside the campaign
-        base_filter = [
-            Image.resolved_target_id == target_id,
-            Image.image_type == "LIGHT",
-            Image.session_date.isnot(None),
-        ]
-        if obj_pattern:
-            base_filter.append(Image.raw_headers["OBJECT"].astext.ilike(obj_pattern))
-        all_dates_q = select(func.distinct(Image.session_date)).where(*base_filter)
-        all_dates = {r[0] for r in (await session.execute(all_dates_q)).all()}
-
-        for d in all_dates:
-            if d not in campaign_dates:
-                session.add(MosaicPanelSession(
-                    panel_id=panel.id,
-                    session_date=d,
-                    status="available",
-                ))
-
-        panel_num += 1
-        created += 1
+    mosaic, created = await accept_suggestion_panels(session, suggestion, selected, keywords)
 
     suggestion.status = "accepted"
     await session.commit()
@@ -462,9 +194,8 @@ async def create_mosaic(
     for p in body.panels:
         obj_pattern = p.object_pattern
         if obj_pattern is None:
-            num = p.panel_label.split()[-1] if p.panel_label.startswith("Panel ") else p.panel_label
-            base = re.sub(r'\s*\(\d{4}(?:-\d{4})?\)\s*$', '', mosaic.name)
-            obj_pattern = f"%{base}%Panel%{num}%"
+            base = strip_year_suffix(mosaic.name)
+            obj_pattern = object_pattern_for_label(p.panel_label, base)
         panel = MosaicPanel(
             mosaic_id=mosaic.id,
             target_id=p.target_id,
@@ -472,6 +203,8 @@ async def create_mosaic(
             object_pattern=obj_pattern,
         )
         session.add(panel)
+        await session.flush()
+        await _retro_link_panel_images(session, panel.id, p.target_id, p.panel_label)
 
     await session.commit()
     return MosaicSummary(
@@ -535,6 +268,44 @@ async def get_mosaic_detail(
     cv_rows = (await session.execute(cv_q)).all()
     custom_values = {slug: val for _, slug, val in cv_rows} if cv_rows else None
 
+    # Panel labels parsed at ingest for this mosaic's targets that have no
+    # backing MosaicPanel row yet. This is the "accepted mosaics frozen" fix:
+    # the offline detection job skips targets already in a MosaicPanel, but
+    # ingest-time parsing (Task 1/2) still stamps Image.panel_label on every
+    # new frame, leaving Image.panel_id NULL when no MosaicPanel matches.
+    # Surfacing only; each entry carries its target_id so a client can
+    # promote the label to a real panel via POST /{mosaic_id}/panels.
+    target_ids = {p.target_id for p in sorted_panels}
+    existing_labels_by_target: dict[uuid.UUID, set[str]] = defaultdict(set)
+    for p in sorted_panels:
+        existing_labels_by_target[p.target_id].add(p.panel_label)
+
+    available_panel_labels: list[AvailablePanelLabel] = []
+    if target_ids:
+        avail_q = (
+            select(Image.resolved_target_id, Image.panel_label)
+            .where(
+                Image.resolved_target_id.in_(target_ids),
+                Image.panel_id.is_(None),
+                Image.panel_label.isnot(None),
+            )
+            .distinct()
+        )
+        avail_rows = (await session.execute(avail_q)).all()
+        pairs = set()
+        for target_id, panel_label in avail_rows:
+            # Defensive guard: panel_id IS NULL should already imply no
+            # MosaicPanel matched this (target_id, panel_label), but skip any
+            # exact duplicate of an existing panel's label rather than
+            # double-counting it as "available".
+            if panel_label in existing_labels_by_target.get(target_id, ()):
+                continue
+            pairs.add((panel_label, str(target_id)))
+        available_panel_labels = [
+            AvailablePanelLabel(label=label, target_id=target_id)
+            for label, target_id in sorted(pairs)
+        ]
+
     return MosaicDetailResponse(
         id=str(mosaic.id),
         name=mosaic.name,
@@ -548,6 +319,7 @@ async def get_mosaic_detail(
         default_filter=default_filter,
         needs_review=mosaic.needs_review,
         custom_values=custom_values,
+        available_panel_labels=available_panel_labels,
     )
 
 
@@ -620,7 +392,7 @@ async def get_panel_thumbnails(
         included_dates = panel_included_dates.get(pid)
         result = await select_best_frame_for_filter(
             panel.target_id, panel.object_pattern, filter, session,
-            included_dates=included_dates,
+            included_dates=included_dates, panel_label=panel.panel_label,
         )
         if not result:
             results.append({
@@ -692,7 +464,7 @@ async def get_panel_thumbnail_image(
 
     result = await select_best_frame_for_filter(
         panel.target_id, panel.object_pattern, filter, session,
-        included_dates=included_dates,
+        included_dates=included_dates, panel_label=panel.panel_label,
     )
     if not result or not result[0].file_path:
         raise HTTPException(404, f"No frames for filter '{filter}' in this panel")
@@ -713,115 +485,6 @@ async def get_panel_thumbnail_image(
 
     _set_cached_thumbnail(pid, filter, jpeg_bytes)
     return Response(content=jpeg_bytes, media_type="image/jpeg")
-
-
-@router.get("/{mosaic_id}/composite/debug")
-async def get_mosaic_composite_debug(
-    mosaic_id: str,
-    session: AsyncSession = Depends(get_session),
-    _user: User = Depends(get_current_user),
-):
-    """Debug endpoint: return layout data as JSON instead of image."""
-    from app.services.mosaic_composite import (
-        select_best_frame, _parse_ra, _parse_coord,
-        PanelInfo, compute_panel_layout, generate_panel_thumbnail,
-    )
-    from pathlib import Path
-
-    mosaic = (
-        await session.execute(
-            select(Mosaic)
-            .where(Mosaic.id == mosaic_id)
-            .options(selectinload(Mosaic.panels).selectinload(MosaicPanel.target))
-        )
-    ).scalars().first()
-
-    if not mosaic:
-        raise HTTPException(status_code=404, detail="Mosaic not found")
-
-    panels = sorted(mosaic.panels, key=lambda p: p.sort_order)
-    debug_panels = []
-    panel_infos = []
-    native_width = 800
-    tile_w, tile_h = 800, 800
-
-    for panel in panels:
-        frame = await select_best_frame(panel.target_id, panel.object_pattern, session)
-        if not frame or not frame.file_path:
-            debug_panels.append({
-                "label": panel.panel_label,
-                "error": "no frame found",
-            })
-            continue
-
-        headers = frame.raw_headers or {}
-        ra_raw = headers.get("RA") or headers.get("OBJCTRA")
-        dec_raw = headers.get("DEC") or headers.get("OBJCTDEC")
-        ra = _parse_ra(ra_raw)
-        dec = _parse_coord(dec_raw)
-
-        fits_path = Path(frame.file_path)
-        exists = fits_path.exists()
-        if exists:
-            try:
-                tile_img, nw = await asyncio.to_thread(generate_panel_thumbnail, fits_path, 400)
-                native_width = nw
-                tile_w, tile_h = tile_img.size
-            except Exception as e:
-                exists = False
-
-        info = {
-            "label": panel.panel_label,
-            "object_pattern": panel.object_pattern,
-            "target_name": panel.target.primary_name if panel.target else None,
-            "frame_id": str(frame.id),
-            "file_path": frame.file_path,
-            "file_exists": exists,
-            "ra_raw": ra_raw,
-            "dec_raw": dec_raw,
-            "ra_deg": ra,
-            "dec_deg": dec,
-            "objctrot": headers.get("OBJCTROT"),
-            "pierside": headers.get("PIERSIDE"),
-            "focallen": headers.get("FOCALLEN"),
-            "xpixsz": headers.get("XPIXSZ"),
-            "median_hfr": frame.median_hfr,
-        }
-        debug_panels.append(info)
-
-        if ra is not None and dec is not None and exists:
-            panel_infos.append(PanelInfo(
-                panel_id=panel.panel_label,
-                ra=ra,
-                dec=dec,
-                objctrot=float(headers.get("OBJCTROT", 0)),
-                pierside=str(headers.get("PIERSIDE", "West")),
-                fits_path=frame.file_path,
-                focallen=float(headers.get("FOCALLEN", 448)),
-                xpixsz=float(headers.get("XPIXSZ", 3.76)),
-            ))
-
-    scale = tile_w / native_width if native_width > 0 else 1.0
-    layout = compute_panel_layout(panel_infos, tile_w, tile_h, scale=scale)
-
-    layout_debug = [
-        {
-            "panel_id": pos.panel_id,
-            "x": round(pos.x, 1),
-            "y": round(pos.y, 1),
-            "rotation": round(pos.rotation, 2),
-        }
-        for pos in layout
-    ]
-
-    return {
-        "mosaic_name": mosaic.name,
-        "native_width": native_width,
-        "tile_size": [tile_w, tile_h],
-        "scale": round(scale, 4),
-        "panels": debug_panels,
-        "layout": layout_debug,
-    }
 
 
 @router.put("/{mosaic_id}", response_model=StatusResponse)
@@ -858,7 +521,7 @@ async def delete_mosaic(
 
     # Clean up accepted suggestions matching this mosaic name so detection
     # can re-suggest them. Strip year suffix for base_name matching too.
-    base = re.sub(r'\s*\(\d{4}(?:-\d{4})?\)\s*$', '', mosaic.name)
+    base = strip_year_suffix(mosaic.name)
     stale_q = select(MosaicSuggestion).where(
         MosaicSuggestion.status == "accepted",
         or_(
@@ -901,10 +564,9 @@ async def add_panel(
     # matching the logic used in accept_suggestion.
     obj_pattern = body.object_pattern
     if obj_pattern is None:
-        num = body.panel_label.split()[-1] if body.panel_label.startswith("Panel ") else body.panel_label
         # Strip year suffix from mosaic name for pattern matching
-        base = re.sub(r'\s*\(\d{4}(?:-\d{4})?\)\s*$', '', mosaic.name)
-        obj_pattern = f"%{base}%Panel%{num}%"
+        base = strip_year_suffix(mosaic.name)
+        obj_pattern = object_pattern_for_label(body.panel_label, base)
 
     panel = MosaicPanel(
         mosaic_id=mosaic_id,
@@ -913,6 +575,10 @@ async def add_panel(
         object_pattern=obj_pattern,
     )
     session.add(panel)
+    await session.flush()
+    # Claim frames ingested before this panel existed so its stats are
+    # populated immediately (same transaction as the panel insert).
+    await _retro_link_panel_images(session, panel.id, body.target_id, body.panel_label)
     await session.commit()
     return {"status": "ok", "panel_id": str(panel.id)}
 
@@ -978,37 +644,6 @@ async def batch_update_panels(
     return result
 
 
-@router.put("/{mosaic_id}/panels/{panel_id}", response_model=StatusResponse)
-async def update_panel(
-    mosaic_id: uuid.UUID,
-    panel_id: uuid.UUID,
-    body: MosaicPanelUpdate,
-    session: AsyncSession = Depends(get_session),
-    user: User = Depends(require_admin),
-):
-    panel = await session.get(MosaicPanel, panel_id)
-    if not panel or panel.mosaic_id != mosaic_id:
-        raise HTTPException(404, "Panel not found")
-    if body.panel_label is not None:
-        panel.panel_label = body.panel_label
-    if body.sort_order is not None:
-        panel.sort_order = body.sort_order
-    if body.object_pattern is not None:
-        panel.object_pattern = body.object_pattern
-    if body.grid_row is not None:
-        panel.grid_row = body.grid_row
-    if body.grid_col is not None:
-        panel.grid_col = body.grid_col
-    if body.rotation is not None:
-        if body.rotation not in (0, 90, 180, 270):
-            raise HTTPException(400, "rotation must be 0, 90, 180, or 270")
-        panel.rotation = body.rotation
-    if body.flip_h is not None:
-        panel.flip_h = body.flip_h
-    await session.commit()
-    return {"status": "ok"}
-
-
 @router.delete("/{mosaic_id}/panels/{panel_id}", response_model=StatusResponse)
 async def remove_panel(
     mosaic_id: uuid.UUID,
@@ -1031,7 +666,21 @@ async def get_panel_sessions(
     session: AsyncSession = Depends(get_session),
     user: User = Depends(get_current_user),
 ):
-    """List all sessions (included + available) for a panel with stats."""
+    """List all sessions (included + available) for a panel with stats.
+
+    Pattern panels (object_pattern set) are scoped by the exact
+    `Image.panel_id == panel.id` join (Phase 5 Task 3) instead of an
+    ILIKE-against-OBJECT prefilter plus a Python object_matches_panel recheck
+    (AUD-008) -- Image.panel_id is assigned at ingest time / by the 0018
+    backfill from the same tokenizer that built object_pattern, so the join
+    is exact by construction. No resolved_target_id leg for pattern panels:
+    panel_id is the authoritative membership column, and requiring target
+    agreement would zero the panel's sessions when an unmerge moves images
+    back to an original target while the panel still points at the merged
+    one. Simple panels (no object_pattern) are unchanged: they still count
+    every LIGHT frame of the target via resolved_target_id alone (that IS
+    their membership mechanism), preserving existing behavior.
+    """
     panel_q = (
         select(MosaicPanel)
         .where(MosaicPanel.id == panel_id, MosaicPanel.mosaic_id == mosaic_id)
@@ -1048,12 +697,16 @@ async def get_panel_sessions(
     }
 
     # Get all session dates from images
-    base_filter = [
-        Image.resolved_target_id == panel.target_id,
-        Image.image_type == "LIGHT",
-    ]
     if panel.object_pattern:
-        base_filter.append(Image.raw_headers["OBJECT"].astext.ilike(panel.object_pattern))
+        base_filter = [
+            Image.panel_id == panel.id,
+            Image.image_type == "LIGHT",
+        ]
+    else:
+        base_filter = [
+            Image.resolved_target_id == panel.target_id,
+            Image.image_type == "LIGHT",
+        ]
 
     img_q = (
         select(

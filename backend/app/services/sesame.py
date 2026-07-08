@@ -9,7 +9,6 @@ Docs: https://vizier.cds.unistra.fr/vizier/doc/sesame.htx
 
 import logging
 import xml.etree.ElementTree as ET
-from datetime import datetime
 from typing import Any
 
 import httpx
@@ -19,7 +18,7 @@ logger = logging.getLogger(__name__)
 SESAME_URL = "https://cds.unistra.fr/cgi-bin/nph-sesame"
 
 
-async def _query_sesame_raw(
+def _query_sesame_raw(
     object_name: str, *, resolvers: str = "SNV",
 ) -> dict[str, Any] | None:
     """Query SESAME and parse the XML response.
@@ -34,8 +33,8 @@ async def _query_sesame_raw(
     encoded_name = object_name.replace(" ", "+")
     url = f"{SESAME_URL}/-ox/{resolvers}?{encoded_name}"
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.get(url)
+        with httpx.Client(timeout=15.0) as client:
+            resp = client.get(url)
             resp.raise_for_status()
 
         root = ET.fromstring(resp.text)
@@ -65,54 +64,28 @@ async def _query_sesame_raw(
         logger.info("SESAME found no match for '%s'", object_name)
         return None
 
-    except (httpx.HTTPError, ET.ParseError, ValueError) as e:
-        logger.warning("SESAME query failed for '%s': %s", object_name, e)
+    except (ET.ParseError, ValueError) as e:
+        logger.warning("SESAME parse/value error for '%s': %s", object_name, e)
         return None
 
 
 def get_cached_sesame(query_name: str, db_session) -> dict[str, Any] | None:
     """Look up a cached SESAME result. Returns raw dict or None (not in cache)."""
-    from app.models.sesame_cache import SesameCache
-    import sqlalchemy as sa
+    from app.services import catalog_cache as cc
 
-    row = db_session.execute(
-        sa.select(SesameCache).where(SesameCache.query_name == query_name)
-    ).scalar_one_or_none()
-    if row is None:
-        return None
-    if row.main_id is None:
+    cached = cc.get_cached(db_session, "sesame", query_name)
+    if cached is cc.NEGATIVE:
         return {"_negative": True}
-    return {
-        "main_id": row.main_id,
-        "raw_aliases": row.raw_aliases or [],
-        "ra": row.ra,
-        "dec": row.dec,
-        "object_type": row.object_type,
-        "resolver": row.resolver,
-    }
+    return cached
 
 
 def save_sesame_cache(
     query_name: str, raw: dict[str, Any] | None, db_session,
 ) -> None:
     """Persist a SESAME result (or negative) to the cache table."""
-    from app.models.sesame_cache import SesameCache
-    from sqlalchemy.dialects.postgresql import insert as pg_insert
+    from app.services import catalog_cache as cc
 
-    values = {
-        "query_name": query_name,
-        "main_id": raw["main_id"] if raw else None,
-        "raw_aliases": raw.get("raw_aliases", []) if raw else [],
-        "ra": raw.get("ra") if raw else None,
-        "dec": raw.get("dec") if raw else None,
-        "object_type": raw.get("object_type") if raw else None,
-        "resolver": raw.get("resolver") if raw else None,
-    }
-    stmt = pg_insert(SesameCache).values(**values).on_conflict_do_update(
-        index_elements=["query_name"],
-        set_=values,
-    )
-    db_session.execute(stmt)
+    cc.save_cached(db_session, "sesame", query_name, raw)
 
 
 def resolve_sesame_cached(
@@ -122,8 +95,18 @@ def resolve_sesame_cached(
 
     Returns curated dict compatible with target_resolver's _create_target,
     or None if unresolvable.
+
+    Routed through catalog_cache's get_or_fetch so a transient SESAME
+    failure (timeout, connection error, 5xx, 429) is retried with backoff
+    and, if every attempt fails, negative-cached and swallowed (returns
+    None) rather than propagating -- matching pre-port behavior for
+    callers (api/merges.py's orphan_preview, the duplicate-detection
+    worker task, filename_resolver.py, target_resolver.py) that never
+    handled an exception from this function. A non-transient failure
+    (a 4xx other than 429) raises NonTransientError uncaught, matching
+    enrich_target_from_vizier/hyperleda/gaia.
     """
-    import asyncio
+    from app.services import catalog_cache as cc
     from app.services.simbad import (
         normalize_object_name,
         curate_simbad_result,
@@ -131,22 +114,12 @@ def resolve_sesame_cached(
 
     normalized = normalize_object_name(object_name)
 
-    # Check cache first
-    cached = get_cached_sesame(normalized, db_session)
-    if cached is not None:
-        if cached.get("_negative"):
-            return None
-        return curate_simbad_result(cached)
+    def fetch() -> dict[str, Any] | None:
+        # Query SESAME (NED + VizieR only - skip SIMBAD since we already
+        # tried it). Plain sync call, no event loop needed.
+        return _query_sesame_raw(object_name, resolvers="NV")
 
-    # Query SESAME (NED + VizieR only - skip SIMBAD since we already tried it)
-    loop = asyncio.new_event_loop()
-    try:
-        raw = loop.run_until_complete(_query_sesame_raw(object_name, resolvers="NV"))
-    finally:
-        loop.close()
-
-    # Cache the result (positive or negative)
-    save_sesame_cache(normalized, raw, db_session)
+    raw = cc.get_or_fetch(db_session, "sesame", normalized, fetch)
 
     if raw is None:
         return None

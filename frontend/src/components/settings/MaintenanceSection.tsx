@@ -1,9 +1,9 @@
 import { Component, Show, createSignal, onCleanup } from "solid-js";
-import { api } from "../../api/client";
-import { showToast } from "../Toast";
+import { apiClient } from "../../api/generated/client";
+import { unwrap } from "../../api/unwrap";
 import { useAuth } from "../AuthProvider";
 import { emitWithToast } from "../../lib/emitWithToast";
-import type { RebuildStatus } from "../../types";
+import type { RebuildStatus } from "../../api/types";
 
 type OpState = "idle" | "running" | "complete" | "error";
 
@@ -18,6 +18,7 @@ const MaintenanceSection: Component<MaintenanceSectionProps> = (props) => {
   const [activeOp, setActiveOp] = createSignal<string | null>(null);
   const [statusMessage, setStatusMessage] = createSignal("");
   const [statusDetails, setStatusDetails] = createSignal<Record<string, number>>({});
+  const [statusPercent, setStatusPercent] = createSignal<number | undefined>(undefined);
   const [errorMessage, setErrorMessage] = createSignal("");
   const [showRebuildConfirm, setShowRebuildConfirm] = createSignal(false);
 
@@ -31,9 +32,13 @@ const MaintenanceSection: Component<MaintenanceSectionProps> = (props) => {
     if (pollTimer) clearInterval(pollTimer);
     pollTimer = setInterval(async () => {
       try {
-        const status: RebuildStatus = await api.getRebuildStatus();
+        const status = await apiClient.GET("/api/scan/rebuild-status").then(unwrap) as RebuildStatus;
         setStatusMessage(status.message);
-        setStatusDetails(status.details);
+        // Generated schema types `details` as a loose `Record<string, unknown>`
+        // (backend serializes numeric counters into it); narrow to the numeric
+        // shape this component actually reads, matching the old hand-written type.
+        setStatusDetails(status.details as Record<string, number>);
+        setStatusPercent(status.percent ?? undefined);
 
         if (status.state === "complete") {
           stopPolling();
@@ -46,6 +51,7 @@ const MaintenanceSection: Component<MaintenanceSectionProps> = (props) => {
               setActiveOp(null);
               setStatusMessage("");
               setStatusDetails({});
+              setStatusPercent(undefined);
             }
           }, 4000);
         } else if (status.state === "error") {
@@ -63,6 +69,7 @@ const MaintenanceSection: Component<MaintenanceSectionProps> = (props) => {
               setActiveOp(null);
               setStatusMessage("");
               setStatusDetails({});
+              setStatusPercent(undefined);
             }
           }, 4000);
         }
@@ -94,6 +101,7 @@ const MaintenanceSection: Component<MaintenanceSectionProps> = (props) => {
     setActiveOp(opName);
     setStatusMessage("");
     setStatusDetails({});
+    setStatusPercent(undefined);
     setErrorMessage("");
 
     startPolling();
@@ -122,7 +130,7 @@ const MaintenanceSection: Component<MaintenanceSectionProps> = (props) => {
   const handleRepairLinks = () =>
     runOperation(
       "repair",
-      () => api.smartRebuildTargets() as Promise<{ task_id: string }>,
+      () => apiClient.POST("/api/scan/smart-rebuild-targets").then(unwrap) as Promise<{ task_id: string }>,
       "Repairing target links...",
       "Target links repaired",
       "Repair failed",
@@ -134,7 +142,7 @@ const MaintenanceSection: Component<MaintenanceSectionProps> = (props) => {
   const handleRetryLookups = () =>
     runOperation(
       "retry",
-      () => api.retryUnresolved() as Promise<{ task_id: string }>,
+      () => apiClient.POST("/api/scan/retry-unresolved").then(unwrap) as Promise<{ task_id: string }>,
       "Retrying failed lookups...",
       "Retry complete",
       "Retry failed",
@@ -146,7 +154,7 @@ const MaintenanceSection: Component<MaintenanceSectionProps> = (props) => {
   const handleBackfillIdentity = () =>
     runOperation(
       "backfill",
-      () => api.backfillCatalogIdentity() as Promise<{ task_id: string }>,
+      () => apiClient.POST("/api/scan/backfill-catalog-identity").then(unwrap) as Promise<{ task_id: string }>,
       "Re-linking catalog orphans...",
       "Catalog orphans re-linked",
       "Backfill failed",
@@ -159,7 +167,7 @@ const MaintenanceSection: Component<MaintenanceSectionProps> = (props) => {
     setShowRebuildConfirm(false);
     runOperation(
       "rebuild",
-      () => api.rebuildTargets() as Promise<{ task_id: string }>,
+      () => apiClient.POST("/api/scan/rebuild-targets").then(unwrap) as Promise<{ task_id: string }>,
       "Starting Full Rebuild...",
       "Full Rebuild complete",
       "Full Rebuild failed",
@@ -173,6 +181,20 @@ const MaintenanceSection: Component<MaintenanceSectionProps> = (props) => {
   const isComplete = (op: string) => opState() === "complete" && activeOp() === op;
   const isError = (op: string) => opState() === "error" && activeOp() === op;
   const anyRunning = () => opState() === "running";
+
+  /** Numeric progress bar, shown alongside the spinner once the backend
+   *  reports a percent (undefined keeps the section spinner-only, e.g.
+   *  before the first poll response or against an older backend). */
+  const ProgressBar: Component = () => (
+    <Show when={statusPercent() !== undefined}>
+      <div class="w-full h-1.5 bg-theme-base rounded-full overflow-hidden mt-2">
+        <div
+          class="h-full bg-theme-accent rounded-full transition-all duration-300"
+          style={{ width: `${statusPercent() ?? 0}%` }}
+        />
+      </div>
+    </Show>
+  );
 
   /** Format detail counts from rebuild status into a readable string */
   const formatDetails = (): string => {
@@ -233,6 +255,7 @@ const MaintenanceSection: Component<MaintenanceSectionProps> = (props) => {
                 <Show when={formatDetails()}>
                   <p class="text-theme-text-tertiary mt-0.5">{formatDetails()}</p>
                 </Show>
+                <ProgressBar />
               </div>
             </div>
           </Show>
@@ -250,7 +273,7 @@ const MaintenanceSection: Component<MaintenanceSectionProps> = (props) => {
             <div class="flex-1">
               <div class="flex items-center gap-2 mb-1">
                 <p class="text-sm text-theme-text-primary font-medium">Retry Failed Lookups</p>
-                <span class="text-xs px-1.5 py-0.5 rounded bg-yellow-500/15 text-yellow-400 border border-yellow-500/20">
+                <span class="text-xs px-1.5 py-0.5 rounded bg-theme-warning/15 text-theme-warning border border-theme-warning/20">
                   Moderate
                 </span>
               </div>
@@ -282,6 +305,7 @@ const MaintenanceSection: Component<MaintenanceSectionProps> = (props) => {
                 <Show when={formatDetails()}>
                   <p class="text-theme-text-tertiary mt-0.5">{formatDetails()}</p>
                 </Show>
+                <ProgressBar />
               </div>
             </div>
           </Show>
@@ -299,7 +323,7 @@ const MaintenanceSection: Component<MaintenanceSectionProps> = (props) => {
             <div class="flex-1">
               <div class="flex items-center gap-2 mb-1">
                 <p class="text-sm text-theme-text-primary font-medium">Re-link Catalog Orphans</p>
-                <span class="text-xs px-1.5 py-0.5 rounded bg-yellow-500/15 text-yellow-400 border border-yellow-500/20">
+                <span class="text-xs px-1.5 py-0.5 rounded bg-theme-warning/15 text-theme-warning border border-theme-warning/20">
                   Moderate
                 </span>
               </div>
@@ -330,6 +354,7 @@ const MaintenanceSection: Component<MaintenanceSectionProps> = (props) => {
                 <Show when={formatDetails()}>
                   <p class="text-theme-text-tertiary mt-0.5">{formatDetails()}</p>
                 </Show>
+                <ProgressBar />
               </div>
             </div>
           </Show>
@@ -400,6 +425,7 @@ const MaintenanceSection: Component<MaintenanceSectionProps> = (props) => {
                 <Show when={formatDetails()}>
                   <p class="text-theme-text-tertiary mt-0.5">{formatDetails()}</p>
                 </Show>
+                <ProgressBar />
               </div>
             </div>
           </Show>

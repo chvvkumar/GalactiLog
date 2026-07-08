@@ -1,6 +1,7 @@
-import { api } from "../api/client";
+import { apiClient } from "../api/generated/client";
+import { unwrap } from "../api/unwrap";
 import { registerCeleryJob, unregisterCeleryJob } from "./activeJobs";
-import type { ActiveJob } from "../types";
+import type { ActiveJob } from "../api/types";
 
 interface PollOptions {
   onSuccess?: (result: unknown) => void;
@@ -32,14 +33,16 @@ export function pollTask(taskId: string, options: PollOptions = {}): () => void 
   const check = async () => {
     if (stopped) return;
     try {
-      const status = await api.getTaskStatus(taskId);
+      const status = await apiClient
+        .GET("/api/tasks/{task_id}/status", { params: { path: { task_id: taskId } } })
+        .then(unwrap);
       if (stopped) return;
       if (status.state === "SUCCESS") {
         stop();
         onSuccess?.(status.result);
       } else if (status.state === "FAILURE") {
         stop();
-        onFailure?.(status.result?.error ?? "Task failed");
+        onFailure?.((status.result as { error?: string } | null)?.error ?? "Task failed");
       }
     } catch {
       // Network error - keep polling, it may recover

@@ -1,6 +1,6 @@
 import { Component, For, Show, createMemo, createSignal, onMount, onCleanup } from "solid-js";
 import { useNavigate } from "@solidjs/router";
-import type { TimelineDetailEntry } from "../types";
+import type { TimelineDetailEntry } from "../api/types";
 
 // Zoom range: 1-20. Thresholds for granularity transitions.
 const ZOOM_MONTHLY_MAX = 4;

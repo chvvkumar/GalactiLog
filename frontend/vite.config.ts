@@ -15,7 +15,7 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks: {
-          'chart-vendor': ['chart.js', '@kurkle/color', 'chartjs-adapter-date-fns', 'chartjs-plugin-annotation'],
+          'chart-vendor': ['chart.js', '@kurkle/color', 'chartjs-adapter-date-fns'],
           'solid-vendor': ['solid-js', '@solidjs/router'],
           'canvas-vendor': ['konva'],
         },

@@ -1,10 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { pollTask } from "./taskPoller";
 
-// Mock the api module so we don't need a real network connection
-vi.mock("../api/client", () => ({
-  api: {
-    getTaskStatus: vi.fn(),
+// Mock the generated apiClient so we don't need a real network connection.
+// pollTask migrated from the old hand-written `api.getTaskStatus()` to
+// `apiClient.GET("/api/tasks/{task_id}/status", ...).then(unwrap)` -- mock the
+// GET method directly and return the raw openapi-fetch `{data,error,response}`
+// shape that `unwrap` expects.
+vi.mock("../api/generated/client", () => ({
+  apiClient: {
+    GET: vi.fn(),
   },
 }));
 
@@ -14,12 +18,16 @@ vi.mock("./activeJobs", () => ({
   unregisterCeleryJob: vi.fn(),
 }));
 
-import { api } from "../api/client";
+import { apiClient } from "../api/generated/client";
+
+function okResult<T>(data: T) {
+  return { data, error: undefined, response: { ok: true, status: 200 } as Response };
+}
 
 describe("pollTask", () => {
   beforeEach(() => {
     vi.useFakeTimers();
-    vi.mocked(api.getTaskStatus).mockReset();
+    vi.mocked(apiClient.GET).mockReset();
   });
 
   afterEach(() => {
@@ -27,11 +35,13 @@ describe("pollTask", () => {
   });
 
   it("calls onSuccess when the task returns SUCCESS", async () => {
-    vi.mocked(api.getTaskStatus).mockResolvedValue({
-      task_id: "abc",
-      state: "SUCCESS",
-      result: { value: 42 },
-    });
+    vi.mocked(apiClient.GET).mockResolvedValue(
+      okResult({
+        task_id: "abc",
+        state: "SUCCESS",
+        result: { value: 42 },
+      }),
+    );
 
     const onSuccess = vi.fn();
     pollTask("abc", { onSuccess, interval: 500 });
@@ -44,11 +54,13 @@ describe("pollTask", () => {
   });
 
   it("calls onFailure when the task returns FAILURE", async () => {
-    vi.mocked(api.getTaskStatus).mockResolvedValue({
-      task_id: "abc",
-      state: "FAILURE",
-      result: { error: "something went wrong" },
-    });
+    vi.mocked(apiClient.GET).mockResolvedValue(
+      okResult({
+        task_id: "abc",
+        state: "FAILURE",
+        result: { error: "something went wrong" },
+      }),
+    );
 
     const onFailure = vi.fn();
     pollTask("abc", { onFailure, interval: 500 });
@@ -60,11 +72,13 @@ describe("pollTask", () => {
   });
 
   it("calls onTimeout and stops polling after the timeout window", async () => {
-    vi.mocked(api.getTaskStatus).mockResolvedValue({
-      task_id: "abc",
-      state: "PENDING",
-      result: null,
-    });
+    vi.mocked(apiClient.GET).mockResolvedValue(
+      okResult({
+        task_id: "abc",
+        state: "PENDING",
+        result: null,
+      }),
+    );
 
     const onTimeout = vi.fn();
     const onSuccess = vi.fn();
@@ -77,11 +91,13 @@ describe("pollTask", () => {
   });
 
   it("returned stop function halts polling", async () => {
-    vi.mocked(api.getTaskStatus).mockResolvedValue({
-      task_id: "abc",
-      state: "SUCCESS",
-      result: null,
-    });
+    vi.mocked(apiClient.GET).mockResolvedValue(
+      okResult({
+        task_id: "abc",
+        state: "SUCCESS",
+        result: null,
+      }),
+    );
 
     const onSuccess = vi.fn();
     const stop = pollTask("abc", { onSuccess, interval: 500 });
@@ -95,10 +111,10 @@ describe("pollTask", () => {
   });
 
   it("continues polling when the task is still PENDING", async () => {
-    vi.mocked(api.getTaskStatus)
-      .mockResolvedValueOnce({ task_id: "abc", state: "PENDING", result: null })
-      .mockResolvedValueOnce({ task_id: "abc", state: "PENDING", result: null })
-      .mockResolvedValueOnce({ task_id: "abc", state: "SUCCESS", result: "done" });
+    vi.mocked(apiClient.GET)
+      .mockResolvedValueOnce(okResult({ task_id: "abc", state: "PENDING", result: null }))
+      .mockResolvedValueOnce(okResult({ task_id: "abc", state: "PENDING", result: null }))
+      .mockResolvedValueOnce(okResult({ task_id: "abc", state: "SUCCESS", result: "done" }));
 
     const onSuccess = vi.fn();
     pollTask("abc", { onSuccess, interval: 500, timeout: 10000 });

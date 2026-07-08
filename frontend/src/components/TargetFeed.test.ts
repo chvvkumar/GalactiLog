@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import type { ActiveFilters } from "../types";
+import type { ActiveFilters } from "../api/types";
 
 // hasActiveFilters is not exported; reproduce it here so the logic can be unit-tested
 // independently of the SolidJS render tree.

@@ -207,3 +207,134 @@ def test_csv_only_fields_present_in_output(mock_fitsio, mock_get_csv):
 
     for col in CSV_COLUMNS:
         assert col in result, f"CSV-only column missing from output: {col}"
+
+
+# ---------------------------------------------------------------------------
+# AUD-001: exposure_time falls back from EXPTIME to EXPOSURE
+# ---------------------------------------------------------------------------
+
+@patch("app.services.scanner.get_csv_metrics")
+@patch("app.services.scanner.fitsio")
+def test_exposure_keyword_fallback(mock_fitsio, mock_get_csv):
+    """A file with EXPOSURE but no EXPTIME still yields a non-null exposure_time."""
+    header = _make_fake_header({"EXPTIME": None, "EXPOSURE": 180.0})
+    mock_fitsio.read_header.return_value = header
+    mock_get_csv.return_value = {}
+
+    result = extract_metadata(Path("/data/Light_180.fits"))
+
+    assert result["exposure_time"] == 180.0
+
+
+@patch("app.services.scanner.get_csv_metrics")
+@patch("app.services.scanner.fitsio")
+def test_exptime_takes_priority_over_exposure(mock_fitsio, mock_get_csv):
+    """EXPTIME wins when both keywords are present."""
+    header = _make_fake_header({"EXPTIME": 300.0, "EXPOSURE": 180.0})
+    mock_fitsio.read_header.return_value = header
+    mock_get_csv.return_value = {}
+
+    result = extract_metadata(Path("/data/Light.fits"))
+
+    assert result["exposure_time"] == 300.0
+
+
+# ---------------------------------------------------------------------------
+# AUD-007: FWHM/MEANFWHM route to median_fwhm, not median_hfr
+# ---------------------------------------------------------------------------
+
+@patch("app.services.scanner.get_csv_metrics")
+@patch("app.services.scanner.fitsio")
+def test_fwhm_only_populates_median_fwhm_not_hfr(mock_fitsio, mock_get_csv):
+    """A FWHM-only frame gets median_hfr = None and median_fwhm populated."""
+    header = _make_fake_header({"HFR": None, "FWHM": 3.4})
+    mock_fitsio.read_header.return_value = header
+    mock_get_csv.return_value = {}
+
+    result = extract_metadata(Path("/data/Light_no_hfr.fits"))
+
+    assert result["median_hfr"] is None
+    assert result["median_fwhm"] == 3.4
+
+
+@patch("app.services.scanner.get_csv_metrics")
+@patch("app.services.scanner.fitsio")
+def test_meanfwhm_preferred_over_fwhm_for_median_fwhm(mock_fitsio, mock_get_csv):
+    """MEANFWHM wins over FWHM when both present, and neither touches median_hfr."""
+    header = _make_fake_header({"HFR": None, "MEANFWHM": 2.9, "FWHM": 3.4})
+    mock_fitsio.read_header.return_value = header
+    mock_get_csv.return_value = {}
+
+    result = extract_metadata(Path("/data/Light.fits"))
+
+    assert result["median_hfr"] is None
+    assert result["median_fwhm"] == 2.9
+
+
+@patch("app.services.scanner.get_csv_metrics")
+@patch("app.services.scanner.fitsio")
+def test_hfr_still_populates_median_hfr(mock_fitsio, mock_get_csv):
+    """An HFR-bearing frame still populates median_hfr; header FWHM goes to median_fwhm."""
+    header = _make_fake_header({"HFR": 1.9, "FWHM": 3.6})
+    mock_fitsio.read_header.return_value = header
+    mock_get_csv.return_value = {}
+
+    result = extract_metadata(Path("/data/Light.fits"))
+
+    assert result["median_hfr"] == 1.9
+    assert result["median_fwhm"] == 3.6
+
+
+# ---------------------------------------------------------------------------
+# AUD-007: eccentricity derived from ELLIPTICITY, not stored raw
+# ---------------------------------------------------------------------------
+
+@patch("app.services.scanner.get_csv_metrics")
+@patch("app.services.scanner.fitsio")
+def test_ellipticity_converted_to_eccentricity(mock_fitsio, mock_get_csv):
+    """ELLIPTICITY is converted to eccentricity, not stored as the raw value."""
+    import math
+    header = _make_fake_header({"ECCENTRICITY": None, "ELLIPTICITY": 0.19})
+    mock_fitsio.read_header.return_value = header
+    mock_get_csv.return_value = {}
+
+    result = extract_metadata(Path("/data/Light.fits"))
+
+    expected = math.sqrt(1.0 - (1.0 - 0.19) ** 2)
+    assert result["eccentricity"] == pytest.approx(expected)
+    assert result["eccentricity"] != 0.19
+
+
+@patch("app.services.scanner.get_csv_metrics")
+@patch("app.services.scanner.fitsio")
+def test_eccentricity_keyword_preferred(mock_fitsio, mock_get_csv):
+    """A native ECCENTRICITY keyword is used directly, ignoring ELLIPTICITY."""
+    header = _make_fake_header({"ECCENTRICITY": 0.42, "ELLIPTICITY": 0.19})
+    mock_fitsio.read_header.return_value = header
+    mock_get_csv.return_value = {}
+
+    result = extract_metadata(Path("/data/Light.fits"))
+
+    assert result["eccentricity"] == 0.42
+
+
+# ---------------------------------------------------------------------------
+# AUD-020: unparseable DATE-OBS logs a warning instead of vanishing silently
+# ---------------------------------------------------------------------------
+
+@patch("app.services.scanner.get_csv_metrics")
+@patch("app.services.scanner.fitsio")
+def test_unparseable_date_obs_logs_warning(mock_fitsio, mock_get_csv, caplog):
+    """A malformed DATE-OBS produces a logged warning naming the file and value."""
+    header = _make_fake_header({"DATE-OBS": "15/06/2025 not-iso"})
+    mock_fitsio.read_header.return_value = header
+    mock_get_csv.return_value = {}
+
+    with caplog.at_level("WARNING"):
+        result = extract_metadata(Path("/data/weird_date.fits"))
+
+    assert result["capture_date"] is None
+    assert any(
+        "DATE-OBS" in rec.message and "weird_date.fits" in rec.message
+        for rec in caplog.records
+    )

@@ -104,6 +104,64 @@ def find_target_by_ngc(session: Session, normalized: str) -> Target | None:
     return target
 
 
+def target_ngc_identifiers(target) -> set[str]:
+    """Return the raw NGC/IC-bearing identifiers a target carries.
+
+    Mirrors what ``find_target_by_ngc`` matches against: an entry whose
+    normalized NGC name equals the target's ``catalog_id`` OR appears in its
+    ``aliases``. Values are returned raw (un-normalized) so the caller compares
+    ``normalize_ngc_name(entry_ngc)`` against this set, matching the bulk
+    matcher's exact semantics without scanning the targets table.
+    """
+    ids: set[str] = set()
+    if target.catalog_id:
+        ids.add(target.catalog_id)
+    for alias in (target.aliases or []):
+        if alias:
+            ids.add(alias)
+    return ids
+
+
+def match_ngc_catalog_for_target(
+    session: Session,
+    target,
+    *,
+    model: type,
+    catalog_name: str,
+    ngc_field: str,
+    get_catalog_number: Callable[[object], str],
+    build_metadata: Callable[[object], dict],
+) -> int:
+    """Per-target inverse of ``match_ngc_catalog`` (Caldwell, Herschel 400).
+
+    Iterates the small static catalog table (not the targets table) and upserts
+    a membership for every entry whose normalized NGC id is one of the target's
+    identifiers. Idempotent via ``upsert_membership``. Returns matches created.
+    """
+    identifiers = target_ngc_identifiers(target)
+    if not identifiers:
+        return 0
+
+    entries = session.execute(select(model)).scalars().all()
+    matched = 0
+    for entry in entries:
+        ngc_value = getattr(entry, ngc_field)
+        if not ngc_value:
+            continue
+        if normalize_ngc_name(ngc_value) in identifiers:
+            upsert_membership(
+                session,
+                target_id=target.id,
+                catalog_name=catalog_name,
+                catalog_number=get_catalog_number(entry),
+                metadata=build_metadata(entry),
+            )
+            matched += 1
+
+    session.flush()
+    return matched
+
+
 def match_ngc_catalog(
     session: Session,
     *,

@@ -1,5 +1,8 @@
-import { Component, createMemo, createResource, For } from "solid-js";
-import { api } from "../../api/client";
+import { Component, createMemo, For } from "solid-js";
+import { useQuery, keepPreviousData } from "@tanstack/solid-query";
+import { apiClient } from "../../api/generated/client";
+import { unwrap } from "../../api/unwrap";
+import { queryKeys } from "../../api/queryKeys";
 import type { SharedFilters } from "../../pages/AnalysisPage";
 
 const X_LABELS: Record<string, string> = {
@@ -23,25 +26,29 @@ function rToColor(r: number | null): string {
 }
 
 interface Props {
+  active: boolean;
   filters: SharedFilters;
 }
 
 const MatrixTab: Component<Props> = (props) => {
-  const dataKey = () =>
-    `matrix-${props.filters.telescope}-${props.filters.camera}-${props.filters.filterUsed}-${props.filters.dateFrom}-${props.filters.dateTo}`;
+  const params = () => ({
+    telescope: props.filters.telescope,
+    camera: props.filters.camera,
+    filter_used: props.filters.filterUsed,
+    date_from: props.filters.dateFrom,
+    date_to: props.filters.dateTo,
+  });
 
-  const [data] = createResource(dataKey, () =>
-    api.getMatrix({
-      telescope: props.filters.telescope,
-      camera: props.filters.camera,
-      filter_used: props.filters.filterUsed,
-      date_from: props.filters.dateFrom,
-      date_to: props.filters.dateTo,
-    })
-  );
+  const dataQuery = useQuery(() => ({
+    queryKey: queryKeys.matrix(params()),
+    queryFn: ({ signal }: { signal: AbortSignal }) =>
+      apiClient.GET("/api/analysis/matrix", { params: { query: params() }, signal }).then(unwrap),
+    enabled: props.active,
+    placeholderData: keepPreviousData,
+  }));
 
   const cellMap = createMemo(() => {
-    const d = data.latest;
+    const d = dataQuery.data;
     type Cell = NonNullable<typeof d>["cells"][number];
     if (!d) return new Map<string, Cell>();
     const map = new Map<string, Cell>();
@@ -60,17 +67,17 @@ const MatrixTab: Component<Props> = (props) => {
       <h3 class="text-base font-medium text-theme-text-primary mb-3">Correlation Matrix</h3>
       <p class="text-xs text-theme-text-tertiary mb-3">Pearson r for all metric pairs. Click a cell to explore in the Correlation tab.</p>
 
-      {data.loading && !data.latest && (
+      {dataQuery.isFetching && !dataQuery.data && (
         <div class="text-sm text-theme-text-secondary py-8 text-center">Computing correlations...</div>
       )}
 
-      {data.latest && (
+      {dataQuery.data && (
         <div class="overflow-x-auto">
           <table class="text-xs border-collapse">
             <thead>
               <tr>
                 <th class="p-1"></th>
-                <For each={data.latest!.x_metrics}>
+                <For each={dataQuery.data!.x_metrics}>
                   {(xm) => (
                     <th class="p-1.5 text-theme-text-secondary font-normal whitespace-nowrap" style={{ "writing-mode": "vertical-lr", transform: "rotate(180deg)" }}>
                       {X_LABELS[xm] || xm}
@@ -80,11 +87,11 @@ const MatrixTab: Component<Props> = (props) => {
               </tr>
             </thead>
             <tbody>
-              <For each={data.latest!.y_metrics}>
+              <For each={dataQuery.data!.y_metrics}>
                 {(ym) => (
                   <tr>
                     <td class="p-1.5 text-theme-text-secondary whitespace-nowrap text-right pr-2">{Y_LABELS[ym] || ym}</td>
-                    <For each={data.latest!.x_metrics}>
+                    <For each={dataQuery.data!.x_metrics}>
                       {(xm) => {
                         const cell = () => getCell(xm, ym);
                         return (

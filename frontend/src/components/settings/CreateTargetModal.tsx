@@ -1,7 +1,8 @@
 import { Component, createSignal } from "solid-js";
 import Dialog from "../Dialog";
 import TargetCreateForm, { TargetFormValues } from "./TargetCreateForm";
-import { api } from "../../api/client";
+import { apiClient } from "../../api/generated/client";
+import { unwrap } from "../../api/unwrap";
 import { showToast } from "../Toast";
 import { getErrorMessage } from "../../utils/errors";
 
@@ -16,7 +17,7 @@ const CreateTargetModal: Component<Props> = (props) => {
   const handleSubmit = async (values: TargetFormValues) => {
     setSubmitting(true);
     try {
-      const res = await api.createCustomTarget(values);
+      const res = await apiClient.POST("/api/targets/custom", { body: values }).then(unwrap);
       const linked = res.linked_images > 0
         ? ` and linked ${res.linked_images} existing ${res.linked_images === 1 ? "image" : "images"}`
         : "";

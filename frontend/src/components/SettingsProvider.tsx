@@ -1,11 +1,27 @@
 import { createContext, useContext, createEffect, createSignal, createResource, startTransition, type ParentComponent } from "solid-js";
-import { useSettings, getFilterColorMap, getFilterAliasMap, enableSettingsFetch } from "../store/settings";
+import { useSettings, getFilterColorMap, getFilterAliasMap, enableSettingsFetch, seedSettings } from "../store/settings";
+import { seedEquipment } from "../store/catalog";
+import { seedFilterOptions } from "../store/filterOptions";
 import { useGraphSettings } from "../store/graphSettings";
-import type { SettingsResponse, GeneralSettings, FilterConfig, EquipmentConfig, DisplaySettings, GraphSettings, CustomColumn, ColumnVisibility } from "../types";
+import type { ColumnVisibility } from "../api/types";
+// SettingsResponse/GeneralSettings/FilterConfig/EquipmentConfig/GraphSettings/
+// CustomColumn are the hand-written definitions in `../api/types` (required
+// `FilterConfig.aliases`, `GeneralSettings.nina_instances`/
+// `stellarium_instances` typed as `IntegrationInstance[]`, literal-union
+// `CustomColumn.column_type`/`applies_to`, etc.), rather than the generated
+// schema, which loosens these fields to optional/untyped (backend Pydantic
+// defaults/enums collapsed by the OpenAPI dump). SettingsContextValue is
+// consumed by nearly every page (CustomColumnsTab/TargetTable/SessionTable/
+// MosaicsTab/FiltersTab/EquipmentTab/AstroBinTab/...) against this shape.
+// The backend always populates the full shape, so the casts at the
+// apiClient call sites below reflect actual runtime data, not a behavior
+// change.
+import type { SettingsResponse, GeneralSettings, FilterConfig, EquipmentConfig, DisplaySettings, GraphSettings, CustomColumn } from "../api/types";
 import type { Resource } from "solid-js";
 import type { FilterBadgeStyle } from "../utils/filterStyles";
 import { applyTheme, applyTextSize, DEFAULT_THEME_ID, DEFAULT_TEXT_SIZE } from "../themes";
-import { api } from "../api/client";
+import { apiClient } from "../api/generated/client";
+import { unwrap } from "../api/unwrap";
 import { useAuth } from "./AuthProvider";
 
 interface SettingsContextValue {
@@ -38,25 +54,67 @@ export const SettingsProvider: ParentComponent = (props) => {
   const store = useSettings();
   const graphStore = useGraphSettings();
   const auth = useAuth();
-  const [customColumns, { refetch: rawRefetchCustomColumns }] = createResource(
-    () => auth.user() !== null,
-    () => api.getCustomColumns(),
+  // Custom columns are gated so bootstrap can seed them without a redundant
+  // fetch; the gate opens once bootstrap resolves (or falls back).
+  const [ccGate, setCCGate] = createSignal(false);
+  let pendingCustomColumnsSeed: CustomColumn[] | null = null;
+  const [customColumns, { refetch: rawRefetchCustomColumns, mutate: mutateCustomColumns }] = createResource(
+    ccGate,
+    async () => {
+      if (pendingCustomColumnsSeed) {
+        const s = pendingCustomColumnsSeed;
+        pendingCustomColumnsSeed = null;
+        return s;
+      }
+      return apiClient.GET("/api/custom-columns", {}).then(unwrap) as Promise<CustomColumn[]>;
+    },
   );
   const refetchCustomColumns = () => startTransition(() => rawRefetchCustomColumns());
   const [columnVisibility, setColumnVisibility] = createSignal<ColumnVisibility | undefined>(undefined);
 
   graphStore.loadGraphSettings();
 
-  // Enable settings fetch once user is authenticated
+  // One bootstrap request replaces the five separate startup calls (settings,
+  // equipment, fits keys, object types, custom columns), seeding each store.
+  // Individual endpoints remain for later refreshes; on failure, fall back to
+  // fetching each store on demand.
   createEffect(() => {
-    if (auth.user()) enableSettingsFetch();
+    if (!auth.user()) return;
+    apiClient
+      .GET("/api/bootstrap", {})
+      .then(unwrap)
+      .then((b) => {
+        // The generated BootstrapResponse types `settings` as a loose
+        // Record<string, unknown> (FastAPI response model looseness) and
+        // `custom_columns` as BootstrapCustomColumn[] with a few fields
+        // optional (created_at, display_order) where SettingsResponse/
+        // CustomColumn require them. The backend always populates the full
+        // shape here (same endpoint the old hand-written client called), so
+        // these casts reflect actual runtime data, not a behavior change --
+        // see api/types.ts's discrepancy note.
+        seedSettings(b.settings as unknown as SettingsResponse);
+        seedEquipment(b.equipment);
+        seedFilterOptions(b.fits_keys, b.object_types);
+        const customColumns = b.custom_columns as unknown as CustomColumn[];
+        pendingCustomColumnsSeed = customColumns;
+        mutateCustomColumns(customColumns);
+        setCCGate(true);
+      })
+      .catch(() => {
+        enableSettingsFetch();
+        setCCGate(true);
+      });
   });
 
   // Load column visibility when user is authenticated
   createEffect(() => {
     const u = auth.user();
     if (u?.id) {
-      api.getColumnVisibility(u.id).then(setColumnVisibility).catch(() => {});
+      apiClient
+        .GET("/api/settings/column-visibility/{user_id}", { params: { path: { user_id: u.id } } })
+        .then(unwrap)
+        .then((vis) => setColumnVisibility(vis as ColumnVisibility))
+        .catch(() => {});
     }
   });
 
@@ -92,7 +150,7 @@ export const SettingsProvider: ParentComponent = (props) => {
     refetchCustomColumns,
     columnVisibility,
     saveColumnVisibility: async (vis: ColumnVisibility) => {
-      await api.updateColumnVisibility(vis);
+      await apiClient.PUT("/api/settings/column-visibility", { body: vis }).then(unwrap);
       setColumnVisibility(vis);
     },
   };

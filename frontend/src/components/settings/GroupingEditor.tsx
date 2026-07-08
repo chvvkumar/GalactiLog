@@ -1,5 +1,5 @@
 import { createSignal, createMemo, For, Show, type Component } from "solid-js";
-import type { DiscoveredItem } from "../../types";
+import type { DiscoveredItem } from "../../api/types";
 
 export interface GroupEntry {
   canonical: string;

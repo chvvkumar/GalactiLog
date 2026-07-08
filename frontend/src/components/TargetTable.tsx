@@ -1,5 +1,5 @@
-import { Component, For, Show, createMemo } from "solid-js";
-import type { TargetAggregation } from "../types";
+import { Component, For, Show } from "solid-js";
+import type { TargetAggregation } from "../api/types";
 import TargetRow from "./TargetRow";
 import ColumnPicker from "./ColumnPicker";
 import { useSettingsContext } from "./SettingsProvider";
@@ -20,24 +20,6 @@ const TargetTable: Component<{ targets: TargetAggregation[] }> = (props) => {
   const ctx = useSettingsContext();
   const tzLabel = () => timezoneLabel(ctx.timezone());
   const { sortKey, sortDir, toggleSort } = useDashboardFilters();
-
-  const UNCATEGORIZED_ID = "obj:__uncategorized__";
-
-  // Client-side sort only for "equipment" (no backend support);
-  // other sort keys are handled server-side, so just pass through.
-  const sortedTargets = createMemo(() => {
-    const key = sortKey();
-    const dir = sortDir();
-    if (key !== "equipment") return props.targets;
-
-    const sorted = [...props.targets].sort((a, b) => {
-      if (a.target_id === UNCATEGORIZED_ID) return 1;
-      if (b.target_id === UNCATEGORIZED_ID) return -1;
-      const cmp = a.equipment.join(" ").localeCompare(b.equipment.join(" "));
-      return dir === "asc" ? cmp : -cmp;
-    });
-    return sorted;
-  });
 
   const arrow = (key: SortKey) => {
     if (sortKey() !== key) return " \u2195";
@@ -123,7 +105,7 @@ const TargetTable: Component<{ targets: TargetAggregation[] }> = (props) => {
         </tr>
       </thead>
       <tbody>
-        <For each={sortedTargets()}>
+        <For each={props.targets}>
           {(target) => (
             <TargetRow target={target} />
           )}

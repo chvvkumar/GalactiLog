@@ -1,13 +1,7 @@
 import { Component, Show } from "solid-js";
 import { useNavigate } from "@solidjs/router";
-import type { DbSummary } from "../types";
-
-function formatBytes(b: number): string {
-  if (b < 1e6) return (b / 1e3).toFixed(0) + " KB";
-  if (b < 1e9) return (b / 1e6).toFixed(0) + " MB";
-  if (b < 1e12) return (b / 1e9).toFixed(1) + " GB";
-  return (b / 1e12).toFixed(2) + " TB";
-}
+import type { DbSummary } from "../api/types";
+import { formatBytes } from "../utils/format";
 
 const DatabaseOverview: Component<{
   summary: DbSummary | null;

@@ -1,7 +1,8 @@
 import { Component, Show, For, createSignal, onMount } from "solid-js";
-import { api } from "../../api/client";
+import { apiClient } from "../../api/generated/client";
+import { unwrap } from "../../api/unwrap";
 import { showToast } from "../Toast";
-import type { MergeCandidateResponse, TargetSearchResultFuzzy } from "../../types";
+import type { MergeCandidateResponse, TargetSearchResultFuzzy } from "../../api/types";
 import Dialog from "../Dialog";
 
 interface Props {
@@ -31,7 +32,9 @@ const MergeOrphanModal: Component<Props> = (props) => {
     searchTimeout = setTimeout(async () => {
       setSearching(true);
       try {
-        const results = await api.searchTargets(q.trim());
+        const results = await apiClient
+          .GET("/api/targets/search", { params: { query: { q: q.trim() } } })
+          .then(unwrap);
         setSearchResults(results);
       } catch {
         setSearchResults([]);
@@ -53,7 +56,11 @@ const MergeOrphanModal: Component<Props> = (props) => {
     if (!target) return;
     setMerging(true);
     try {
-      await api.mergeTargets(target.id, undefined, props.candidate.source_name);
+      await apiClient
+        .POST("/api/targets/merge", {
+          body: { winner_id: target.id, loser_name: props.candidate.source_name },
+        })
+        .then(unwrap);
       showToast(`Merged "${props.candidate.source_name}" into "${target.primary_name}"`);
       props.onResolved();
     } catch {

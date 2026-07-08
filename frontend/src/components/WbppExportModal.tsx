@@ -1,5 +1,6 @@
 import { Component, For, Show, JSX, createSignal, createMemo, onMount } from "solid-js";
-import { api } from "../api/client";
+import { apiClient } from "../api/generated/client";
+import { unwrap } from "../api/unwrap";
 import { showToast } from "./Toast";
 import { getErrorMessage } from "../utils/errors";
 import { useSettingsContext } from "./SettingsProvider";
@@ -16,7 +17,7 @@ import {
   HANDLE_KEYS,
   type PermState,
 } from "../lib/wbppBrowserCopy";
-import type { WbppSessionPreview, WbppFolderLevel, WbppGenerateResponse, WbppCopyOperation } from "../types";
+import type { WbppSessionPreview, WbppFolderLevel, WbppGenerateResponse, WbppCopyOperation } from "../api/types";
 
 interface Props {
   targetId: string;
@@ -60,7 +61,7 @@ function permClass(p: PermOrNone): string {
   switch (p) {
     case "granted": return "text-green-400";
     case "denied": return "text-theme-error";
-    case "prompt": return "text-yellow-400";
+    case "prompt": return "text-theme-warning";
     default: return "text-theme-text-tertiary";
   }
 }
@@ -224,13 +225,17 @@ const WbppExportModal: Component<Props> = (props) => {
     setError(null);
     setPreviewing(true);
     try {
-      const resp = await api.wbppPreview({
-        target_id: props.targetId,
-        session_dates: props.selectedDates,
-        chosen_levels: chosenLevels(),
-        library_root: libraryRoot().trim(),
-        target_os: targetOsParam(),
-      });
+      const resp = await apiClient
+        .POST("/api/wbpp/preview", {
+          body: {
+            target_id: props.targetId,
+            session_dates: props.selectedDates,
+            chosen_levels: chosenLevels(),
+            library_root: libraryRoot().trim(),
+            target_os: targetOsParam(),
+          },
+        })
+        .then(unwrap);
       setSessions(resp.sessions);
       setLevelsOpen(true);
       setGenerated(null);
@@ -262,16 +267,20 @@ const WbppExportModal: Component<Props> = (props) => {
     setShowScript(false);
     setCopyOpen(true);
     try {
-      const resp = await api.wbppGenerate({
-        target_id: props.targetId,
-        target_name: props.targetName,
-        session_dates: props.selectedDates,
-        chosen_levels: chosenLevels(),
-        library_root: libraryRoot().trim(),
-        target_os: targetOsParam(),
-        staging_path: stagingPath().trim() || null,
-        exclusions: parsedExclusions(),
-      });
+      const resp = await apiClient
+        .POST("/api/wbpp/generate", {
+          body: {
+            target_id: props.targetId,
+            target_name: props.targetName,
+            session_dates: props.selectedDates,
+            chosen_levels: chosenLevels(),
+            library_root: libraryRoot().trim(),
+            target_os: targetOsParam(),
+            staging_path: stagingPath().trim() || null,
+            exclusions: parsedExclusions(),
+          },
+        })
+        .then(unwrap);
       setGenerated(resp);
       setShowScript(true);
     } catch (e: unknown) {
@@ -587,11 +596,11 @@ const WbppExportModal: Component<Props> = (props) => {
                                 title={
                                   level.is_contaminated
                                     ? `Also contains${
-                                        level.other_targets.length
+                                        level.other_targets?.length
                                           ? ` other targets: ${level.other_targets.join(", ")}`
                                           : ""
                                       }${
-                                        level.other_dates.length
+                                        level.other_dates?.length
                                           ? ` other dates: ${level.other_dates.join(", ")}`
                                           : ""
                                       }`

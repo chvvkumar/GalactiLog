@@ -7,7 +7,8 @@ a summary string. Register new migrations in MIGRATIONS with the next version nu
 import logging
 from typing import Callable
 
-from sqlalchemy import select, text
+from celery.exceptions import SoftTimeLimitExceeded
+from sqlalchemy import or_, select, text
 from sqlalchemy.orm import Session
 
 from app.models.app_metadata import AppMetadata
@@ -21,7 +22,16 @@ logger = logging.getLogger(__name__)
 
 # Current data version - bump this and add a migration function when
 # code changes affect how stored target data is derived.
-DATA_VERSION = 11
+DATA_VERSION = 13
+
+# Migrations whose per-target loops make external network calls (VizieR, Gaia,
+# SAC, HyperLEDA) with pacing sleeps commit their work every this many queried
+# targets. On a large catalog such a loop can exceed the Celery time limit and
+# be interrupted; committing in chunks makes the completed enrichment durable so
+# the next run resumes from where it stopped (the per-target enrichers skip
+# already-enriched targets) instead of rolling the whole version back and
+# replaying it every boot (AUD-035).
+_MIGRATION_COMMIT_CHUNK = 25
 
 
 def _migrate_v1_fix_catalog_designations(session: Session) -> str:
@@ -167,6 +177,8 @@ def _migrate_v4_vizier_and_common_names(session: Session) -> str:
         if enrich_target_from_vizier(session, target):
             vizier_enriched += 1
         vizier_queried += 1
+        if vizier_queried % _MIGRATION_COMMIT_CHUNK == 0:
+            session.commit()  # persist partial enrichment so a timeout resumes cheaply
         time.sleep(0.3)
 
     session.flush()
@@ -224,7 +236,6 @@ def _migrate_v6_clear_negative_cache_and_reenrich(session: Session) -> str:
     """
     import time
     from app.models import Target
-    from app.models.vizier_cache import VizierCache
     from app.services.constellation import coords_to_constellation
 
     # Step 1: Clear negative cache entries (no size data)
@@ -262,6 +273,8 @@ def _migrate_v6_clear_negative_cache_and_reenrich(session: Session) -> str:
         if enrich_target_from_vizier(session, target):
             vizier_enriched += 1
         vizier_queried += 1
+        if vizier_queried % _MIGRATION_COMMIT_CHUNK == 0:
+            session.commit()  # persist partial enrichment so a timeout resumes cheaply
         time.sleep(0.3)
     session.flush()
 
@@ -328,6 +341,7 @@ def _migrate_v8_tier1_and_catalogs(session: Session) -> str:
         time.sleep(0.5)
 
         if (i + 1) % 10 == 0:
+            session.commit()  # persist partial enrichment so a timeout resumes cheaply
             logger.info("Enrichment progress: %d/%d targets", i + 1, len(targets))
 
     session.flush()
@@ -459,6 +473,13 @@ def _migrate_v11_hyperleda_galaxies(session: Session) -> str:
         try:
             if enrich_target_from_hyperleda(session, target):
                 enriched += 1
+        except SoftTimeLimitExceeded:
+            # The Celery soft-limit signal can land inside the HyperLEDA HTTP
+            # call. It must propagate to run_data_migrations so the runner can
+            # roll back the uncommitted tail and emit the data_upgrade_paused
+            # event; swallowing it here would let the task run on to the hard
+            # kill with no terminal state written (AUD-035).
+            raise
         except Exception as exc:  # noqa: BLE001
             logger.warning(
                 "HyperLEDA enrichment failed for %s: %s",
@@ -470,10 +491,245 @@ def _migrate_v11_hyperleda_galaxies(session: Session) -> str:
         # Skip the sleep for non-galaxies and cache hits, which make no call.
         if will_query:
             queried += 1
+            if queried % _MIGRATION_COMMIT_CHUNK == 0:
+                session.commit()  # persist partial enrichment so a timeout resumes cheaply
             time.sleep(0.5)
 
     session.flush()
     return f"HyperLEDA: {enriched} galaxies enriched ({queried} network queries)"
+
+
+def _migrate_v12_exposure_and_metric_split(session: Session) -> str:
+    """Backfill exposure_time and split mislabeled FWHM out of median_hfr.
+
+    Re-derives image-level values from raw_headers after two scanner fixes:
+
+    AUD-001: files carrying only the standard FITS `EXPOSURE` keyword (not
+    `EXPTIME`) previously stored exposure_time = NULL, silently zeroing their
+    integration in every aggregation. Backfill from raw_headers (EXPTIME first,
+    then EXPOSURE) wherever exposure_time is still NULL.
+
+    AUD-007: the scanner previously routed FWHM/MEANFWHM header values into the
+    median_hfr column, conflating two different metrics. Move those mislabeled
+    values into the new median_fwhm column. raw_headers is the ground truth for
+    which source keyword produced each stored value: a row whose headers carry
+    no HFR key but do carry MEANFWHM/FWHM, and whose stored median_hfr equals
+    that FWHM value, was populated from FWHM and is reclassified. Rows whose
+    median_hfr came from a real HFR keyword, the filename, or CSV enrichment
+    (value will not match the header FWHM) are left untouched.
+    """
+    from app.models import Image
+
+    def _to_float(val) -> float | None:
+        if val is None:
+            return None
+        try:
+            return float(val)
+        except (ValueError, TypeError):
+            return None
+
+    # --- AUD-001: backfill NULL exposure_time from raw_headers ---
+    exposure_rows = session.execute(
+        select(Image.id, Image.raw_headers).where(
+            Image.exposure_time.is_(None),
+            or_(
+                Image.raw_headers.has_key("EXPTIME"),   # noqa: W601 (JSONB ?)
+                Image.raw_headers.has_key("EXPOSURE"),  # noqa: W601
+            ),
+        )
+    ).all()
+
+    exposure_updates: list[dict] = []
+    for img_id, headers in exposure_rows:
+        if not headers:
+            continue
+        val = _to_float(headers.get("EXPTIME"))
+        if val is None:
+            val = _to_float(headers.get("EXPOSURE"))
+        if val is not None:
+            exposure_updates.append({"id": img_id, "exposure_time": val})
+
+    if exposure_updates:
+        session.bulk_update_mappings(Image, exposure_updates)
+        session.flush()
+
+    # --- AUD-007: reclassify FWHM values mislabeled as median_hfr ---
+    hfr_rows = session.execute(
+        select(Image.id, Image.median_hfr, Image.raw_headers).where(
+            Image.median_hfr.isnot(None),
+            Image.median_fwhm.is_(None),
+            ~Image.raw_headers.has_key("HFR"),          # noqa: W601
+            or_(
+                Image.raw_headers.has_key("MEANFWHM"),  # noqa: W601
+                Image.raw_headers.has_key("FWHM"),      # noqa: W601
+            ),
+        )
+    ).all()
+
+    metric_updates: list[dict] = []
+    for img_id, median_hfr, headers in hfr_rows:
+        if not headers or median_hfr is None:
+            continue
+        # Mirror the old scanner priority: MEANFWHM first, then FWHM.
+        fwhm_val = _to_float(headers.get("MEANFWHM"))
+        if fwhm_val is None:
+            fwhm_val = _to_float(headers.get("FWHM"))
+        if fwhm_val is None:
+            continue
+        # Only reclassify when the stored median_hfr actually came from that
+        # FWHM value. A mismatch means the value was a real HFR (CSV/filename),
+        # so leave it alone.
+        if abs(median_hfr - fwhm_val) <= 1e-6:
+            metric_updates.append({
+                "id": img_id,
+                "median_fwhm": fwhm_val,
+                "median_hfr": None,
+            })
+
+    if metric_updates:
+        session.bulk_update_mappings(Image, metric_updates)
+        session.flush()
+
+    parts = []
+    if exposure_updates:
+        parts.append(f"{len(exposure_updates)} exposures backfilled from raw_headers")
+    if metric_updates:
+        parts.append(f"{len(metric_updates)} FWHM values moved from median_hfr to median_fwhm")
+    return "; ".join(parts) if parts else "No changes needed"
+
+
+def _migrate_v13_enrich_created_targets(session: Session) -> str:
+    """Backfill the per-target enrichment gaps for targets created since v11.
+
+    A target ingested after the last data migration ran only got OpenNGC/VizieR/
+    SAC enrichment; it never received the coordinate-based constellation
+    fallback, catalog memberships, cluster-gated Gaia distance, or galaxy-gated
+    HyperLEDA morphology that migration-time targets got (AUD-006). Prod evidence
+    shows 7 of 32 galaxy targets missing hubble_t_type and 95 non-user targets
+    with zero catalog memberships, so post-migration creations are demonstrably
+    missing enrichment.
+
+    Reuses the exact same per-target logic (enrich_new_target) that the new
+    async follow-up task runs, so a migration-time target and a freshly ingested
+    one converge. Every step is idempotent, so this migration is safe to replay:
+    the per-target enrichers skip already-enriched fields and the membership
+    upserts are conflict-updates. Commits every _MIGRATION_COMMIT_CHUNK network
+    queries so a timeout resumes cheaply, and re-raises SoftTimeLimitExceeded so
+    the runner can write a terminal state (AUD-035).
+    """
+    import time
+    from app.models import Target
+    from app.services.catalog_membership import load_all_catalogs
+    from app.services.target_enrichment import enrich_new_target
+
+    # Ensure the static catalogs are loaded so per-target membership matching
+    # has data to match against (idempotent upserts).
+    load_all_catalogs(session)
+    session.flush()
+
+    targets = session.execute(
+        select(Target).where(Target.merged_into_id.is_(None))
+    ).scalars().all()
+
+    const_added = 0
+    membership_added = 0
+    gaia_added = 0
+    hyperleda_added = 0
+    queried = 0
+    for target in targets:
+        if getattr(target, "user_defined", False):
+            continue
+
+        try:
+            res = enrich_new_target(session, target)
+        except SoftTimeLimitExceeded:
+            # Propagate so run_data_migrations rolls back the uncommitted tail
+            # and emits data_upgrade_paused instead of hitting the hard kill.
+            raise
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "v13 enrichment failed for %s: %s",
+                target.catalog_id or target.primary_name, exc,
+            )
+            continue
+
+        const_added += 1 if res["constellation"] else 0
+        membership_added += res["memberships"]
+        gaia_added += 1 if res["gaia"] else 0
+        hyperleda_added += 1 if res["hyperleda"] else 0
+
+        # Pace + chunk-commit only when a real network query was made, matching
+        # the v8/v11 loops (non-galaxies, non-clusters, and cache hits are free).
+        if res["queried_network"]:
+            queried += 1
+            if queried % _MIGRATION_COMMIT_CHUNK == 0:
+                session.commit()  # persist partial enrichment so a timeout resumes cheaply
+            time.sleep(0.5)
+
+    session.flush()
+
+    parts = []
+    if const_added:
+        parts.append(f"{const_added} constellations computed")
+    if membership_added:
+        parts.append(f"{membership_added} catalog memberships matched")
+    if gaia_added:
+        parts.append(f"Gaia: {gaia_added} clusters got distances")
+    if hyperleda_added:
+        parts.append(f"HyperLEDA: {hyperleda_added} galaxies enriched")
+    if queried:
+        parts.append(f"{queried} network queries")
+    return "; ".join(parts) if parts else "No changes needed"
+
+
+def reference_catalogs_are_empty(session: Session) -> bool:
+    """Return True if the static OpenNGC catalog table has no rows.
+
+    OpenNGC is the anchor catalog every other static catalog (SAC, Caldwell,
+    Herschel 400, Arp, Abell) and target enrichment depend on, so an empty
+    ``openngc_catalog`` table is a reliable signal that the static reference
+    data has never been loaded on this database (e.g. a fresh install whose
+    baseline seeds a current data_version, so the data-migration functions
+    that used to load these catalogs never run - see load_reference_catalogs).
+    """
+    from app.models.openngc import OpenNGCEntry
+
+    return session.execute(select(OpenNGCEntry.name).limit(1)).first() is None
+
+
+def load_reference_catalogs(session: Session) -> str:
+    """Load all static reference catalogs independent of the data-version gate.
+
+    OpenNGC, SAC, Caldwell, Herschel 400, Arp, and Abell were historically
+    loaded only as a side effect of data migrations v3/v7/v13
+    (_migrate_v3_load_openngc, _migrate_v8_tier1_and_catalogs,
+    _migrate_v13_enrich_created_targets). The v2.0 baseline seeds fresh
+    databases at the current data_version so the upgrade gate holds, which
+    means those data migrations never run on a fresh install and the catalog
+    tables stay permanently empty. This function loads and matches the same
+    catalogs directly so boot can call it unconditionally.
+
+    Every loader is a Postgres upsert keyed on a natural key (see
+    load_openngc_csv, load_sac_csv, load_catalog_csv, upsert_membership), so
+    this is safe to call repeatedly: re-running it updates existing rows in
+    place rather than duplicating them.
+    """
+    from app.services.sac import load_sac_csv
+    from app.services.catalog_membership import load_catalog_memberships
+
+    openngc_loaded = load_openngc_csv(session)
+    session.flush()
+
+    sac_loaded = load_sac_csv(session)
+    session.flush()
+
+    membership_summary = load_catalog_memberships(session)
+    session.flush()
+
+    return (
+        f"OpenNGC: {openngc_loaded} entries; SAC: {sac_loaded} entries; "
+        f"{membership_summary}"
+    )
 
 
 # Registry: version number -> (description, migration function)
@@ -490,6 +746,8 @@ MIGRATIONS: dict[int, tuple[str, Callable[[Session], str]]] = {
     9: ("Stellarium common name cache refresh", _migrate_v9_stellarium_names),
     10: ("Re-enrich targets from OpenNGC (Messier lookup fix)", _migrate_v10_openngc_messier_common_names),
     11: ("Backfill HyperLEDA morphological type and inclination for galaxies", _migrate_v11_hyperleda_galaxies),
+    12: ("Backfill exposure_time from EXPOSURE keyword and split FWHM out of median_hfr", _migrate_v12_exposure_and_metric_split),
+    13: ("Backfill per-target enrichment (constellation, memberships, Gaia, HyperLEDA) for targets created since v11", _migrate_v13_enrich_created_targets),
 }
 
 

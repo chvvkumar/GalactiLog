@@ -705,7 +705,7 @@ export const TEXT_SIZES: TextSizePreset[] = [
 
 export const DEFAULT_TEXT_SIZE = "large";
 
-export function getThemeById(id: string): ThemeMeta {
+function getThemeById(id: string): ThemeMeta {
   return THEMES.find((t) => t.id === id) ?? THEMES[0];
 }
 

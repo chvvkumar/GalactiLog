@@ -1,5 +1,8 @@
-import { Component, createSignal, createResource, Show } from "solid-js";
-import { api } from "../../api/client";
+import { Component, createSignal, Show } from "solid-js";
+import { useQuery, keepPreviousData } from "@tanstack/solid-query";
+import { apiClient } from "../../api/generated/client";
+import { unwrap } from "../../api/unwrap";
+import { queryKeys } from "../../api/queryKeys";
 import type { SharedFilters } from "../../pages/AnalysisPage";
 import HistogramChart from "./HistogramChart";
 import BoxPlotChart from "./BoxPlotChart";
@@ -49,6 +52,7 @@ const GROUP_OPTIONS = [
 ] as const;
 
 interface Props {
+  active: boolean;
   filters: SharedFilters;
 }
 
@@ -58,35 +62,41 @@ const DistributionsTab: Component<Props> = (props) => {
   const [boxMetric, setBoxMetric] = createSignal("hfr");
   const [groupBy, setGroupBy] = createSignal<"filter" | "equipment" | "month" | "target">("filter");
 
-  const histKey = () =>
-    `hist-${histMetric()}-${props.filters.telescope}-${props.filters.camera}-${props.filters.filterUsed}-${props.filters.granularity}-${props.filters.dateFrom}-${props.filters.dateTo}`;
+  const histParams = () => ({
+    metric: histMetric(),
+    telescope: props.filters.telescope,
+    camera: props.filters.camera,
+    filter_used: props.filters.filterUsed,
+    granularity: props.filters.granularity,
+    date_from: props.filters.dateFrom,
+    date_to: props.filters.dateTo,
+  });
 
-  const [histData] = createResource(histKey, () =>
-    api.getDistribution({
-      metric: histMetric(),
-      telescope: props.filters.telescope,
-      camera: props.filters.camera,
-      filter_used: props.filters.filterUsed,
-      granularity: props.filters.granularity,
-      date_from: props.filters.dateFrom,
-      date_to: props.filters.dateTo,
-    }).catch(() => undefined)
-  );
+  const histQuery = useQuery(() => ({
+    queryKey: queryKeys.distribution(histParams()),
+    queryFn: ({ signal }: { signal: AbortSignal }) =>
+      apiClient.GET("/api/analysis/distribution", { params: { query: histParams() }, signal }).then(unwrap),
+    enabled: props.active,
+    placeholderData: keepPreviousData,
+  }));
 
-  const boxKey = () =>
-    `box-${boxMetric()}-${groupBy()}-${props.filters.telescope}-${props.filters.camera}-${props.filters.filterUsed}-${props.filters.dateFrom}-${props.filters.dateTo}`;
+  const boxParams = () => ({
+    metric: boxMetric(),
+    group_by: groupBy(),
+    telescope: props.filters.telescope,
+    camera: props.filters.camera,
+    filter_used: props.filters.filterUsed,
+    date_from: props.filters.dateFrom,
+    date_to: props.filters.dateTo,
+  });
 
-  const [boxData] = createResource(boxKey, () =>
-    api.getBoxPlot({
-      metric: boxMetric(),
-      group_by: groupBy(),
-      telescope: props.filters.telescope,
-      camera: props.filters.camera,
-      filter_used: props.filters.filterUsed,
-      date_from: props.filters.dateFrom,
-      date_to: props.filters.dateTo,
-    }).catch(() => undefined)
-  );
+  const boxQuery = useQuery(() => ({
+    queryKey: queryKeys.boxplot(boxParams()),
+    queryFn: ({ signal }: { signal: AbortSignal }) =>
+      apiClient.GET("/api/analysis/boxplot", { params: { query: boxParams() }, signal }).then(unwrap),
+    enabled: props.active,
+    placeholderData: keepPreviousData,
+  }));
 
   const selectClass = "text-sm bg-theme-elevated border border-theme-border rounded px-2.5 py-1.5 text-theme-text-primary";
   const toggleClass = (active: boolean) =>
@@ -115,14 +125,14 @@ const DistributionsTab: Component<Props> = (props) => {
         </div>
         <div style={{ height: "450px" }} class="relative">
           <HistogramChart
-            data={histData.latest}
-            loading={histData.loading}
-            baselineMedian={histData.latest?.stats?.median ?? null}
+            data={histQuery.data}
+            loading={histQuery.isFetching}
+            baselineMedian={histQuery.data?.stats?.median ?? null}
           />
         </div>
-        <Show when={histData.latest?.stats}>
+        <Show when={histQuery.data?.stats}>
           <div class="mt-3">
-            <StatsCard stats={histData.latest!.stats} label={`${ALL_METRICS.find((m) => m.value === histMetric())?.label} (skewness: ${histData.latest!.skewness.toFixed(2)})`} />
+            <StatsCard stats={histQuery.data!.stats} label={`${ALL_METRICS.find((m) => m.value === histMetric())?.label} (skewness: ${histQuery.data!.skewness.toFixed(2)})`} />
           </div>
         </Show>
       </div>
@@ -138,10 +148,10 @@ const DistributionsTab: Component<Props> = (props) => {
             {GROUP_OPTIONS.map((o) => <option value={o.value}>{o.label}</option>)}
           </select>
         </div>
-        <div style={{ height: `${Math.max(200, (boxData.latest?.groups?.length || 3) * 60)}px` }} class="relative">
+        <div style={{ height: `${Math.max(200, (boxQuery.data?.groups?.length || 3) * 60)}px` }} class="relative">
           <BoxPlotChart
-            groups={boxData.latest?.groups || []}
-            loading={boxData.loading}
+            groups={boxQuery.data?.groups || []}
+            loading={boxQuery.isFetching}
             metricLabel={Y_METRICS.find((m) => m.value === boxMetric())?.label}
           />
         </div>

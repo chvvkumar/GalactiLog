@@ -1,7 +1,14 @@
 import { createSignal, createEffect } from "solid-js";
-import { api } from "../api/client";
+import { apiClient } from "../api/generated/client";
+import { unwrap } from "../api/unwrap";
 import { useSettings } from "./settings";
-import type { GraphSettings } from "../types";
+// GraphSettings is the hand-written definition in `../api/types` (required
+// `enabled_metrics`/`enabled_filters` arrays, vs. the generated schema's
+// optional fields -- backend Pydantic defaults). This store always holds a
+// fully-populated object (seeded from DEFAULT_GRAPH_SETTINGS, merged via
+// spread on every update), so the required-field contract is accurate for
+// every local read (`.includes`, `.filter`).
+import type { GraphSettings } from "../api/types";
 
 const DEFAULT_GRAPH_SETTINGS: GraphSettings = {
   enabled_metrics: ["hfr", "eccentricity", "fwhm", "guiding_rms"],
@@ -40,7 +47,7 @@ export function useGraphSettings() {
       const next = { ...current, ...updates };
       setGraphSettings(next);
       try {
-        await api.updateGraph(next);
+        await apiClient.PUT("/api/settings/graph", { body: next }).then(unwrap);
       } catch {
         setGraphSettings(current);
       }
@@ -53,7 +60,10 @@ export function useGraphSettings() {
         : [...current.enabled_metrics, metric];
       const next = { ...current, enabled_metrics: metrics };
       setGraphSettings(next);
-      api.updateGraph(next).catch(() => setGraphSettings(current));
+      apiClient
+        .PUT("/api/settings/graph", { body: next })
+        .then(unwrap)
+        .catch(() => setGraphSettings(current));
     },
 
     toggleFilter(filter: string) {
@@ -63,7 +73,10 @@ export function useGraphSettings() {
         : [...current.enabled_filters, filter];
       const next = { ...current, enabled_filters: filters };
       setGraphSettings(next);
-      api.updateGraph(next).catch(() => setGraphSettings(current));
+      apiClient
+        .PUT("/api/settings/graph", { body: next })
+        .then(unwrap)
+        .catch(() => setGraphSettings(current));
     },
   };
 }

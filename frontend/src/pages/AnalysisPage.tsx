@@ -1,5 +1,8 @@
-import { Component, createSignal, createResource, createEffect, createMemo, For, Show, Suspense, onMount, onCleanup } from "solid-js";
-import { api } from "../api/client";
+import { Component, createSignal, createEffect, createMemo, For, Show, Suspense, onMount, onCleanup } from "solid-js";
+import { useQuery } from "@tanstack/solid-query";
+import { apiClient } from "../api/generated/client";
+import { unwrap } from "../api/unwrap";
+import { queryKeys } from "../api/queryKeys";
 import { useSettingsContext } from "../components/SettingsProvider";
 import { contentWidthClass } from "../utils/format";
 import { useStats } from "../store/stats";
@@ -70,7 +73,12 @@ const AnalysisPage: Component = () => {
   onMount(() => window.addEventListener("analysis-navigate", handleMatrixNav));
   onCleanup(() => window.removeEventListener("analysis-navigate", handleMatrixNav));
 
-  const [filters] = createResource(() => api.getAnalysisFilters());
+  const filtersQuery = useQuery(() => ({
+    queryKey: queryKeys.analysisFilters(),
+    queryFn: ({ signal }: { signal: AbortSignal }) =>
+      apiClient.GET("/api/analysis/filters", { signal }).then(unwrap),
+  }));
+  const filters = () => filtersQuery.data;
 
   const shared = (): SharedFilters => ({
     telescope: telescope(),
@@ -250,7 +258,7 @@ const AnalysisPage: Component = () => {
                     </ul>
                   </HelpPopover>
                 </div>
-                <CorrelationTab filters={shared()} navX={navX()} navY={navY()} onNavConsumed={() => { setNavX(undefined); setNavY(undefined); }} />
+                <CorrelationTab active={activeTab() === "correlation"} filters={shared()} navX={navX()} navY={navY()} onNavConsumed={() => { setNavX(undefined); setNavY(undefined); }} />
               </div>
             </Suspense>
           </Show>
@@ -271,7 +279,7 @@ const AnalysisPage: Component = () => {
                     </ul>
                   </HelpPopover>
                 </div>
-                <DistributionsTab filters={shared()} />
+                <DistributionsTab active={activeTab() === "distributions"} filters={shared()} />
               </div>
             </Suspense>
           </Show>
@@ -292,7 +300,7 @@ const AnalysisPage: Component = () => {
                     </ul>
                   </HelpPopover>
                 </div>
-                <TimeSeriesTab filters={shared()} />
+                <TimeSeriesTab active={activeTab() === "timeseries"} filters={shared()} />
               </div>
             </Suspense>
           </Show>
@@ -314,7 +322,7 @@ const AnalysisPage: Component = () => {
                     <p class="text-sm text-theme-text-secondary">Click a cell to jump to the Correlation tab pre-filtered to that combination.</p>
                   </HelpPopover>
                 </div>
-                <MatrixTab filters={shared()} />
+                <MatrixTab active={activeTab() === "matrix"} filters={shared()} />
               </div>
             </Suspense>
           </Show>
@@ -335,7 +343,7 @@ const AnalysisPage: Component = () => {
                     </ul>
                   </HelpPopover>
                 </div>
-                <CompareTab filters={shared()} combos={combos()} availableFilters={filters() || []} />
+                <CompareTab active={activeTab() === "compare"} filters={shared()} combos={combos()} availableFilters={filters() || []} />
               </div>
             </Suspense>
           </Show>

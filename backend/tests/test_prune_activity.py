@@ -79,3 +79,43 @@ def test_prune_task_in_beat_schedule():
     assert "prune-activity-events" in schedule
     entry = schedule["prune-activity-events"]
     assert entry["task"] == "app.worker.prune_activity.prune_activity_events"
+
+
+def test_refresh_token_prune_task_in_beat_schedule():
+    from app.worker.celery_app import celery_app
+    schedule = celery_app.conf.beat_schedule
+    assert "prune-refresh-tokens" in schedule
+    entry = schedule["prune-refresh-tokens"]
+    assert entry["task"] == "app.worker.prune_activity.prune_refresh_tokens"
+
+
+def test_prune_refresh_tokens_deletes_expired_and_revoked():
+    from app.worker.prune_activity import prune_refresh_tokens
+
+    mock_result = MagicMock()
+    mock_result.rowcount = 7
+    session = MagicMock()
+    session.execute.return_value = mock_result
+    session.commit = MagicMock()
+
+    with patch("app.worker.prune_activity.Session") as ms:
+        ms.return_value.__enter__ = lambda s, *a: session
+        ms.return_value.__exit__ = lambda s, *a: None
+        result = prune_refresh_tokens.run()
+
+    assert result == {"status": "complete", "deleted": 7}
+    session.commit.assert_called_once()
+    executed_sql = str(session.execute.call_args[0][0])
+    assert "refresh_tokens" in executed_sql
+    assert "revoked" in executed_sql
+    assert "expires_at" in executed_sql
+
+
+def test_prune_refresh_tokens_handles_error():
+    from app.worker.prune_activity import prune_refresh_tokens
+
+    with patch("app.worker.prune_activity.Session", side_effect=RuntimeError("db down")):
+        result = prune_refresh_tokens.run()
+
+    assert result["status"] == "error"
+    assert "db down" in result["error"]

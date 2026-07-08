@@ -1,6 +1,8 @@
 import { createContext, createSignal, useContext, onMount, onCleanup, Show, type ParentProps, type Component } from "solid-js";
-import { api } from "../api/client";
-import type { AuthUser } from "../types";
+import { apiClient } from "../api/generated/client";
+import { unwrap } from "../api/unwrap";
+import { refreshSession } from "../api/authRefresh";
+import type { AuthUser } from "../api/types";
 
 interface AuthContextValue {
   user: () => AuthUser | null;
@@ -33,11 +35,8 @@ async function probeAuth(): Promise<AuthUser | null> {
   let resp = await fetch(`${API_BASE}/auth/me`, { credentials: "same-origin" });
 
   if (resp.status === 401) {
-    const refreshResp = await fetch(`${API_BASE}/auth/refresh`, {
-      method: "POST",
-      credentials: "same-origin",
-    });
-    if (refreshResp.ok) {
+    const ok = await refreshSession();
+    if (ok) {
       resp = await fetch(`${API_BASE}/auth/me`, { credentials: "same-origin" });
     }
   }
@@ -110,7 +109,7 @@ export const AuthProvider: Component<ParentProps> = (props) => {
 
   const refreshUser = async () => {
     try {
-      const me = await api.getMe();
+      const me = await apiClient.GET("/api/auth/me", {}).then(unwrap);
       setUser(me);
     } catch (e) {
       setUser(null);
@@ -119,12 +118,14 @@ export const AuthProvider: Component<ParentProps> = (props) => {
   };
 
   const login = async (username: string, password: string, remember?: boolean) => {
-    await api.login(username, password, remember ?? false);
+    await apiClient
+      .POST("/api/auth/login", { body: { username, password, remember: remember ?? false } })
+      .then(unwrap);
     await refreshUser();
   };
 
   const logout = async () => {
-    await api.logout();
+    await apiClient.POST("/api/auth/logout", {}).then(unwrap);
     setUser(null);
   };
 

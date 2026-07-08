@@ -6,7 +6,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, Query
 from starlette.responses import Response
-from sqlalchemy import select, func, case
+from sqlalchemy import select, func, case, or_, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings, async_redis
@@ -15,9 +15,6 @@ from app.api.deps import get_current_user
 from app.models.user import User
 from app.models import Image, Target
 from app.services.normalization import load_alias_maps, normalize_filter, normalize_equipment
-from app.services import frame_quality
-from sqlalchemy import cast
-from sqlalchemy.types import Date
 
 from app.schemas.stats import (
     StatsResponse, OverviewStats, EquipmentStats, EquipmentItem,
@@ -234,24 +231,42 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
 
     async def _query_overview():
         capture_date_col = Image.session_date
+        has_date = Image.capture_date.isnot(None)
+        # Frames belonging to a merged-away (loser) target should not be
+        # double-counted under a stale target id; mirrors the merged-target
+        # guard in target_aggregation.list_targets_aggregated (AUD-032, axis 3).
+        merged_ok = or_(Image.resolved_target_id.is_(None), Target.merged_into_id.is_(None))
+        # rig_session_count: distinct (night, telescope, camera) combinations.
+        # This is deliberately NOT "distinct nights" -- a night imaged with two
+        # rigs counts as two rig-sessions here. Every other surface (the
+        # calendar below, target-detail session_count, the paginated
+        # aggregation) counts distinct session_date alone, i.e. imaging
+        # nights. Both definitions are kept and exposed as separate,
+        # explicitly-named metrics rather than unified; see AUD-019. Do not
+        # rename this back to a bare "session_count" / "sessions" label.
+        rig_session_expr = func.concat(
+            capture_date_col,
+            "|",
+            func.coalesce(Image.telescope, ""),
+            "|",
+            func.coalesce(Image.camera, ""),
+        )
         q = select(
-            func.coalesce(func.sum(Image.exposure_time), 0),
-            func.count(func.distinct(Image.resolved_target_id)),
+            func.coalesce(func.sum(Image.exposure_time).filter(has_date), 0),
+            func.count(func.distinct(Image.resolved_target_id)).filter(has_date),
+            # total_frames: all LIGHT frames regardless of capture_date, matching
+            # its "all LIGHT frames" label (AUD-032, axis 2: the aggregation
+            # used for the Dashboard sidebar counts NULL-capture_date frames
+            # too, so this no longer silently excludes them here).
             func.count(Image.id),
-            func.count(func.distinct(
-                func.concat(
-                    capture_date_col,
-                    "|",
-                    func.coalesce(Image.telescope, ""),
-                    "|",
-                    func.coalesce(Image.camera, ""),
-                )
-            )),
-            func.min(capture_date_col),
-            func.max(capture_date_col),
+            func.count(func.distinct(rig_session_expr)).filter(has_date),
+            func.min(capture_date_col).filter(has_date),
+            func.max(capture_date_col).filter(has_date),
+        ).select_from(Image).outerjoin(
+            Target, Image.resolved_target_id == Target.id
         ).where(
             Image.image_type == "LIGHT",
-            Image.capture_date.isnot(None),
+            merged_ok,
         )
         async with async_session() as s:
             return (await s.execute(q)).one()
@@ -301,14 +316,6 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
             func.min(hfr_nz).label("best_hfr"),
             func.percentile_cont(0.5).within_group(ecc_nz).label("med_ecc"),
             func.percentile_cont(0.5).within_group(fwhm_nz).label("med_fwhm"),
-            # Raw non-zero metric values per raw group, so MAD can be computed in
-            # Python over the normalized (telescope, camera) combo. Postgres has
-            # no direct MAD aggregate, and the median needed for the absolute
-            # deviation is only known after the normalized regrouping merges
-            # filter sub-rows. NULLs are dropped in post-processing.
-            func.array_agg(hfr_nz).label("hfr_vals"),
-            func.array_agg(ecc_nz).label("ecc_vals"),
-            func.array_agg(fwhm_nz).label("fwhm_vals"),
         ).where(
             Image.image_type == "LIGHT",
             Image.telescope.isnot(None),
@@ -316,6 +323,83 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
         ).group_by(Image.telescope, Image.camera, Image.filter_used)
         async with async_session() as s:
             return (await s.execute(q)).all()
+
+    def _norm_case(col, alias_map: dict[str, str]):
+        """SQL expression mapping a raw equipment name to its canonical form.
+
+        Mirrors normalize_equipment() (an exact-match dict lookup) so MAD can be
+        grouped by the SAME normalized (telescope, camera) combo the Python
+        post-processing uses. Empty map -> the column unchanged.
+        """
+        if not alias_map:
+            return col
+        return case(alias_map, value=col, else_=col)
+
+    async def _query_equipment_mad():
+        """Median absolute deviation of hfr/ecc/fwhm per normalized (telescope,
+        camera) combo, computed entirely in SQL (two passes of percentile_cont):
+        group median, then median of abs(value - median). Replaces shipping every
+        frame's raw metric values to Python via array_agg.
+        """
+        norm_tel = _norm_case(Image.telescope, tel_map).label("norm_tel")
+        norm_cam = _norm_case(Image.camera, cam_map).label("norm_cam")
+        hfr_nz = func.nullif(Image.median_hfr, 0)
+        ecc_nz = func.nullif(Image.eccentricity, 0)
+        fwhm_nz = func.nullif(Image.fwhm, 0)
+        base = (
+            select(
+                norm_tel,
+                norm_cam,
+                hfr_nz.label("hfr"),
+                ecc_nz.label("ecc"),
+                fwhm_nz.label("fwhm"),
+            )
+            .where(
+                Image.image_type == "LIGHT",
+                Image.telescope.isnot(None),
+                Image.camera.isnot(None),
+            )
+            .subquery()
+        )
+        med = (
+            select(
+                base.c.norm_tel,
+                base.c.norm_cam,
+                func.percentile_cont(0.5).within_group(base.c.hfr).label("med_hfr"),
+                func.percentile_cont(0.5).within_group(base.c.ecc).label("med_ecc"),
+                func.percentile_cont(0.5).within_group(base.c.fwhm).label("med_fwhm"),
+            )
+            .group_by(base.c.norm_tel, base.c.norm_cam)
+            .subquery()
+        )
+        mad_q = (
+            select(
+                base.c.norm_tel,
+                base.c.norm_cam,
+                func.percentile_cont(0.5)
+                .within_group(func.abs(base.c.hfr - med.c.med_hfr))
+                .label("mad_hfr"),
+                func.percentile_cont(0.5)
+                .within_group(func.abs(base.c.ecc - med.c.med_ecc))
+                .label("mad_ecc"),
+                func.percentile_cont(0.5)
+                .within_group(func.abs(base.c.fwhm - med.c.med_fwhm))
+                .label("mad_fwhm"),
+            )
+            .select_from(
+                base.join(
+                    med,
+                    and_(
+                        base.c.norm_tel == med.c.norm_tel,
+                        base.c.norm_cam == med.c.norm_cam,
+                    ),
+                )
+            )
+            .group_by(base.c.norm_tel, base.c.norm_cam)
+        )
+        async with async_session() as s:
+            rows = (await s.execute(mad_q)).all()
+        return {(r.norm_tel, r.norm_cam): r for r in rows}
 
     async def _query_filter_usage():
         q = select(
@@ -428,6 +512,7 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
         cam_rows,
         tel_rows,
         perf_rows,
+        mad_by_combo,
         filter_rows,
         monthly_rows,
         site_coords,
@@ -445,6 +530,7 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
         _query_cameras(),
         _query_telescopes(),
         _query_equipment_perf(),
+        _query_equipment_mad(),
         _query_filter_usage(),
         _query_timeline_monthly(),
         _query_site_coords(),
@@ -466,7 +552,7 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
         total_seconds,
         target_count,
         total_frames,
-        session_count,
+        rig_session_count,
         first_capture_date,
         last_capture_date,
     ) = ov_row
@@ -477,7 +563,7 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
         total_frames=total_frames,
         all_frames=all_frames,
         disk_usage_bytes=_storage_cache["fits"] + _storage_cache["thumbnails"],
-        session_count=session_count or 0,
+        rig_session_count=rig_session_count or 0,
         first_capture_date=first_capture_date.isoformat() if first_capture_date else None,
         last_capture_date=last_capture_date.isoformat() if last_capture_date else None,
     )
@@ -549,11 +635,6 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
                 "filter_rows": {},
                 "raw_telescopes": set(),
                 "raw_cameras": set(),
-                # Raw per-frame metric values across all filter sub-rows, used
-                # to compute a robust MAD over the normalized combo.
-                "raw_hfr": [],
-                "raw_ecc": [],
-                "raw_fwhm": [],
             }
 
         combo_data[key]["raw_telescopes"].add(r.telescope)
@@ -564,14 +645,6 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
         cd["total_seconds"] += float(r.total_seconds)
         if getattr(r, "session_dates", None):
             cd["sessions"].update(d for d in r.session_dates if d is not None)
-
-        # array_agg returns NULLs for zero/absent metrics; drop them.
-        if getattr(r, "hfr_vals", None):
-            cd["raw_hfr"].extend(v for v in r.hfr_vals if v is not None)
-        if getattr(r, "ecc_vals", None):
-            cd["raw_ecc"].extend(v for v in r.ecc_vals if v is not None)
-        if getattr(r, "fwhm_vals", None):
-            cd["raw_fwhm"].extend(v for v in r.fwhm_vals if v is not None)
 
         if r.med_hfr is not None:
             cd["hfr_vals"].append((r.med_hfr, r.frame_count))
@@ -663,9 +736,8 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
     def safe_round(v: float | None) -> float | None:
         return round(float(v), 2) if v is not None else None
 
-    def combo_mad(values: list[float]) -> float | None:
-        m = frame_quality.mad(values)
-        return round(float(m), 3) if m is not None else None
+    def combo_mad(value: float | None) -> float | None:
+        return round(float(value), 3) if value is not None else None
 
     def build_filter_metrics(filter_rows_dict: dict) -> list[EquipmentFilterMetrics]:
         result = []
@@ -683,6 +755,7 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
 
     equipment_performance = []
     for (tel, cam), cd in sorted(combo_data.items(), key=lambda x: x[1]["frame_count"], reverse=True):
+        mad_row = mad_by_combo.get((tel, cam))
         equipment_performance.append(EquipmentComboMetrics(
             telescope=tel,
             camera=cam,
@@ -693,9 +766,9 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
             best_hfr=safe_round(cd["best_hfr"]),
             median_eccentricity=weighted_median_approx(cd["ecc_vals"]),
             median_fwhm=weighted_median_approx(cd["fwhm_vals"]),
-            mad_hfr=combo_mad(cd["raw_hfr"]),
-            mad_eccentricity=combo_mad(cd["raw_ecc"]),
-            mad_fwhm=combo_mad(cd["raw_fwhm"]),
+            mad_hfr=combo_mad(mad_row.mad_hfr if mad_row else None),
+            mad_eccentricity=combo_mad(mad_row.mad_ecc if mad_row else None),
+            mad_fwhm=combo_mad(mad_row.mad_fwhm if mad_row else None),
             grouped=len(cd["raw_telescopes"]) > 1 or len(cd["raw_cameras"]) > 1,
             filters=sorted(cd["filters"]),
             filter_breakdown=build_filter_metrics(cd["filter_rows"]),
@@ -849,6 +922,9 @@ async def get_calendar(
     session: AsyncSession = Depends(get_session),
     user: User = Depends(get_current_user),
 ):
+    # Grouped by distinct imaging night (session_date alone), not by rig -- see
+    # the rig_session_count comment in _query_overview (AUD-019). A night with
+    # two rigs is one calendar cell here, but two rig-sessions in the overview.
     date_col = Image.session_date
     q = (
         select(

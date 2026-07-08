@@ -1,9 +1,10 @@
 import { Component, For, Show, createSignal, createMemo, onMount, onCleanup } from "solid-js";
-import { api } from "../../api/client";
+import { apiClient } from "../../api/generated/client";
+import { unwrap } from "../../api/unwrap";
 import { showToast, dismissToast } from "../Toast";
 import { useAuth } from "../AuthProvider";
 import { pollTask } from "../../store/taskPoller";
-import type { FilenameCandidateResponse } from "../../types";
+import type { FilenameCandidateResponse } from "../../api/types";
 
 const methodLabel = (c: FilenameCandidateResponse) => {
   switch (c.method) {
@@ -51,8 +52,8 @@ export const UnresolvedFilesTab: Component = () => {
   const refresh = async () => {
     try {
       const [p, a] = await Promise.all([
-        api.getFilenameCandidates("pending"),
-        api.getFilenameCandidates("accepted"),
+        apiClient.GET("/api/filename-resolution/candidates", { params: { query: { status: "pending" } } }).then(unwrap),
+        apiClient.GET("/api/filename-resolution/candidates", { params: { query: { status: "accepted" } } }).then(unwrap),
       ]);
       setPending(p);
       setAccepted(a);
@@ -80,7 +81,7 @@ export const UnresolvedFilesTab: Component = () => {
   const handleDetect = async () => {
     setDetecting(true);
     try {
-      const { task_id } = await api.triggerFilenameDetection();
+      const { task_id } = await apiClient.POST("/api/filename-resolution/detect").then(unwrap);
       showToast("Detecting filenames...", "info", 60000);
       stopPolling = pollTask(task_id, {
         onSuccess: (result) => {
@@ -107,7 +108,15 @@ export const UnresolvedFilesTab: Component = () => {
     setConfirmId(null);
     try {
       const createNew = c.method === "simbad_new";
-      await api.acceptFilenameCandidate(c.id, c.suggested_target_id ?? undefined, createNew);
+      await apiClient
+        .POST("/api/filename-resolution/candidates/{candidate_id}/accept", {
+          params: { path: { candidate_id: c.id } },
+          body: {
+            ...(c.suggested_target_id ? { target_id: c.suggested_target_id } : {}),
+            create_new: createNew,
+          },
+        })
+        .then(unwrap);
       showToast(`Assigned ${c.file_count} file(s) via "${c.extracted_name}"`);
       await refresh();
     } catch {
@@ -117,7 +126,11 @@ export const UnresolvedFilesTab: Component = () => {
 
   const handleDismiss = async (c: FilenameCandidateResponse) => {
     try {
-      await api.dismissFilenameCandidate(c.id);
+      await apiClient
+        .POST("/api/filename-resolution/candidates/{candidate_id}/dismiss", {
+          params: { path: { candidate_id: c.id } },
+        })
+        .then(unwrap);
       setPending((prev) => prev.filter((x) => x.id !== c.id));
     } catch {
       showToast("Dismiss failed", "error");
@@ -127,7 +140,11 @@ export const UnresolvedFilesTab: Component = () => {
   const handleRevert = async (c: FilenameCandidateResponse) => {
     setConfirmRevertId(null);
     try {
-      await api.revertFilenameCandidate(c.id);
+      await apiClient
+        .POST("/api/filename-resolution/candidates/{candidate_id}/revert", {
+          params: { path: { candidate_id: c.id } },
+        })
+        .then(unwrap);
       showToast(`Reverted "${c.extracted_name}"`);
       await refresh();
     } catch {

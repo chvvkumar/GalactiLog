@@ -1,36 +1,31 @@
 import { Component, For, Show, createSignal } from "solid-js";
 import type { Accessor } from "solid-js";
 import { A } from "@solidjs/router";
-import { api } from "../../api/client";
+import { apiClient } from "../../api/generated/client";
+import { unwrap } from "../../api/unwrap";
 import { showToast } from "../Toast";
 import { useAuth } from "../AuthProvider";
-import type { MergeCandidateResponse } from "../../types";
+import { useSettingsContext } from "../SettingsProvider";
+import type { MergeCandidateResponse } from "../../api/types";
+import { formatDate } from "../../utils/dateTime";
 
 interface MergeHistorySectionProps {
   candidates: Accessor<MergeCandidateResponse[]>;
   onAction: () => void;
 }
 
-function formatDate(iso: string): string {
-  try {
-    const d = new Date(iso);
-    return d.toLocaleDateString("en-US", {
-      month: "short",
-      day: "numeric",
-      year: "numeric",
-    });
-  } catch {
-    return iso;
-  }
-}
-
 const MergeHistorySection: Component<MergeHistorySectionProps> = (props) => {
   const { isAdmin } = useAuth();
+  const { timezone } = useSettingsContext();
   const [expanded, setExpanded] = createSignal(false);
 
   const handleUndo = async (candidateId: string) => {
     try {
-      await api.revertMergeCandidate(candidateId);
+      await apiClient
+        .POST("/api/targets/merge-candidates/{candidate_id}/revert", {
+          params: { path: { candidate_id: candidateId } },
+        })
+        .then(unwrap);
       showToast("Merge reverted");
       props.onAction();
       window.dispatchEvent(new Event("merges-changed"));
@@ -116,7 +111,7 @@ const MergeHistorySection: Component<MergeHistorySectionProps> = (props) => {
                           {/* Date + image count */}
                           <div class="flex items-center gap-2 flex-wrap">
                             <span class="text-xs text-theme-text-secondary">
-                              Merged on {formatDate(mergedDate())}
+                              Merged on {formatDate(mergedDate(), timezone())}
                             </span>
                             <span class="text-xs text-theme-text-secondary">
                               {c.source_image_count} {c.source_image_count === 1 ? "image" : "images"}

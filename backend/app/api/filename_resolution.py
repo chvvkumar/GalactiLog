@@ -16,6 +16,7 @@ from app.models.filename_candidate import FilenameCandidate
 from app.schemas.filename_candidate import FilenameCandidateResponse, AcceptRequest
 from app.schemas.common import StatusResponse
 from app.schemas.filename_resolution import CandidateCountResponse, DetectResponse
+from app.services.mosaic_detection import recompute_panel_membership_for_images
 
 router = APIRouter(prefix="/filename-resolution", tags=["filename-resolution"])
 
@@ -131,6 +132,11 @@ async def accept_candidate(
                 .where(Image.id.in_(valid_image_ids))
                 .values(resolved_target_id=target_id)
             )
+            # These images were unresolved (no target) at ingest, so panel
+            # membership was never attempted on them; now that they have a
+            # target, recompute it (previously-null panel_id can populate for
+            # simple one-target-one-panel mosaics; see resolve_panel_membership).
+            await recompute_panel_membership_for_images(session, valid_image_ids)
 
     # Update candidate
     candidate.status = "accepted"
@@ -179,14 +185,18 @@ async def revert_candidate(
 
     # Unset resolved_target_id for images matching image_ids AND the candidate's target
     if candidate.image_ids and candidate.suggested_target_id:
-        await session.execute(
+        result = await session.execute(
             update(Image)
             .where(
                 Image.id.in_(candidate.image_ids),
                 Image.resolved_target_id == candidate.suggested_target_id,
             )
             .values(resolved_target_id=None)
+            .returning(Image.id)
         )
+        # Losing their target means panel_id is no longer valid membership;
+        # clear it in step.
+        await recompute_panel_membership_for_images(session, result.scalars().all())
 
     candidate.status = "pending"
     candidate.resolved_at = None

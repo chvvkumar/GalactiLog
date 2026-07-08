@@ -83,6 +83,71 @@ async def test_cache_read_error_falls_through_to_compute():
     compute.assert_awaited_once()
 
 
+def _make_scan_iter(keys):
+    """Return a callable matching AsyncRedis.scan_iter's async-generator signature."""
+    async def _scan_iter(match=None):
+        for k in keys:
+            yield k
+    return _scan_iter
+
+
+@pytest.mark.asyncio
+async def test_invalidate_stats_and_analysis_cache_deletes_both_key_families():
+    """AUD-034: invalidation must delete the stats cache key and every
+    galactilog:analysis:* key discovered via SCAN, not just one family."""
+    analysis_keys = ["galactilog:analysis:correlation:abc", "galactilog:analysis:distribution:xyz"]
+
+    mock_redis = AsyncMock()
+    mock_redis.delete = AsyncMock()
+    mock_redis.scan_iter = _make_scan_iter(analysis_keys)
+
+    @asynccontextmanager
+    async def _mock_async_redis():
+        yield mock_redis
+
+    with patch("app.services.cache.async_redis", _mock_async_redis):
+        from app.services.cache import invalidate_stats_and_analysis_cache, STATS_CACHE_KEY
+        await invalidate_stats_and_analysis_cache()
+
+    # First delete call clears the stats cache key.
+    first_call_args = mock_redis.delete.await_args_list[0].args
+    assert first_call_args == (STATS_CACHE_KEY,)
+    # Second delete call clears every discovered analysis:* key.
+    second_call_args = mock_redis.delete.await_args_list[1].args
+    assert set(second_call_args) == set(analysis_keys)
+
+
+@pytest.mark.asyncio
+async def test_invalidate_stats_and_analysis_cache_no_analysis_keys_skips_second_delete():
+    """When SCAN finds no analysis keys, only the stats cache delete runs."""
+    mock_redis = AsyncMock()
+    mock_redis.delete = AsyncMock()
+    mock_redis.scan_iter = _make_scan_iter([])
+
+    @asynccontextmanager
+    async def _mock_async_redis():
+        yield mock_redis
+
+    with patch("app.services.cache.async_redis", _mock_async_redis):
+        from app.services.cache import invalidate_stats_and_analysis_cache
+        await invalidate_stats_and_analysis_cache()
+
+    mock_redis.delete.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_invalidate_stats_and_analysis_cache_swallows_redis_errors():
+    """A Redis failure during invalidation must not raise (mirrors cached_json)."""
+    @asynccontextmanager
+    async def _mock_async_redis():
+        raise ConnectionError("redis down")
+        yield  # pragma: no cover - unreachable, keeps this an async generator
+
+    with patch("app.services.cache.async_redis", _mock_async_redis):
+        from app.services.cache import invalidate_stats_and_analysis_cache
+        await invalidate_stats_and_analysis_cache()  # must not raise
+
+
 @pytest.mark.asyncio
 async def test_cache_write_error_does_not_raise():
     """A Redis write failure must not raise; the computed value is still returned."""

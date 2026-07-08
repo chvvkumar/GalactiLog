@@ -1,9 +1,9 @@
 import { createSignal } from "solid-js";
-import type { ActiveJob, ScanStatus, RebuildStatus } from "../types";
+import type { ActiveJob, ScanStatus, RebuildStatus } from "../api/types";
 
 const [celeryJobs, setCeleryJobs] = createSignal<Map<string, ActiveJob>>(new Map());
 
-export function scanStatusToJob(
+function scanStatusToJob(
   s: ScanStatus,
   onStop: () => Promise<void>
 ): ActiveJob | null {
@@ -11,8 +11,17 @@ export function scanStatusToJob(
 
   const startedAt = s.started_at != null ? s.started_at * 1000 : Date.now();
 
+  // While ingesting, prefer the server-derived envelope percent (0-100 ->
+  // 0-1 fraction); fall back to the hand-computed counter ratio only if the
+  // backend hasn't sent a percent yet (e.g. mixed-deploy rolling upgrade
+  // window). Discovery ("scanning") has no fixed total, so it stays
+  // indeterminate regardless of the envelope, matching prior behavior.
   const progress =
-    s.state === "ingesting" && s.total > 0
+    s.state !== "ingesting"
+      ? undefined
+      : s.percent !== undefined
+      ? Math.min(1, s.percent / 100)
+      : s.total > 0
       ? Math.min(1, (s.completed + s.failed) / s.total)
       : undefined;
 
@@ -35,7 +44,7 @@ export function scanStatusToJob(
   };
 }
 
-export function rebuildStatusToJob(r: RebuildStatus): ActiveJob | null {
+function rebuildStatusToJob(r: RebuildStatus): ActiveJob | null {
   if (r.state !== "running") return null;
 
   const startedAt = r.started_at != null ? r.started_at * 1000 : Date.now();
@@ -48,12 +57,16 @@ export function rebuildStatusToJob(r: RebuildStatus): ActiveJob | null {
     regen: "Regenerating Thumbnails",
   };
 
+  // Backend percent is 0-100; ActiveJob.progress is a 0-1 fraction expected
+  // by ActiveJobRow. Convert explicitly -- do not assume the scales match.
+  const progress = r.percent !== undefined ? Math.min(1, r.percent / 100) : undefined;
+
   return {
     id: "rebuild",
     category: "rebuild",
     label: modeLabel[r.mode] ?? "Rebuild",
     subLabel: r.message || undefined,
-    progress: undefined,
+    progress,
     startedAt,
     cancelable: false,
   };

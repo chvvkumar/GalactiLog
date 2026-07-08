@@ -1,7 +1,8 @@
 import { Component, For, Show, createEffect, createMemo, createSignal, onMount } from "solid-js";
 import { useNavigate } from "@solidjs/router";
-import { api, ApiError } from "../../api/client";
-import { showToast, dismissToast } from "../Toast";
+import { apiClient } from "../../api/generated/client";
+import { unwrap, ApiError } from "../../api/unwrap";
+import { showToast } from "../Toast";
 import { useAuth } from "../AuthProvider";
 import { useSettingsContext } from "../SettingsProvider";
 import HelpPopover from "../HelpPopover";
@@ -11,7 +12,7 @@ import type {
   MosaicDetailResponse,
   MosaicSuggestionResponse,
   TargetSearchResultFuzzy,
-} from "../../types";
+} from "../../api/types";
 
 // Module-level cache so data persists across navigations
 let cachedSuggestions: MosaicSuggestionResponse[] | null = null;
@@ -86,11 +87,28 @@ export const MosaicsTab: Component = () => {
   const [mosaicsCollapsed, setMosaicsCollapsed] = createSignal(false);
 
   type MosaicSortKey = "name" | "panels" | "integration" | "frames" | "date_range";
-  const [mosaicSortKey, setMosaicSortKey] = createSignal<MosaicSortKey>("name");
-  const [mosaicSortAsc, setMosaicSortAsc] = createSignal(true);
+  // Mosaics list sort persisted to localStorage (Dashboard pattern).
+  const MOSAIC_LIST_SORT_LS = "mosaics_list_sort";
+  let initialListSort: { key: MosaicSortKey; asc: boolean } = { key: "name", asc: true };
+  try {
+    const stored = localStorage.getItem(MOSAIC_LIST_SORT_LS);
+    if (stored) initialListSort = JSON.parse(stored);
+  } catch { /* ignore corrupt localStorage */ }
+  const [mosaicSortKey, setMosaicSortKey] = createSignal<MosaicSortKey>(initialListSort.key);
+  const [mosaicSortAsc, setMosaicSortAsc] = createSignal(initialListSort.asc);
+  const persistListSort = (key: MosaicSortKey, asc: boolean) => {
+    try { localStorage.setItem(MOSAIC_LIST_SORT_LS, JSON.stringify({ key, asc })); } catch { /* ignore */ }
+  };
   const toggleMosaicSort = (key: MosaicSortKey) => {
-    if (mosaicSortKey() === key) setMosaicSortAsc(!mosaicSortAsc());
-    else { setMosaicSortKey(key); setMosaicSortAsc(true); }
+    if (mosaicSortKey() === key) {
+      const asc = !mosaicSortAsc();
+      setMosaicSortAsc(asc);
+      persistListSort(key, asc);
+    } else {
+      setMosaicSortKey(key);
+      setMosaicSortAsc(true);
+      persistListSort(key, true);
+    }
   };
   const sortedMosaics = createMemo(() => {
     const key = mosaicSortKey();
@@ -148,20 +166,31 @@ export const MosaicsTab: Component = () => {
   const campaignGap = () =>
     settingsCtx.settings()?.general?.mosaic_campaign_gap_days ?? 0;
 
+  // Load lifecycle: skeleton rows while the first fetch is in flight, and an
+  // inline error with Retry if it fails, instead of a timed info toast that
+  // silently swallowed failures.
+  const [loading, setLoading] = createSignal(false);
+  const [loadError, setLoadError] = createSignal(false);
+
   const refresh = async (silent = false) => {
-    if (!silent) showToast("Loading mosaics...", "info", 15000);
+    if (!silent) {
+      setLoading(true);
+      setLoadError(false);
+    }
     try {
       const [s, m] = await Promise.all([
-        api.getMosaicSuggestions(),
-        api.getMosaics(),
+        apiClient.GET("/api/mosaics/suggestions").then(unwrap),
+        apiClient.GET("/api/mosaics").then(unwrap),
       ]);
       cachedSuggestions = s;
       cachedMosaics = m;
       setSuggestions(s);
       setMosaics(m);
-      if (!silent) dismissToast();
+      setLoadError(false);
     } catch {
-      if (!silent) dismissToast();
+      if (!silent) setLoadError(true);
+    } finally {
+      if (!silent) setLoading(false);
     }
   };
 
@@ -205,7 +234,7 @@ export const MosaicsTab: Component = () => {
     if (detecting()) return;
     setDetecting(true);
     await emitWithToast({
-      action: () => api.triggerMosaicDetection() as Promise<{ task_id: string }>,
+      action: () => apiClient.POST("/api/mosaics/detect").then(unwrap),
       pendingLabel: "Running mosaic detection...",
       successLabel: "Mosaic detection complete",
       errorLabel: "Mosaic detection failed",
@@ -270,13 +299,18 @@ export const MosaicsTab: Component = () => {
     }
     setAcceptingId(s.id);
     try {
-      await api.acceptMosaicSuggestion(s.id, selected);
+      await apiClient
+        .POST("/api/mosaics/suggestions/{suggestion_id}/accept", {
+          params: { path: { suggestion_id: s.id } },
+          body: { selected_panels: selected ?? null },
+        })
+        .then(unwrap);
       showToast(`Created mosaic "${s.suggested_name}"`);
       setExpandedSuggestion(null);
       // Update both lists before allowing next accept
       const [newSuggestions, newMosaics] = await Promise.all([
-        api.getMosaicSuggestions(),
-        api.getMosaics(),
+        apiClient.GET("/api/mosaics/suggestions").then(unwrap),
+        apiClient.GET("/api/mosaics").then(unwrap),
       ]);
       setSuggestions(newSuggestions);
       setMosaics(newMosaics);
@@ -296,7 +330,11 @@ export const MosaicsTab: Component = () => {
 
   const handleDismiss = async (s: MosaicSuggestionResponse) => {
     try {
-      await api.dismissMosaicSuggestion(s.id);
+      await apiClient
+        .POST("/api/mosaics/suggestions/{suggestion_id}/dismiss", {
+          params: { path: { suggestion_id: s.id } },
+        })
+        .then(unwrap);
       setConfirmDismissId(null);
       setExpandedSuggestion(null);
       setSuggestions((prev) => prev.filter((x) => x.id !== s.id));
@@ -372,7 +410,12 @@ export const MosaicsTab: Component = () => {
       try {
         const panelSel = selectedPanels()[s.id];
         const selected = panelSel && panelSel.size < s.panel_labels.length ? [...panelSel] : undefined;
-        await api.acceptMosaicSuggestion(s.id, selected);
+        await apiClient
+          .POST("/api/mosaics/suggestions/{suggestion_id}/accept", {
+            params: { path: { suggestion_id: s.id } },
+            body: { selected_panels: selected ?? null },
+          })
+          .then(unwrap);
         succeeded++;
         setBulkProgress({ done: succeeded, total: items.length });
         setSuggestions((prev) => prev.filter((x) => x.id !== s.id));
@@ -388,8 +431,8 @@ export const MosaicsTab: Component = () => {
     }
     try {
       const [newSuggestions, newMosaics] = await Promise.all([
-        api.getMosaicSuggestions(),
-        api.getMosaics(),
+        apiClient.GET("/api/mosaics/suggestions").then(unwrap),
+        apiClient.GET("/api/mosaics").then(unwrap),
       ]);
       setSuggestions(newSuggestions);
       setMosaics(newMosaics);
@@ -417,7 +460,11 @@ export const MosaicsTab: Component = () => {
     let succeeded = 0;
     for (const s of items) {
       try {
-        await api.dismissMosaicSuggestion(s.id);
+        await apiClient
+          .POST("/api/mosaics/suggestions/{suggestion_id}/dismiss", {
+            params: { path: { suggestion_id: s.id } },
+          })
+          .then(unwrap);
         succeeded++;
         setBulkProgress({ done: succeeded, total: items.length });
         setSuggestions((prev) => prev.filter((x) => x.id !== s.id));
@@ -442,7 +489,7 @@ export const MosaicsTab: Component = () => {
     let succeeded = 0;
     for (const id of ids) {
       try {
-        await api.deleteMosaic(id);
+        await apiClient.DELETE("/api/mosaics/{mosaic_id}", { params: { path: { mosaic_id: id } } }).then(unwrap);
         succeeded++;
         setBulkProgress({ done: succeeded, total: ids.length });
         // Remove from list immediately
@@ -458,7 +505,7 @@ export const MosaicsTab: Component = () => {
     }
     // Refresh suggestions (some may now be valid again)
     try {
-      const newSuggestions = await api.getMosaicSuggestions();
+      const newSuggestions = await apiClient.GET("/api/mosaics/suggestions").then(unwrap);
       setSuggestions(newSuggestions);
     } catch {}
     setBulkAction(null);
@@ -476,7 +523,9 @@ export const MosaicsTab: Component = () => {
     setAddingPanelFor(null);
     if (!details()[id]) {
       try {
-        const detail = await api.getMosaicDetail(id);
+        const detail = await apiClient
+          .GET("/api/mosaics/{mosaic_id}", { params: { path: { mosaic_id: id } } })
+          .then(unwrap);
         setDetails((prev) => ({ ...prev, [id]: detail }));
       } catch {
         showToast("Failed to load mosaic details", "error");
@@ -493,7 +542,9 @@ export const MosaicsTab: Component = () => {
       return;
     }
     try {
-      const results = await api.searchTargets(query);
+      const results = await apiClient
+        .GET("/api/targets/search", { params: { query: { q: query } } })
+        .then(unwrap);
       setSearchResults(results);
     } catch {
       setSearchResults([]);
@@ -514,17 +565,24 @@ export const MosaicsTab: Component = () => {
       return;
     }
     try {
-      await api.addMosaicPanel(mosaicId, target.id, label);
+      await apiClient
+        .POST("/api/mosaics/{mosaic_id}/panels", {
+          params: { path: { mosaic_id: mosaicId } },
+          body: { target_id: target.id, panel_label: label },
+        })
+        .then(unwrap);
       showToast(`Added panel "${label}"`);
       setPanelSearch("");
       setPanelLabel("");
       setSelectedTarget(null);
       setAddingPanelFor(null);
       // Refresh detail
-      const detail = await api.getMosaicDetail(mosaicId);
+      const detail = await apiClient
+        .GET("/api/mosaics/{mosaic_id}", { params: { path: { mosaic_id: mosaicId } } })
+        .then(unwrap);
       setDetails((prev) => ({ ...prev, [mosaicId]: detail }));
       // Refresh summary
-      const allMosaics = await api.getMosaics();
+      const allMosaics = await apiClient.GET("/api/mosaics").then(unwrap);
       setMosaics(allMosaics);
     } catch {
       showToast("Failed to add panel", "error");
@@ -533,11 +591,17 @@ export const MosaicsTab: Component = () => {
 
   const handleRemovePanel = async (mosaicId: string, panelId: string) => {
     try {
-      await api.removeMosaicPanel(mosaicId, panelId);
+      await apiClient
+        .DELETE("/api/mosaics/{mosaic_id}/panels/{panel_id}", {
+          params: { path: { mosaic_id: mosaicId, panel_id: panelId } },
+        })
+        .then(unwrap);
       showToast("Panel removed");
-      const detail = await api.getMosaicDetail(mosaicId);
+      const detail = await apiClient
+        .GET("/api/mosaics/{mosaic_id}", { params: { path: { mosaic_id: mosaicId } } })
+        .then(unwrap);
       setDetails((prev) => ({ ...prev, [mosaicId]: detail }));
-      const allMosaics = await api.getMosaics();
+      const allMosaics = await apiClient.GET("/api/mosaics").then(unwrap);
       setMosaics(allMosaics);
     } catch {
       showToast("Failed to remove panel", "error");
@@ -546,7 +610,7 @@ export const MosaicsTab: Component = () => {
 
   const handleDeleteMosaic = async (id: string) => {
     try {
-      await api.deleteMosaic(id);
+      await apiClient.DELETE("/api/mosaics/{mosaic_id}", { params: { path: { mosaic_id: id } } }).then(unwrap);
       showToast("Mosaic deleted");
       setConfirmDeleteId(null);
       setExpandedId(null);
@@ -560,7 +624,9 @@ export const MosaicsTab: Component = () => {
     const name = renameValue().trim();
     if (!name) return;
     try {
-      await api.updateMosaic(id, { name });
+      await apiClient
+        .PUT("/api/mosaics/{mosaic_id}", { params: { path: { mosaic_id: id } }, body: { name } })
+        .then(unwrap);
       showToast(`Renamed mosaic to "${name}"`);
       setRenamingId(null);
       setRenameValue("");
@@ -574,7 +640,7 @@ export const MosaicsTab: Component = () => {
     const name = newMosaicName().trim();
     if (!name) return;
     try {
-      await api.createMosaic(name);
+      await apiClient.POST("/api/mosaics", { body: { name, panels: [] } }).then(unwrap);
       showToast(`Created mosaic "${name}"`);
       setNewMosaicName("");
       setShowCreate(false);
@@ -849,7 +915,7 @@ export const MosaicsTab: Component = () => {
                             {formatIntegration(totals().integration)}
                             <Show when={(s.other_session_count ?? 0) > 0}>
                               {" · "}
-                              <span class="text-amber-400">
+                              <span class="text-theme-warning">
                                 +{s.other_session_count} more sessions
                               </span>
                             </Show>
@@ -1074,7 +1140,7 @@ export const MosaicsTab: Component = () => {
                 <button
                   onClick={async (e) => {
                     e.stopPropagation();
-                    await api.clearMosaicReviews();
+                    await apiClient.POST("/api/mosaics/clear-reviews").then(unwrap);
                     await refresh();
                   }}
                   class="px-3 py-1.5 text-sm border border-theme-border text-theme-text-secondary rounded-[var(--radius-sm)] hover:text-theme-text-primary hover:border-theme-accent transition-colors"
@@ -1146,7 +1212,32 @@ export const MosaicsTab: Component = () => {
         <Show
           when={mosaics().length > 0}
           fallback={
-            <p class="text-sm text-theme-text-secondary">No mosaics yet.</p>
+            <Show
+              when={loadError()}
+              fallback={
+                <Show
+                  when={loading()}
+                  fallback={<p class="text-sm text-theme-text-secondary">No mosaics yet.</p>}
+                >
+                  <div class="space-y-2">
+                    <For each={Array.from({ length: 4 })}>
+                      {() => (
+                        <div class="flex items-center gap-3 p-3 border border-theme-border rounded-[var(--radius-sm)]">
+                          <div class="h-4 w-40 bg-theme-elevated rounded animate-pulse" />
+                          <div class="h-4 w-16 bg-theme-elevated rounded animate-pulse ml-auto" />
+                          <div class="h-4 w-16 bg-theme-elevated rounded animate-pulse" />
+                        </div>
+                      )}
+                    </For>
+                  </div>
+                </Show>
+              }
+            >
+              <div class="px-3 py-2 rounded border border-theme-error/30 bg-theme-error/10 text-theme-error text-sm flex items-center justify-between">
+                <span>Failed to load mosaics.</span>
+                <button onClick={() => refresh()} class="ml-3 underline hover:no-underline">Retry</button>
+              </div>
+            </Show>
           }
         >
           <table class="w-full text-sm border-collapse">
@@ -1208,7 +1299,7 @@ export const MosaicsTab: Component = () => {
                           </Show>
                           <span class="font-medium">{m.name}</span>
                           <Show when={m.needs_review}>
-                            <span class="text-xs text-amber-400 border border-amber-400/30 rounded px-1.5 py-0.5 whitespace-nowrap">
+                            <span class="text-xs text-theme-warning border border-theme-warning/30 rounded px-1.5 py-0.5 whitespace-nowrap">
                               Needs Review
                             </span>
                           </Show>
@@ -1245,12 +1336,16 @@ export const MosaicsTab: Component = () => {
                                 columnType={col.column_type}
                                 value={m.custom_values?.[col.slug]}
                                 dropdownOptions={col.dropdown_options}
-                                onSave={(val) => {
-                                  api.setCustomValue({
-                                    column_id: col.id,
-                                    mosaic_id: m.id,
-                                    value: val,
-                                  });
+                                onSave={async (val) => {
+                                  await apiClient
+                                    .PUT("/api/custom-columns/values", {
+                                      body: {
+                                        column_id: col.id,
+                                        mosaic_id: m.id,
+                                        value: val,
+                                      },
+                                    })
+                                    .then(unwrap);
                                 }}
                               />
                             </td>

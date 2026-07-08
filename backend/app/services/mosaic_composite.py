@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import io
 import logging
@@ -19,6 +20,7 @@ from astropy.wcs import WCS
 from app.models.image import Image
 from app.services.activity import emit as _emit_activity
 from app.services.thumbnail import _read_binned
+from app.services.coordinates import _parse_ra, _parse_coord
 from app.services.stretch import (
     normalize_to_unit,
     resize_array,
@@ -26,58 +28,6 @@ from app.services.stretch import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-def _parse_coord(value) -> float | None:
-    """Parse a coordinate value that may be numeric or sexagesimal.
-
-    Handles:
-    - Numeric (float/int): returned directly
-    - RA sexagesimal 'HH MM SS.s': converted to degrees (* 15)
-    - DEC sexagesimal '[+-]DD MM SS.s': converted to degrees
-    """
-    if value is None:
-        return None
-    if isinstance(value, (int, float)):
-        return float(value)
-    s = str(value).strip()
-    try:
-        return float(s)
-    except ValueError:
-        pass
-    # Sexagesimal parsing
-    parts = s.lstrip("+-").split()
-    if len(parts) != 3:
-        return None
-    try:
-        d, m, sec = float(parts[0]), float(parts[1]), float(parts[2])
-        deg = d + m / 60 + sec / 3600
-        if s.startswith("-"):
-            deg = -deg
-        return deg
-    except (ValueError, IndexError):
-        return None
-
-
-def _parse_ra(value) -> float | None:
-    """Parse RA - if sexagesimal (HH MM SS), multiply by 15 for degrees."""
-    if value is None:
-        return None
-    if isinstance(value, (int, float)):
-        return float(value)
-    s = str(value).strip()
-    try:
-        return float(s)
-    except ValueError:
-        pass
-    parts = s.split()
-    if len(parts) != 3:
-        return None
-    try:
-        h, m, sec = float(parts[0]), float(parts[1]), float(parts[2])
-        return (h + m / 60 + sec / 3600) * 15
-    except (ValueError, IndexError):
-        return None
 
 
 def score_frames(frames: list) -> list[tuple[Any, float]]:
@@ -149,6 +99,7 @@ async def select_best_frame(
     object_pattern: str | None,
     session: AsyncSession,
     included_dates: list | None = None,
+    panel_label: str | None = None,
 ):
     """Select the best LIGHT frame for a mosaic panel.
     Primary: lowest median_hfr > 0.
@@ -161,6 +112,17 @@ async def select_best_frame(
     ]
     if object_pattern:
         base_filter.append(Image.raw_headers["OBJECT"].astext.ilike(object_pattern))
+        # ILIKE is a cheap pre-filter only -- it also matches sibling panels
+        # for which this panel's number is a prefix (e.g. "1" matching
+        # "Panel 12"); pair it with an exact-number regex (AUD-008).
+        if panel_label:
+            from app.services.mosaic_detection import exact_panel_regex, load_mosaic_keywords, panel_number_from_label
+
+            keywords = await load_mosaic_keywords(session)
+            expected_num = panel_number_from_label(panel_label)
+            base_filter.append(
+                Image.raw_headers["OBJECT"].astext.op("~*")(exact_panel_regex(keywords, expected_num))
+            )
     if included_dates is not None:
         if included_dates:
             base_filter.append(Image.session_date.in_(included_dates))
@@ -196,6 +158,7 @@ async def select_best_frame_for_filter(
     filter_name: str,
     session: AsyncSession,
     included_dates: list | None = None,
+    panel_label: str | None = None,
 ) -> tuple[Any, float] | None:
     """Select the best LIGHT frame for a specific filter using quality scoring.
     Returns (frame, score) or None.
@@ -208,6 +171,16 @@ async def select_best_frame_for_filter(
     ]
     if object_pattern:
         base_filter.append(Image.raw_headers["OBJECT"].astext.ilike(object_pattern))
+        # See select_best_frame: ILIKE alone can match a sibling panel whose
+        # number this panel's number is a prefix of (AUD-008).
+        if panel_label:
+            from app.services.mosaic_detection import exact_panel_regex, load_mosaic_keywords, panel_number_from_label
+
+            keywords = await load_mosaic_keywords(session)
+            expected_num = panel_number_from_label(panel_label)
+            base_filter.append(
+                Image.raw_headers["OBJECT"].astext.op("~*")(exact_panel_regex(keywords, expected_num))
+            )
     if included_dates is not None:
         if included_dates:
             base_filter.append(Image.session_date.in_(included_dates))
@@ -255,6 +228,7 @@ async def find_default_filter(
     """
     from sqlalchemy import func as sa_func
     from collections import defaultdict
+    from app.services.mosaic_detection import exact_panel_regex, load_mosaic_keywords, panel_number_from_label
 
     # ----------------------------------------------------------------
     # Partition panels into "simple" (no object_pattern, no per-panel
@@ -273,6 +247,20 @@ async def find_default_filter(
             complex_panels.append(panel)
         else:
             simple_panels.append(panel)
+
+    # ILIKE alone matches sibling panels for which this panel's number is a
+    # prefix (e.g. "1" matching "Panel 12"); pair it with an exact-number
+    # regex for every panel that has an object_pattern (AUD-008).
+    keywords = await load_mosaic_keywords(session) if any(p.object_pattern for p in complex_panels) else []
+
+    def _object_pattern_filters(panel) -> list:
+        if not panel.object_pattern:
+            return []
+        expected_num = panel_number_from_label(panel.panel_label)
+        return [
+            Image.raw_headers["OBJECT"].astext.ilike(panel.object_pattern),
+            Image.raw_headers["OBJECT"].astext.op("~*")(exact_panel_regex(keywords, expected_num)),
+        ]
 
     all_filters: dict[str, float] = {}
 
@@ -303,8 +291,7 @@ async def find_default_filter(
             Image.image_type == "LIGHT",
             Image.file_path.isnot(None),
         ]
-        if panel.object_pattern:
-            base_filter.append(Image.raw_headers["OBJECT"].astext.ilike(panel.object_pattern))
+        base_filter.extend(_object_pattern_filters(panel))
         if panel_included_dates is not None:
             pid = str(panel.id)
             if pid in panel_included_dates:
@@ -378,8 +365,7 @@ async def find_default_filter(
             Image.file_path.isnot(None),
             Image.filter_used.in_(available),
         ]
-        if panel.object_pattern:
-            base_filter.append(Image.raw_headers["OBJECT"].astext.ilike(panel.object_pattern))
+        base_filter.extend(_object_pattern_filters(panel))
         if panel_included_dates is not None:
             pid = str(panel.id)
             if pid in panel_included_dates:
@@ -701,13 +687,13 @@ async def build_mosaic_composite(
             if filter_name:
                 result = await select_best_frame_for_filter(
                     panel.target_id, panel.object_pattern, filter_name, session,
-                    included_dates=included_dates,
+                    included_dates=included_dates, panel_label=panel.panel_label,
                 )
                 frame = result[0] if result else None
             else:
                 frame = await select_best_frame(
                     panel.target_id, panel.object_pattern, session,
-                    included_dates=included_dates,
+                    included_dates=included_dates, panel_label=panel.panel_label,
                 )
             if frame and frame.file_path:
                 panel_frames.append((panel, frame))
@@ -721,8 +707,9 @@ async def build_mosaic_composite(
         if cached:
             return cached
 
-        panel_infos = []
-        tiles = {}
+        # First pass: resolve coordinates and validate file paths. This is
+        # cheap (no FITS reads) so it stays on the event loop.
+        renderable = []
         for panel, frame in panel_frames:
             headers = frame.raw_headers or {}
             ra_raw = headers.get("RA") or headers.get("OBJCTRA")
@@ -736,12 +723,29 @@ async def build_mosaic_composite(
             fits_path = Path(frame.file_path)
             if not fits_path.exists():
                 continue
-            try:
-                tile_img, native_width = generate_panel_thumbnail(fits_path, max_width=tile_max_width)
-                tiles[pid] = tile_img
-            except Exception:
+            renderable.append((panel, frame, pid, fits_path, ra, dec, headers))
+
+        # Second pass: generate every panel tile concurrently. Each
+        # generate_panel_thumbnail is a blocking FITS read + numpy stretch +
+        # PIL encode, so it runs in a worker thread (off the event loop); the
+        # gather also parallelizes the NFS reads across panels.
+        tile_results = await asyncio.gather(
+            *(
+                asyncio.to_thread(generate_panel_thumbnail, fits_path, max_width=tile_max_width)
+                for (_p, _f, _pid, fits_path, _ra, _dec, _h) in renderable
+            ),
+            return_exceptions=True,
+        )
+
+        panel_infos = []
+        tiles = {}
+        native_width = 0
+        for (panel, frame, pid, fits_path, ra, dec, headers), result in zip(renderable, tile_results):
+            if isinstance(result, Exception):
                 logger.warning("Failed to generate thumbnail for panel %s", panel.id)
                 continue
+            tile_img, native_width = result
+            tiles[pid] = tile_img
 
             panel_infos.append(PanelInfo(
                 panel_id=pid,

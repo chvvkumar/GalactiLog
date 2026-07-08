@@ -93,7 +93,23 @@ class ScanFilterConfig:
         )
 
     def roots(self, fits_root: Path) -> list[Path]:
-        return list(self.include_paths) if self.include_paths else [fits_root]
+        if not self.include_paths:
+            return [fits_root]
+        # Deduplicate include paths and drop any that are nested under another
+        # include path: walking the ancestor already visits the descendant, so
+        # keeping both would enumerate (and queue ingest for) the nested files
+        # twice in a single scan (AUD-015). Original order is preserved.
+        result: list[Path] = []
+        for path in self.include_paths:
+            if path in result:
+                continue  # exact duplicate already kept
+            nested = any(
+                other != path and path.is_relative_to(other)
+                for other in self.include_paths
+            )
+            if not nested:
+                result.append(path)
+        return result
 
     def should_walk_dir(self, dir_path: Path, fits_root: Path) -> bool:
         resolved = dir_path.resolve()

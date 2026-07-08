@@ -16,21 +16,33 @@ orchestrator that gathers per-target frame data and persists suggestions.
 """
 
 import math
-import re
 import statistics
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from sqlalchemy import select, func, delete
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, delete
+from sqlalchemy.orm import Session
 
 from app.models import Target, UserSettings, SETTINGS_ROW_ID
 from app.models.image import Image
 from app.models.mosaic import Mosaic
 from app.models.mosaic_panel import MosaicPanel
 from app.models.mosaic_suggestion import MosaicSuggestion
-from app.services.mosaic_composite import _parse_ra, _parse_coord
+from app.services.coordinates import _parse_ra, _parse_coord
+from app.services.panel_tokens import (  # noqa: F401 -- re-exported
+    _TILE_RE, _keyword_regex, match_panel_token_full, match_panel_token,
+    strip_panel_token, build_panel_pattern, panel_number_from_label,
+    object_matches_panel, exact_panel_regex, _panel_label,
+)
+from app.services.panel_membership import (  # noqa: F401 -- re-exported
+    load_mosaic_keywords, load_mosaic_keywords_sync,
+    resolve_panel_membership, retro_link_panel_images,
+    prune_stale_panel_sessions, _prepare_recompute_groups,
+    _panel_id_lookup_stmt, _pick_panel_id,
+    recompute_panel_membership_for_images,
+    recompute_panel_membership_for_images_sync,
+)
 
 
 # Fallback position tolerance when no FOV-derived value is available
@@ -141,78 +153,6 @@ def angular_separation_deg(ra1: float, dec1: float, ra2: float, dec2: float) -> 
 
 
 # ---------------------------------------------------------------------------
-# Stage 1: name-path token matching
-# ---------------------------------------------------------------------------
-
-# Tile convention: "<base>_<row>-<col>" e.g. IC1805_1-1. The row-col pair is
-# the panel number. Anchored to end-of-string so trailing tokens aren't lost.
-_TILE_RE = re.compile(r"^(.+?)[\s_-]+(\d+-\d+)\s*$")
-
-
-def _keyword_regex(keywords: list[str]) -> re.Pattern:
-    kw_pattern = "|".join(re.escape(k) for k in keywords)
-    # Capture the keyword token itself (group 2) so the stored panel_pattern can
-    # include it for unambiguous matching.
-    return re.compile(
-        rf"^(.+?)\s*[-_\s]?\s*({kw_pattern})\s*[-_\s]?\s*(\d+)\s*$",
-        re.IGNORECASE,
-    )
-
-
-def match_panel_token_full(
-    name: str, keywords: list[str]
-) -> tuple[str, str, str | None] | None:
-    """Return (base_name, panel_number, keyword) if name carries a token.
-
-    ``keyword`` is the matched keyword (e.g. "Panel"/"P") for keyword matches,
-    or None for tile-pattern (_R-C) matches. Tries the keyword pattern first,
-    then the tile pattern. Returns None when there is no panel token.
-    """
-    if not name:
-        return None
-    if keywords:
-        m = _keyword_regex(keywords).match(name)
-        if m:
-            return m.group(1).strip(), m.group(3), m.group(2)
-    m = _TILE_RE.match(name)
-    if m:
-        return m.group(1).strip(), m.group(2), None
-    return None
-
-
-def match_panel_token(name: str, keywords: list[str]) -> tuple[str, str] | None:
-    """Return (base_name, panel_number) if name carries a panel/tile token.
-
-    Tries the keyword pattern (Panel N / P N) first, then the _R-C tile
-    pattern. Returns None when the name has no panel token (never-absorb).
-    """
-    result = match_panel_token_full(name, keywords)
-    if result is None:
-        return None
-    base, num, _kw = result
-    return base, num
-
-
-def strip_panel_token(name: str, keywords: list[str]) -> str | None:
-    """Return the stripped base name, or None if no panel token present."""
-    result = match_panel_token(name, keywords)
-    return result[0] if result else None
-
-
-def build_panel_pattern(base_name: str, keyword: str | None, num: str) -> str:
-    """Build an ILIKE pattern that uniquely identifies a panel's OBJECT.
-
-    Keyword candidates include the matched keyword token so the pattern does not
-    match a sibling panel of the same base (important when the base itself
-    contains digits, e.g. "Sh2 119"). Tile candidates carry the R-C token, which
-    is already unique within the base.
-    """
-    if keyword:
-        return f"%{base_name}%{keyword}%{num}%"
-    return f"%{base_name}%{num}%"
-
-
-# ---------------------------------------------------------------------------
 # Stage 2 + 3: grouping, reconciliation, scoring
 # ---------------------------------------------------------------------------
 
@@ -288,10 +228,6 @@ def _build_candidates(targets: list[dict], keywords: list[str]) -> list[PanelCan
                 )
             )
     return candidates
-
-
-def _panel_label(num: str) -> str:
-    return f"Panel {num}"
 
 
 def _effective_tolerance(
@@ -681,32 +617,43 @@ def compute_dedup_signature(
 # DB orchestrator
 # ---------------------------------------------------------------------------
 
-async def _gather_target_records(session: AsyncSession) -> list[dict]:
+def _gather_target_records(session: Session) -> list[dict]:
     """Build per-target records (object names, median center, FOV) for all
     unmerged targets not already assigned to a mosaic panel.
     """
     in_mosaic_q = select(MosaicPanel.target_id)
-    in_mosaic = {r[0] for r in (await session.execute(in_mosaic_q)).all()}
+    in_mosaic = {r[0] for r in session.execute(in_mosaic_q).all()}
 
     targets_q = select(Target.id).where(Target.merged_into_id.is_(None))
-    target_ids = [r[0] for r in (await session.execute(targets_q)).all()]
+    target_ids = [r[0] for r in session.execute(targets_q).all()]
     target_ids = [tid for tid in target_ids if tid not in in_mosaic]
     if not target_ids:
         return []
 
-    # Pull LIGHT-frame headers per target. Project only the JSONB header so we
-    # don't load full ORM rows. Headers carry OBJECT / RA / DEC / FOCALLEN etc.
+    # Pull only the header keys detection actually reads, extracted as scalar
+    # columns, instead of shipping the full raw_headers JSONB of every LIGHT
+    # frame (hundreds of MB on a large catalog). Keys used downstream:
+    # OBJECT (panel token), RA/DEC/OBJCTRA/OBJCTDEC (center), FOCALLEN/XPIXSZ/
+    # NAXIS1/NAXIS2 (FOV).
+    _HEADER_KEYS = (
+        "OBJECT", "RA", "DEC", "OBJCTRA", "OBJCTDEC",
+        "FOCALLEN", "XPIXSZ", "NAXIS1", "NAXIS2",
+    )
     rows_q = (
-        select(Image.resolved_target_id, Image.raw_headers)
+        select(
+            Image.resolved_target_id,
+            *(Image.raw_headers[k].astext.label(k) for k in _HEADER_KEYS),
+        )
         .where(
             Image.resolved_target_id.in_(target_ids),
             Image.image_type == "LIGHT",
         )
     )
     by_target_headers: dict = defaultdict(list)
-    for tid, headers in (await session.execute(rows_q)).all():
+    for row in session.execute(rows_q).all():
+        headers = {k: getattr(row, k) for k in _HEADER_KEYS if getattr(row, k) is not None}
         if headers:
-            by_target_headers[tid].append(headers)
+            by_target_headers[row.resolved_target_id].append(headers)
 
     def _first_fov(frame_list: list[dict]) -> float | None:
         for h in frame_list:
@@ -757,14 +704,15 @@ async def _gather_target_records(session: AsyncSession) -> list[dict]:
     return records
 
 
-async def detect_mosaic_panels(session: AsyncSession, gap_days: int = 0) -> int:
+def detect_mosaic_panels(session: Session, gap_days: int = 0) -> int:
     """Scan targets for mosaic panels (name + position) and create suggestions.
 
-    Entry point used by the API (with gap_days from settings) and the Celery
-    task (gap_days defaults to 0). Reads mosaic_keywords and
-    mosaic_position_tolerance_arcmin from user settings.
+    Entry point used exclusively by the Celery task (`detect_mosaic_panels_task`
+    in `app.worker.tasks_mosaics`), which resolves `gap_days` from user settings
+    before calling in. Reads mosaic_keywords and mosaic_position_tolerance_arcmin
+    from user settings.
     """
-    settings = await session.get(UserSettings, SETTINGS_ROW_ID)
+    settings = session.get(UserSettings, SETTINGS_ROW_ID)
     general = settings.general if settings else {}
     keywords = general.get("mosaic_keywords", ["Panel", "P"])
     tolerance_arcmin = general.get("mosaic_position_tolerance_arcmin", 0) or 0
@@ -772,7 +720,7 @@ async def detect_mosaic_panels(session: AsyncSession, gap_days: int = 0) -> int:
     if not keywords:
         keywords = []
 
-    records = await _gather_target_records(session)
+    records = _gather_target_records(session)
     if not records:
         return 0
 
@@ -786,30 +734,43 @@ async def detect_mosaic_panels(session: AsyncSession, gap_days: int = 0) -> int:
     new_base_names = {g.base_name for g in groups}
 
     # Durable dismissals: load the dedup signatures of rejected (dismissed)
-    # suggestions BEFORE clearing pending. Any regenerated group whose signature
-    # matches is skipped so a dismissed suggestion does not resurface. If the
+    # suggestions BEFORE clearing pending, along with the session dates each
+    # dismissal covered at the time. A regenerated group is skipped only when
+    # its signature matches AND its own session dates are fully covered by
+    # (a subset of) the dismissed suggestion's dates -- a later campaign over
+    # the same panel set that includes genuinely new dates (e.g. a re-shoot
+    # years later, AUD-033) is NOT a subset and resurfaces normally. If the
     # panel set materially changes (different target set or panel_labels) the
-    # signature differs and the suggestion may resurface (acceptable default).
-    rejected_q = select(MosaicSuggestion.dedup_signature).where(
+    # signature differs and the suggestion may resurface regardless.
+    rejected_q = select(
+        MosaicSuggestion.dedup_signature, MosaicSuggestion.session_dates
+    ).where(
         MosaicSuggestion.status == "rejected",
         MosaicSuggestion.dedup_signature.is_not(None),
     )
-    rejected_signatures = {
-        r[0] for r in (await session.execute(rejected_q)).all() if r[0]
-    }
+    rejected_signatures: dict[str, set[str]] = {}
+    for sig, dates_by_label in session.execute(rejected_q).all():
+        if not sig:
+            continue
+        flat_dates: set[str] = set()
+        for dates in (dates_by_label or {}).values():
+            flat_dates.update(dates or [])
+        # Multiple dismissed rows can share a signature (re-dismissed after a
+        # resurfacing); union their covered dates so any of them can suppress.
+        rejected_signatures.setdefault(sig, set()).update(flat_dates)
 
     # Detection is idempotent: clear ALL pending suggestions before regenerating.
     # This drops stale rows from prior runs AND legacy rows from the old code
     # (which have NULL base_name/geometry and would otherwise coexist as
     # no-preview duplicates). Rejected/dismissed and accepted rows are untouched.
-    await session.execute(
+    session.execute(
         delete(MosaicSuggestion).where(MosaicSuggestion.status == "pending")
     )
 
     # Skip base names already represented by an existing mosaic.
     existing_mosaic_q = select(Mosaic.name)
     existing_mosaic_names = {
-        r[0].upper() for r in (await session.execute(existing_mosaic_q)).all()
+        r[0].upper() for r in session.execute(existing_mosaic_q).all()
     }
     accepted_bases: set[str] = set()
     for base in new_base_names:
@@ -837,16 +798,29 @@ async def detect_mosaic_panels(session: AsyncSession, gap_days: int = 0) -> int:
         sess_dates: dict[str, list[str]] = {}
         all_dates: list[str] = []
         per_panel_dates: list[list[str]] = []
-        for label, pattern in zip(g.panel_labels, panel_patterns):
-            dates_q = select(func.distinct(Image.session_date)).where(
-                Image.image_type == "LIGHT",
-                Image.raw_headers["OBJECT"].astext.ilike(pattern),
+        for label, pattern, num in zip(g.panel_labels, panel_patterns, g.panel_numbers):
+            # ILIKE is a cheap pre-filter only (it also matches sibling panels
+            # for which `num` is a prefix, e.g. "1" matching "Panel 12"), so
+            # fetch (session_date, OBJECT) pairs and re-parse each OBJECT to
+            # keep only frames that exactly belong to this panel (AUD-008).
+            dates_q = (
+                select(
+                    Image.session_date,
+                    Image.raw_headers["OBJECT"].astext.label("obj"),
+                )
+                .where(
+                    Image.image_type == "LIGHT",
+                    Image.raw_headers["OBJECT"].astext.ilike(pattern),
+                )
+                .distinct()
             )
-            raw_dates = (await session.execute(dates_q)).scalars().all()
+            raw_rows = session.execute(dates_q).all()
             date_strs = sorted(
-                d.strftime("%Y-%m-%d") if hasattr(d, "strftime") else str(d)
-                for d in raw_dates
-                if d is not None
+                {
+                    d.strftime("%Y-%m-%d") if hasattr(d, "strftime") else str(d)
+                    for d, obj in raw_rows
+                    if d is not None and object_matches_panel(obj, keywords, num)
+                }
             )
             sess_dates[label] = date_strs
             per_panel_dates.append(date_strs)
@@ -890,12 +864,12 @@ async def detect_mosaic_panels(session: AsyncSession, gap_days: int = 0) -> int:
                     rejected_signatures=rejected_signatures,
                 )
 
-    await session.commit()
+    session.commit()
     return count
 
 
 def _add_suggestion(
-    session: AsyncSession,
+    session: Session,
     group: PanelGroup,
     raw_id: dict,
     panel_patterns: list[str],
@@ -903,12 +877,14 @@ def _add_suggestion(
     suggested_name: str,
     subset_idxs: list[int] | None = None,
     used_names: set[str] | None = None,
-    rejected_signatures: set[str] | None = None,
+    rejected_signatures: dict[str, set[str]] | None = None,
 ) -> int:
     """Create and add one MosaicSuggestion.
 
     Returns 1 if created, 0 if skipped because its dedup signature matches a
-    dismissed (rejected) suggestion. ``suggested_name`` is uniquified against
+    dismissed (rejected) suggestion AND its session dates are fully covered
+    by that dismissal's dates (AUD-033: a later campaign with genuinely new
+    dates is not suppressed). ``suggested_name`` is uniquified against
     ``used_names`` only when the suggestion is actually created.
     """
     if subset_idxs is None:
@@ -932,7 +908,13 @@ def _add_suggestion(
 
     signature = compute_dedup_signature(group.base_name, target_ids, panel_labels)
     if rejected_signatures and signature in rejected_signatures:
-        return 0  # user dismissed this exact panel set; do not resurface it
+        campaign_dates: set[str] = set()
+        for dates in sess_dates.values():
+            campaign_dates.update(dates or [])
+        if campaign_dates <= rejected_signatures[signature]:
+            # Every date in this campaign was already covered by the
+            # dismissal; do not resurface it.
+            return 0
 
     if used_names is not None:
         suggested_name = _unique_name(suggested_name, used_names)

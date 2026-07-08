@@ -1,4 +1,4 @@
-import type { DisplaySettings, ColumnVisibility } from "../types";
+import type { DisplaySettings, ColumnVisibility } from "../api/types";
 
 export function isFieldVisible(
   display: DisplaySettings | undefined,

@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import String, DateTime, func, Index
+from sqlalchemy import String, DateTime, func
 from sqlalchemy.dialects.postgresql import UUID, ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -34,7 +34,3 @@ class MosaicSuggestion(Base):
     # target_ids + sorted panel_labels. Used to keep dismissed (rejected)
     # suggestions from resurfacing across re-detection runs.
     dedup_signature: Mapped[str | None] = mapped_column(String(512), nullable=True)
-
-    __table_args__ = (
-        Index("ix_mosaic_suggestions_dedup_signature", "dedup_signature"),
-    )

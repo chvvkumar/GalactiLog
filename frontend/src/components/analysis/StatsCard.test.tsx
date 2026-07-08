@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { render } from "@solidjs/testing-library";
 import StatsCard from "./StatsCard";
-import type { SummaryStats } from "../../types";
+import type { SummaryStats } from "../../api/types";
 
 const sampleStats: SummaryStats = {
   count: 100,

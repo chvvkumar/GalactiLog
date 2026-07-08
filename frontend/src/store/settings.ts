@@ -1,11 +1,51 @@
 import { createSignal, createResource, startTransition } from "solid-js";
-import { api } from "../api/client";
-import type { SettingsResponse, GeneralSettings, FilterConfig, EquipmentConfig, DisplaySettings } from "../types";
+import { apiClient } from "../api/generated/client";
+import { unwrap } from "../api/unwrap";
+// SettingsResponse/GeneralSettings/FilterConfig/EquipmentConfig/DisplaySettings
+// are the hand-written definitions in `../api/types` (required
+// `FilterConfig.aliases`, `GeneralSettings.nina_instances`/
+// `stellarium_instances` typed as `IntegrationInstance[]`, etc.), rather
+// than the generated schema, which loosens several of these fields to
+// optional/untyped (backend Pydantic defaults collapsed by the OpenAPI
+// dump). `store/graphSettings.ts` depends on `SettingsResponse.graph`
+// carrying this required-field `GraphSettings` shape, and this store is
+// consumed by nearly every page. The backend always populates the full
+// shape, so the casts below reflect actual runtime data, not a behavior
+// change.
+import type { SettingsResponse, GeneralSettings, FilterConfig, EquipmentConfig, DisplaySettings } from "../api/types";
+// The generated GeneralSettings schema marks several Pydantic-default fields
+// (activity_retention_days, app_log_*, mosaic_position_tolerance_arcmin) as
+// required, even though the backend model supplies defaults for them and
+// tolerates a PUT body that omits them (the old hand-written GeneralSettings
+// type -- and every caller of saveGeneral -- has never included these
+// fields). Cast at the request boundary only; this preserves the exact
+// request body the old fetchJson-based client sent.
+import type { GeneratedGeneralSettings } from "../api/types";
 
 const [settingsGate, setSettingsGate] = createSignal(false);
 export function enableSettingsFetch() { setSettingsGate(true); }
 
-const [settingsData, { refetch: refetchSettings }] = createResource(settingsGate, () => api.getSettings());
+// One-shot seed consumed by the resource's first run so that opening the gate
+// after a bootstrap load does not fire a redundant GET /settings. Manual
+// refetches still hit the API.
+let pendingSettingsSeed: SettingsResponse | null = null;
+const [settingsData, { refetch: refetchSettings, mutate: mutateSettings }] = createResource(
+  settingsGate,
+  async () => {
+    if (pendingSettingsSeed) {
+      const s = pendingSettingsSeed;
+      pendingSettingsSeed = null;
+      return s;
+    }
+    return apiClient.GET("/api/settings", {}).then(unwrap) as Promise<SettingsResponse>;
+  },
+);
+
+export function seedSettings(data: SettingsResponse) {
+  pendingSettingsSeed = data;
+  mutateSettings(data);
+  setSettingsGate(true);
+}
 
 /** Refetch settings without triggering the Suspense boundary */
 const quietRefetch = () => startTransition(() => refetchSettings());
@@ -16,30 +56,32 @@ export function useSettings() {
     refetchSettings: quietRefetch,
 
     async saveGeneral(general: GeneralSettings) {
-      const result = await api.updateGeneral(general);
+      const result = await apiClient
+        .PUT("/api/settings/general", { body: general as unknown as GeneratedGeneralSettings })
+        .then(unwrap) as SettingsResponse;
       quietRefetch();
       return result;
     },
 
     async saveFilters(filters: Record<string, FilterConfig>) {
-      const result = await api.updateFilters(filters);
+      const result = await apiClient.PUT("/api/settings/filters", { body: filters }).then(unwrap) as SettingsResponse;
       quietRefetch();
       return result;
     },
 
     async saveEquipment(equipment: EquipmentConfig) {
-      const result = await api.updateEquipment(equipment);
+      const result = await apiClient.PUT("/api/settings/equipment", { body: equipment }).then(unwrap) as SettingsResponse;
       quietRefetch();
       return result;
     },
 
     async saveDisplay(display: DisplaySettings) {
-      await api.updateDisplay(display);
+      await apiClient.PUT("/api/settings/display", { body: display }).then(unwrap);
       quietRefetch();
     },
 
-    getFilterSuggestions: () => api.getFilterSuggestions(),
-    getEquipmentSuggestions: () => api.getEquipmentSuggestions(),
+    getFilterSuggestions: () => apiClient.GET("/api/settings/suggestions/filters", {}).then(unwrap),
+    getEquipmentSuggestions: () => apiClient.GET("/api/settings/suggestions/equipment", {}).then(unwrap),
   };
 }
 

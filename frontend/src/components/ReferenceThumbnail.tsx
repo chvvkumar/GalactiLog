@@ -1,6 +1,6 @@
 import { Component, Show, createSignal, createMemo } from "solid-js";
 import { Portal } from "solid-js/web";
-import { api } from "../api/client";
+import { thumbnailUrl } from "../api/thumbnailUrl";
 
 const ReferenceThumbnail: Component<{ url: string | null; fill?: boolean }> = (props) => {
   const [open, setOpen] = createSignal(false);
@@ -17,7 +17,7 @@ const ReferenceThumbnail: Component<{ url: string | null; fill?: boolean }> = (p
       {(url) => (
         <>
           <img
-            src={api.thumbnailUrl(url())}
+            src={thumbnailUrl(url())}
             alt="Reference frame"
             class={`rounded bg-black cursor-pointer ${props.fill ? "max-h-full w-auto" : "w-full object-contain max-h-64"}`}
             loading="lazy"
@@ -33,7 +33,7 @@ const ReferenceThumbnail: Component<{ url: string | null; fill?: boolean }> = (p
                 onClick={() => setOpen(false)}
               >
                 <img
-                  src={api.thumbnailUrl(url())}
+                  src={thumbnailUrl(url())}
                   alt="Reference frame"
                   class="max-w-[90vw] max-h-[90vh]"
                 />

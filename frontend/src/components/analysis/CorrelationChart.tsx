@@ -1,8 +1,9 @@
 import { Component, createEffect, onCleanup } from "solid-js";
 import { Chart } from "chart.js";
 import "../../utils/chartRegistry";
-import type { CorrelationResponse } from "../../types";
+import type { CorrelationResponse } from "../../api/types";
 import { chartFontSize } from "../../utils/chartConfig";
+import { ARCSEC } from "../../utils/format";
 
 const METRIC_LABELS: Record<string, string> = {
   humidity: "Humidity (%)",
@@ -18,9 +19,9 @@ const METRIC_LABELS: Record<string, string> = {
   hfr: "HFR (px)",
   fwhm: "FWHM",
   eccentricity: "Eccentricity",
-  guiding_rms: "Guiding RMS (\")",
-  guiding_rms_ra: "Guiding RA RMS (\")",
-  guiding_rms_dec: "Guiding DEC RMS (\")",
+  guiding_rms: `Guiding RMS (${ARCSEC})`,
+  guiding_rms_ra: `Guiding RA RMS (${ARCSEC})`,
+  guiding_rms_dec: `Guiding DEC RMS (${ARCSEC})`,
   detected_stars: "Detected Stars",
   adu_mean: "ADU Mean",
   adu_median: "ADU Median",

@@ -3,7 +3,7 @@ import { useSettingsContext } from "./SettingsProvider";
 import { useAuth } from "./AuthProvider";
 import { showToast } from "./Toast";
 import HelpPopover from "./HelpPopover";
-import type { DisplaySettings, MetricGroupSettings } from "../types";
+import type { DisplaySettings, MetricGroupSettings } from "../api/types";
 import { THEMES_SORTED, TEXT_SIZES, type ThemeMeta } from "../themes";
 import { FILTER_STYLE_OPTIONS, getFilterBadgeStyle, type FilterBadgeStyle } from "../utils/filterStyles";
 import { timezoneLabel } from "../utils/dateTime";

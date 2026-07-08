@@ -1,5 +1,4 @@
 import re
-import os
 from pathlib import Path
 
 _NAME_RE = re.compile(r'_\("(.+?)"\)')
