@@ -415,7 +415,7 @@ const ImagingTimeline: Component<Props> = (props) => {
                     </Show>
                     {/* Bar */}
                     <div
-                      class={`w-full rounded-t ${isEmpty() ? "" : "bg-theme-accent hover:opacity-80 cursor-pointer"}`}
+                      class={`w-full rounded-t ${isEmpty() ? "" : "bg-theme-accent/80 hover:opacity-100 cursor-pointer"}`}
                       style={{ height: isEmpty() ? "0px" : `${Math.max(pct(), 1)}%`, "min-height": isEmpty() ? "0" : "2px", transition: "height 300ms ease" }}
                       title={!isEmpty() ? `${formatLabel(entry.period, granularity())}: ${formatHours(entry.integration_seconds)}` : undefined}
                       onClick={() => !isEmpty() && handleBarClick(entry)}

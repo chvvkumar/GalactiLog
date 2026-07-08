@@ -18,7 +18,7 @@ const TopTargets: Component<{ targets: TopTarget[] }> = (props) => {
             <div class="flex items-center gap-2 pl-6">
               <div class="flex-1 bg-theme-base rounded-full h-3 overflow-hidden">
                 <div
-                  class="bg-theme-accent h-3 rounded-full"
+                  class="bg-theme-accent/80 h-3 rounded-full"
                   style={{ width: `${(target.integration_seconds / maxVal()) * 100}%` }}
                 />
               </div>
