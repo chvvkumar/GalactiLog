@@ -193,6 +193,40 @@ def missing_all_credentials(
     return not (has_admin_password or has_admin_user or has_jwt_secret)
 
 
+def admin_user_exists() -> bool:
+    """Return True iff a row with role='admin' exists in the users table.
+
+    Single source of truth for the credential gate's admin-row signal: both
+    entrypoint.sh and the integration tests call this rather than
+    re-implementing the SELECT, so the query the gate runs and the query the
+    tests validate can never drift apart. Uses a short-lived synchronous
+    engine (psycopg2) so it can run standalone from the root-context
+    entrypoint script before any async app machinery exists, mirroring the
+    other create_engine probes in entrypoint.sh.
+
+    Exceptions (DB unreachable, users table missing) are deliberately allowed
+    to propagate rather than being caught and turned into a False. entrypoint.sh
+    wraps this call in run_db_probe, whose retry-then-exit-1 logic must see a
+    connectivity failure as a failure and refuse to boot, never misread it as
+    a definitive "no admin row" and fall through to the fresh-install refusal
+    (or, worse, fail open). The sqlalchemy import is local so importing
+    app.config from the many root-context entrypoint snippets stays cheap and
+    side-effect-free.
+    """
+    from sqlalchemy import create_engine, text
+
+    url = settings.database_url.replace("+asyncpg", "+psycopg2")
+    engine = create_engine(url)
+    try:
+        with engine.connect() as conn:
+            result = conn.execute(
+                text("SELECT EXISTS (SELECT 1 FROM users WHERE role = 'admin')")
+            )
+            return bool(result.scalar())
+    finally:
+        engine.dispose()
+
+
 import redis.asyncio as aioredis
 import redis as sync_redis
 from contextlib import asynccontextmanager

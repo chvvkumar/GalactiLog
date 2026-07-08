@@ -305,14 +305,8 @@ echo "Migrations complete."
 # nothing to clean up. An existing install with any one of the three signals
 # present boots unchanged - no new log lines, no behavior change.
 HAS_ADMIN_USER=$(run_db_probe "admin user existence check" "
-from sqlalchemy import create_engine, text
-from app.config import settings
-url = settings.database_url.replace('+asyncpg', '+psycopg2')
-eng = create_engine(url)
-with eng.connect() as c:
-    r = c.execute(text(\"SELECT EXISTS (SELECT 1 FROM users WHERE role = 'admin')\"))
-    print('yes' if r.scalar() else 'no')
-eng.dispose()
+from app.config import admin_user_exists
+print('yes' if admin_user_exists() else 'no')
 ")
 
 MISSING_ALL_CREDS=$(python -c "

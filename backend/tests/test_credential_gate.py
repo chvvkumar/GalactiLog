@@ -11,19 +11,14 @@ realistic install states instead: a real migrated test DB for the admin-row
 signal, a real tmp_path file for the JWT-secret-file signal, and a real
 monkeypatched env var for the password signal.
 
-Coverage gap (documented, not fixed here): unlike jwt_secret_file_exists,
-there is no importable production function for the admin-row signal -
-entrypoint.sh computes it inline via a python -c heredoc
-(`SELECT EXISTS (SELECT 1 FROM users WHERE role = 'admin')`, see
-entrypoint.sh's HAS_ADMIN_USER probe). Task 1's brief flagged this as
-something Task 2 should escalate rather than silently work around by
-shelling out to entrypoint.sh (which is Linux/Docker-only, see
-container_perms.sh). The tests below therefore reproduce entrypoint.sh's
-exact SQL locally (_has_admin_user_row) so the *query itself* gets real-DB
-coverage, and combine its result with missing_all_credentials() to prove
-the full signal-computation-plus-decision pipeline behaves correctly. If a
-future task extracts that SQL into an importable app.services function,
-these tests should be updated to call it directly instead of duplicating it.
+The admin-row signal is computed by the single importable production
+function app.config.admin_user_exists() - the exact same function
+entrypoint.sh's HAS_ADMIN_USER probe calls. These tests insert/clear real
+rows in the migrated test DB and then call admin_user_exists() directly, so
+the query the gate runs in production and the query these tests validate are
+one and the same: if the SQL ever drifts, this suite drifts with it and
+catches the change. This closes the coverage gap flagged in Task 1's brief
+(the SQL used to be duplicated inline in both entrypoint.sh and this file).
 
 Requires a real Postgres (test:test@localhost:5432/test_catalog) with the
 Alembic schema applied. When the DB is unreachable the whole module skips,
@@ -51,21 +46,10 @@ import pytest_asyncio
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from app.config import missing_all_credentials
+from app.config import admin_user_exists, missing_all_credentials
 from app.models import User, UserRole
 
 TEST_DB_URL = os.environ["GALACTILOG_DATABASE_URL"]
-
-# Mirrors entrypoint.sh's HAS_ADMIN_USER probe exactly (see entrypoint.sh
-# around the "admin user existence check" run_db_probe call). Kept as plain
-# SQL, not the ORM, so this test exercises the identical query the real gate
-# runs rather than a semantically-similar-but-different ORM query.
-_ADMIN_ROW_QUERY = text("SELECT EXISTS (SELECT 1 FROM users WHERE role = 'admin')")
-
-
-async def _has_admin_user_row(session) -> bool:
-    result = await session.execute(_ADMIN_ROW_QUERY)
-    return bool(result.scalar())
 
 
 @pytest_asyncio.fixture
@@ -111,8 +95,10 @@ async def test_fresh_install_empty_db_no_env_no_file_refuses(db_session, tmp_pat
     """Truly fresh install: empty migrated DB, no password env, no secret
     file on disk -> the gate must refuse to boot."""
     secret_file = tmp_path / ".jwt_secret"
-    async with db_session() as s:
-        has_admin = await _has_admin_user_row(s)
+    # Call the exact production function the gate uses (app.config), so this
+    # suite exercises the real query, not a copy. It opens its own sync
+    # connection to the same test DB and sees the rows committed above.
+    has_admin = admin_user_exists()
 
     assert has_admin is False
     assert missing_all_credentials(
@@ -133,8 +119,10 @@ async def test_existing_install_via_real_admin_row_boots(db_session, tmp_path):
         s.add(_user(UserRole.admin, "admin"))
         await s.commit()
 
-    async with db_session() as s:
-        has_admin = await _has_admin_user_row(s)
+    # Call the exact production function the gate uses (app.config), so this
+    # suite exercises the real query, not a copy. It opens its own sync
+    # connection to the same test DB and sees the rows committed above.
+    has_admin = admin_user_exists()
 
     assert has_admin is True
     assert missing_all_credentials(
@@ -152,8 +140,10 @@ async def test_existing_install_via_persisted_secret_file_boots(db_session, tmp_
     secret_file = tmp_path / ".jwt_secret"
     secret_file.write_text("deadbeef" * 8, encoding="utf-8")
 
-    async with db_session() as s:
-        has_admin = await _has_admin_user_row(s)
+    # Call the exact production function the gate uses (app.config), so this
+    # suite exercises the real query, not a copy. It opens its own sync
+    # connection to the same test DB and sees the rows committed above.
+    has_admin = admin_user_exists()
 
     assert has_admin is False
     assert missing_all_credentials(
@@ -172,8 +162,10 @@ async def test_existing_install_via_password_env_boots(monkeypatch, db_session, 
     monkeypatch.setenv("GALACTILOG_ADMIN_PASSWORD", "hunter2")
     secret_file = tmp_path / ".jwt_secret"
 
-    async with db_session() as s:
-        has_admin = await _has_admin_user_row(s)
+    # Call the exact production function the gate uses (app.config), so this
+    # suite exercises the real query, not a copy. It opens its own sync
+    # connection to the same test DB and sees the rows committed above.
+    has_admin = admin_user_exists()
 
     assert has_admin is False
     assert missing_all_credentials(
@@ -196,8 +188,10 @@ async def test_viewer_only_row_does_not_count_as_admin_row(db_session, tmp_path)
         s.add(_user(UserRole.viewer, "viewer"))
         await s.commit()
 
-    async with db_session() as s:
-        has_admin = await _has_admin_user_row(s)
+    # Call the exact production function the gate uses (app.config), so this
+    # suite exercises the real query, not a copy. It opens its own sync
+    # connection to the same test DB and sees the rows committed above.
+    has_admin = admin_user_exists()
 
     assert has_admin is False
     assert missing_all_credentials(
@@ -219,8 +213,10 @@ async def test_admin_row_alongside_viewer_row_still_boots(db_session, tmp_path):
         s.add(_user(UserRole.admin, "admin"))
         await s.commit()
 
-    async with db_session() as s:
-        has_admin = await _has_admin_user_row(s)
+    # Call the exact production function the gate uses (app.config), so this
+    # suite exercises the real query, not a copy. It opens its own sync
+    # connection to the same test DB and sees the rows committed above.
+    has_admin = admin_user_exists()
 
     assert has_admin is True
     assert missing_all_credentials(
