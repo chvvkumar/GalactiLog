@@ -1,9 +1,9 @@
-import { Component, For, Show } from "solid-js";
-import type { SessionSummary } from "../types";
+import { Component } from "solid-js";
+import type { SessionSummary } from "../api/types";
 import FilterBadges from "./FilterBadges";
 import { useSettingsContext } from "./SettingsProvider";
 import { isColumnVisible } from "../utils/displaySettings";
-import ColumnPicker from "./ColumnPicker";
+import DataTable, { type DataTableColumn } from "./DataTable";
 import { timezoneLabel } from "../utils/dateTime";
 
 import { formatIntegration } from "../utils/format";
@@ -26,81 +26,93 @@ const SessionTable: Component<{
     ctx.saveColumnVisibility(updated);
   }
 
+  // Resolved key->visible record for DataTable's own body/header gating.
+  // Keyed independently from the raw ColumnVisibility storage (passed
+  // separately to `columnPicker.visibility` below) per the T4 reviewer note:
+  // DataTable never interprets ColumnVisibility itself.
+  const resolvedVisibility = () => ({
+    frames: isColumnVisible(ctx.columnVisibility(), "session_table", "builtin", "frames"),
+    integration: isColumnVisible(ctx.columnVisibility(), "session_table", "builtin", "integration"),
+    filters: isColumnVisible(ctx.columnVisibility(), "session_table", "builtin", "filters"),
+    ...Object.fromEntries(
+      sessionCustomCols().map((col) => [col.slug, isColumnVisible(ctx.columnVisibility(), "session_table", "custom", col.slug)]),
+    ),
+  });
+
+  const columns = (): DataTableColumn<SessionSummary>[] => [
+    {
+      key: "date",
+      label: `Date (${tzLabel()})`,
+      alwaysVisible: true,
+      render: (s) => s.session_date,
+    },
+    {
+      key: "frames",
+      label: "Frames",
+      align: "right",
+      render: (s) => s.frame_count,
+    },
+    {
+      key: "integration",
+      label: "Integration",
+      align: "right",
+      render: (s) => formatIntegration(s.integration_seconds),
+    },
+    {
+      key: "filters",
+      label: "Filters",
+      render: (s) => <FilterBadges distribution={Object.fromEntries(s.filters_used.map(f => [f, 0]))} compact />,
+    },
+    ...sessionCustomCols().map((col): DataTableColumn<SessionSummary> => ({
+      key: col.slug,
+      label: col.name,
+      align: "right",
+      // Session-level custom values were never editable/populated here in the
+      // pre-DataTable table either -- always rendered as a static "-".
+      render: () => "-",
+    })),
+    {
+      key: "actions",
+      label: "",
+      alwaysVisible: true,
+      render: (s) => (
+        <button
+          onClick={() => props.onDeepDive(s.session_date)}
+          class="text-theme-accent hover:underline text-label"
+        >
+          Deep Dive
+        </button>
+      ),
+    },
+  ];
+
   return (
     <div class="border-t border-theme-border mt-2 overflow-x-auto">
-      <div class="flex items-center justify-end px-2 py-1">
-        <ColumnPicker
-          table="session_table"
-          builtinColumns={[
+      <DataTable
+        // Density: the pre-swap SessionTable used py-1.5/px-2 (tighter than
+        // DataTable's default py-2/px-3). DataTable hard-codes cell padding
+        // per the T4 API, so density is applied here via descendant
+        // arbitrary-variant overrides on the `class` prop (the caller-class
+        // mechanism the T4 reviewer note prescribes), not a new DataTable prop.
+        class="text-xs min-w-[400px] [&_td]:!py-1.5 [&_td]:!px-2 [&_th]:!py-1.5 [&_th]:!px-2"
+        columns={columns()}
+        rows={props.sessions}
+        rowKey={(s) => s.session_date}
+        visibility={resolvedVisibility}
+        emptyMessage=""
+        columnPicker={{
+          table: "session_table",
+          builtinColumns: [
             { key: "date", label: "Date", alwaysVisible: true },
             { key: "frames", label: "Frames" },
             { key: "integration", label: "Integration" },
             { key: "filters", label: "Filters" },
-          ]}
-          customColumns={sessionCustomCols()}
-          visibility={ctx.columnVisibility()}
-          onToggle={handleColumnToggle}
-        />
-      </div>
-      <table class="w-full text-xs min-w-[400px]">
-        <thead>
-          <tr class="text-theme-text-secondary border-b border-theme-border">
-            <th class="text-left py-1.5 px-2 font-normal">Date ({tzLabel()})</th>
-            <Show when={isColumnVisible(ctx.columnVisibility(), "session_table", "builtin", "frames")}>
-              <th class="text-right py-1.5 px-2 font-normal">Frames</th>
-            </Show>
-            <Show when={isColumnVisible(ctx.columnVisibility(), "session_table", "builtin", "integration")}>
-              <th class="text-right py-1.5 px-2 font-normal">Integration</th>
-            </Show>
-            <Show when={isColumnVisible(ctx.columnVisibility(), "session_table", "builtin", "filters")}>
-              <th class="text-left py-1.5 px-2 font-normal">Filters</th>
-            </Show>
-            <For each={sessionCustomCols()}>
-              {(col) => (
-                <Show when={isColumnVisible(ctx.columnVisibility(), "session_table", "custom", col.slug)}>
-                  <th class="py-1.5 px-2 text-right font-normal">{col.name}</th>
-                </Show>
-              )}
-            </For>
-            <th class="py-1.5 px-2"></th>
-          </tr>
-        </thead>
-        <tbody>
-          <For each={props.sessions}>
-            {(session) => (
-              <tr class="border-b border-theme-border/50 hover:bg-theme-hover transition-colors duration-150">
-                <td class="py-1.5 px-2 text-theme-text-primary">{session.session_date}</td>
-                <Show when={isColumnVisible(ctx.columnVisibility(), "session_table", "builtin", "frames")}>
-                  <td class="py-1.5 px-2 text-right text-theme-text-primary">{session.frame_count}</td>
-                </Show>
-                <Show when={isColumnVisible(ctx.columnVisibility(), "session_table", "builtin", "integration")}>
-                  <td class="py-1.5 px-2 text-right text-theme-text-primary">{formatIntegration(session.integration_seconds)}</td>
-                </Show>
-                <Show when={isColumnVisible(ctx.columnVisibility(), "session_table", "builtin", "filters")}>
-                  <td class="py-1.5 px-2">
-                    <FilterBadges distribution={Object.fromEntries(session.filters_used.map(f => [f, 0]))} compact />
-                  </td>
-                </Show>
-                <For each={sessionCustomCols()}>
-                  {(col) => (
-                    <Show when={isColumnVisible(ctx.columnVisibility(), "session_table", "custom", col.slug)}>
-                      <td class="py-1.5 px-2 text-right text-theme-text-secondary">-</td>
-                    </Show>
-                  )}
-                </For>
-                <td class="py-1.5 px-2 text-right">
-                  <button
-                    onClick={() => props.onDeepDive(session.session_date)}
-                    class="text-theme-accent hover:underline text-label"
-                  >
-                    Deep Dive
-                  </button>
-                </td>
-              </tr>
-            )}
-          </For>
-        </tbody>
-      </table>
+          ],
+          customColumns: sessionCustomCols(),
+          visibility: ctx.columnVisibility(),
+          onToggle: handleColumnToggle,
+        }}
+      />
     </div>
   );
 };

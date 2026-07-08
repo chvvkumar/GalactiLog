@@ -1,6 +1,6 @@
 import { showToast, dismissToast } from "../components/Toast";
 import { track } from "../store/taskPoller";
-import type { ActiveJob } from "../types";
+import type { ActiveJob } from "../api/types";
 
 interface EmitWithToastOptions {
   action: () => Promise<{ task_id: string }>;

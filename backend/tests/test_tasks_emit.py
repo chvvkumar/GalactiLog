@@ -14,7 +14,10 @@ for _mod in ("fitsio",):
         sys.modules[_mod] = MagicMock()
 
 
-TASKS_PATH = pathlib.Path("app/worker/tasks.py")
+# run_scan lives in tasks_scan.py since the Phase 6 Task 3 module split;
+# tasks.py is now a thin facade that only imports/re-exports it.
+TASKS_PATH = pathlib.Path("app/worker/tasks_scan.py")
+ORPHAN_CLEANUP_PATH = pathlib.Path("app/services/orphan_cleanup.py")
 
 
 def _run_scan_source() -> str:
@@ -23,20 +26,38 @@ def _run_scan_source() -> str:
     for node in ast.walk(tree):
         if isinstance(node, ast.FunctionDef) and node.name == "run_scan":
             return ast.get_source_segment(src, node)
-    raise AssertionError("run_scan not found in tasks.py")
+    raise AssertionError("run_scan not found in tasks_scan.py")
 
 
 def test_run_scan_uses_emit_sync_not_append_activity_sync():
-    """The 5 scan emit sites inside run_scan must use emit_sync, not append_activity_sync."""
+    """The scan emit sites must use emit_sync, not append_activity_sync.
+
+    scan_stopped, delta_scan, and scan_complete stay inline in run_scan.
+    orphan_cleanup, orphan_force_warning, and orphan_warning were extracted
+    into app.services.orphan_cleanup.cleanup_orphaned_images (Phase 6 Task 4)
+    -- run_scan forwards its own _emit_activity_sync reference into that
+    call, so the emit sites still resolve to the same function, just via the
+    `emit_fn` parameter instead of the module-level name directly.
+    """
     run_scan_src = _run_scan_source()
+    orphan_cleanup_src = ORPHAN_CLEANUP_PATH.read_text()
     assert "append_activity_sync(" not in run_scan_src, (
         "run_scan still contains append_activity_sync() calls; "
-        "all 5 scan emit sites should use _emit_activity_sync()"
+        "all scan emit sites should use _emit_activity_sync()"
     )
-    # All 5 sites should be migrated.
-    assert run_scan_src.count("_emit_activity_sync(") >= 5, (
-        "run_scan should contain at least 5 _emit_activity_sync() calls "
-        "(scan_stopped, delta_scan, orphan_cleanup, orphan_warning, scan_complete)"
+    assert "append_activity_sync(" not in orphan_cleanup_src, (
+        "orphan_cleanup still contains append_activity_sync() calls; "
+        "all scan emit sites should use emit_sync()"
+    )
+    # All 6 sites (across both modules) should be migrated.
+    total_emit_calls = (
+        run_scan_src.count("_emit_activity_sync(")
+        + orphan_cleanup_src.count("emit_fn(")
+    )
+    assert total_emit_calls >= 5, (
+        "expected at least 5 emit_sync-based calls across run_scan and "
+        "orphan_cleanup (scan_stopped, delta_scan, orphan_cleanup, "
+        "orphan_force_warning, orphan_warning, scan_complete)"
     )
 
 
@@ -48,7 +69,7 @@ def test_append_activity_sync_not_imported_in_tasks():
             if node.module and "scan_state" in node.module:
                 names = [a.name for a in node.names]
                 assert "append_activity_sync" not in names, \
-                    "append_activity_sync still imported in tasks.py"
+                    "append_activity_sync still imported in tasks_scan.py"
 
 
 def test_emit_sync_imported_in_tasks():
@@ -61,33 +82,44 @@ def test_emit_sync_imported_in_tasks():
                 names = [a.name for a in node.names]
                 if "emit_sync" in names:
                     found = True
-    assert found, "emit_sync not imported from app.services.activity in tasks.py"
+    assert found, "emit_sync not imported from app.services.activity in tasks_scan.py"
 
 
-def _bootstrap_real_tasks():
-    """Replace the conftest MagicMock stub with the real app.worker.tasks module."""
+def _bootstrap_real_tasks(modname="app.worker.tasks_scan"):
+    """Load the real target module, patching create_engine so it doesn't need
+    a live DB connection at import time.
+
+    run_scan lives in tasks_scan.py and detect_mosaic_panels_task lives in
+    tasks_mosaics.py since the Phase 6 Task 3 module split; every patch below
+    targets whichever module actually owns the function under test (a
+    patch.object() on the app.worker.tasks facade would not affect a function
+    whose __globals__ point at a different, real module).
+    """
     import sys as _sys
-    mod = _sys.modules.get("app.worker.tasks")
+    mod = _sys.modules.get(modname)
     if mod is not None and not isinstance(mod, MagicMock):
         return mod
-    _sys.modules.pop("app.worker.tasks", None)
+    _sys.modules.pop(modname, None)
     mock_engine = MagicMock()
     mock_engine.connect.return_value.__enter__ = MagicMock(return_value=mock_engine)
     mock_engine.connect.return_value.__exit__ = MagicMock(return_value=False)
     with patch("sqlalchemy.create_engine", return_value=mock_engine):
-        import app.worker.tasks as tasks_mod
-    return tasks_mod
+        import importlib
+        mod = importlib.import_module(modname)
+    return mod
 
 
 def test_enrichment_query_failed_emits_after_rebuild():
     import pathlib
-    src = pathlib.Path("app/worker/tasks.py").read_text()
+    # rebuild_targets/retry_unresolved now live in tasks_target_rebuild.py.
+    src = pathlib.Path("app/worker/tasks_target_rebuild.py").read_text()
     assert "enrichment_query_failed" in src
 
 
 def test_filename_candidate_failed_event_type_present():
     import pathlib
-    src = pathlib.Path("app/worker/tasks.py").read_text()
+    # _do_ingest now lives in tasks_scan.py.
+    src = pathlib.Path("app/worker/tasks_scan.py").read_text()
     assert "filename_candidate_failed" in src
 
 
@@ -127,7 +159,7 @@ def _drive_run_scan(force, known_paths, disk_paths):
 
     known_rows = [(p, 100, 1.0) for p in known_paths]
     orphaned = set(known_paths) - set(disk_paths)
-    orphan_rows = [(i, None) for i, _ in enumerate(sorted(orphaned))]
+    orphan_rows = [(i, None, None) for i, _ in enumerate(sorted(orphaned))]
 
     emit_calls = []
 
@@ -283,8 +315,70 @@ def test_run_scan_releases_run_lock_after_completing():
     mock_redis.delete.assert_any_call(tasks_mod.SCAN_RUN_LOCK)
 
 
-def test_mosaic_detection_complete_emits():
+def test_run_scan_rebuilds_skipped_paths_dropping_missing_files():
+    """3.3: scan:skipped_paths must be rebuilt each excluded-calibration scan to
+    only paths still present on disk, not merely accumulated forever."""
     tasks_mod = _bootstrap_real_tasks()
+
+    prior_skipped = {
+        "/tmp/test_fits/still_here.fits",
+        "/tmp/test_fits/deleted.fits",
+    }
+
+    class _EmptySession:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def execute(self, *a, **k):
+            res = MagicMock()
+            res.all.return_value = []
+            res.scalar_one_or_none.return_value = None
+            return res
+
+    mock_redis = MagicMock()
+    mock_redis.set.return_value = True
+
+    mock_actx = MagicMock()
+    mock_actx.__enter__ = lambda s, *a: MagicMock()
+    mock_actx.__exit__ = lambda s, *a: None
+
+    fake_cfg = MagicMock()
+    fake_cfg.should_include_file.return_value = True
+    fake_cfg.roots.return_value = [tasks_mod.Path("/tmp/test_fits")]
+
+    rebuild_calls = []
+
+    def _fake_exists(self):
+        return self.name == "still_here.fits"
+
+    with patch.object(tasks_mod, "Session", lambda *a, **k: _EmptySession()), \
+         patch.object(tasks_mod, "_redis", mock_redis), \
+         patch.object(tasks_mod, "_activity_session", lambda: mock_actx), \
+         patch.object(tasks_mod, "clear_cancel_sync"), \
+         patch.object(tasks_mod, "start_scanning_sync"), \
+         patch.object(tasks_mod, "get_skipped_paths_sync", return_value=set(prior_skipped)), \
+         patch.object(tasks_mod, "rebuild_skipped_paths_sync", side_effect=lambda r, p: rebuild_calls.append(p)), \
+         patch.object(tasks_mod, "is_cancel_requested_sync", return_value=False), \
+         patch.object(tasks_mod, "set_discovered_sync"), \
+         patch.object(tasks_mod, "set_idle_sync"), \
+         patch.object(tasks_mod, "generate_reference_thumbnails"), \
+         patch.object(tasks_mod, "detect_duplicate_targets"), \
+         patch.object(tasks_mod, "backfill_dark_hours"), \
+         patch("pathlib.Path.exists", _fake_exists), \
+         patch("app.services.scan_filters.ScanFilterConfig.from_settings", return_value=fake_cfg), \
+         patch("app.services.scanner.scan_directory", return_value=([], [], set())):
+        result = tasks_mod.run_scan.run(include_calibration=False)
+
+    assert result["status"] == "complete"
+    assert len(rebuild_calls) == 1
+    assert rebuild_calls[0] == {"/tmp/test_fits/still_here.fits"}
+
+
+def test_mosaic_detection_complete_emits():
+    tasks_mod = _bootstrap_real_tasks("app.worker.tasks_mosaics")
     detect_mosaic_panels_task = tasks_mod.detect_mosaic_panels_task
     emit_calls = []
 
@@ -295,10 +389,26 @@ def test_mosaic_detection_complete_emits():
     mock_redis.set.return_value = True
     mock_redis.delete = MagicMock()
 
+    import app.services.mosaic_detection as md
+
+    class FakeSession:
+        def get(self, *a, **k):
+            return None
+
+        def commit(self):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
     with patch.object(tasks_mod, "_redis", mock_redis), \
          patch.object(tasks_mod, "_emit_activity_sync", fake_emit_sync), \
          patch.object(tasks_mod, "_activity_session") as mf, \
-         patch("asyncio.run", return_value=7):
+         patch.object(tasks_mod, "Session", lambda engine: FakeSession()), \
+         patch.object(md, "detect_mosaic_panels", lambda session, gap_days=0: 7):
         mctx = MagicMock()
         mctx.__enter__ = lambda s, *a: MagicMock()
         mctx.__exit__ = lambda s, *a: None
@@ -315,33 +425,29 @@ def test_mosaic_detection_complete_emits():
 def test_detection_task_passes_campaign_gap_days_from_settings():
     """The scan-triggered task must read mosaic_campaign_gap_days from settings
     and pass it to detect_mosaic_panels, matching the manual /detect endpoint."""
-    import contextlib
-    from unittest.mock import AsyncMock
-
-    tasks_mod = _bootstrap_real_tasks()
+    tasks_mod = _bootstrap_real_tasks("app.worker.tasks_mosaics")
     detect_mosaic_panels_task = tasks_mod.detect_mosaic_panels_task
 
-    # Fake async session: get(UserSettings, ...) returns general with gap=7.
+    # Fake sync session: get(UserSettings, ...) returns general with gap=7.
     settings_row = MagicMock()
     settings_row.general = {"mosaic_campaign_gap_days": 7}
 
-    fake_session = AsyncMock()
-    fake_session.get = AsyncMock(return_value=settings_row)
-    fake_session.commit = AsyncMock()
+    class FakeSession:
+        def get(self, *a, **k):
+            return settings_row
 
-    @contextlib.asynccontextmanager
-    async def _session_cm():
-        yield fake_session
+        def commit(self):
+            pass
 
-    def _sessionmaker(*a, **k):
-        return lambda: _session_cm()
+        def __enter__(self):
+            return self
 
-    fake_engine = MagicMock()
-    fake_engine.dispose = AsyncMock()
+        def __exit__(self, *a):
+            return False
 
     captured = {}
 
-    async def fake_detect(session, gap_days=0):
+    def fake_detect(session, gap_days=0):
         captured["gap_days"] = gap_days
         return 3
 
@@ -358,9 +464,8 @@ def test_detection_task_passes_campaign_gap_days_from_settings():
     with patch.object(tasks_mod, "_redis", mock_redis), \
          patch.object(tasks_mod, "_emit_activity_sync", lambda *a, **k: None), \
          patch.object(tasks_mod, "_activity_session", lambda: mctx), \
-         patch.object(md, "detect_mosaic_panels", fake_detect), \
-         patch("sqlalchemy.ext.asyncio.create_async_engine", return_value=fake_engine), \
-         patch("sqlalchemy.ext.asyncio.async_sessionmaker", _sessionmaker):
+         patch.object(tasks_mod, "Session", lambda engine: FakeSession()), \
+         patch.object(md, "detect_mosaic_panels", fake_detect):
         result = detect_mosaic_panels_task.run()
 
     assert result["status"] == "complete"

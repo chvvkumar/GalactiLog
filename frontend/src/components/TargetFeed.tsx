@@ -1,7 +1,7 @@
 import { Component, Show, For, createMemo } from "solid-js";
 import { useDashboardFilters, type SortKey } from "./DashboardFilterProvider";
 import TargetTable from "./TargetTable";
-import type { ActiveFilters } from "../types";
+import type { ActiveFilters } from "../api/types";
 
 const SkeletonRow: Component = () => (
   <tr class="border-b border-theme-border">
@@ -127,13 +127,13 @@ const TargetFeed: Component = () => {
                     <th class="p-3" />
                   </tr></thead>
                   <tbody>
-                    <For each={Array(pageSize())}>{() => <SkeletonRow />}</For>
+                    <For each={Array.from({ length: pageSize() })}>{() => <SkeletonRow />}</For>
                   </tbody>
                 </table>
               </div>
               {/* Mobile skeleton */}
               <div class="md:hidden">
-                <For each={Array(pageSize())}>{() => <SkeletonCard />}</For>
+                <For each={Array.from({ length: pageSize() })}>{() => <SkeletonCard />}</For>
               </div>
             </div>
           </Show>

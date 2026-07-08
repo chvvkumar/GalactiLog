@@ -1,6 +1,8 @@
 import logging
 import os
 import secrets
+import tempfile
+import threading
 
 from pydantic_settings import BaseSettings
 
@@ -32,14 +34,27 @@ class Settings(BaseSettings):
 
 settings = Settings()
 
+# Upgrade gate: oldest install state this release can upgrade from.
+# Installs older than this must first run the checkpoint image below.
+# Bump these when migration history is squashed at a checkpoint release.
+MIN_UPGRADE_FROM_ALEMBIC_REVISION = "0015"
+MIN_UPGRADE_FROM_DATA_VERSION = 13
+CHECKPOINT_IMAGE_TAG = "chvvkumar/galactilog:v2.0"
+
 
 def load_or_create_jwt_secret(secret_file: str) -> str:
     """Load a persisted JWT secret from ``secret_file`` or create one.
 
     The generated secret is written to a stable file so it survives process
-    restarts and is shared across multiple workers. The write tolerates
-    concurrent workers racing to create the file: if another worker wins the
-    race, the secret it persisted is read back and returned.
+    restarts and is shared across multiple workers. The write is atomic:
+    the secret is first written completely to a temporary file (mode 0600)
+    in the same directory, which is then published under the final name via
+    os.link, an atomic create-if-absent. A process that loses the creation
+    race therefore can only ever observe the winner's fully written file,
+    never a partial one, and reads the winner's secret back so all
+    processes end up sharing the same secret. On filesystems without hard
+    link support the publish falls back to os.replace, which is equally
+    atomic but last-writer-wins rather than first-writer-wins.
     """
     # Fast path: file already exists.
     try:
@@ -60,24 +75,40 @@ def load_or_create_jwt_secret(secret_file: str) -> str:
         except OSError as exc:
             logger.warning("Could not create directory for JWT secret file %s: %s", parent, exc)
 
+    tmp_path = None
     try:
-        # O_EXCL ensures only the first worker writes; others race-lose here.
-        fd = os.open(secret_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        # Write the full secret to a temp file in the target directory first
+        # (mkstemp creates it 0600), then publish it under the final name.
+        fd, tmp_path = tempfile.mkstemp(dir=parent or ".", prefix=".jwt_secret.tmp.")
         try:
             os.write(fd, secret.encode("utf-8"))
         finally:
             os.close(fd)
-        return secret
-    except FileExistsError:
-        # Another worker created it first; read back its secret.
         try:
-            with open(secret_file, "r", encoding="utf-8") as fh:
-                persisted = fh.read().strip()
-            if persisted:
-                return persisted
-        except OSError as exc:
-            logger.warning("Could not read JWT secret file %s after race: %s", secret_file, exc)
-        return secret
+            # os.link is an atomic create-if-absent: it fails if the target
+            # already exists and, because the temp file is complete before
+            # the link, a racing loser can never see a partially written
+            # secret under the final name.
+            os.link(tmp_path, secret_file)
+            return secret
+        except FileExistsError:
+            # Another worker published first; its file is complete by
+            # construction, so a single read-back suffices.
+            try:
+                with open(secret_file, "r", encoding="utf-8") as fh:
+                    persisted = fh.read().strip()
+                if persisted:
+                    return persisted
+            except OSError as exc:
+                logger.warning("Could not read JWT secret file %s after race: %s", secret_file, exc)
+            return secret
+        except OSError:
+            # Filesystem without hard link support: fall back to os.replace,
+            # which is still atomic (readers never see a partial file) but
+            # last-writer-wins instead of first-writer-wins.
+            os.replace(tmp_path, secret_file)
+            tmp_path = None
+            return secret
     except OSError as exc:
         # Could not persist (read-only FS etc.); fall back to in-memory secret.
         logger.warning(
@@ -87,32 +118,158 @@ def load_or_create_jwt_secret(secret_file: str) -> str:
             exc,
         )
         return secret
+    finally:
+        if tmp_path is not None:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
 
 
-# Auto-generate JWT secret if not set. The secret is persisted to a stable file
-# (settings.jwt_secret_file) so it survives restarts and is shared by all
-# workers. Operators should still set GALACTILOG_JWT_SECRET explicitly for
-# production/multi-host deployments (see the startup warning in main.py).
-if not settings.jwt_secret:
-    settings.jwt_secret = load_or_create_jwt_secret(settings.jwt_secret_file)
+def jwt_secret_persisted(secret_file: str, secret: str) -> bool:
+    """Best-effort check that ``secret`` actually made it to ``secret_file``.
+
+    load_or_create_jwt_secret() falls back to an in-memory-only secret when it
+    can't read or write the file (e.g. wrong ownership, read-only filesystem).
+    Callers use this to avoid logging that sessions survive restarts when
+    they in fact won't.
+    """
+    try:
+        with open(secret_file, "r", encoding="utf-8") as fh:
+            return fh.read().strip() == secret
+    except OSError:
+        return False
+
+
+_jwt_secret_lock = threading.Lock()
+
+
+def get_jwt_secret() -> str:
+    """Return the configured JWT secret, generating/loading it on first use.
+
+    This is deliberately lazy rather than run as a side effect of importing
+    this module. The entrypoint script imports app.config from several
+    root-context helper snippets (to read settings.database_url, version
+    constants, etc.) before privileges drop to the unprivileged app user. If
+    secret generation ran at import time, whichever of those root snippets
+    happened to import this module first would create the persisted secret
+    file as root, and the app user would never be able to read it back -
+    causing a fresh secret (and fresh sessions) on every restart. Deferring
+    generation until a token is actually created/decoded ensures the file is
+    created by the process that needs it, running as the app user.
+    """
+    if settings.jwt_secret:
+        return settings.jwt_secret
+    with _jwt_secret_lock:
+        if not settings.jwt_secret:
+            settings.jwt_secret = load_or_create_jwt_secret(settings.jwt_secret_file)
+    return settings.jwt_secret
+
+
+def missing_all_credentials(
+    *,
+    admin_password_env: str,
+    jwt_secret_env: str,
+    jwt_secret_file_exists: bool,
+    has_admin_user: bool,
+) -> bool:
+    """True iff no credential signal exists at all (fresh, unusable install).
+
+    Refuses iff ALL of:
+      - admin_password_env is empty (GALACTILOG_ADMIN_PASSWORD unset)
+      - has_admin_user is False (no role='admin' row in users)
+      - jwt_secret_env is empty AND jwt_secret_file_exists is False
+        (no persisted or explicit JWT secret)
+
+    Pure function: takes primitives, does no DB/file I/O itself, so callers
+    (entrypoint.sh via a python -c snippet, or tests directly) supply the
+    three signals already computed. Callers must compute
+    jwt_secret_file_exists via a plain existence check (e.g. os.path.exists)
+    rather than get_jwt_secret()/load_or_create_jwt_secret(), which would
+    create the file as a side effect and mask a genuinely absent signal.
+    """
+    has_admin_password = bool(admin_password_env)
+    has_jwt_secret = bool(jwt_secret_env) or jwt_secret_file_exists
+    return not (has_admin_password or has_admin_user or has_jwt_secret)
+
+
+def admin_user_exists() -> bool:
+    """Return True iff a row with role='admin' exists in the users table.
+
+    Single source of truth for the credential gate's admin-row signal: both
+    entrypoint.sh and the integration tests call this rather than
+    re-implementing the SELECT, so the query the gate runs and the query the
+    tests validate can never drift apart. Uses a short-lived synchronous
+    engine (psycopg2) so it can run standalone from the root-context
+    entrypoint script before any async app machinery exists, mirroring the
+    other create_engine probes in entrypoint.sh.
+
+    Exceptions (DB unreachable, users table missing) are deliberately allowed
+    to propagate rather than being caught and turned into a False. entrypoint.sh
+    wraps this call in run_db_probe, whose retry-then-exit-1 logic must see a
+    connectivity failure as a failure and refuse to boot, never misread it as
+    a definitive "no admin row" and fall through to the fresh-install refusal
+    (or, worse, fail open). The sqlalchemy import is local so importing
+    app.config from the many root-context entrypoint snippets stays cheap and
+    side-effect-free.
+    """
+    from sqlalchemy import create_engine, text
+
+    url = settings.database_url.replace("+asyncpg", "+psycopg2")
+    engine = create_engine(url)
+    try:
+        with engine.connect() as conn:
+            result = conn.execute(
+                text("SELECT EXISTS (SELECT 1 FROM users WHERE role = 'admin')")
+            )
+            return bool(result.scalar())
+    finally:
+        engine.dispose()
+
 
 import redis.asyncio as aioredis
 import redis as sync_redis
 from contextlib import asynccontextmanager
 
 
+import asyncio
+
+# Single async Redis client shared across all requests. redis-py manages an
+# internal connection pool, so building a fresh client (and TCP connection) per
+# call is pure overhead on hot paths. The client is created lazily and reused.
+#
+# The client's connection pool is bound to the event loop it was created on, so
+# it is keyed by that loop: in production there is one long-lived loop and thus
+# one client for the process lifetime; under pytest each test runs on its own
+# loop, so a new client is created per loop (the previous one is discarded),
+# which preserves test isolation without a fixture reset.
+_shared_async_redis: "aioredis.Redis | None" = None
+_shared_async_redis_loop = None
+
+
 def get_async_redis() -> aioredis.Redis:
-    return aioredis.from_url(settings.redis_url, decode_responses=True)
+    """Return the shared async Redis client for the current event loop."""
+    global _shared_async_redis, _shared_async_redis_loop
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+    if _shared_async_redis is None or _shared_async_redis_loop is not loop:
+        _shared_async_redis = aioredis.from_url(settings.redis_url, decode_responses=True)
+        _shared_async_redis_loop = loop
+    return _shared_async_redis
 
 
 @asynccontextmanager
 async def async_redis():
-    """Async context manager that auto-closes the Redis connection."""
-    r = get_async_redis()
-    try:
-        yield r
-    finally:
-        await r.aclose()
+    """Yield the shared async Redis client.
+
+    Kept as a context manager for call-site compatibility, but it no longer
+    opens or closes a connection per use: it hands out the process-wide shared
+    client and leaves it open (closing would tear down the pool other callers
+    depend on). The pool self-manages connections.
+    """
+    yield get_async_redis()
 
 
 def get_sync_redis() -> sync_redis.Redis:

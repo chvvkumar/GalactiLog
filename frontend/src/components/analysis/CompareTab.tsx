@@ -1,5 +1,8 @@
-import { Component, createSignal, createResource, Show, For } from "solid-js";
-import { api } from "../../api/client";
+import { Component, createSignal, Show, For } from "solid-js";
+import { useQuery, keepPreviousData } from "@tanstack/solid-query";
+import { apiClient } from "../../api/generated/client";
+import { unwrap } from "../../api/unwrap";
+import { queryKeys } from "../../api/queryKeys";
 import type { SharedFilters } from "../../pages/AnalysisPage";
 import BoxPlotChart from "./BoxPlotChart";
 import StatsCard from "./StatsCard";
@@ -18,6 +21,7 @@ const Y_METRICS = [
 ];
 
 interface Props {
+  active: boolean;
   filters: SharedFilters;
   combos: Array<{ telescope: string; camera: string; label: string; grouped: boolean }>;
   availableFilters: string[];
@@ -31,20 +35,22 @@ const CompareTab: Component<Props> = (props) => {
 
   const canCompare = () => groupA() !== "" && groupB() !== "" && groupA() !== groupB();
 
-  const dataKey = () =>
-    canCompare() ? `compare-${mode()}-${metric()}-${groupA()}-${groupB()}-${props.filters.dateFrom}-${props.filters.dateTo}` : null;
-
-  const [data] = createResource(dataKey, (key) => {
-    if (!key) return undefined;
-    return api.getCompare({
-      metric: metric(),
-      mode: mode(),
-      group_a: groupA(),
-      group_b: groupB(),
-      date_from: props.filters.dateFrom,
-      date_to: props.filters.dateTo,
-    }).catch(() => undefined);
+  const params = () => ({
+    metric: metric(),
+    mode: mode(),
+    group_a: groupA(),
+    group_b: groupB(),
+    date_from: props.filters.dateFrom,
+    date_to: props.filters.dateTo,
   });
+
+  const dataQuery = useQuery(() => ({
+    queryKey: queryKeys.compare(params()),
+    queryFn: ({ signal }: { signal: AbortSignal }) =>
+      apiClient.GET("/api/analysis/compare", { params: { query: params() }, signal }).then(unwrap),
+    enabled: props.active && canCompare(),
+    placeholderData: keepPreviousData,
+  }));
 
   const selectClass = "text-sm bg-theme-elevated border border-theme-border rounded px-2.5 py-1.5 text-theme-text-primary";
   const toggleClass = (active: boolean) =>
@@ -111,20 +117,20 @@ const CompareTab: Component<Props> = (props) => {
         </div>
       </Show>
 
-      <Show when={data.latest && canCompare()}>
+      <Show when={dataQuery.data && canCompare()}>
         <div style={{ height: "200px" }} class="relative mb-4">
           <BoxPlotChart
-            groups={[data.latest!.group_a.box, data.latest!.group_b.box]}
-            loading={data.loading}
+            groups={[dataQuery.data!.group_a.box, dataQuery.data!.group_b.box]}
+            loading={dataQuery.isFetching}
             metricLabel={Y_METRICS.find((m) => m.value === metric())?.label}
           />
         </div>
 
-        <div class="text-sm text-theme-text-primary mb-3 font-medium">{data.latest!.verdict}</div>
+        <div class="text-sm text-theme-text-primary mb-3 font-medium">{dataQuery.data!.verdict}</div>
 
         <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
-          <StatsCard stats={data.latest!.group_a.stats} label={data.latest!.group_a.name} />
-          <StatsCard stats={data.latest!.group_b.stats} label={data.latest!.group_b.name} />
+          <StatsCard stats={dataQuery.data!.group_a.stats} label={dataQuery.data!.group_a.name} />
+          <StatsCard stats={dataQuery.data!.group_b.stats} label={dataQuery.data!.group_b.name} />
         </div>
       </Show>
     </div>

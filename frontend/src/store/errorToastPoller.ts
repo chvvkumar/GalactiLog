@@ -1,5 +1,6 @@
 import { showToast } from "../components/Toast";
-import { api } from "../api/client";
+import { apiClient } from "../api/generated/client";
+import { unwrap } from "../api/unwrap";
 
 const LS_KEY = "galactilog_last_error_ts";
 
@@ -23,10 +24,22 @@ function setLastSeenTs(ts: string): void {
 
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 
+// Only poll while the tab is visible; a backgrounded tab does not need to
+// surface background-error toasts, and re-checks immediately on return.
+function pollIfVisible(): void {
+  if (document.visibilityState === "visible") void checkErrors();
+}
+
+function onVisibilityChange(): void {
+  if (document.visibilityState === "visible") void checkErrors();
+}
+
 async function checkErrors(): Promise<void> {
   const since = getLastSeenTs();
   try {
-    const res = await api.fetchActivityErrorsSince(since);
+    const res = await apiClient
+      .GET("/api/activity", { params: { query: { severity: ["error"], since } } })
+      .then(unwrap);
     if (res.items.length === 0) return;
 
     setLastSeenTs(res.items[0].timestamp);
@@ -53,8 +66,9 @@ async function checkErrors(): Promise<void> {
 
 export function startErrorToastPoller(): void {
   if (pollTimer) return;
-  checkErrors();
-  pollTimer = setInterval(checkErrors, 10_000);
+  pollIfVisible();
+  pollTimer = setInterval(pollIfVisible, 10_000);
+  document.addEventListener("visibilitychange", onVisibilityChange);
 }
 
 export function stopErrorToastPoller(): void {
@@ -62,4 +76,5 @@ export function stopErrorToastPoller(): void {
     clearInterval(pollTimer);
     pollTimer = null;
   }
+  document.removeEventListener("visibilitychange", onVisibilityChange);
 }

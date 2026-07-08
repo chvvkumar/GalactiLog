@@ -1,7 +1,20 @@
 import { Component, Show, For, createResource, createSignal, createEffect, createMemo, on, onMount, onCleanup } from "solid-js";
 import { A, useParams, useSearchParams } from "@solidjs/router";
-import { api } from "../api/client";
-import type { TargetDetailResponse, SessionDetail, TargetSearchResultFuzzy, MergedTargetResponse } from "../types";
+import { useQuery } from "@tanstack/solid-query";
+import { apiClient } from "../api/generated/client";
+import { unwrap } from "../api/unwrap";
+import { queryKeys } from "../api/queryKeys";
+// TargetDetailResponse/SessionDetail are the hand-written definitions in
+// `../api/types` -- the generated schema marks many numeric/string fields
+// as merely optional (`T | null | undefined`) where these declare them
+// required-nullable (`T | null`), which this file's formatting helpers
+// (formatCoord/formatSize/buildRows) and SessionOverview/SessionDetail
+// assignments rely on throughout. Same precedent as
+// DashboardFilterProvider.tsx's TargetAggregationResponse cast and
+// TargetRow.tsx's TargetAggregation cast: cast the apiClient result to
+// this type at the two fetch boundaries below.
+import type { TargetDetailResponse, SessionDetail } from "../api/types";
+import type { TargetSearchResultFuzzy, MergedTargetResponse } from "../api/types";
 import SessionAccordionCard from "../components/SessionAccordionCard";
 import { showToast } from "../components/Toast";
 import FilterBadges from "../components/FilterBadges";
@@ -13,13 +26,17 @@ import { useSettingsContext } from "../components/SettingsProvider";
 import { isFieldVisible } from "../utils/displaySettings";
 import { contentWidthClass } from "../utils/format";
 import HelpPopover from "../components/HelpPopover";
-import { timezoneLabel } from "../utils/dateTime";
+import { timezoneLabel, formatDate } from "../utils/dateTime";
+import ActionsMenu from "../components/ActionsMenu";
+import InlineRename from "../components/InlineRename";
+import CollapsibleHeader from "../components/CollapsibleHeader";
 import MergePreviewModal from "../components/MergePreviewModal";
 import { useAuth } from "../components/AuthProvider";
 import { OBJECT_TYPE_OPTIONS } from "../constants/objectTypes";
 
 import { formatIntegration, formatArcsec } from "../utils/format";
 import { getErrorMessage } from "../utils/errors";
+import { useNotesAutosave } from "../lib/useNotesAutosave";
 
 function formatCoord(val: number | null, label: string): string {
   if (val === null) return "";
@@ -68,7 +85,11 @@ const MergeFromDetailFlow: Component<MergeFromDetailFlowProps> = (props) => {
     searchTimeout = setTimeout(async () => {
       setSearching(true);
       try {
-        const results = await api.searchTargets(q.trim(), true);
+        const results = await apiClient
+          .GET("/api/targets/search", {
+            params: { query: { q: q.trim(), include_unresolved: true } },
+          })
+          .then(unwrap);
         setSearchResults(results.filter((t) => t.id !== props.winnerId));
       } catch {
         setSearchResults([]);
@@ -186,41 +207,51 @@ const TargetDetailPage: Component = () => {
   const visible = (group: Parameters<typeof isFieldVisible>[1], field: string) =>
     isFieldVisible(displaySettings(), group, field);
 
-  const [targetDetail, { refetch: refetchDetail }] = createResource(
-    () => params.targetId,
-    (id) => api.getTargetDetail(id),
-  );
+  const targetDetailQuery = useQuery(() => ({
+    queryKey: queryKeys.targetDetail(params.targetId),
+    queryFn: () =>
+      apiClient
+        .GET("/api/targets/{target_id}/detail", {
+          params: { path: { target_id: params.targetId } },
+        })
+        .then(unwrap) as Promise<TargetDetailResponse>,
+  }));
+  // Solid `createResource`-shaped accessor kept for source compatibility with
+  // this file's many `targetDetail()` / `.loading` / `.error` call sites and
+  // with `on(targetDetail, ...)` below (same technique as
+  // DashboardFilterProvider.tsx's `targetData`). `.loading` maps to
+  // `isFetching` (not `isLoading`) so it stays true during refetches too,
+  // matching Solid's `resource.loading` semantics used by the old code.
+  const targetDetail = (() => targetDetailQuery.data) as (() => TargetDetailResponse | undefined) & {
+    readonly loading: boolean;
+    readonly error: unknown;
+  };
+  Object.defineProperty(targetDetail, "loading", { enumerable: true, get: () => targetDetailQuery.isFetching });
+  Object.defineProperty(targetDetail, "error", { enumerable: true, get: () => targetDetailQuery.error });
+  const refetchDetail = async () => { await targetDetailQuery.refetch(); };
 
   const [showExport, setShowExport] = createSignal(false);
   const [showMerge, setShowMerge] = createSignal(false);
   const [showWbppExport, setShowWbppExport] = createSignal(false);
-  const [actionsMenuOpen, setActionsMenuOpen] = createSignal(false);
-  let actionsMenuRef: HTMLDivElement | undefined;
-  const onActionsMenuDocClick = (e: MouseEvent) => {
-    if (!actionsMenuRef) return;
-    if (!actionsMenuRef.contains(e.target as Node)) setActionsMenuOpen(false);
-  };
-  const onActionsMenuKey = (e: KeyboardEvent) => {
-    if (e.key === "Escape") setActionsMenuOpen(false);
-  };
-  onMount(() => {
-    document.addEventListener("click", onActionsMenuDocClick);
-    document.addEventListener("keydown", onActionsMenuKey);
-  });
-  onCleanup(() => {
-    document.removeEventListener("click", onActionsMenuDocClick);
-    document.removeEventListener("keydown", onActionsMenuKey);
-  });
   const [expandedSessions, setExpandedSessions] = createSignal<Set<string>>(new Set());
   const [sessionCache, setSessionCache] = createSignal<Record<string, SessionDetail>>({});
   const [targetChartExpanded, setTargetChartExpanded] = createSignal(graphSettings().target_chart_expanded);
   const [selectedChartDates, setSelectedChartDates] = createSignal<string[]>([]);
 
-  const [mergeHistory, { refetch: refetchMergeHistory }] = createResource(
-    () => params.targetId,
-    (id): Promise<MergedTargetResponse[]> | MergedTargetResponse[] =>
-      id.startsWith("obj:") ? [] : api.getMergeHistory(id).catch(() => []),
-  );
+  const mergeHistoryQuery = useQuery(() => ({
+    queryKey: queryKeys.targetMergeHistory(params.targetId),
+    queryFn: (): Promise<MergedTargetResponse[]> =>
+      params.targetId.startsWith("obj:")
+        ? Promise.resolve([])
+        : apiClient
+            .GET("/api/targets/{target_id}/merge-history", {
+              params: { path: { target_id: params.targetId } },
+            })
+            .then(unwrap)
+            .catch(() => []),
+  }));
+  const mergeHistory = () => mergeHistoryQuery.data;
+  const refetchMergeHistory = async () => { await mergeHistoryQuery.refetch(); };
   const [mergeHistoryExpanded, setMergeHistoryExpanded] = createSignal(false);
   const [undoingMerge, setUndoingMerge] = createSignal<string | null>(null);
 
@@ -229,10 +260,24 @@ const TargetDetailPage: Component = () => {
   // The DSS reference thumbnail is an auth-gated binary, so it is loaded as a
   // blob via fetchWithRefresh (matching getMosaicCompositeBlob) rather than a
   // raw <img src>, which would have no 401-refresh path.
+  // Kept as `createResource` (not `useQuery`) deliberately: this preserves the
+  // existing, already-correct object-URL create/revoke lifecycle below
+  // exactly as-is (per the migration plan's blob-endpoint hazard note, the
+  // priority for blob fetches is preserving that lifecycle, not uniformity
+  // with the rest of the file's reads). Only the fetch itself moves onto
+  // apiClient -- `parseAs: "blob"` (openapi-fetch) matches the old
+  // `fetchWithRefresh(...).blob()` behavior; the generated schema types this
+  // endpoint's success body as `unknown` (FastAPI's streaming response isn't
+  // declared with a content schema), so the unwrap result is cast to `Blob`.
   const [referenceThumbnailUrl] = createResource(
     () => (skyViewExpanded() && targetDetail()?.reference_thumbnail_path ? params.targetId : null),
     async (id: string) => {
-      const blob = await api.getReferenceThumbnailBlob(id);
+      const blob = await apiClient
+        .GET("/api/targets/{target_id}/reference-thumbnail", {
+          params: { path: { target_id: id } },
+          parseAs: "blob",
+        })
+        .then(unwrap) as Blob;
       return URL.createObjectURL(blob);
     },
   );
@@ -249,13 +294,21 @@ const TargetDetailPage: Component = () => {
   });
 
   const [notesExpanded, setNotesExpanded] = createSignal(false);
-  const [targetNotes, setTargetNotes] = createSignal<string>("");
-  const [notesSaving, setNotesSaving] = createSignal(false);
-  let notesTimer: ReturnType<typeof setTimeout> | undefined;
+  const { notes: targetNotes, onInput: onNotesInput, saving: notesSaving } = useNotesAutosave({
+    serverValue: () => targetDetail()?.notes,
+    save: async (text) => {
+      await apiClient
+        .PUT("/api/targets/{target_id}/notes", {
+          params: { path: { target_id: params.targetId } },
+          body: { notes: text || null },
+        })
+        .then(unwrap);
+    },
+    errorLabel: "Failed to save notes",
+  });
 
   // Rename/re-resolve signals
   const [editing, setEditing] = createSignal(false);
-  const [editName, setEditName] = createSignal("");
   const [savingIdentity, setSavingIdentity] = createSignal(false);
 
   // Object type edit
@@ -267,7 +320,12 @@ const TargetDetailPage: Component = () => {
     if (!detail) return;
     setSavingObjectType(true);
     try {
-      await api.updateTargetIdentity(detail.target_id, { object_type: value });
+      await apiClient
+        .PUT("/api/targets/{target_id}/identity", {
+          params: { path: { target_id: detail.target_id } },
+          body: { object_type: value, re_resolve: false },
+        })
+        .then(unwrap);
       setEditingObjectType(false);
       await refetchDetail();
     } catch (e: unknown) {
@@ -277,10 +335,10 @@ const TargetDetailPage: Component = () => {
     }
   };
 
-  const handleRename = async () => {
+  const handleRename = async (nameInput: string) => {
     const detail = targetDetail();
     if (!detail) return;
-    const name = editName().trim();
+    const name = nameInput.trim();
     if (!name) {
       showToast("Name cannot be empty", "error");
       return;
@@ -292,7 +350,12 @@ const TargetDetailPage: Component = () => {
     }
     setSavingIdentity(true);
     try {
-      await api.updateTargetIdentity(detail.target_id, { primary_name: name });
+      await apiClient
+        .PUT("/api/targets/{target_id}/identity", {
+          params: { path: { target_id: detail.target_id } },
+          body: { primary_name: name, re_resolve: false },
+        })
+        .then(unwrap);
       setEditing(false);
       await refetchDetail();
     } catch (e: unknown) {
@@ -307,7 +370,12 @@ const TargetDetailPage: Component = () => {
     if (!detail) return;
     setSavingIdentity(true);
     try {
-      await api.updateTargetIdentity(detail.target_id, { re_resolve: true });
+      await apiClient
+        .PUT("/api/targets/{target_id}/identity", {
+          params: { path: { target_id: detail.target_id } },
+          body: { re_resolve: true },
+        })
+        .then(unwrap);
       await refetchDetail();
       showToast("Re-resolve queued");
     } catch (e: unknown) {
@@ -320,7 +388,11 @@ const TargetDetailPage: Component = () => {
   const handleUndoMerge = async (merged: MergedTargetResponse) => {
     setUndoingMerge(merged.id);
     try {
-      await api.unmergeTarget(merged.id);
+      await apiClient
+        .POST("/api/targets/{target_id}/unmerge", {
+          params: { path: { target_id: merged.id } },
+        })
+        .then(unwrap);
       showToast(`Unmerged "${merged.primary_name}"`);
       await Promise.all([refetchMergeHistory(), refetchDetail()]);
       // Unmerging moves frames off this night, so drop the cache and re-load
@@ -333,26 +405,6 @@ const TargetDetailPage: Component = () => {
     } finally {
       setUndoingMerge(null);
     }
-  };
-
-  // Initialize notes when data loads
-  createEffect(() => {
-    const detail = targetDetail();
-    if (detail?.notes) setTargetNotes(detail.notes);
-  });
-
-  const saveTargetNotes = (text: string) => {
-    clearTimeout(notesTimer);
-    notesTimer = setTimeout(async () => {
-      setNotesSaving(true);
-      try {
-        await api.updateTargetNotes(params.targetId, text || null);
-      } catch (e: unknown) {
-        showToast(getErrorMessage(e, "Failed to save notes"), "error");
-      } finally {
-        setNotesSaving(false);
-      }
-    }, 1000);
   };
 
   createEffect(
@@ -398,7 +450,13 @@ const TargetDetailPage: Component = () => {
       setCsvLoading(true);
       try {
         const results = await Promise.all(
-          missingDates.map((d) => api.getSessionDetail(params.targetId, d))
+          missingDates.map((d) =>
+            apiClient
+              .GET("/api/targets/{target_id}/sessions/{date}", {
+                params: { path: { target_id: params.targetId, date: d } },
+              })
+              .then(unwrap) as Promise<SessionDetail>
+          )
         );
         const newCache = { ...sessionCache() };
         missingDates.forEach((d, i) => {
@@ -493,7 +551,11 @@ const TargetDetailPage: Component = () => {
       const date = loadQueue.shift()!;
       if (sessionCache()[date] || pendingLoads.has(date)) continue;
       pendingLoads.add(date);
-      api.getSessionDetail(params.targetId, date)
+      (apiClient
+        .GET("/api/targets/{target_id}/sessions/{date}", {
+          params: { path: { target_id: params.targetId, date } },
+        })
+        .then(unwrap) as Promise<SessionDetail>)
         .then((detail) => {
           setSessionCache((prev) => ({ ...prev, [date]: detail }));
         })
@@ -640,10 +702,7 @@ const TargetDetailPage: Component = () => {
                               title="Rename target"
                               aria-label="Rename target"
                               disabled={savingIdentity()}
-                              onClick={() => {
-                                setEditName(detail().primary_name);
-                                setEditing(true);
-                              }}
+                              onClick={() => setEditing(true)}
                             >
                               &#9998;
                             </button>
@@ -660,36 +719,13 @@ const TargetDetailPage: Component = () => {
                         </>
                       }
                     >
-                      <input
-                        type="text"
-                        class="text-2xl font-semibold tracking-tight bg-transparent border-b border-theme-accent text-theme-text-primary focus:outline-none min-w-0 flex-1"
-                        value={editName()}
-                        onInput={(e) => setEditName(e.currentTarget.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") handleRename();
-                          if (e.key === "Escape") setEditing(false);
-                        }}
-                        ref={(el) => { setTimeout(() => el?.focus(), 0); }}
-                        disabled={savingIdentity()}
+                      <InlineRename
+                        initialValue={detail().primary_name}
+                        onSave={handleRename}
+                        onCancel={() => setEditing(false)}
+                        saving={savingIdentity()}
+                        inputClass="text-2xl font-semibold tracking-tight bg-transparent border-b border-theme-accent text-theme-text-primary focus:outline-none min-w-0 flex-1"
                       />
-                      <button
-                        class="text-theme-text-tertiary hover:text-green-400 transition-colors text-lg leading-none"
-                        title="Save"
-                        aria-label="Save name"
-                        onClick={handleRename}
-                        disabled={savingIdentity()}
-                      >
-                        &#10003;
-                      </button>
-                      <button
-                        class="text-theme-text-tertiary hover:text-theme-error transition-colors text-lg leading-none"
-                        title="Cancel"
-                        aria-label="Cancel rename"
-                        onClick={() => setEditing(false)}
-                        disabled={savingIdentity()}
-                      >
-                        &#10005;
-                      </button>
                     </Show>
                     <HelpPopover>
                       <p class="text-sm text-theme-text-secondary">
@@ -713,33 +749,16 @@ const TargetDetailPage: Component = () => {
                     >
                       Export
                     </button>
-                    <div ref={actionsMenuRef} class="relative inline-flex">
-                      <button
-                        type="button"
-                        aria-label="More actions"
-                        aria-haspopup="menu"
-                        aria-expanded={actionsMenuOpen()}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setActionsMenuOpen((v) => !v);
-                        }}
-                        class="inline-flex items-center justify-center w-8 h-8 rounded border border-theme-border text-theme-text-secondary hover:text-theme-text-primary hover:bg-theme-hover transition-colors cursor-pointer"
-                      >
-                        <span class="text-lg leading-none" aria-hidden="true">&#8943;</span>
-                      </button>
-                      <Show when={actionsMenuOpen()}>
-                        <div
-                          role="menu"
-                          onClick={(e) => e.stopPropagation()}
-                          class="absolute top-full right-0 mt-2 z-50 min-w-[12rem] bg-theme-elevated border border-theme-border rounded-[var(--radius-sm)] shadow-[var(--shadow-lg)] py-1"
-                        >
+                    <ActionsMenu>
+                      {(close) => (
+                        <>
                           <Show when={auth.isAdmin()}>
                             <button
                               type="button"
                               role="menuitem"
                               class="w-full text-left px-3 py-1.5 text-sm text-theme-text-primary hover:bg-theme-hover transition-colors cursor-pointer"
                               onClick={() => {
-                                setActionsMenuOpen(false);
+                                close();
                                 setShowMerge(true);
                               }}
                             >
@@ -754,7 +773,7 @@ const TargetDetailPage: Component = () => {
                             class="w-full text-left px-3 py-1.5 text-sm text-theme-text-primary hover:bg-theme-hover transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
                             onClick={() => {
                               if (selectedChartDates().length === 0) return;
-                              setActionsMenuOpen(false);
+                              close();
                               setShowWbppExport(true);
                             }}
                           >
@@ -762,9 +781,9 @@ const TargetDetailPage: Component = () => {
                               ? `WBPP Export (${selectedChartDates().length})`
                               : "WBPP Export"}
                           </button>
-                        </div>
-                      </Show>
-                    </div>
+                        </>
+                      )}
+                    </ActionsMenu>
                   </div>
                   </div>
                   <div class="text-xs text-theme-text-secondary mt-1 flex flex-wrap gap-x-2 gap-y-0.5 items-center">
@@ -934,22 +953,12 @@ const TargetDetailPage: Component = () => {
             {/* Merge History */}
             <Show when={mergeHistory()?.length}>
               <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4">
-                <button
-                  class="flex items-center gap-2 py-2 cursor-pointer group"
-                  onClick={() => setMergeHistoryExpanded((v) => !v)}
-                >
-                  <h3 class="text-xs font-semibold uppercase tracking-wider text-theme-text-secondary border-l-2 border-theme-accent pl-2 group-hover:text-theme-text-primary transition-colors">
-                    Merge History
-                    <span class="text-theme-text-tertiary font-normal normal-case tracking-normal ml-2">({mergeHistory()!.length})</span>
-                  </h3>
-                  <svg
-                    class={`w-3.5 h-3.5 transition-transform duration-200 text-theme-text-tertiary ${mergeHistoryExpanded() ? "rotate-180" : ""}`}
-                    viewBox="0 0 20 20"
-                    fill="currentColor"
-                  >
-                    <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
-                  </svg>
-                </button>
+                <CollapsibleHeader
+                  title="Merge History"
+                  expanded={mergeHistoryExpanded}
+                  onToggle={() => setMergeHistoryExpanded((v) => !v)}
+                  suffix={<span class="text-theme-text-tertiary font-normal normal-case tracking-normal ml-2">({mergeHistory()!.length})</span>}
+                />
                 <Show when={mergeHistoryExpanded()}>
                   <div class="mt-2 space-y-2">
                     <For each={mergeHistory()}>
@@ -958,7 +967,7 @@ const TargetDetailPage: Component = () => {
                           <div class="flex-1 min-w-0">
                             <span class="text-theme-text-primary text-sm font-medium">{merged.primary_name}</span>
                             <div class="text-xs text-theme-text-secondary mt-0.5">
-                              Merged on {new Date(merged.merged_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                              Merged on {formatDate(merged.merged_at, timezone())}
                               {" · "}{merged.image_count} {merged.image_count === 1 ? "image" : "images"}
                             </div>
                           </div>
@@ -983,21 +992,11 @@ const TargetDetailPage: Component = () => {
             <Show when={detail().ra != null && detail().dec != null}>
               <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4">
                 <div class="flex items-center gap-2">
-                  <button
-                    class="flex items-center gap-2 py-2 cursor-pointer group"
-                    onClick={() => setSkyViewExpanded((v) => !v)}
-                  >
-                    <h3 class="text-xs font-semibold uppercase tracking-wider text-theme-text-secondary border-l-2 border-theme-accent pl-2 group-hover:text-theme-text-primary transition-colors">
-                      Sky View
-                    </h3>
-                    <svg
-                      class={`w-3.5 h-3.5 transition-transform duration-200 text-theme-text-tertiary ${skyViewExpanded() ? "rotate-180" : ""}`}
-                      viewBox="0 0 20 20"
-                      fill="currentColor"
-                    >
-                      <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
-                    </svg>
-                  </button>
+                  <CollapsibleHeader
+                    title="Sky View"
+                    expanded={skyViewExpanded}
+                    onToggle={() => setSkyViewExpanded((v) => !v)}
+                  />
                   <HelpPopover>
                     <p class="text-sm text-theme-text-secondary">
                       Interactive sky viewer centered on the target. The Aladin panel supports zoom and pan across surveys (DSS2, PanSTARRS, and others), and the reference thumbnail shows the default DSS image for context. Example: switch surveys in Aladin to compare how the target looks in different wavelengths.
@@ -1033,29 +1032,21 @@ const TargetDetailPage: Component = () => {
             {/* Target Notes */}
             <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4">
               <div class="flex items-center gap-2">
-                <button
-                  class="flex items-center gap-2 py-2 cursor-pointer group"
-                  onClick={() => setNotesExpanded((v) => !v)}
-                >
-                  <h3 class="text-xs font-semibold uppercase tracking-wider text-theme-text-secondary border-l-2 border-theme-accent pl-2 group-hover:text-theme-text-primary transition-colors">
-                    Notes
+                <CollapsibleHeader
+                  title="Notes"
+                  expanded={notesExpanded}
+                  onToggle={() => setNotesExpanded((v) => !v)}
+                  suffix={
                     <Show when={targetNotes()}>
                       <span class="text-theme-text-tertiary font-normal normal-case tracking-normal ml-2">has content</span>
                     </Show>
-                  </h3>
-                  <div class="flex items-center gap-2">
+                  }
+                  trailing={
                     <Show when={notesSaving()}>
                       <span class="text-xs text-theme-text-secondary">Saving...</span>
                     </Show>
-                    <svg
-                      class={`w-3.5 h-3.5 transition-transform duration-200 text-theme-text-tertiary ${notesExpanded() ? "rotate-180" : ""}`}
-                      viewBox="0 0 20 20"
-                      fill="currentColor"
-                    >
-                      <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
-                    </svg>
-                  </div>
-                </button>
+                  }
+                />
                 <HelpPopover>
                   <p class="text-sm text-theme-text-secondary">
                     Free-form notes attached to this target. Notes persist across sessions and are included in exports. Example: record plate solving issues, framing plans, or processing decisions.
@@ -1067,11 +1058,7 @@ const TargetDetailPage: Component = () => {
                   class="w-full bg-theme-elevated border border-theme-border rounded px-3 py-2 text-sm text-theme-text-primary placeholder-theme-text-secondary resize-y min-h-[60px] mt-2"
                   placeholder="Add notes about this target..."
                   value={targetNotes()}
-                  onInput={(e) => {
-                    const val = e.currentTarget.value;
-                    setTargetNotes(val);
-                    saveTargetNotes(val);
-                  }}
+                  onInput={(e) => onNotesInput(e.currentTarget.value)}
                 />
               </Show>
             </div>
@@ -1080,21 +1067,11 @@ const TargetDetailPage: Component = () => {
             <Show when={targetDetail()}>
               <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4">
                 <div class="flex items-center gap-2">
-                  <button
-                    class="flex items-center gap-2 py-2 cursor-pointer group"
-                    onClick={toggleTargetChart}
-                  >
-                    <h3 class="text-xs font-semibold uppercase tracking-wider text-theme-text-secondary border-l-2 border-theme-accent pl-2 group-hover:text-theme-text-primary transition-colors">
-                      Graphs
-                    </h3>
-                    <svg
-                      class={`w-3.5 h-3.5 transition-transform duration-200 text-theme-text-tertiary ${targetChartExpanded() ? "rotate-180" : ""}`}
-                      viewBox="0 0 20 20"
-                      fill="currentColor"
-                    >
-                      <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
-                    </svg>
-                  </button>
+                  <CollapsibleHeader
+                    title="Graphs"
+                    expanded={targetChartExpanded}
+                    onToggle={toggleTargetChart}
+                  />
                   <HelpPopover>
                     <p class="text-sm text-theme-text-secondary">
                       Per-frame metric plots (HFR, FWHM, eccentricity, guide RMS, and others) over time. Use the date selector to narrow to a single imaging night or span multiple sessions. Example: spot a degrading HFR trend across a single night to identify focus drift.

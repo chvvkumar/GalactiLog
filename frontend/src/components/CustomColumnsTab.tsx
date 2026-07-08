@@ -1,9 +1,20 @@
 import { createSignal, For, Show } from "solid-js";
-import { api } from "../api/client";
-import type { CustomColumn } from "../types";
+import { apiClient } from "../api/generated/client";
+import { unwrap } from "../api/unwrap";
+// CustomColumn is the hand-written definition (literal-union `column_type`/
+// `applies_to`) in `../api/types` -- Slice 15 moved it there verbatim
+// rather than aliasing the generated schema, which loosens both fields to
+// `string`; `ctx.customColumns` (this component's data source) is typed
+// against this shape.
+import type { CustomColumn } from "../api/types";
+import type { components } from "../api/generated/schema";
 import { useSettingsContext } from "./SettingsProvider";
 import HelpPopover from "./HelpPopover";
 import ConfirmDialog from "./ConfirmDialog";
+import DataTable, { type DataTableColumn } from "./DataTable";
+
+type CustomColumnCreate = components["schemas"]["CustomColumnCreate"];
+type CustomColumnUpdate = components["schemas"]["CustomColumnUpdate"];
 
 function OptionsList(props: { options: string[]; onChange: (opts: string[]) => void }) {
   const [draft, setDraft] = createSignal("");
@@ -77,7 +88,7 @@ export default function CustomColumnsTab() {
   async function handleCreate() {
     const name = newName().trim();
     if (!name) return;
-    const body: Parameters<typeof api.createCustomColumn>[0] = {
+    const body: CustomColumnCreate = {
       name,
       column_type: newType(),
       applies_to: newAppliesTo(),
@@ -85,14 +96,14 @@ export default function CustomColumnsTab() {
     if (newType() === "dropdown") {
       body.dropdown_options = newOptions();
     }
-    await api.createCustomColumn(body);
+    await apiClient.POST("/api/custom-columns", { body }).then(unwrap);
     setNewName("");
     setNewOptions([]);
     refetch();
   }
 
   async function handleDelete(id: string) {
-    await api.deleteCustomColumn(id);
+    await apiClient.DELETE("/api/custom-columns/{column_id}", { params: { path: { column_id: id } } }).then(unwrap);
     refetch();
   }
 
@@ -103,21 +114,104 @@ export default function CustomColumnsTab() {
   }
 
   async function handleSaveEdit(col: CustomColumn) {
-    const updates: Parameters<typeof api.updateCustomColumn>[1] = {};
+    const updates: CustomColumnUpdate = {};
     const name = editName().trim();
     if (name && name !== col.name) updates.name = name;
     if (col.column_type === "dropdown") {
       updates.dropdown_options = editOptions();
     }
-    await api.updateCustomColumn(col.id, updates);
+    await apiClient.PATCH("/api/custom-columns/{column_id}", { params: { path: { column_id: col.id } }, body: updates }).then(unwrap);
     setEditingId(null);
     refetch();
   }
 
   async function moveColumn(col: CustomColumn, direction: -1 | 1) {
-    await api.updateCustomColumn(col.id, { display_order: col.display_order + direction });
+    await apiClient
+      .PATCH("/api/custom-columns/{column_id}", {
+        params: { path: { column_id: col.id } },
+        body: { display_order: col.display_order + direction },
+      })
+      .then(unwrap);
     refetch();
   }
+
+  const tableColumns: DataTableColumn<CustomColumn>[] = [
+    {
+      key: "order",
+      label: "Order",
+      render: (col) => (
+        <div class="flex gap-1">
+          <button onClick={() => moveColumn(col, -1)} class="text-xs hover:text-theme-accent" title="Move up">^</button>
+          <button onClick={() => moveColumn(col, 1)} class="text-xs hover:text-theme-accent" title="Move down">v</button>
+        </div>
+      ),
+    },
+    {
+      key: "name",
+      label: "Name",
+      render: (col) => (
+        <Show when={editingId() === col.id} fallback={col.name}>
+          <input
+            type="text"
+            value={editName()}
+            onInput={(e) => setEditName(e.currentTarget.value)}
+            class="px-1 py-0.5 rounded border border-theme-border bg-theme-input text-theme-text-primary text-sm w-full"
+          />
+        </Show>
+      ),
+    },
+    {
+      key: "column_type",
+      label: "Type",
+      render: (col) => <span class="capitalize">{col.column_type}</span>,
+    },
+    {
+      key: "applies_to",
+      label: "Applies To",
+      render: (col) => <span class="capitalize">{col.applies_to}</span>,
+    },
+    {
+      key: "options",
+      label: "Options",
+      render: (col) => (
+        <Show
+          when={editingId() === col.id && col.column_type === "dropdown"}
+          fallback={
+            <div class="flex flex-wrap gap-1">
+              <For each={col.dropdown_options ?? []}>
+                {(opt) => (
+                  <span class="px-1.5 py-0.5 rounded bg-theme-elevated border border-theme-border text-xs">{opt}</span>
+                )}
+              </For>
+              <Show when={!col.dropdown_options?.length}>
+                <span class="text-theme-text-tertiary">-</span>
+              </Show>
+            </div>
+          }
+        >
+          <OptionsList options={editOptions()} onChange={setEditOptions} />
+        </Show>
+      ),
+    },
+    {
+      key: "actions",
+      label: "Actions",
+      render: (col) => (
+        <div class="flex gap-2">
+          <Show
+            when={editingId() === col.id}
+            fallback={
+              <button onClick={() => startEdit(col)} class="text-xs text-theme-accent hover:underline">Edit</button>
+            }
+          >
+            <button onClick={() => handleSaveEdit(col)} class="px-4 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded text-sm font-medium hover:bg-theme-accent/25 transition-colors">Save</button>
+            <button onClick={() => setEditingId(null)} class="text-xs text-theme-text-secondary hover:underline">Cancel</button>
+          </Show>
+          <button onClick={() => setDeleteConfirmId(col.id)} class="text-xs text-red-500 hover:underline">Delete</button>
+        </div>
+      ),
+    },
+  ];
 
   return (
     <div class="rounded-[var(--radius-md)] bg-theme-surface border border-theme-border p-4 space-y-6">
@@ -201,76 +295,12 @@ export default function CustomColumnsTab() {
           </HelpPopover>
         </div>
         <Show when={columns()?.length} fallback={<p class="text-sm text-theme-text-secondary">No custom columns defined yet.</p>}>
-          <table class="w-full text-sm">
-          <thead>
-            <tr class="border-b border-theme-border text-left text-theme-text-secondary">
-              <th class="py-2 px-2">Order</th>
-              <th class="py-2 px-2">Name</th>
-              <th class="py-2 px-2">Type</th>
-              <th class="py-2 px-2">Applies To</th>
-              <th class="py-2 px-2">Options</th>
-              <th class="py-2 px-2">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            <For each={columns()}>
-              {(col) => (
-                <tr class="border-b border-theme-border">
-                  <td class="py-2 px-2">
-                    <div class="flex gap-1">
-                      <button onClick={() => moveColumn(col, -1)} class="text-xs hover:text-theme-accent" title="Move up">^</button>
-                      <button onClick={() => moveColumn(col, 1)} class="text-xs hover:text-theme-accent" title="Move down">v</button>
-                    </div>
-                  </td>
-                  <td class="py-2 px-2">
-                    <Show when={editingId() === col.id} fallback={col.name}>
-                      <input
-                        type="text"
-                        value={editName()}
-                        onInput={(e) => setEditName(e.currentTarget.value)}
-                        class="px-1 py-0.5 rounded border border-theme-border bg-theme-input text-theme-text-primary text-sm w-full"
-                      />
-                    </Show>
-                  </td>
-                  <td class="py-2 px-2 capitalize">{col.column_type}</td>
-                  <td class="py-2 px-2 capitalize">{col.applies_to}</td>
-                  <td class="py-2 px-2">
-                    <Show when={editingId() === col.id && col.column_type === "dropdown"}
-                      fallback={
-                        <div class="flex flex-wrap gap-1">
-                          <For each={col.dropdown_options ?? []}>
-                            {(opt) => (
-                              <span class="px-1.5 py-0.5 rounded bg-theme-elevated border border-theme-border text-xs">{opt}</span>
-                            )}
-                          </For>
-                          <Show when={!col.dropdown_options?.length}>
-                            <span class="text-theme-text-tertiary">-</span>
-                          </Show>
-                        </div>
-                      }
-                    >
-                      <OptionsList options={editOptions()} onChange={setEditOptions} />
-                    </Show>
-                  </td>
-                  <td class="py-2 px-2">
-                    <div class="flex gap-2">
-                      <Show
-                        when={editingId() === col.id}
-                        fallback={
-                          <button onClick={() => startEdit(col)} class="text-xs text-theme-accent hover:underline">Edit</button>
-                        }
-                      >
-                        <button onClick={() => handleSaveEdit(col)} class="px-4 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded text-sm font-medium hover:bg-theme-accent/25 transition-colors">Save</button>
-                        <button onClick={() => setEditingId(null)} class="text-xs text-theme-text-secondary hover:underline">Cancel</button>
-                      </Show>
-                      <button onClick={() => setDeleteConfirmId(col.id)} class="text-xs text-red-500 hover:underline">Delete</button>
-                    </div>
-                  </td>
-                </tr>
-              )}
-            </For>
-          </tbody>
-          </table>
+          <DataTable
+            columns={tableColumns}
+            rows={columns() ?? []}
+            rowKey={(col) => col.id}
+            emptyMessage="No custom columns defined yet."
+          />
         </Show>
       </div>
 

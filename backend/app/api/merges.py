@@ -1,7 +1,8 @@
+import asyncio
 import uuid
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select, update, func, delete, or_, text
+from sqlalchemy import select, update, func, or_, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
@@ -11,10 +12,8 @@ from app.models.user import User
 from app.models.target import Target
 from app.models.image import Image
 from app.models.merge_candidate import MergeCandidate
-from app.schemas.target import MergeCandidateResponse, MergedTargetResponse, MergeRequest, OrphanPreviewRequest, OrphanPreviewResponse, OrphanCreateRequest, MergePreviewRequest, MergePreviewResponse, TargetIdentityRequest, TargetIdentityResponse, StatusResponse, MergeCandidateCountResponse, DuplicateDetectionResponse, OrphanCreateResponse, CustomTargetCreateRequest, CustomTargetCreateResponse
+from app.schemas.target import MergeCandidateResponse, MergedTargetResponse, MergeRequest, OrphanPreviewRequest, OrphanPreviewResponse, OrphanCreateRequest, MergePreviewRequest, MergePreviewResponse, TargetIdentityRequest, TargetIdentityResponse, StatusResponse, DuplicateDetectionResponse, OrphanCreateResponse, CustomTargetCreateRequest, CustomTargetCreateResponse
 from app.services.simbad import normalize_catalog_id, normalize_object_name
-from app.models.simbad_cache import SimbadCache
-from app.models.sesame_cache import SesameCache
 from app.config import async_redis
 from app.models.merge_manifest import MergeManifest
 from app.services.target_merge import (
@@ -24,6 +23,7 @@ from app.services.target_merge import (
     apply_merge_manifest_restore,
 )
 from app.services.cache import invalidate_stats_and_analysis_cache
+from app.services.mosaic_detection import recompute_panel_membership_for_images
 
 router = APIRouter(prefix="/targets", tags=["merges"])
 
@@ -64,19 +64,6 @@ async def unmerge_target(
 ):
     """Restore a soft-deleted (merged) target."""
     return await _unmerge_target_service(target_id, session)
-
-
-@router.get("/merge-candidates/count", response_model=MergeCandidateCountResponse)
-async def get_merge_candidate_count(
-    session: AsyncSession = Depends(get_session),
-    user: User = Depends(get_current_user),
-):
-    """Return count of pending merge candidates (for badge display)."""
-    result = await session.execute(
-        select(func.count(MergeCandidate.id)).where(MergeCandidate.status == "pending")
-    )
-    count = result.scalar_one()
-    return {"count": count}
 
 
 @router.get("/merge-candidates", response_model=list[MergeCandidateResponse])
@@ -128,20 +115,15 @@ async def orphan_preview(
     source = body.source_name
     normalized = normalize_object_name(source)
 
-    # Clear negative caches so the name gets a fresh attempt
-    await session.execute(
-        delete(SimbadCache).where(SimbadCache.query_name == normalized, SimbadCache.main_id.is_(None))
-    )
-    await session.execute(
-        delete(SesameCache).where(SesameCache.query_name == normalized, SesameCache.main_id.is_(None))
-    )
-    await session.commit()
-
     async with async_redis() as redis:
         await redis.srem("target_resolver:negative", normalized)
 
     def _resolve_sync():
+        from app.services import catalog_cache as cc
         with SyncSession(sync_engine) as sync_db:
+            # Clear negative caches so the name gets a fresh attempt
+            cc.clear_negative(sync_db, "simbad", normalized)
+            cc.clear_negative(sync_db, "sesame", normalized)
             result = resolve_target_name_cached(source, sync_db)
             if result is None:
                 result = resolve_sesame_cached(source, sync_db)
@@ -328,14 +310,18 @@ async def orphan_create(
     session.add(target)
     await session.flush()
 
-    await session.execute(
+    resolved_rows = (await session.execute(
         update(Image)
         .where(
             Image.raw_headers["OBJECT"].astext == candidate.source_name,
             Image.resolved_target_id.is_(None),
         )
         .values(resolved_target_id=target.id)
-    )
+        .returning(Image.id)
+    )).scalars().all()
+    # These images were unresolved at ingest, so panel membership was never
+    # attempted; recompute now that they have a target.
+    await recompute_panel_membership_for_images(session, resolved_rows)
 
     candidate.suggested_target_id = target.id
     candidate.status = "accepted"
@@ -358,7 +344,7 @@ async def orphan_create(
     await invalidate_stats_and_analysis_cache()
 
     if not body.user_defined:
-        _enrich_new_target(target.id)
+        await asyncio.to_thread(_enrich_new_target, target.id)
 
     return {"target_id": str(target.id)}
 
@@ -427,19 +413,28 @@ async def create_custom_target(
 
     now = datetime.now(timezone.utc)
     linked_images = 0
+    linked_image_ids: list = []
     for cand in pending:
-        result = await session.execute(
+        rows = (await session.execute(
             update(Image)
             .where(
                 Image.raw_headers["OBJECT"].astext == cand.source_name,
                 Image.resolved_target_id.is_(None),
             )
             .values(resolved_target_id=target.id)
-        )
-        linked_images += result.rowcount or 0
+            .returning(Image.id)
+        )).scalars().all()
+        linked_images += len(rows)
+        linked_image_ids.extend(rows)
         cand.suggested_target_id = target.id
         cand.status = "accepted"
         cand.resolved_at = now
+
+    if linked_image_ids:
+        # These images were unresolved at ingest, so panel membership was
+        # never attempted (the "never-parsed images gain a target" case);
+        # recompute now that they have a target.
+        await recompute_panel_membership_for_images(session, linked_image_ids)
 
     try:
         await session.commit()
@@ -458,48 +453,13 @@ async def create_custom_target(
     await invalidate_stats_and_analysis_cache()
 
     if not body.user_defined:
-        _enrich_new_target(target.id)
+        await asyncio.to_thread(_enrich_new_target, target.id)
 
     return {
         "target_id": str(target.id),
         "linked_candidates": len(pending),
         "linked_images": linked_images,
     }
-
-
-@router.get("/merged-targets", response_model=list[MergedTargetResponse])
-async def list_merged_targets(
-    session: AsyncSession = Depends(get_session),
-    user: User = Depends(get_current_user),
-):
-    """List all soft-deleted (merged) targets with winner name and image count."""
-    winner_alias = aliased(Target, name="winner")
-
-    result = await session.execute(
-        select(
-            Target,
-            winner_alias.primary_name.label("merged_into_name"),
-            func.count(Image.id).label("image_count"),
-        )
-        .join(winner_alias, Target.merged_into_id == winner_alias.id)
-        .outerjoin(Image, Image.resolved_target_id == winner_alias.id)
-        .where(Target.merged_into_id.is_not(None))
-        .group_by(Target.id, winner_alias.primary_name)
-        .order_by(Target.merged_at.desc())
-    )
-    rows = result.all()
-
-    return [
-        MergedTargetResponse(
-            id=target.id,
-            primary_name=target.primary_name,
-            merged_into_id=target.merged_into_id,
-            merged_into_name=merged_into_name,
-            merged_at=target.merged_at.isoformat() if target.merged_at else "",
-            image_count=image_count,
-        )
-        for target, merged_into_name, image_count in rows
-    ]
 
 
 @router.get("/{target_id:path}/merge-history", response_model=list[MergedTargetResponse])
@@ -569,14 +529,18 @@ async def revert_merge_candidate(
     source_name = candidate.source_name
 
     if candidate.method == "orphan":
-        await session.execute(
+        unresolved_rows = (await session.execute(
             update(Image)
             .where(
                 Image.resolved_target_id == winner.id,
                 Image.raw_headers["OBJECT"].astext == source_name,
             )
             .values(resolved_target_id=None)
-        )
+            .returning(Image.id)
+        )).scalars().all()
+        # Losing their target means panel_id is no longer valid membership;
+        # clear it in step.
+        await recompute_panel_membership_for_images(session, unresolved_rows)
         remaining = await session.execute(
             select(func.count(Image.id)).where(Image.resolved_target_id == winner.id)
         )
@@ -613,31 +577,44 @@ async def revert_merge_candidate(
                 .limit(1)
             )).scalars().first()
             if manifest is not None:
-                await apply_merge_manifest_restore(manifest, loser, winner, session)
+                moved_ids = await apply_merge_manifest_restore(manifest, loser, winner, session)
                 await session.delete(manifest)
             else:
+                moved_ids = []
                 for name in loser_names:
-                    await session.execute(
+                    rows = (await session.execute(
                         update(Image)
                         .where(
                             Image.resolved_target_id == winner.id,
                             Image.raw_headers["OBJECT"].astext == name,
                         )
                         .values(resolved_target_id=loser.id)
-                    )
+                        .returning(Image.id)
+                    )).scalars().all()
+                    moved_ids.extend(rows)
+            # This endpoint's manifest/legacy-fallback restore does not move
+            # MosaicPanel rows back to the loser (unlike unmerge_target), so
+            # there is no panel-reversion ordering to wait for here: recompute
+            # immediately. If the loser's panel wasn't moved back by any other
+            # path, this correctly clears panel_id rather than leaving it
+            # pointing at a panel still owned by the winner.
+            if moved_ids:
+                await recompute_panel_membership_for_images(session, moved_ids)
             winner.aliases = [a for a in (winner.aliases or []) if a not in loser_names]
             loser.merged_into_id = None
             loser.merged_at = None
         else:
             winner.aliases = [a for a in (winner.aliases or []) if a != source_name]
-            await session.execute(
+            unresolved_rows = (await session.execute(
                 update(Image)
                 .where(
                     Image.resolved_target_id == winner.id,
                     Image.raw_headers["OBJECT"].astext == source_name,
                 )
                 .values(resolved_target_id=None)
-            )
+                .returning(Image.id)
+            )).scalars().all()
+            await recompute_panel_membership_for_images(session, unresolved_rows)
 
         candidate.status = "pending"
         candidate.resolved_at = None
@@ -672,23 +649,7 @@ async def update_target_identity(
             target.aliases[0] if target.aliases else None
         )
 
-        # Delete negative cache entries for all of this target's aliases
         all_names = [lookup_name] + list(target.aliases or [])
-        for name in all_names:
-            n = normalize_object_name(name)
-            await session.execute(
-                delete(SimbadCache).where(
-                    SimbadCache.query_name == n,
-                    SimbadCache.main_id.is_(None),
-                )
-            )
-            await session.execute(
-                delete(SesameCache).where(
-                    SesameCache.query_name == n,
-                    SesameCache.main_id.is_(None),
-                )
-            )
-        await session.flush()
 
         async with async_redis() as redis:
             for name in all_names:
@@ -696,7 +657,12 @@ async def update_target_identity(
                 await redis.srem("target_resolver:negative", n)
 
         def _resolve_sync():
+            from app.services import catalog_cache as cc
             with SyncSession(sync_engine) as sync_db:
+                for name in all_names:
+                    n = normalize_object_name(name)
+                    cc.clear_negative(sync_db, "simbad", n)
+                    cc.clear_negative(sync_db, "sesame", n)
                 return resolve_target_name_cached(lookup_name, sync_db)
 
         result = await asyncio.to_thread(_resolve_sync)

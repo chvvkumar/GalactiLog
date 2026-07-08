@@ -236,7 +236,6 @@ def _migrate_v6_clear_negative_cache_and_reenrich(session: Session) -> str:
     """
     import time
     from app.models import Target
-    from app.models.vizier_cache import VizierCache
     from app.services.constellation import coords_to_constellation
 
     # Step 1: Clear negative cache entries (no size data)
@@ -681,6 +680,56 @@ def _migrate_v13_enrich_created_targets(session: Session) -> str:
     if queried:
         parts.append(f"{queried} network queries")
     return "; ".join(parts) if parts else "No changes needed"
+
+
+def reference_catalogs_are_empty(session: Session) -> bool:
+    """Return True if the static OpenNGC catalog table has no rows.
+
+    OpenNGC is the anchor catalog every other static catalog (SAC, Caldwell,
+    Herschel 400, Arp, Abell) and target enrichment depend on, so an empty
+    ``openngc_catalog`` table is a reliable signal that the static reference
+    data has never been loaded on this database (e.g. a fresh install whose
+    baseline seeds a current data_version, so the data-migration functions
+    that used to load these catalogs never run - see load_reference_catalogs).
+    """
+    from app.models.openngc import OpenNGCEntry
+
+    return session.execute(select(OpenNGCEntry.name).limit(1)).first() is None
+
+
+def load_reference_catalogs(session: Session) -> str:
+    """Load all static reference catalogs independent of the data-version gate.
+
+    OpenNGC, SAC, Caldwell, Herschel 400, Arp, and Abell were historically
+    loaded only as a side effect of data migrations v3/v7/v13
+    (_migrate_v3_load_openngc, _migrate_v8_tier1_and_catalogs,
+    _migrate_v13_enrich_created_targets). The v2.0 baseline seeds fresh
+    databases at the current data_version so the upgrade gate holds, which
+    means those data migrations never run on a fresh install and the catalog
+    tables stay permanently empty. This function loads and matches the same
+    catalogs directly so boot can call it unconditionally.
+
+    Every loader is a Postgres upsert keyed on a natural key (see
+    load_openngc_csv, load_sac_csv, load_catalog_csv, upsert_membership), so
+    this is safe to call repeatedly: re-running it updates existing rows in
+    place rather than duplicating them.
+    """
+    from app.services.sac import load_sac_csv
+    from app.services.catalog_membership import load_catalog_memberships
+
+    openngc_loaded = load_openngc_csv(session)
+    session.flush()
+
+    sac_loaded = load_sac_csv(session)
+    session.flush()
+
+    membership_summary = load_catalog_memberships(session)
+    session.flush()
+
+    return (
+        f"OpenNGC: {openngc_loaded} entries; SAC: {sac_loaded} entries; "
+        f"{membership_summary}"
+    )
 
 
 # Registry: version number -> (description, migration function)

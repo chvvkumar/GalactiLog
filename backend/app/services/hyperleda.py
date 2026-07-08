@@ -6,11 +6,9 @@ import re
 from typing import TYPE_CHECKING, Any
 
 import httpx
-from sqlalchemy import select
 from sqlalchemy.orm import Session
-from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-from app.models.hyperleda_cache import HyperLEDACache
+from app.services import catalog_cache as cc
 
 if TYPE_CHECKING:
     from app.models.target import Target
@@ -73,62 +71,61 @@ def _extract_param_value(html: str, param_name: str) -> float | None:
 def query_hyperleda(catalog_id: str) -> dict[str, Any] | None:
     """Query HyperLEDA for morphological type and inclination.
 
-    Returns {"t_type": float|None, "inclination": float|None} or None on error.
+    Returns {"t_type": float|None, "inclination": float|None} or None when
+    the API returns no usable data for the object. Raises on HTTP/network
+    failures so the cache wrapper can retry transient errors and skip
+    caching non-transient ones.
     Uses the ledacat.cgi endpoint which returns structured HTML with
     parameter/value pairs.
     """
     name = _hyperleda_name(catalog_id)
 
-    try:
-        with httpx.Client(timeout=15.0, follow_redirects=True) as client:
-            resp = client.get(HYPERLEDA_URL, params={"o": name})
-            resp.raise_for_status()
+    with httpx.Client(timeout=15.0, follow_redirects=True) as client:
+        resp = client.get(HYPERLEDA_URL, params={"o": name})
+        resp.raise_for_status()
 
-        html = resp.text
+    html = resp.text
 
-        # Check for "no record" response
-        if "returns no record" in html:
-            logger.debug("HyperLEDA returned no data for '%s'", catalog_id)
-            return None
-
-        t_type = _extract_param_value(html, "t")
-        inclination = _extract_param_value(html, "incl")
-
-        if t_type is None and inclination is None:
-            logger.debug("HyperLEDA returned no t/incl for '%s'", catalog_id)
-            return None
-
-        return {
-            "t_type": t_type,
-            "inclination": inclination,
-        }
-
-    except (httpx.HTTPError, ValueError, IndexError) as e:
-        logger.warning("HyperLEDA query failed for '%s': %s", catalog_id, e)
+    # Check for "no record" response
+    if "returns no record" in html:
+        logger.debug("HyperLEDA returned no data for '%s'", catalog_id)
         return None
 
+    t_type = _extract_param_value(html, "t")
+    inclination = _extract_param_value(html, "incl")
 
-def get_cached_hyperleda(catalog_id: str, session: Session) -> HyperLEDACache | None:
-    """Check the HyperLEDA cache for a previous lookup."""
-    return session.execute(
-        select(HyperLEDACache).where(HyperLEDACache.catalog_id == catalog_id)
-    ).scalar_one_or_none()
+    if t_type is None and inclination is None:
+        logger.debug("HyperLEDA returned no t/incl for '%s'", catalog_id)
+        return None
+
+    return {
+        "t_type": t_type,
+        "inclination": inclination,
+    }
+
+
+def get_cached_hyperleda(catalog_id: str, session: Session) -> dict[str, Any] | None:
+    """Check the HyperLEDA cache for a previous lookup.
+
+    Returns a dict with 't_type' and 'inclination' keys (values may be None)
+    for a positive or negative cache hit, or None if not cached at all.
+    """
+    cached = cc.get_cached(session, "hyperleda", catalog_id)
+    if cached is None:
+        return None
+    if cached is cc.NEGATIVE:
+        return {"t_type": None, "inclination": None}
+    return cached
 
 
 def save_hyperleda_cache(
     session: Session, catalog_id: str, data: dict[str, Any] | None,
 ) -> None:
-    """Save a HyperLEDA lookup result (including negative) to the cache."""
-    entry = {
-        "catalog_id": catalog_id,
-        "t_type": data.get("t_type") if data else None,
-        "inclination": data.get("inclination") if data else None,
-    }
-    stmt = pg_insert(HyperLEDACache).values(**entry).on_conflict_do_update(
-        index_elements=["catalog_id"],
-        set_=entry,
-    )
-    session.execute(stmt)
+    """Save a HyperLEDA lookup result (including negative) to the cache.
+
+    Does not commit -- caller owns the transaction.
+    """
+    cc.save_cached(session, "hyperleda", catalog_id, data)
 
 
 def enrich_target_from_hyperleda(session: Session, target: "Target") -> bool:
@@ -149,25 +146,26 @@ def enrich_target_from_hyperleda(session: Session, target: "Target") -> bool:
     if not target.catalog_id:
         return False
 
-    # Check cache
+    # Check cache first (read-only, no HTTP call)
     cached = get_cached_hyperleda(target.catalog_id, session)
     if cached is not None:
-        if cached.t_type is None and cached.inclination is None:
+        if cached["t_type"] is None and cached["inclination"] is None:
             return False
         updated = False
-        if cached.t_type is not None and target.hubble_t_type is None:
-            target.hubble_t_type = cached.t_type
+        if cached["t_type"] is not None and target.hubble_t_type is None:
+            target.hubble_t_type = cached["t_type"]
             updated = True
-        if cached.inclination is not None and target.inclination is None:
-            target.inclination = cached.inclination
+        if cached["inclination"] is not None and target.inclination is None:
+            target.inclination = cached["inclination"]
             updated = True
         return updated
 
-    # Query HyperLEDA
-    data = query_hyperleda(target.catalog_id)
+    # Query HyperLEDA via the cache wrapper (handles retry/backoff and
+    # negative caching). The HTTP call happens outside any open transaction.
+    def fetch() -> dict[str, Any] | None:
+        return query_hyperleda(target.catalog_id)
 
-    # Cache the result (even if None - negative cache)
-    save_hyperleda_cache(session, target.catalog_id, data)
+    data = cc.get_or_fetch(session, "hyperleda", target.catalog_id, fetch)
     session.commit()
 
     if data is None:

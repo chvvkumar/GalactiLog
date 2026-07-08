@@ -1,10 +1,14 @@
+from unittest.mock import MagicMock, patch
+import httpx
 import pytest
 from app.services.vizier import (
     determine_vizier_catalog,
     build_adql_query,
     _adql_quote,
     _adql_int,
+    enrich_target_from_vizier,
 )
+from app.services import catalog_cache as cc
 
 
 class TestAdqlEscaping:
@@ -164,3 +168,220 @@ class TestBuildAdqlQuery:
 
     def test_ngc_returns_none(self):
         assert build_adql_query("NGC 7000") is None
+
+
+class TestEnrichTargetFromVizierCache:
+    """Test enrich_target_from_vizier behavior with the generic catalog cache wrapper."""
+
+    def test_negative_cache_suppresses_refetch(self):
+        """Test that a negative cache hit suppresses HTTP calls without fetching."""
+        catalog_id = "SH 2-999"
+        mock_session = MagicMock()
+
+        # Create a mock target
+        target = MagicMock()
+        target.user_defined = False
+        target.catalog_id = catalog_id
+        target.size_major = None
+        target.size_minor = None
+        target.constellation = None
+
+        # Mock get_cached_vizier to return cc.NEGATIVE
+        with patch("app.services.vizier.get_cached_vizier") as mock_get_cached:
+            mock_get_cached.return_value = cc.NEGATIVE
+
+            # Mock query_vizier to track if it's called
+            with patch("app.services.vizier.query_vizier") as mock_query:
+                result = enrich_target_from_vizier(mock_session, target)
+
+        # Should return False (no update) and not call query_vizier
+        assert result is False
+        mock_query.assert_not_called()
+
+    def test_positive_cache_applies_enrichment(self):
+        """Test that a positive cache hit applies enrichment to target."""
+        catalog_id = "SH 2-129"
+        payload = {
+            "size_major": 45.0,
+            "size_minor": 30.0,
+            "constellation": "CYG",
+            "vizier_catalog": "VII/20",
+        }
+
+        mock_session = MagicMock()
+
+        # Create a mock target
+        target = MagicMock()
+        target.user_defined = False
+        target.catalog_id = catalog_id
+        target.size_major = None
+        target.size_minor = None
+        target.constellation = None
+
+        # Mock get_cached_vizier to return the positive cache
+        with patch("app.services.vizier.get_cached_vizier") as mock_get_cached:
+            mock_get_cached.return_value = payload
+
+            # Mock query_vizier to verify it's not called
+            with patch("app.services.vizier.query_vizier") as mock_query:
+                result = enrich_target_from_vizier(mock_session, target)
+
+        # Should apply enrichment without calling query_vizier
+        assert result is True
+        assert target.size_major == 45.0
+        assert target.size_minor == 30.0
+        assert target.constellation == "CYG"
+        mock_query.assert_not_called()
+
+    def test_user_defined_targets_skipped(self):
+        """Test that user-defined targets are never enriched."""
+        mock_session = MagicMock()
+        target = MagicMock()
+        target.user_defined = True
+        target.catalog_id = "SH 2-129"
+
+        with patch("app.services.vizier.query_vizier") as mock_query:
+            result = enrich_target_from_vizier(mock_session, target)
+
+        assert result is False
+        mock_query.assert_not_called()
+
+    def test_cache_miss_triggers_query(self):
+        """Test that a cache miss triggers a VizieR query and caches the result."""
+        catalog_id = "SH 2-129"
+        fetched_data = {"size_major": 45.0, "size_minor": 30.0}
+
+        mock_session = MagicMock()
+        mock_session.get.return_value = None  # real cc.get_cached: cache miss
+
+        # Create a mock target
+        target = MagicMock()
+        target.user_defined = False
+        target.catalog_id = catalog_id
+        target.size_major = None
+        target.size_minor = None
+        target.constellation = None
+
+        # Mock get_cached_vizier to return None (cache miss)
+        with patch("app.services.vizier.get_cached_vizier") as mock_get_cached:
+            mock_get_cached.return_value = None
+
+            # Mock query_vizier to return data; the fetch is routed through
+            # cc.get_or_fetch, which calls query_vizier via enrich's fetch()
+            # closure and persists the result via cc.save_cached internally.
+            with patch("app.services.vizier.query_vizier") as mock_query:
+                mock_query.return_value = fetched_data
+                result = enrich_target_from_vizier(mock_session, target)
+
+        # Should have called query_vizier
+        mock_query.assert_called_once_with(catalog_id)
+
+        # Should have committed the cached result (own mini-transaction).
+        mock_session.commit.assert_called_once()
+
+        # Should have applied enrichment
+        assert result is True
+        assert target.size_major == 45.0
+        assert target.size_minor == 30.0
+
+    def test_cache_miss_persists_full_payload_shape(self):
+        """A newly cached positive row must carry the full payload shape:
+        vizier_catalog metadata plus the constellation key, matching
+        save_vizier_cache and the 0017-migrated rows, not query_vizier's
+        raw {size_major, size_minor} return.
+        """
+        catalog_id = "SH 2-129"
+        fetched_data = {"size_major": 45.0, "size_minor": 30.0}
+
+        mock_session = MagicMock()
+        mock_session.get.return_value = None  # real cc.get_cached: cache miss
+
+        target = MagicMock()
+        target.user_defined = False
+        target.catalog_id = catalog_id
+        target.size_major = None
+        target.size_minor = None
+        target.constellation = None
+
+        with patch("app.services.vizier.get_cached_vizier", return_value=None), \
+             patch("app.services.vizier.query_vizier", return_value=fetched_data), \
+             patch("app.services.catalog_cache.save_cached") as mock_save:
+            result = enrich_target_from_vizier(mock_session, target)
+
+        assert result is True
+        mock_save.assert_called_once()
+        _session, source, key, payload = mock_save.call_args[0]
+        assert source == "vizier"
+        assert key == catalog_id
+        assert payload == {
+            "size_major": 45.0,
+            "size_minor": 30.0,
+            "constellation": None,  # key present for shape parity
+            "vizier_catalog": "VII/20",
+        }
+
+
+class TestEnrichTargetFromVizierRetrySemantics:
+    """Verify the cache-miss path is routed through cc.get_or_fetch so that a
+    query_vizier() failure is retried/degraded rather than crashing the
+    caller, mirroring hyperleda.enrich_target_from_hyperleda and
+    gaia.enrich_target_from_gaia (neither catches get_or_fetch's exceptions;
+    both rely on the wrapper's own retry/negative-cache/non-transient
+    handling).
+    """
+
+    def _make_target(self, catalog_id="SH 2-129"):
+        target = MagicMock()
+        target.user_defined = False
+        target.catalog_id = catalog_id
+        target.size_major = None
+        target.size_minor = None
+        target.constellation = None
+        return target
+
+    def test_transient_error_exhausts_retries_and_returns_false(self):
+        """A persistent transient failure (e.g. a timeout or 5xx) must not
+        crash target enrichment. get_or_fetch retries per its backoff policy
+        and, once attempts are exhausted, negative-caches the result -- so
+        enrich_target_from_vizier degrades to False instead of raising,
+        exactly as hyperleda/gaia do for the same failure class.
+        """
+        target = self._make_target()
+        session = MagicMock()
+        session.get.return_value = None  # real cc.get_cached: cache miss
+
+        with patch("app.services.vizier.get_cached_vizier", return_value=None), \
+             patch(
+                 "app.services.vizier.query_vizier",
+                 side_effect=httpx.HTTPError("timeout"),
+             ) as mock_query, \
+             patch.object(cc.time, "sleep"):
+            result = enrich_target_from_vizier(session, target)
+
+        assert result is False
+        # Retried up to the wrapper's max attempts, not just once.
+        assert mock_query.call_count == cc.DEFAULT_MAX_ATTEMPTS
+        # Negative result still cached and committed (own mini-transaction).
+        session.commit.assert_called_once()
+
+    def test_non_transient_error_propagates_uncaught(self):
+        """A non-transient failure (404) is not swallowed -- it propagates as
+        NonTransientError, matching hyperleda/gaia which also do not catch
+        it. Nothing is cached and no retry is attempted.
+        """
+        target = self._make_target()
+        session = MagicMock()
+        session.get.return_value = None  # real cc.get_cached: cache miss
+
+        request = httpx.Request("POST", "https://tapvizier.example/tap/sync")
+        response = httpx.Response(404, request=request)
+        http_error = httpx.HTTPStatusError("not found", request=request, response=response)
+
+        with patch("app.services.vizier.get_cached_vizier", return_value=None), \
+             patch(
+                 "app.services.vizier.query_vizier", side_effect=http_error,
+             ) as mock_query:
+            with pytest.raises(cc.NonTransientError):
+                enrich_target_from_vizier(session, target)
+
+        mock_query.assert_called_once()

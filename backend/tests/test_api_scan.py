@@ -190,6 +190,90 @@ async def test_old_scan_activity_routes_removed():
 
 
 @pytest.mark.asyncio
+async def test_db_summary_counts_catalog_cache_by_source():
+    """db-summary must read live counts from catalog_cache, not the frozen
+    per-source tables, and must count negative rows via the `negative` flag."""
+    import os
+    from sqlalchemy import text as _text
+    from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+
+    db_url = os.environ["GALACTILOG_DATABASE_URL"]
+    engine = create_async_engine(db_url, pool_pre_ping=True)
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+
+    mark = "zzdbsummarytest"
+    try:
+        async with Session() as s:
+            try:
+                await s.execute(_text("SELECT 1 FROM catalog_cache LIMIT 1"))
+            except Exception as exc:  # noqa: BLE001
+                pytest.skip(f"test DB not reachable: {exc}")
+            await s.execute(_text("DELETE FROM catalog_cache WHERE key LIKE :p"), {"p": f"{mark}%"})
+            await s.execute(_text("""
+                INSERT INTO catalog_cache (source, key, payload, negative)
+                VALUES
+                    ('simbad', :k1, '{"main_id": "M31"}'::jsonb, false),
+                    ('simbad', :k2, NULL, true),
+                    ('vizier', :k3, '{"vizier_catalog": "VII/118"}'::jsonb, false),
+                    ('vizier', :k4, NULL, true),
+                    ('sesame', :k5, '{"main_id": "NGC 224"}'::jsonb, false),
+                    ('sesame', :k6, NULL, true)
+            """), {
+                "k1": f"{mark}_simbad_pos", "k2": f"{mark}_simbad_neg",
+                "k3": f"{mark}_vizier_pos", "k4": f"{mark}_vizier_neg",
+                "k5": f"{mark}_sesame_pos", "k6": f"{mark}_sesame_neg",
+            })
+            await s.commit()
+
+            before = (await s.execute(_text("""
+                SELECT
+                    (SELECT COUNT(*) FROM catalog_cache WHERE source = 'simbad'),
+                    (SELECT COUNT(*) FROM catalog_cache WHERE source = 'simbad' AND negative),
+                    (SELECT COUNT(*) FROM catalog_cache WHERE source = 'vizier'),
+                    (SELECT COUNT(*) FROM catalog_cache WHERE source = 'vizier' AND negative),
+                    (SELECT COUNT(*) FROM catalog_cache WHERE source = 'sesame'),
+                    (SELECT COUNT(*) FROM catalog_cache WHERE source = 'sesame' AND negative)
+            """))).one()
+
+        async def override():
+            async with Session() as session:
+                yield session
+
+        admin = _admin_user()
+        app.dependency_overrides[get_session] = override
+        app.dependency_overrides[get_current_user] = lambda: admin
+
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.get("/api/scan/db-summary")
+
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+
+        # Response shape/field names are unchanged.
+        assert set(data.keys()) == {
+            "total_images", "light_frames", "resolved_targets", "unresolved_images",
+            "cached_simbad", "cached_negative", "pending_merges", "csv_enriched",
+            "cached_vizier", "cached_vizier_negative", "cached_sesame", "cached_sesame_negative",
+        }
+
+        assert data["cached_simbad"] == before[0]
+        assert data["cached_negative"] == before[1]
+        assert data["cached_vizier"] == before[2]
+        assert data["cached_vizier_negative"] == before[3]
+        assert data["cached_sesame"] == before[4]
+        assert data["cached_sesame_negative"] == before[5]
+        assert data["cached_simbad"] >= 2
+        assert data["cached_negative"] >= 1
+    finally:
+        async with Session() as s:
+            await s.execute(_text("DELETE FROM catalog_cache WHERE key LIKE :p"), {"p": f"{mark}%"})
+            await s.commit()
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_backfill_catalog_identity_queues_task():
     admin = _admin_user()
     app.dependency_overrides[require_admin] = lambda: admin

@@ -1,8 +1,9 @@
 import { Component, createSignal, createEffect, on, For, Show } from "solid-js";
-import { api } from "../api/client";
+import { apiClient } from "../api/generated/client";
+import { unwrap } from "../api/unwrap";
 import { useDashboardFilters } from "./DashboardFilterProvider";
 import { debounce } from "../utils/debounce";
-import type { TargetSearchResultFuzzy } from "../types";
+import type { TargetSearchResultFuzzy } from "../api/types";
 
 const SearchBar: Component = () => {
   const { updateFilter, filters } = useDashboardFilters();
@@ -22,7 +23,9 @@ const SearchBar: Component = () => {
 
   const fetchSuggestions = debounce(async (value: string) => {
     try {
-      const results = await api.searchTargets(value);
+      const results = await apiClient
+        .GET("/api/targets/search", { params: { query: { q: value } } })
+        .then(unwrap);
       setSuggestions(results);
       setShowSuggestions(results.length > 0);
     } catch {

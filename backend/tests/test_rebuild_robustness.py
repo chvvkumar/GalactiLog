@@ -23,15 +23,25 @@ for _mod in ("fitsio",):
         sys.modules[_mod] = MagicMock()
 
 
-def _bootstrap_tasks():
-    """Import app.worker.tasks with the sync engine mocked (no DB needed)."""
-    mod = sys.modules.get("app.worker.tasks")
+def _bootstrap_tasks(modname="app.worker.tasks"):
+    """Import the real target module with the sync engine mocked (no DB
+    needed).
+
+    Tasks now live in per-domain app.worker.tasks_* modules (app.worker.tasks
+    is a thin facade -- see app/worker/tasks.py). Every helper below that
+    patches an internal name (Session, _redis, clear_cancel_sync, etc.) must
+    bootstrap the module that actually owns the task under test, since a
+    patch.object() on the facade does not affect a function whose __globals__
+    point at a different, real module.
+    """
+    mod = sys.modules.get(modname)
     if mod is not None and not isinstance(mod, MagicMock):
         return mod
-    sys.modules.pop("app.worker.tasks", None)
+    sys.modules.pop(modname, None)
     with patch("sqlalchemy.create_engine", return_value=MagicMock()):
-        import app.worker.tasks as tasks_mod
-    return tasks_mod
+        import importlib
+        mod = importlib.import_module(modname)
+    return mod
 
 
 # ---------------------------------------------------------------------------
@@ -224,9 +234,10 @@ def _run_thumbnails(tasks, targets, fetch):
     cm.__exit__ = MagicMock(return_value=False)
     captured = {}
 
-    def _capture_complete(r, message, details):
+    def _capture_complete(r, message, details, **kwargs):
         captured["message"] = message
         captured["details"] = details
+        captured["kwargs"] = kwargs
 
     with patch.object(tasks, "Session", return_value=cm), \
          patch("app.services.skyview.fetch_reference_thumbnail", side_effect=fetch), \
@@ -246,7 +257,7 @@ def _run_thumbnails(tasks, targets, fetch):
 
 class TestThumbnailPartialProgress:
     def test_commits_in_chunks(self):
-        tasks = _bootstrap_tasks()
+        tasks = _bootstrap_tasks("app.worker.tasks_thumbnails")
         targets = _thumbnail_targets(25)
         result, session, captured = _run_thumbnails(
             tasks, targets, fetch=lambda t, d: "thumb.png"
@@ -258,7 +269,7 @@ class TestThumbnailPartialProgress:
         assert result["timed_out"] is False
 
     def test_soft_time_limit_leaves_terminal_state_and_partial_progress(self):
-        tasks = _bootstrap_tasks()
+        tasks = _bootstrap_tasks("app.worker.tasks_thumbnails")
         targets = _thumbnail_targets(25)
         calls = {"n": 0}
 
@@ -276,10 +287,30 @@ class TestThumbnailPartialProgress:
         assert session.commit.called
         assert result["fetched"] == 11
 
+    def test_soft_time_limit_reports_step_as_processed_not_total(self):
+        """A paused run must report progress as the actual processed count,
+        not the full total -- otherwise the progress bar reads 100% while
+        the message says "paused"."""
+        tasks = _bootstrap_tasks("app.worker.tasks_thumbnails")
+        targets = _thumbnail_targets(25)
+        calls = {"n": 0}
+
+        def fetch(target, output_dir):
+            calls["n"] += 1
+            if calls["n"] == 12:
+                raise tasks.SoftTimeLimitExceeded()
+            return "thumb.png"
+
+        result, session, captured = _run_thumbnails(tasks, targets, fetch=fetch)
+        assert result["timed_out"] is True
+        assert captured["kwargs"]["step"] == 11
+        assert captured["kwargs"]["step"] != captured["kwargs"]["total_steps"]
+        assert captured["kwargs"]["total_steps"] == 25
+
     def test_resume_query_skips_targets_with_thumbnails(self):
         """Non-force runs only select targets whose thumbnail path is NULL, so a
         re-run after a partial kill continues instead of starting over."""
-        tasks = _bootstrap_tasks()
+        tasks = _bootstrap_tasks("app.worker.tasks_thumbnails")
         targets = _thumbnail_targets(3)
         _run_thumbnails(tasks, targets, fetch=lambda t, d: "thumb.png")
         # Every fetched target got its path recorded, so the next run's
@@ -299,9 +330,10 @@ def _run_rebuild_family(tasks, task, object_names, resolve_side_effect):
     cm.__exit__ = MagicMock(return_value=False)
     captured = {}
 
-    def _capture_complete(r, message, details):
+    def _capture_complete(r, message, details, **kwargs):
         captured["message"] = message
         captured["details"] = details
+        captured["kwargs"] = kwargs
 
     with patch.object(tasks, "Session", return_value=cm), \
          patch.object(tasks, "resolve_target", side_effect=resolve_side_effect), \
@@ -321,7 +353,7 @@ def _run_rebuild_family(tasks, task, object_names, resolve_side_effect):
 
 class TestRebuildFamilyTimeout:
     def test_rebuild_targets_timeout_sets_complete(self):
-        tasks = _bootstrap_tasks()
+        tasks = _bootstrap_tasks("app.worker.tasks_target_rebuild")
 
         def resolve(*a, **k):
             raise tasks.SoftTimeLimitExceeded()
@@ -333,7 +365,7 @@ class TestRebuildFamilyTimeout:
         assert "paused" in captured["message"].lower()
 
     def test_retry_unresolved_timeout_sets_complete(self):
-        tasks = _bootstrap_tasks()
+        tasks = _bootstrap_tasks("app.worker.tasks_target_rebuild")
 
         def resolve(*a, **k):
             raise tasks.SoftTimeLimitExceeded()
@@ -343,6 +375,46 @@ class TestRebuildFamilyTimeout:
         )
         assert result["status"] == "timeout"
         assert "paused" in captured["message"].lower()
+
+
+class TestRebuildFamilyNonTransientError:
+    """A single bad name's NonTransientError (4xx from sesame/vizier) must not
+    abort the whole batch or strand the rebuild status at "running" -- it is
+    counted as a failure and the loop continues to the next name."""
+
+    def test_rebuild_targets_skips_non_transient_failure_and_continues(self):
+        tasks = _bootstrap_tasks("app.worker.tasks_target_rebuild")
+
+        def resolve(obj_name, *a, **k):
+            if obj_name == "BadName":
+                raise tasks.cc.NonTransientError("400 client error")
+            return "target-id-123"
+
+        result, captured = _run_rebuild_family(
+            tasks, tasks.rebuild_targets,
+            [("BadName", 3), ("M31", 10)], resolve,
+        )
+        assert result["status"] == "complete"
+        assert result["resolved"] == 1
+        assert result["failed"] == 1
+        assert result["total"] == 2
+
+    def test_retry_unresolved_skips_non_transient_failure_and_continues(self):
+        tasks = _bootstrap_tasks("app.worker.tasks_target_rebuild")
+
+        def resolve(obj_name, *a, **k):
+            if obj_name == "BadName":
+                raise tasks.cc.NonTransientError("400 client error")
+            return "target-id-123"
+
+        result, captured = _run_rebuild_family(
+            tasks, tasks.retry_unresolved,
+            [("BadName", 3), ("M31", 10)], resolve,
+        )
+        assert result["status"] == "complete"
+        assert result["resolved"] == 1
+        assert result["failed"] == 1
+        assert result["total"] == 2
 
 
 # ---------------------------------------------------------------------------
@@ -377,7 +449,7 @@ def _run_migrations(tasks, pending):
 
 class TestDataMigrationTimeout:
     def test_soft_time_limit_pauses_without_stamping_version(self):
-        tasks = _bootstrap_tasks()
+        tasks = _bootstrap_tasks("app.worker.tasks_migrations")
 
         def timeout_migration(session):
             raise tasks.SoftTimeLimitExceeded()
@@ -395,7 +467,7 @@ class TestDataMigrationTimeout:
         assert "data_upgrade_paused" in events
 
     def test_prior_committed_migration_persists_before_timeout(self):
-        tasks = _bootstrap_tasks()
+        tasks = _bootstrap_tasks("app.worker.tasks_migrations")
 
         def ok_migration(session):
             return "ok"
@@ -447,7 +519,7 @@ class TestSoftLimitPropagation:
         still produces the terminal data_upgrade_paused activity event."""
         from celery.exceptions import SoftTimeLimitExceeded
         import app.services.data_migrations as dm
-        tasks = _bootstrap_tasks()
+        tasks = _bootstrap_tasks("app.worker.tasks_migrations")
 
         target = MagicMock()
         target.object_type = "G"
@@ -496,3 +568,172 @@ class TestSoftLimitPropagation:
 
         with patch.object(httpx, "Client", side_effect=httpx.ConnectError("boom")):
             assert fetch_reference_thumbnail(target, "/tmp/test_thumbnails/reference") is None
+
+
+# ---------------------------------------------------------------------------
+# Task 2: Rebuild progress envelope integration
+# ---------------------------------------------------------------------------
+
+class TestRebuildProgressEnvelope:
+    """Tests for Phase 3 Task 2: migrate rebuild tasks to structured envelope.
+    Verifies that rebuild status captures step/total_steps/percent alongside
+    the existing message field."""
+
+    def test_set_progress_writes_envelope_fields_to_rebuild_key(self):
+        from app.services.progress_envelope import set_progress
+        from app.services import scan_state
+
+        sync = FakeSyncRedis()
+        scan_state.set_rebuild_running_sync(sync, "full", "starting")
+        set_progress(
+            sync, scan_state.REBUILD_KEY, task="full", step=2, total_steps=10,
+            message="Resolving 2/10 object names...",
+        )
+        status = scan_state._parse_rebuild(sync.hgetall(scan_state.REBUILD_KEY))
+        assert status.step == 2
+        assert status.total_steps == 10
+        assert status.percent == 20.0
+        assert status.message == "Resolving 2/10 object names..."
+
+    def test_progress_percent_derived_on_parse(self):
+        """Percent is never stored, always derived from step/total_steps."""
+        from app.services.progress_envelope import set_progress
+        from app.services import scan_state
+
+        sync = FakeSyncRedis()
+        scan_state.set_rebuild_running_sync(sync, "full", "starting")
+        set_progress(
+            sync, scan_state.REBUILD_KEY, task="full", step=3, total_steps=7,
+            message="3/7",
+        )
+        # Verify percent is not stored as a separate field.
+        h = sync.hgetall(scan_state.REBUILD_KEY)
+        assert "percent" not in h
+        # Verify percent is derived on parse (rounded to 1 decimal place).
+        status = scan_state._parse_rebuild(h)
+        assert status.percent == 42.9
+
+    def test_progress_zero_total_steps_yields_zero_percent(self):
+        from app.services.progress_envelope import set_progress
+        from app.services import scan_state
+
+        sync = FakeSyncRedis()
+        scan_state.set_rebuild_running_sync(sync, "full", "starting")
+        set_progress(
+            sync, scan_state.REBUILD_KEY, task="full", step=0, total_steps=0,
+            message="starting",
+        )
+        status = scan_state._parse_rebuild(sync.hgetall(scan_state.REBUILD_KEY))
+        assert status.step == 0
+        assert status.total_steps == 0
+        assert status.percent == 0.0
+
+    def test_progress_full_completion(self):
+        from app.services.progress_envelope import set_progress
+        from app.services import scan_state
+
+        sync = FakeSyncRedis()
+        scan_state.set_rebuild_running_sync(sync, "full", "starting")
+        set_progress(
+            sync, scan_state.REBUILD_KEY, task="full", step=10, total_steps=10,
+            message="done",
+        )
+        status = scan_state._parse_rebuild(sync.hgetall(scan_state.REBUILD_KEY))
+        assert status.percent == 100.0
+
+    def test_rebuild_to_dict_includes_progress_fields(self):
+        """RebuildStatus.to_dict() must include step/total_steps/percent for
+        API responses (GET /scan/rebuild-status)."""
+        from app.services.progress_envelope import set_progress
+        from app.services import scan_state
+
+        sync = FakeSyncRedis()
+        scan_state.set_rebuild_running_sync(sync, "retry", "working")
+        set_progress(
+            sync, scan_state.REBUILD_KEY, task="retry", step=5, total_steps=15,
+            message="Retrying 5/15",
+        )
+        status = scan_state._parse_rebuild(sync.hgetall(scan_state.REBUILD_KEY))
+        d = status.to_dict()
+        assert d["step"] == 5
+        assert d["total_steps"] == 15
+        assert d.get("percent") == pytest.approx(33.3, abs=0.01)
+        assert d["message"] == "Retrying 5/15"
+
+    def test_new_run_resets_stale_envelope_from_previous_run(self):
+        """rebuild:status persists REBUILD_EXPIRE seconds after a run, so a
+        new run's running-state write must reset step/total_steps rather than
+        inherit the previous run's completed envelope (e.g. 100% from a prior
+        full rebuild showing during a fresh quick fix)."""
+        from app.services import scan_state
+
+        sync = FakeSyncRedis()
+        # Previous run finished at 100%.
+        scan_state.set_rebuild_running_sync(sync, "full", "starting", task="full")
+        scan_state.set_rebuild_complete_sync(
+            sync, "Resolved 20 targets", {"total": 20},
+            task="full", step=20, total_steps=20,
+        )
+        prior = scan_state._parse_rebuild(sync.hgetall(scan_state.REBUILD_KEY))
+        assert prior.percent == 100.0
+
+        # New run starts: envelope must be reset, not inherited.
+        scan_state.set_rebuild_running_sync(
+            sync, "smart", "Running quick fix...",
+            task="smart", step=0, total_steps=1,
+        )
+        status = scan_state._parse_rebuild(sync.hgetall(scan_state.REBUILD_KEY))
+        assert status.state == "running"
+        assert status.step == 0
+        assert status.total_steps == 1
+        assert status.percent == 0.0
+        assert status.message == "Running quick fix..."
+
+    def test_running_without_task_still_resets_envelope(self):
+        """Even a legacy-style running call (no task kwarg) must not leak the
+        previous run's envelope; task falls back to mode."""
+        from app.services import scan_state
+
+        sync = FakeSyncRedis()
+        scan_state.set_rebuild_complete_sync(
+            sync, "done", {}, task="full", step=10, total_steps=10,
+        )
+        scan_state.set_rebuild_running_sync(sync, "retry", "Clearing caches...")
+        status = scan_state._parse_rebuild(sync.hgetall(scan_state.REBUILD_KEY))
+        assert status.step == 0
+        assert status.total_steps == 0
+        assert status.percent == 0.0
+        h = sync.hgetall(scan_state.REBUILD_KEY)
+        assert h["task"] == "retry"
+
+    def test_message_written_once_per_call(self):
+        """The sync writers must not write message twice (own hset plus
+        set_progress); a single write per call keeps the hash update atomic
+        per field."""
+        from app.services import scan_state
+
+        class CountingRedis(FakeSyncRedis):
+            def __init__(self):
+                super().__init__()
+                self.message_writes = 0
+
+            def hset(self, key, field=None, value=None, mapping=None):
+                if mapping and "message" in mapping:
+                    self.message_writes += 1
+                if field == "message":
+                    self.message_writes += 1
+                super().hset(key, field=field, value=value, mapping=mapping)
+
+        r = CountingRedis()
+        scan_state.set_rebuild_running_sync(r, "full", "starting", task="full")
+        assert r.message_writes == 1
+        r.message_writes = 0
+        scan_state.set_rebuild_progress_sync(
+            r, "Resolving 1/2...", task="full", step=1, total_steps=2,
+        )
+        assert r.message_writes == 1
+        r.message_writes = 0
+        scan_state.set_rebuild_complete_sync(
+            r, "done", {}, task="full", step=2, total_steps=2,
+        )
+        assert r.message_writes == 1

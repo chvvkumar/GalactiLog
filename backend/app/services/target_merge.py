@@ -24,6 +24,7 @@ from app.schemas.target import (
     MergeRequest, MergePreviewRequest, MergePreviewResponse, MergePreviewSide,
 )
 from app.services.cache import invalidate_stats_and_analysis_cache
+from app.services.mosaic_detection import recompute_panel_membership_for_images
 
 
 async def _record_merge_manifest(loser, winner, session: AsyncSession) -> None:
@@ -109,21 +110,33 @@ async def _record_merge_manifest(loser, winner, session: AsyncSession) -> None:
     ))
 
 
-async def apply_merge_manifest_restore(manifest, loser, winner, session: AsyncSession) -> None:
+async def apply_merge_manifest_restore(manifest, loser, winner, session: AsyncSession) -> list:
     """Reverse a merge exactly, using the recorded manifest.
 
     Reassigns the recorded image id set back to the loser, moves re-keyed
     session notes and custom values back, and restores appended winner notes to
     their pre-merge text. Shared by unmerge_target and revert_merge_candidate.
+
+    Returns the list of moved image ids (as ``uuid.UUID``) so the caller can
+    recompute their panel membership at the right point in its own flow.
+    Deliberately does NOT recompute panel membership itself: unmerge_target
+    also moves MosaicPanel rows back to the loser (panel-target reversion,
+    based on object_pattern substring match) in a step that runs AFTER this
+    function returns, and panel membership must be recomputed only once that
+    reversion has happened -- recomputing here first would look up a panel
+    under the loser before it exists there, incorrectly clearing panel_id for
+    images whose panel is legitimately about to move back.
     """
     payload = manifest.payload or {}
 
     image_ids = payload.get("image_ids") or []
+    image_uuids: list = []
     if image_ids:
+        image_uuids = [uuid.UUID(i) for i in image_ids]
         await session.execute(
             update(Image)
             .where(
-                Image.id.in_([uuid.UUID(i) for i in image_ids]),
+                Image.id.in_(image_uuids),
                 Image.resolved_target_id == winner.id,
             )
             .values(resolved_target_id=loser.id)
@@ -151,6 +164,8 @@ async def apply_merge_manifest_restore(manifest, loser, winner, session: AsyncSe
             .where(CustomColumnValue.id.in_([uuid.UUID(i) for i in ccv_ids]))
             .values(target_id=loser.id)
         )
+
+    return image_uuids
 
 
 async def _find_merge_manifest(loser_id, winner_id, session: AsyncSession):
@@ -256,14 +271,18 @@ async def merge_targets(body: MergeRequest, session: AsyncSession) -> dict:
         winner.aliases = new_aliases
 
         # Resolve all images whose OBJECT header matches loser_name and have no target (or wrong target)
-        await session.execute(
+        resolved_rows = (await session.execute(
             update(Image)
             .where(
                 Image.raw_headers["OBJECT"].astext == loser_name,
                 Image.resolved_target_id.is_(None),
             )
             .values(resolved_target_id=winner.id)
-        )
+            .returning(Image.id)
+        )).scalars().all()
+        # These images were unresolved at ingest, so panel membership was
+        # never attempted; recompute now that they have a target.
+        await recompute_panel_membership_for_images(session, resolved_rows)
 
         # Mark related merge_candidates as accepted
         await session.execute(
@@ -427,21 +446,24 @@ async def unmerge_target(target_id, session: AsyncSession) -> dict:
     # OBJECT-header name match (lossy for filename-resolved images, but the only
     # information available for those older merges).
     manifest = await _find_merge_manifest(loser.id, winner.id, session)
+    moved_image_ids: list = []
     if manifest is not None:
-        await apply_merge_manifest_restore(manifest, loser, winner, session)
+        moved_image_ids = await apply_merge_manifest_restore(manifest, loser, winner, session)
         await session.delete(manifest)
     else:
         # Legacy fallback: reassign images back to loser based on OBJECT header
         # matching loser's names.
         for name in loser_names:
-            await session.execute(
+            rows = (await session.execute(
                 update(Image)
                 .where(
                     Image.resolved_target_id == winner.id,
                     Image.raw_headers["OBJECT"].astext == name,
                 )
                 .values(resolved_target_id=loser.id)
-            )
+                .returning(Image.id)
+            )).scalars().all()
+            moved_image_ids.extend(rows)
 
     # Remove loser's names from winner's aliases
     winner_aliases = [a for a in (winner.aliases or []) if a not in loser_names]
@@ -458,6 +480,14 @@ async def unmerge_target(target_id, session: AsyncSession) -> dict:
                 if name.lower() in pattern_lower:
                     panel.target_id = loser.id
                     break
+
+    # Recompute panel membership for the moved images now that both their
+    # resolved_target_id AND any panels moving back to the loser (just above)
+    # have settled -- doing this before the panel reversion would look up a
+    # panel under the loser before it exists there and incorrectly clear
+    # panel_id for images whose panel is legitimately moving back too.
+    if moved_image_ids:
+        await recompute_panel_membership_for_images(session, moved_image_ids)
 
     # Clear merge fields on loser
     loser.merged_into_id = None

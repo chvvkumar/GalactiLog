@@ -1,5 +1,5 @@
 import { Component, For, Show } from "solid-js";
-import type { TargetAggregation } from "../types";
+import type { TargetAggregation } from "../api/types";
 import TargetRow from "./TargetRow";
 import ColumnPicker from "./ColumnPicker";
 import { useSettingsContext } from "./SettingsProvider";

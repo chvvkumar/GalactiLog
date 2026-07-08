@@ -1,54 +1,78 @@
-import { Component, For, Show } from "solid-js";
-import type { EquipmentItem } from "../types";
+import { Component, Show } from "solid-js";
+import type { EquipmentItem } from "../api/types";
 import { formatIntegration, formatArcsec } from "../utils/format";
+import DataTable, { type DataTableColumn } from "./DataTable";
 
-const EquipmentTable: Component<{ title: string; items: EquipmentItem[] }> = (props) => (
-  <div>
-    <table class="w-full text-xs table-fixed">
-      <colgroup>
-        <col class="w-[24%]" />
-        <col class="w-[10.857%]" />
-        <col class="w-[10.857%]" />
-        <col class="w-[10.857%]" />
-        <col class="w-[10.857%]" />
-        <col class="w-[10.857%]" />
-        <col class="w-[10.857%]" />
-        <col class="w-[10.857%]" />
-      </colgroup>
-      <thead>
-        <tr class="border-b border-theme-border">
-          <th class="text-left text-theme-text-secondary font-normal py-1 pr-4">{props.title}</th>
-          <th class="text-right text-theme-text-secondary font-normal py-1 pr-4">Frames</th>
-          <th class="text-right text-theme-text-secondary font-normal py-1 pr-4">Nights</th>
-          <th class="text-right text-theme-text-secondary font-normal py-1 pr-4">Targets</th>
-          <th class="text-right text-theme-text-secondary font-normal py-1 pr-4">Avg Session</th>
-          <th class="text-right text-theme-text-secondary font-normal py-1 pr-4">Integration</th>
-          <th class="text-right text-theme-text-secondary font-normal py-1 pr-4">Med FWHM</th>
-          <th class="text-right text-theme-text-secondary font-normal py-1">Guiding</th>
-        </tr>
-      </thead>
-      <tbody>
-        <For each={props.items}>{(item) => (
-          <tr class="border-b border-theme-border/30">
-            <td class="text-left text-theme-text-primary py-1 pr-4">
-              {item.name}
-              <Show when={item.grouped}>
-                <span class="text-theme-text-secondary text-tiny ml-1 cursor-help" title="Grouped: multiple equipment aliases are combined under this name">&#x29C9;</span>
-              </Show>
-            </td>
-            <td class="text-right text-theme-text-secondary py-1 pr-4 whitespace-nowrap">{item.frame_count.toLocaleString()}</td>
-            <td class="text-right text-theme-text-secondary py-1 pr-4 whitespace-nowrap">{item.nights.toLocaleString()}</td>
-            <td class="text-right text-theme-text-secondary py-1 pr-4 whitespace-nowrap">{item.target_count.toLocaleString()}</td>
-            <td class="text-right text-theme-text-secondary py-1 pr-4 whitespace-nowrap">{item.avg_session_seconds !== null ? formatIntegration(item.avg_session_seconds) : "—"}</td>
-            <td class="text-right text-theme-text-secondary py-1 pr-4 whitespace-nowrap">{formatIntegration(item.integration_seconds)}</td>
-            <td class="text-right text-theme-text-secondary py-1 pr-4 whitespace-nowrap">{item.median_fwhm !== null ? formatArcsec(item.median_fwhm) : "—"}</td>
-            <td class="text-right text-theme-text-secondary py-1 whitespace-nowrap">{item.median_guiding_rms !== null ? formatArcsec(item.median_guiding_rms) : "—"}</td>
-          </tr>
-        )}</For>
-      </tbody>
-    </table>
-  </div>
-);
+const EquipmentTable: Component<{ title: string; items: EquipmentItem[] }> = (props) => {
+  const columns: DataTableColumn<EquipmentItem>[] = [
+    {
+      key: "name",
+      label: props.title,
+      render: (item) => (
+        <>
+          {item.name}
+          <Show when={item.grouped}>
+            <span class="text-theme-text-secondary text-tiny ml-1 cursor-help" title="Grouped: multiple equipment aliases are combined under this name">&#x29C9;</span>
+          </Show>
+        </>
+      ),
+    },
+    {
+      key: "frame_count",
+      label: "Frames",
+      align: "right",
+      render: (item) => item.frame_count.toLocaleString(),
+    },
+    {
+      key: "nights",
+      label: "Nights",
+      align: "right",
+      render: (item) => item.nights.toLocaleString(),
+    },
+    {
+      key: "target_count",
+      label: "Targets",
+      align: "right",
+      render: (item) => item.target_count.toLocaleString(),
+    },
+    {
+      key: "avg_session_seconds",
+      label: "Avg Session",
+      align: "right",
+      render: (item) => (item.avg_session_seconds != null ? formatIntegration(item.avg_session_seconds) : "—"),
+    },
+    {
+      key: "integration_seconds",
+      label: "Integration",
+      align: "right",
+      render: (item) => formatIntegration(item.integration_seconds),
+    },
+    {
+      key: "median_fwhm",
+      label: "Med FWHM",
+      align: "right",
+      render: (item) => (item.median_fwhm !== null ? formatArcsec(item.median_fwhm) : "—"),
+    },
+    {
+      key: "median_guiding_rms",
+      label: "Guiding",
+      align: "right",
+      render: (item) => (item.median_guiding_rms !== null ? formatArcsec(item.median_guiding_rms) : "—"),
+    },
+  ];
+
+  return (
+    <div>
+      <DataTable
+        columns={columns}
+        rows={props.items}
+        rowKey={(item) => item.name}
+        class="text-xs"
+        emptyMessage="No equipment data"
+      />
+    </div>
+  );
+};
 
 const EquipmentInventory: Component<{ cameras: EquipmentItem[]; telescopes: EquipmentItem[] }> = (props) => {
   return (

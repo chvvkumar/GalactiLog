@@ -1,5 +1,5 @@
 import { Component, For } from "solid-js";
-import type { TopTarget } from "../types";
+import type { TopTarget } from "../api/types";
 import { formatIntegration } from "../utils/format";
 
 const TopTargets: Component<{ targets: TopTarget[] }> = (props) => {

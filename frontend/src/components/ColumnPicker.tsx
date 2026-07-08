@@ -1,5 +1,5 @@
 import { createSignal, createEffect, onCleanup, For, Show } from "solid-js";
-import type { CustomColumn, ColumnVisibility } from "../types";
+import type { CustomColumn, ColumnVisibility } from "../api/types";
 import { isColumnVisible } from "../utils/displaySettings";
 
 interface BuiltinColumn {

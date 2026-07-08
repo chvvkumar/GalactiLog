@@ -5,7 +5,6 @@ import logging
 import sys
 
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import async_session
 from app.models.user import User

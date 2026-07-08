@@ -2,6 +2,19 @@ import { Component, createEffect, createMemo, createResource, createSignal, For,
 import { parsePrometheusText, type MetricFamily } from "../../utils/prometheusParse";
 import { aggregate, emptyPrev, type Health, type PrevCounters } from "../../utils/metricsAggregate";
 import { formatBytes } from "../../utils/format";
+// No DataTable swap in this file (evaluated per the Slice 14 plan). Every
+// table here (percentile rows, top-5 endpoint/error/task lists, raw
+// gauge/counter/histogram tables) is a bordered "card" table with px-4
+// padding, font-mono cells, colored status text, and a conditional
+// last-row-has-no-border rule -- a different visual system from DataTable's
+// fixed header/cell classes (uppercase tracking-wide headers, py-2 px-3,
+// border-b on every row). DataTable's `class` prop only reaches the
+// <table> element, not per-cell/per-row styling, so it cannot reproduce
+// this design without new DataTable props (out of scope per the T4/T5
+// lesson: don't add density/styling escape hatches to DataTable per
+// consumer). The raw/counter/histogram tables are additionally dynamic in
+// their column set (label columns vary per metric), matching the
+// MatrixTab-style "not a column-def table" non-fit noted in the T3+T5 plan.
 
 type RefreshOption = "off" | "5" | "15" | "30" | "60";
 
@@ -69,7 +82,7 @@ function statusColorClass(status: string): string {
   const sc = parseInt(status, 10);
   if (isNaN(sc)) return "text-theme-text-secondary";
   if (sc >= 500) return "text-red-400";
-  if (sc >= 400) return "text-amber-400";
+  if (sc >= 400) return "text-theme-warning";
   if (sc >= 300) return "text-blue-400";
   return "text-green-400";
 }
@@ -78,12 +91,12 @@ const StatusPill: Component<{ health: Health }> = (props) => {
   const label = () => props.health === "green" ? "Healthy" : props.health === "amber" ? "Degraded" : "Unhealthy";
   const classes = () => {
     if (props.health === "green") return "bg-green-900/40 text-green-300";
-    if (props.health === "amber") return "bg-amber-900/40 text-amber-300";
+    if (props.health === "amber") return "bg-theme-warning/20 text-theme-warning";
     return "bg-red-900/40 text-red-300";
   };
   const dotClass = () => {
     if (props.health === "green") return "bg-green-500";
-    if (props.health === "amber") return "bg-amber-500";
+    if (props.health === "amber") return "bg-theme-warning";
     return "bg-red-500";
   };
   return (
@@ -139,6 +152,16 @@ export const MetricsTab: Component = () => {
 
   const [data] = createResource(tick, async () => {
     try {
+      // Deliberately NOT routed through apiClient: the backend mounts this
+      // route with `include_in_schema=False` (backend/app/api/metrics_endpoint.py)
+      // specifically because it's a Prometheus scrape target that returns
+      // text/plain exposition format, not JSON, and is gated by an optional
+      // bearer token unrelated to the session-cookie auth the generated
+      // client's 401-refresh middleware protects. It is absent from
+      // openapi.json/schema.d.ts, so apiClient's typed `paths` has no entry
+      // for it -- calling it through apiClient is not possible without
+      // hand-editing the generated schema (against project convention).
+      // Flagged here rather than silently left as a bare fetch elsewhere.
       const res = await fetch("/api/metrics", { credentials: "include" });
       if (!res.ok) {
         setFetchError(`HTTP ${res.status}`);
@@ -387,7 +410,7 @@ const DbCard: Component<{ summary: import("../../utils/metricsAggregate").DbSumm
           </div>
           <div class="h-2.5 rounded bg-theme-elevated overflow-hidden">
             <div
-              class={`h-full rounded ${utilPct() >= 90 ? "bg-red-500/60" : utilPct() >= 70 ? "bg-amber-500/60" : "bg-blue-500/60"}`}
+              class={`h-full rounded ${utilPct() >= 90 ? "bg-red-500/60" : utilPct() >= 70 ? "bg-theme-warning/60" : "bg-blue-500/60"}`}
               style={{ width: `${Math.min(100, utilPct())}%` }}
             />
           </div>
@@ -439,7 +462,7 @@ const JobsCard: Component<{ summary: import("../../utils/metricsAggregate").Jobs
           </div>
           <div class="h-2.5 rounded bg-theme-elevated overflow-hidden">
             <div
-              class={`h-full rounded ${utilPct() >= 90 ? "bg-red-500/60" : utilPct() >= 70 ? "bg-amber-500/60" : "bg-blue-500/60"}`}
+              class={`h-full rounded ${utilPct() >= 90 ? "bg-red-500/60" : utilPct() >= 70 ? "bg-theme-warning/60" : "bg-blue-500/60"}`}
               style={{ width: `${Math.min(100, utilPct())}%` }}
             />
           </div>

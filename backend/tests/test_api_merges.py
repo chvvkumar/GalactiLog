@@ -266,26 +266,6 @@ async def test_merge_history_unknown_uuid_returns_404(viewer_user):
         app.dependency_overrides.clear()
 
 
-@pytest.mark.asyncio
-async def test_merge_candidate_count_returns_count(viewer_user):
-    mock_result = MagicMock()
-    mock_result.scalar_one.return_value = 7
-    mock_session = AsyncMock()
-    mock_session.execute = AsyncMock(return_value=mock_result)
-
-    _override_session(mock_session)
-    app.dependency_overrides[get_current_user] = lambda: viewer_user
-    try:
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
-            resp = await client.get("/api/targets/merge-candidates/count")
-        assert resp.status_code == 200, resp.text
-        assert resp.json() == {"count": 7}
-    finally:
-        app.dependency_overrides.clear()
-
-
 def _make_candidate(status="accepted", method="orphan", suggested_target_id=None, source_name="Foo"):
     from app.models.merge_candidate import MergeCandidate
     c = MagicMock(spec=MergeCandidate)
@@ -409,6 +389,69 @@ async def test_custom_create_invalidates_stats_and_analysis_cache(admin_user, mo
 
     assert mock_redis.delete.await_args_list[0].args == (STATS_CACHE_KEY,)
     assert set(mock_redis.delete.await_args_list[1].args) == set(analysis_keys)
+
+
+class _FakeSyncSession:
+    """Stand-in for `sqlalchemy.orm.Session(sync_engine)` used by the
+    identity endpoint's `_resolve_sync` closure, so the test never opens a
+    real DB connection."""
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc_info):
+        return False
+
+
+@pytest.mark.asyncio
+async def test_re_resolve_clears_sesame_negative_cache_alongside_simbad(admin_user):
+    """Phase 4 sesame-port follow-up: re-resolving a target's identity must
+    clear the sesame negative cache entry for each alias, not just simbad's
+    (the sesame delete used to target the abandoned sesame_cache table and
+    matched zero rows)."""
+    target = _make_target(name="NGC 7000", aliases=["North America Nebula"])
+    target.catalog_id = None
+    target.common_name = None
+    target.name_locked = False
+
+    mock_session = AsyncMock()
+    mock_session.get = AsyncMock(return_value=target)
+    mock_session.commit = AsyncMock()
+    mock_session.refresh = AsyncMock()
+
+    redis_cm, _mock_redis = _fake_async_redis_cm()
+
+    clear_negative_calls = []
+
+    def _fake_clear_negative(session, source, key=None):
+        clear_negative_calls.append((source, key))
+        return 0
+
+    _override_session(mock_session)
+    app.dependency_overrides[require_admin] = lambda: admin_user
+    try:
+        with patch("app.api.merges.async_redis", redis_cm), \
+             patch("app.services.cache.async_redis", redis_cm), \
+             patch("sqlalchemy.orm.Session", return_value=_FakeSyncSession()), \
+             patch("app.services.catalog_cache.clear_negative", side_effect=_fake_clear_negative), \
+             patch("app.services.simbad.resolve_target_name_cached", return_value=None):
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url="http://test"
+            ) as client:
+                resp = await client.put(
+                    f"/api/targets/{target.id}/identity",
+                    json={"re_resolve": True},
+                )
+        assert resp.status_code == 200, resp.text
+    finally:
+        app.dependency_overrides.clear()
+
+    sources_by_name = {}
+    for source, key in clear_negative_calls:
+        sources_by_name.setdefault(key, set()).add(source)
+
+    assert sources_by_name.get("NGC 7000") == {"simbad", "sesame"}
+    assert sources_by_name.get("NORTH AMERICA NEBULA") == {"simbad", "sesame"}
 
 
 @pytest.mark.asyncio

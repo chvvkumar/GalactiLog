@@ -2,14 +2,20 @@
 
 Pure extraction of the per-panel and per-mosaic stat computations that used to
 live inline in app/api/mosaics.py. Behavior (query shapes, aggregation rules,
-and returned PanelStats/MosaicSummary fields) is preserved exactly.
+and returned PanelStats/MosaicSummary fields) is preserved exactly, with one
+deliberate change: "pattern" panels (those with an object_pattern) are now
+matched via the exact `Image.panel_id` join populated at ingest time (Phase 5,
+Task 1/2) instead of an ILIKE-against-raw_headers prefilter plus a Python
+exact-number recheck (AUD-008). "Simple" panels (no object_pattern) are left
+untouched -- they still match on `resolved_target_id` alone, which counts
+every LIGHT frame of the target including token-bearing OBJECT frames; this
+is preserved intentionally, not an oversight (see panel_stats/get_panel_
+sessions docstrings below).
 """
 
-import re
 from collections import defaultdict
-from datetime import datetime
 
-from sqlalchemy import select, func, or_, text
+from sqlalchemy import select, func, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -19,27 +25,6 @@ from app.models.mosaic import Mosaic
 from app.models.mosaic_panel import MosaicPanel
 from app.models.mosaic_panel_session import MosaicPanelSession
 from app.schemas.mosaic import MosaicSummary, PanelStats
-from app.services.mosaic_detection import (
-    exact_panel_regex,
-    load_mosaic_keywords,
-    object_matches_panel,
-    panel_number_from_label,
-)
-
-
-def _ilike_to_regex(pattern: str):
-    """Convert a SQL ILIKE pattern (%, _) to a compiled Python regex."""
-    # Process char-by-char: % and _ are ILIKE wildcards, everything else is literal.
-    # Can't rely on re.escape treating % specially (Python 3.7+ doesn't).
-    parts = []
-    for ch in pattern:
-        if ch == "%":
-            parts.append(".*")
-        elif ch == "_":
-            parts.append(".")
-        else:
-            parts.append(re.escape(ch))
-    return re.compile(f"^{''.join(parts)}$", re.IGNORECASE)
 
 
 def _parse_sexa_ra(s: str) -> float | None:
@@ -71,6 +56,10 @@ async def get_panel_included_dates(
 
     Only panels that have membership records are included in the dict.
     Panels without any membership records are omitted (meaning "use all sessions").
+
+    Phase 5 Task 3 note: this function was already join-based against
+    `MosaicPanelSession` (panel_id/session_date/status) with no ILIKE and no
+    `raw_headers` reference -- confirmed unchanged, not silently skipped.
     """
     panel_ids = [p.id for p in panels]
     if not panel_ids:
@@ -98,27 +87,43 @@ async def get_panel_included_dates(
 
 
 async def panel_stats(panel: MosaicPanel, session: AsyncSession) -> PanelStats:
-    """Compute stats for a single panel."""
+    """Compute stats for a single panel.
+
+    Pattern panels (object_pattern set -- multiple panels sharing a target
+    after a SIMBAD merge) are scoped by the exact `Image.panel_id == panel.id`
+    join ALONE. `Image.panel_id` is assigned at ingest time (and by the 0018
+    backfill) from the same tokenizer that built `object_pattern`, so this is
+    an exact match, not a prefilter -- no Python recheck is needed. No
+    `resolved_target_id` leg is added for pattern panels: the panel_id FK is
+    the authoritative membership column, and requiring target agreement would
+    couple stats to the unmerge substring-matching path (target_merge.py),
+    which can move an Image's resolved_target_id back to an original target
+    while the panel still points at the merged one -- silently zeroing the
+    panel's stats even though membership is intact.
+
+    Simple panels (no object_pattern) are NOT switched to a panel_id filter:
+    they intentionally count every LIGHT frame of the target via
+    `resolved_target_id` alone, including frames whose OBJECT string happens
+    to carry a panel-like token but were never associated with a `MosaicPanel`
+    row (Task 1's backfill only sets `panel_id` for a simple panel when the
+    target has exactly one such panel; token-bearing frames on that target
+    get `panel_label` set but keep whatever `panel_id` the simple-panel
+    fallback assigns them -- narrowing this filter to `panel_id` would drop
+    frames that today's behavior counts). This matches production behavior
+    before this rewrite and is preserved on purpose.
+    """
     target = panel.target
 
-    # When an object_pattern is set, filter frames by OBJECT header
-    # (needed when multiple panels share the same target after SIMBAD merge).
-    # The ILIKE pattern is a cheap pre-filter only -- it also matches sibling
-    # panels for which this panel's number is a prefix (e.g. "1" matching
-    # "Panel 12"), so pair it with an exact-number regex (AUD-008).
-    object_regex = None
     if panel.object_pattern:
-        keywords = await load_mosaic_keywords(session)
-        expected_num = panel_number_from_label(panel.panel_label)
-        object_regex = exact_panel_regex(keywords, expected_num)
-
-    base_filter = [
-        Image.resolved_target_id == panel.target_id,
-        Image.image_type == "LIGHT",
-    ]
-    if panel.object_pattern:
-        base_filter.append(Image.raw_headers["OBJECT"].astext.ilike(panel.object_pattern))
-        base_filter.append(Image.raw_headers["OBJECT"].astext.op("~*")(object_regex))
+        base_filter = [
+            Image.panel_id == panel.id,
+            Image.image_type == "LIGHT",
+        ]
+    else:
+        base_filter = [
+            Image.resolved_target_id == panel.target_id,
+            Image.image_type == "LIGHT",
+        ]
 
     # Fetch all membership rows in one query, then derive both the total count
     # (any status) and the included-date list in Python. This replaces the two
@@ -141,13 +146,16 @@ async def panel_stats(panel: MosaicPanel, session: AsyncSession) -> PanelStats:
 
     # Count available sessions
     if any_membership_count > 0:
-        all_dates_filter = [
-            Image.resolved_target_id == panel.target_id,
-            Image.image_type == "LIGHT",
-        ]
         if panel.object_pattern:
-            all_dates_filter.append(Image.raw_headers["OBJECT"].astext.ilike(panel.object_pattern))
-            all_dates_filter.append(Image.raw_headers["OBJECT"].astext.op("~*")(object_regex))
+            all_dates_filter = [
+                Image.panel_id == panel.id,
+                Image.image_type == "LIGHT",
+            ]
+        else:
+            all_dates_filter = [
+                Image.resolved_target_id == panel.target_id,
+                Image.image_type == "LIGHT",
+            ]
         all_dates_q = (
             select(func.count(func.distinct(Image.session_date)))
             .where(*all_dates_filter)
@@ -262,6 +270,14 @@ async def batch_panel_stats(
     Panels without membership use the original 3-query bulk approach.
 
     Returns a dict keyed by str(panel.id).
+
+    Phase 5 Task 3 note: both call sites (`get_mosaic_detail`,
+    `update_mosaic_panels_batch` in api/mosaics.py) only ever pass panels with
+    `object_pattern is None` into this function -- pattern panels always go
+    through `panel_stats` instead. This function never built an ILIKE filter
+    (it aggregates purely by `resolved_target_id`), so there is nothing to
+    convert to an exact `panel_id` join here; confirmed unchanged rather than
+    silently skipped.
     """
     # Check which panels have any membership records
     all_panel_ids = [p.id for p in panels]
@@ -542,22 +558,19 @@ async def list_mosaic_summaries(session: AsyncSession) -> list[MosaicSummary]:
                 str(r.last_session) if r.last_session else None,
             )
 
-    # Batch-fetch integration stats for all pattern panels using a single query
-    # with per-(target_id, object_pattern) case expressions to avoid N+1.
+    # Batch-fetch integration stats for all pattern panels using a single query,
+    # grouped directly by the exact Image.panel_id join (Phase 5 Task 3): no
+    # more ILIKE-of-OBJECT prefilter, no raw-OBJECT-string GROUP BY workaround,
+    # and no Python object_matches_panel recheck. Image.panel_id is assigned at
+    # ingest time / by the 0018 backfill from the same tokenizer that built
+    # object_pattern, so grouping on it is exact by construction.
     pattern_panels = [p for m in mosaics for p in m.panels if p.object_pattern]
     panel_stats_map: dict[str, tuple[float, int]] = {}
     panel_dates_map: dict[str, tuple[str | None, str | None]] = {}
     if pattern_panels:
-        # Build one OR condition per unique (target_id, pattern) pair
-        unique_pairs = list({(p.target_id, p.object_pattern) for p in pattern_panels})
-        conditions = or_(*(
-            (Image.resolved_target_id == tid) &
-            (Image.raw_headers["OBJECT"].astext.ilike(pat))
-            for tid, pat in unique_pairs
-        ))
+        all_panel_ids = [p.id for p in pattern_panels]
 
         # Collect ALL membership records to distinguish "no records" from "records but none included"
-        all_panel_ids = [p.id for p in pattern_panels]
         has_membership_q = (
             select(func.distinct(MosaicPanelSession.panel_id))
             .where(MosaicPanelSession.panel_id.in_(all_panel_ids))
@@ -578,18 +591,12 @@ async def list_mosaic_summaries(session: AsyncSession) -> list[MosaicSummary]:
         for r in membership_rows:
             panel_included_dates[str(r.panel_id)].add(r.session_date)
 
-        # Aggregate matching frames in SQL by (target_id, object_name, session_date).
-        # ILIKE patterns can't appear in GROUP BY, so we group on the raw OBJECT
-        # string and per-session date instead: this collapses the per-frame result
-        # set into one row per (target, object, session) while letting Python still
-        # apply per-panel pattern matching and included-date scoping. SUM/COUNT move
-        # into SQL; the Python-side regex/scoping work scales with distinct
-        # (object, session) tuples rather than total frame count.
-        object_name_col = Image.raw_headers["OBJECT"].astext.label("object_name")
+        # Aggregate matching frames in SQL directly by (panel_id, session_date):
+        # a plain GROUP BY on an equality-joined column, no raw-string grouping
+        # needed since panel_id (unlike an ILIKE pattern) can appear in GROUP BY.
         grouped_q = (
             select(
-                Image.resolved_target_id,
-                object_name_col,
+                Image.panel_id,
                 Image.session_date,
                 # coalesce so a group where every frame has NULL exposure_time
                 # yields 0.0 (SQL SUM over all-NULL returns NULL), matching the
@@ -597,60 +604,36 @@ async def list_mosaic_summaries(session: AsyncSession) -> list[MosaicSummary]:
                 func.sum(func.coalesce(Image.exposure_time, 0.0)).label("integration"),
                 func.count(Image.id).label("frames"),
             )
-            .where(Image.image_type == "LIGHT", conditions)
-            .group_by(Image.resolved_target_id, object_name_col, Image.session_date)
+            .where(Image.image_type == "LIGHT", Image.panel_id.in_(all_panel_ids))
+            .group_by(Image.panel_id, Image.session_date)
         )
         grouped_rows = (await session.execute(grouped_q)).all()
 
-        # Build a lookup: target_id -> list of (compiled regex, pattern string) per target_id.
-        pair_regexes = {(str(tid), pat): _ilike_to_regex(pat) for tid, pat in unique_pairs}
-        # Group patterns by target_id for efficient lookup
-        patterns_by_target: dict[str, list[tuple[str, object]]] = defaultdict(list)
-        for (tid_str, pat), rx in pair_regexes.items():
-            patterns_by_target[tid_str].append((pat, rx))
-
-        pair_to_panels: dict[tuple[str, str], list[str]] = defaultdict(list)
-        for p in pattern_panels:
-            pair_to_panels[(str(p.target_id), p.object_pattern)].append(str(p.id))
-
-        # rx.match() mirrors ILIKE semantics only (a cheap pre-filter): it
-        # still matches sibling panels for which this panel's number is a
-        # prefix (e.g. "1" matching "Panel 12"). Re-parse and compare each
-        # panel's own exact expected number before accumulating (AUD-008).
-        keywords = await load_mosaic_keywords(session)
-        panel_expected_num = {str(p.id): panel_number_from_label(p.panel_label) for p in pattern_panels}
-
         # Accumulate per panel: total integration, total frames, and the set of
         # contributing session dates (for min/max). Sum/count come pre-aggregated
-        # from SQL; we add a session's totals to a panel when its pattern matches
-        # and (for scoped panels) the session is included.
+        # from SQL; we add a session's totals to a panel when (for scoped
+        # panels) the session is included.
         panel_integration: dict[str, float] = {str(p.id): 0.0 for p in pattern_panels}
         panel_frames: dict[str, int] = {str(p.id): 0 for p in pattern_panels}
         panel_accum_dates: dict[str, list[str]] = {str(p.id): [] for p in pattern_panels}
 
         for row in grouped_rows:
-            tid_str = str(row.resolved_target_id)
-            obj_name = row.object_name or ""
+            pid = str(row.panel_id)
             integration = row.integration or 0.0
             frames = row.frames or 0
-            for pat, rx in patterns_by_target.get(tid_str, []):
-                if rx.match(obj_name):
-                    for pid in pair_to_panels.get((tid_str, pat), []):
-                        if not object_matches_panel(obj_name, keywords, panel_expected_num[pid]):
-                            continue
-                        if pid not in panel_has_membership:
-                            # No membership records - legacy unscoped
-                            panel_integration[pid] += integration
-                            panel_frames[pid] += frames
-                            if row.session_date:
-                                panel_accum_dates[pid].append(str(row.session_date))
-                        elif pid in panel_included_dates and row.session_date in panel_included_dates[pid]:
-                            # Has membership with included dates - scoped
-                            panel_integration[pid] += integration
-                            panel_frames[pid] += frames
-                            if row.session_date:
-                                panel_accum_dates[pid].append(str(row.session_date))
-                        # else: has membership but session not included - skip
+            if pid not in panel_has_membership:
+                # No membership records - legacy unscoped
+                panel_integration[pid] += integration
+                panel_frames[pid] += frames
+                if row.session_date:
+                    panel_accum_dates[pid].append(str(row.session_date))
+            elif pid in panel_included_dates and row.session_date in panel_included_dates[pid]:
+                # Has membership with included dates - scoped
+                panel_integration[pid] += integration
+                panel_frames[pid] += frames
+                if row.session_date:
+                    panel_accum_dates[pid].append(str(row.session_date))
+            # else: has membership but session not included - skip
 
         for pid in panel_integration:
             panel_stats_map[pid] = (panel_integration[pid], panel_frames[pid])

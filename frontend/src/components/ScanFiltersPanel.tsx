@@ -347,7 +347,7 @@ const ScanFiltersPanel: Component<Props> = (props) => {
         {filters.exclude_paths.length} exclude path(s),{" "}
         {filters.name_rules.length} name rule(s)
         <Show when={dirty()}>
-          <span class="ml-2 text-xs text-amber-400">unsaved</span>
+          <span class="ml-2 text-xs text-theme-warning">unsaved</span>
         </Show>
       </summary>
 

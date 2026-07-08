@@ -53,7 +53,18 @@ celery_app.conf.update(
             "soft_time_limit": 3600,
             "time_limit": 3720,
         },
+        # High-frequency beat tasks whose results are never read. Storing a
+        # result backend entry for each just accumulates celery-task-meta-*
+        # keys in Redis (drain_app_logs alone runs every 5s). Skip the result
+        # backend for them entirely.
+        "app.worker.drain_logs.drain_app_logs": {"ignore_result": True},
+        "app.worker.prune_activity.prune_activity_events": {"ignore_result": True},
+        "app.worker.prune_activity.prune_refresh_tokens": {"ignore_result": True},
+        "app.worker.tasks.auto_scan_tick": {"ignore_result": True},
     },
+    # Cap how long task results linger in the result backend. Anything that
+    # still writes a result expires within an hour (well under one day) rather
+    # than accumulating unbounded.
     result_expires=3600,
     broker_transport_options={"socket_timeout": 5, "socket_connect_timeout": 5},
     result_backend_transport_options={"socket_timeout": 5},
@@ -66,6 +77,10 @@ celery_app.conf.update(
         "prune-activity-events": {
             "task": "app.worker.prune_activity.prune_activity_events",
             "schedule": crontab(hour=3, minute=0),
+        },
+        "prune-refresh-tokens": {
+            "task": "app.worker.prune_activity.prune_refresh_tokens",
+            "schedule": crontab(hour=3, minute=30),
         },
         "drain-app-logs": {
             "task": "app.worker.drain_logs.drain_app_logs",

@@ -1,16 +1,39 @@
-import { Component, JSX, createContext, createMemo, createSignal, useContext } from "solid-js";
+import { Component, JSX, createContext, createEffect, createMemo, createSignal, useContext } from "solid-js";
 import { useSearchParams } from "@solidjs/router";
-import { createResource } from "solid-js";
-import { api } from "../api/client";
+import { useQuery } from "@tanstack/solid-query";
+import { apiClient } from "../api/generated/client";
+import type { paths } from "../api/generated/schema";
+import { unwrap } from "../api/unwrap";
+import { queryKeys } from "../api/queryKeys";
 import { useSettingsContext } from "./SettingsProvider";
-import type { ActiveFilters, TargetAggregationResponse } from "../types";
+import type { ActiveFilters } from "../api/types";
+// TargetAggregationResponse is the hand-written definition in `../api/types`
+// (nested `TargetAggregation.catalog_id` is required), rather than the
+// generated schema, which omits `catalog_id` entirely (a real
+// backend/OpenAPI schema gap -- the field IS returned by GET /api/targets,
+// it's just missing from the Pydantic response model's declared fields).
+// `targetData` is consumed by TargetFeed -> TargetTable (and by
+// Sidebar/DateRangePicker) against this shape: cast the apiClient result to
+// this type at the fetch boundary below.
+import type { TargetAggregationResponse } from "../api/types";
 
 export type SortKey = "name" | "integration" | "lastSession" | "equipment";
 export type SortDir = "asc" | "desc";
 
+// Resource-shaped accessor kept for source compatibility with out-of-scope
+// consumers (Slice 5's TargetTable/TargetFeed, plus Sidebar/DateRangePicker)
+// that call `targetData()` and read `.loading`/`.latest` the way Solid's
+// `createResource` exposes them. See the "Query shape" comment on
+// `targetsQuery` below for how this is built on top of `useQuery`.
+export interface TargetDataResource {
+  (): TargetAggregationResponse | undefined;
+  readonly loading: boolean;
+  readonly latest: TargetAggregationResponse | undefined;
+}
+
 interface DashboardFilterAPI {
   filters: () => ActiveFilters;
-  targetData: ReturnType<typeof createResource<TargetAggregationResponse | undefined>>[0];
+  targetData: TargetDataResource;
   refetchTargets: () => void;
   fetchError: () => Error | null;
   updateFilter: (key: string, value: any) => void;
@@ -56,6 +79,56 @@ const ALL_PARAM_KEYS = [
   ...METRIC_KEYS.flatMap((k) => [`${k}_min`, `${k}_max`]),
   "page",
 ];
+
+// Ports the old client.ts `buildTargetQuery` URLSearchParams logic (client.ts:196-235)
+// into a typed query object for openapi-fetch's `params: { query: {...} } }`,
+// preserving today's exact param names/encoding. `fits_key`/`fits_op`/`fits_val`
+// stay as parallel arrays (openapi-fetch's default "form"/explode serializer
+// emits repeated `key=a&key=b` query params, matching the old `.append()` calls
+// and the backend's `List[str]` query params) instead of the old comma-joined
+// strings used for `filters`/`object_type`.
+type TargetQueryParams = NonNullable<paths["/api/targets"]["get"]["parameters"]["query"]>;
+
+function buildTargetQueryParams(
+  filters: ActiveFilters,
+  page?: number,
+  pageSize?: number,
+  sortBy?: string,
+  sortDir?: string,
+  includeCustom?: boolean,
+): TargetQueryParams {
+  const params: TargetQueryParams = {};
+  if (page != null) params.page = page;
+  if (pageSize != null) params.page_size = pageSize;
+  if (sortBy) params.sort_by = sortBy;
+  if (sortDir) params.sort_dir = sortDir;
+  if (filters.selectedTargetId) params.target_id = filters.selectedTargetId;
+  else if (filters.searchQuery) params.search = filters.searchQuery;
+  if (filters.camera) params.camera = filters.camera;
+  if (filters.telescope) params.telescope = filters.telescope;
+  if (filters.opticalFilters.length > 0) params.filters = filters.opticalFilters.join(",");
+  if (filters.objectTypes.length > 0) params.object_type = filters.objectTypes.join(",");
+  if (filters.dateRange.start) params.date_from = filters.dateRange.start;
+  if (filters.dateRange.end) params.date_to = filters.dateRange.end;
+  if (filters.qualityFilters.hfrMin != null) params.hfr_min = filters.qualityFilters.hfrMin;
+  if (filters.qualityFilters.hfrMax != null) params.hfr_max = filters.qualityFilters.hfrMax;
+  if (filters.fitsQueries.length > 0) {
+    params.fits_key = filters.fitsQueries.map((q) => q.key);
+    params.fits_op = filters.fitsQueries.map((q) => q.operator);
+    params.fits_val = filters.fitsQueries.map((q) => q.value);
+  }
+  const loose = params as Record<string, unknown>;
+  for (const [metric, range] of Object.entries(filters.metricFilters)) {
+    if (range.min != null) loose[`${metric}_min`] = range.min;
+    if (range.max != null) loose[`${metric}_max`] = range.max;
+  }
+  if (filters.customColumnFilters.length > 0) {
+    params.custom_filters = JSON.stringify(filters.customColumnFilters);
+  }
+  if (filters.catalog) params.catalog = filters.catalog;
+  if (includeCustom) params.include_custom = true;
+  return params;
+}
 
 type RawSearchParams = Record<string, string | string[] | undefined>;
 
@@ -198,31 +271,51 @@ const DashboardFilterProvider: Component<{ children: JSX.Element }> = (props) =>
     settingsCtx.settings() !== undefined && settingsCtx.customColumns() !== undefined,
   );
 
-  const fetchKey = createMemo(() => {
-    if (!settingsReady()) return null;
-    return {
-      filters: filters(), page: currentPage(), pageSize: currentPageSize(),
-      sortBy: apiSortBy(), sortDir: sortDir(), includeCustom: hasCustomColumns(),
-    };
+  // Query shape depended on by Slice 5 (TargetTable/TargetFeed) and by
+  // Sidebar/DateRangePicker: `useQuery` (via TanStack Query, replacing the
+  // old `createResource`) drives the actual fetch, wrapped in `apiClient` +
+  // `unwrap` per the migration convention. `enabled` replicates the old
+  // `fetchKey` null-skip -- the query does not fire until settings +
+  // custom-columns have both resolved (see settingsReady's comment above),
+  // avoiding the double-fetch/cancel race described there. `queryFn`'s
+  // `signal` is TanStack's own AbortSignal (cancelled automatically on
+  // query-key change or unmount), replacing the old hand-rolled
+  // `AbortController` -- do not reintroduce manual abort tracking here.
+  const targetsQuery = useQuery(() => ({
+    queryKey: queryKeys.targets(filters(), currentPage(), currentPageSize(), apiSortBy(), sortDir(), hasCustomColumns()),
+    queryFn: ({ signal }: { signal: AbortSignal }) =>
+      apiClient
+        .GET("/api/targets", {
+          params: { query: buildTargetQueryParams(filters(), currentPage(), currentPageSize(), apiSortBy(), sortDir(), hasCustomColumns()) },
+          signal,
+        })
+        .then(unwrap) as Promise<TargetAggregationResponse>,
+    enabled: settingsReady(),
+  }));
+
+  // `.latest` mirrors Solid `createResource`'s behavior of retaining the last
+  // successfully-resolved value across a refetch (TargetFeed/Sidebar's
+  // `targetData() ?? targetData.latest` fallback relies on this so the table
+  // doesn't flash empty while a filter-driven refetch is in flight).
+  const [latestTargetData, setLatestTargetData] = createSignal<TargetAggregationResponse | undefined>(undefined);
+  createEffect(() => {
+    const d = targetsQuery.data;
+    if (d !== undefined) setLatestTargetData(() => d);
   });
 
-  let abortController: AbortController | undefined;
-  const [fetchError, setFetchError] = createSignal<Error | null>(null);
+  const targetData = (() => targetsQuery.data) as TargetDataResource;
+  Object.defineProperty(targetData, "loading", { enumerable: true, get: () => targetsQuery.isFetching });
+  Object.defineProperty(targetData, "latest", { enumerable: true, get: () => latestTargetData() });
 
-  const [targetData, { refetch: refetchTargets }] = createResource(fetchKey, async (k) => {
-    abortController?.abort();
-    abortController = new AbortController();
-    const signal = abortController.signal;
-    try {
-      const result = await api.getTargets(k.filters, k.page, k.pageSize, k.sortBy, k.sortDir, signal, k.includeCustom);
-      setFetchError(null);
-      return result;
-    } catch (e) {
-      if (signal.aborted) return undefined as unknown as TargetAggregationResponse;
-      setFetchError(e instanceof Error ? e : new Error(String(e)));
-      return undefined as unknown as TargetAggregationResponse;
-    }
-  });
+  const refetchTargets = () => {
+    void targetsQuery.refetch();
+  };
+
+  const fetchError = (): Error | null => {
+    const e = targetsQuery.error;
+    if (!e) return null;
+    return e instanceof Error ? e : new Error(String(e));
+  };
 
   const set = (updates: Record<string, string | undefined>) => {
     // Reset to page 1 when any filter changes (but not when only page changes)

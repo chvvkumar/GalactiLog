@@ -1,8 +1,24 @@
 import uuid
 import pytest
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 from httpx import AsyncClient, ASGITransport
+
+
+def _cache_miss_patch():
+    """Patch the analysis/baseline Redis cache to always miss, so the compute
+    path runs against the mocked session instead of returning a stale/empty
+    cached value from the shared test Redis."""
+    mock_redis = AsyncMock()
+    mock_redis.get = AsyncMock(return_value=None)
+    mock_redis.setex = AsyncMock()
+
+    @asynccontextmanager
+    async def _ctx():
+        yield mock_redis
+
+    return patch("app.services.cache.async_redis", _ctx)
 
 from app.main import app
 from app.database import get_session
@@ -138,8 +154,9 @@ async def test_session_detail_returns_baselines():
     app.dependency_overrides[get_current_user] = lambda: _admin_user()
 
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        resp = await client.get(f"/api/targets/{tid}/sessions/2026-03-20")
+    with _cache_miss_patch():
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.get(f"/api/targets/{tid}/sessions/2026-03-20")
 
     assert resp.status_code == 200
     data = resp.json()

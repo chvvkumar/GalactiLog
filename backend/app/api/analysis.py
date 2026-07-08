@@ -2,10 +2,10 @@ import logging
 import math
 import statistics
 from collections import defaultdict
-from datetime import date as date_type, datetime
+from datetime import date as date_type
 
 from fastapi import APIRouter, Depends, Query, HTTPException
-from sqlalchemy import select, func, cast, Date, distinct
+from sqlalchemy import select, func, distinct
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
@@ -37,6 +37,11 @@ logger = logging.getLogger(__name__)
 
 _MATRIX_CACHE_TTL = 300  # 5 minutes
 _ANALYSIS_CACHE_TTL = 300  # 5 minutes
+
+# Max scatter points returned by /correlation. Frame granularity can match tens
+# of thousands of frames; the point set is downsampled to this cap for the
+# response payload while trend/stats stay computed over the full set.
+_CORRELATION_POINT_CAP = 5000
 
 # ── Metric map ──────────────────────────────────────────────────────────
 
@@ -289,7 +294,7 @@ async def get_correlation(
     telescope: str | None = Query(None),
     camera: str | None = Query(None),
     filter_used: str | None = Query(None),
-    granularity: str = Query("frame", regex="^(frame|session)$"),
+    granularity: str = Query("frame", pattern="^(frame|session)$"),
     date_from: str | None = Query(None),
     date_to: str | None = Query(None),
     session: AsyncSession = Depends(get_session),
@@ -366,12 +371,27 @@ async def get_correlation(
             for x, y, d, tid in raw_points
         ]
 
+        # Trend and summary stats are always computed over the FULL point set,
+        # before any downsampling, so they reflect every matching frame.
         trend = _compute_trend(points)
         x_stats = _compute_summary_stats(all_xs)
         y_stats = _compute_summary_stats(all_ys)
 
+        # Cap the returned point set. Frame granularity can match ~100k frames;
+        # shipping every one as a JSON point bloats the payload with no visual
+        # benefit (the scatter is already saturated). Downsample with an even
+        # stride, which preserves the overall shape and keeps outliers spread
+        # across the range. sampled_count/total_count let the client note that
+        # it is showing a subset.
+        total_count = len(points)
+        if total_count > _CORRELATION_POINT_CAP:
+            step = total_count / _CORRELATION_POINT_CAP
+            returned_points = [points[int(i * step)] for i in range(_CORRELATION_POINT_CAP)]
+        else:
+            returned_points = points
+
         return CorrelationResponse(
-            points=points,
+            points=returned_points,
             trend=trend,
             x_metric=x_metric,
             y_metric=y_metric,
@@ -379,6 +399,8 @@ async def get_correlation(
             x_stats=x_stats,
             y_stats=y_stats,
             target_names={str(tid): name for tid, name in target_names.items()},
+            total_count=total_count,
+            sampled_count=len(returned_points),
         ).model_dump()
 
     data = await cached_json(cache_key, _ANALYSIS_CACHE_TTL, _compute)
@@ -391,7 +413,7 @@ async def get_distribution(
     telescope: str | None = Query(None),
     camera: str | None = Query(None),
     filter_used: str | None = Query(None),
-    granularity: str = Query("frame", regex="^(frame|session)$"),
+    granularity: str = Query("frame", pattern="^(frame|session)$"),
     date_from: str | None = Query(None),
     date_to: str | None = Query(None),
     session: AsyncSession = Depends(get_session),
@@ -468,7 +490,7 @@ async def get_distribution(
 @router.get("/boxplot", response_model=BoxPlotResponse)
 async def get_boxplot(
     metric: str = Query(..., description="Quality metric name"),
-    group_by: str = Query(..., regex="^(filter|equipment|month|target)$"),
+    group_by: str = Query(..., pattern="^(filter|equipment|month|target)$"),
     telescope: str | None = Query(None),
     camera: str | None = Query(None),
     filter_used: str | None = Query(None),
@@ -722,7 +744,7 @@ async def get_matrix(
 @router.get("/compare", response_model=CompareResponse)
 async def get_compare(
     metric: str = Query(..., description="Quality metric to compare"),
-    mode: str = Query(..., regex="^(equipment|filter)$"),
+    mode: str = Query(..., pattern="^(equipment|filter)$"),
     group_a: str = Query(..., description="First group identifier"),
     group_b: str = Query(..., description="Second group identifier"),
     date_from: str | None = Query(None),

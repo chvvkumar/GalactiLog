@@ -309,6 +309,45 @@ class TestEnrichNewTargetCoordinator:
             with pytest.raises(SoftTimeLimitExceeded):
                 enrich_new_target(session, target)
 
+    def test_gaia_failure_is_caught_and_logged_not_raised(self):
+        """A Gaia enrichment failure (e.g. a NonTransientError from the shared
+        cache wrapper) must not abort the rest of enrich_new_target -- mirrors
+        the existing HyperLEDA except-and-continue behavior."""
+        from app.services.target_enrichment import enrich_new_target
+
+        session = MagicMock()
+        target = _target(ra=100.0, dec=-10.0, object_type="OpC")
+        target.constellation = "Ori"
+
+        with patch("app.services.catalog_membership.match_target_memberships", return_value=0), \
+             patch("app.services.gaia._is_cluster_type", return_value=True), \
+             patch("app.services.gaia.get_cached_gaia", return_value=None), \
+             patch("app.services.gaia.enrich_target_from_gaia",
+                   side_effect=RuntimeError("boom")), \
+             patch("app.services.hyperleda._is_galaxy_type", return_value=False), \
+             patch("app.services.hyperleda.enrich_target_from_hyperleda", return_value=False):
+            res = enrich_new_target(session, target)
+
+        assert res["gaia"] is False
+        # HyperLEDA step still ran despite the Gaia failure.
+        assert res["hyperleda"] is False
+
+    def test_gaia_soft_time_limit_propagates(self):
+        from celery.exceptions import SoftTimeLimitExceeded
+        from app.services.target_enrichment import enrich_new_target
+
+        session = MagicMock()
+        target = _target(ra=100.0, dec=-10.0, object_type="OpC")
+        target.constellation = "Ori"
+
+        with patch("app.services.catalog_membership.match_target_memberships", return_value=0), \
+             patch("app.services.gaia._is_cluster_type", return_value=True), \
+             patch("app.services.gaia.get_cached_gaia", return_value=None), \
+             patch("app.services.gaia.enrich_target_from_gaia",
+                   side_effect=SoftTimeLimitExceeded()):
+            with pytest.raises(SoftTimeLimitExceeded):
+                enrich_new_target(session, target)
+
 
 # ---------------------------------------------------------------------------
 # _create_target dispatches the async follow-up on a genuine new insert

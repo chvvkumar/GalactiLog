@@ -1,7 +1,8 @@
 import { Component, Show, createSignal, onMount } from "solid-js";
-import { api } from "../../api/client";
+import { apiClient } from "../../api/generated/client";
+import { unwrap } from "../../api/unwrap";
 import { useAuth } from "../AuthProvider";
-import type { MergeCandidateResponse } from "../../types";
+import type { MergeCandidateResponse } from "../../api/types";
 import DuplicatesSection from "./DuplicatesSection";
 import UnresolvedSection from "./UnresolvedSection";
 import MergeHistorySection from "./MergeHistorySection";
@@ -29,8 +30,8 @@ export const TargetManagementTab: Component = () => {
   const refresh = async () => {
     try {
       const [p, a] = await Promise.all([
-        api.getMergeCandidates("pending"),
-        api.getMergeCandidates("accepted"),
+        apiClient.GET("/api/targets/merge-candidates", { params: { query: { status: "pending" } } }).then(unwrap),
+        apiClient.GET("/api/targets/merge-candidates", { params: { query: { status: "accepted" } } }).then(unwrap),
       ]);
       setPending(p);
       setAccepted(a);
@@ -42,7 +43,7 @@ export const TargetManagementTab: Component = () => {
   onMount(async () => {
     refresh();
     try {
-      const s = await api.getScanSummary();
+      const s = await apiClient.GET("/api/scan/summary").then(unwrap);
       if (s) setScanSummary(s as ScanSummary);
     } catch {
       // non-blocking
@@ -96,7 +97,7 @@ export const TargetManagementTab: Component = () => {
               <Show when={s().duplicates_found > 0}>
                 <div class="text-sm">
                   <span class="text-theme-text-secondary">Duplicates: </span>
-                  <span class="text-yellow-400 font-medium">{s().duplicates_found}</span>
+                  <span class="text-theme-warning font-medium">{s().duplicates_found}</span>
                 </div>
               </Show>
               <Show when={s().unresolved_names > 0}>

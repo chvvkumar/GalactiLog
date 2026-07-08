@@ -62,13 +62,84 @@ if [ "${GALACTILOG_SKIP_CHOWN:-0}" != "1" ]; then
 fi
 # ---- end PUID/PGID handling ----
 
+# ---- JWT secret file self-heal ----
+# The persisted JWT secret (settings.jwt_secret_file, default
+# /app/data/.jwt_secret) must be owned by the app user with mode 0600, since
+# it is generated and read back by app.config running as galactilog (see
+# app/config.py's get_jwt_secret()). Some existing installs were left with
+# this file owned by root (a prior version of app.config generated it as a
+# side effect of importing the module, which could happen from a
+# root-context entrypoint snippet before privileges dropped). Repair that
+# here, while still root and before any service starts, so already-affected
+# deployments heal on their next restart with no manual steps. This check is
+# independent of GALACTILOG_SKIP_CHOWN: unlike the bind-mounted data/
+# thumbnails directories, ownership of this file is an internal
+# implementation detail, not something an operator manages externally. It is
+# a no-op when the file doesn't exist yet or already has the correct owner
+# and mode, and it deliberately does not follow symlinks.
+JWT_SECRET_FILE=$(python -c "from app.config import settings; print(settings.jwt_secret_file)" 2>/dev/null || echo "/app/data/.jwt_secret")
+if [ -n "$JWT_SECRET_FILE" ]; then
+    if [ -L "$JWT_SECRET_FILE" ]; then
+        echo "Warning: JWT secret file $JWT_SECRET_FILE is a symlink - refusing to touch ownership or mode."
+    elif [ -f "$JWT_SECRET_FILE" ]; then
+        jwt_owner=$(stat -c '%u:%g' "$JWT_SECRET_FILE" 2>/dev/null || echo "")
+        desired="$PUID:$PGID"
+        if [ -n "$jwt_owner" ] && [ "$jwt_owner" != "$desired" ]; then
+            echo "Repairing ownership of JWT secret file $JWT_SECRET_FILE ($jwt_owner -> $desired)..."
+            if ! chown "$PUID:$PGID" "$JWT_SECRET_FILE" 2>/dev/null; then
+                echo "Warning: could not chown $JWT_SECRET_FILE - sessions may not survive restarts."
+            fi
+        fi
+        # Enforce owner-only permissions independently of the ownership
+        # check: a correctly-owned but group/world-readable secret file must
+        # still be tightened to 0600.
+        jwt_mode=$(stat -c '%a' "$JWT_SECRET_FILE" 2>/dev/null || echo "")
+        if [ -n "$jwt_mode" ] && [ "$jwt_mode" != "600" ]; then
+            echo "Tightening permissions of JWT secret file $JWT_SECRET_FILE ($jwt_mode -> 600)..."
+            chmod 600 "$JWT_SECRET_FILE" 2>/dev/null || \
+                echo "Warning: could not chmod $JWT_SECRET_FILE"
+        fi
+    fi
+fi
+# ---- end JWT secret file self-heal ----
+
 echo "Running database migrations..."
+
+# Run a python DB probe with retries, distinguishing a genuine "no such
+# table/row" result (which the probe script itself prints, rc 0) from a
+# transient database error (nonzero rc, e.g. connection refused while
+# postgres is still starting). Probes that misclassify a connectivity error
+# as a definitive "no" can send an existing, populated database down the
+# fresh-install code path, so on persistent failure this refuses to start
+# rather than falling through to a wrong branch.
+run_db_probe() {
+    local desc="$1"
+    local script="$2"
+    local max_attempts=5
+    local attempt=1
+    local output
+    while [ "$attempt" -le "$max_attempts" ]; do
+        if output=$(python -c "$script" 2>&1); then
+            printf '%s' "$output"
+            return 0
+        fi
+        echo "Warning: $desc probe failed (attempt $attempt/$max_attempts): $output" >&2
+        attempt=$((attempt + 1))
+        [ "$attempt" -le "$max_attempts" ] && sleep 3
+    done
+    echo "ERROR: Could not reach the database after $max_attempts attempts while checking: $desc" >&2
+    echo "" >&2
+    echo "The database has NOT been modified." >&2
+    echo "This looks like a transient database connectivity issue rather than a" >&2
+    echo "fresh or unrecognized database, so startup is refusing to guess." >&2
+    exit 1
+}
 
 # Check if alembic_version table exists. If the DB has tables but no
 # alembic tracking (created by Base.metadata.create_all), stamp at head
 # since create_all produces the current schema. This makes deployment
 # safe for existing installs - future migrations will run incrementally.
-HAS_ALEMBIC=$(python -c "
+HAS_ALEMBIC=$(run_db_probe "alembic_version table check" "
 from sqlalchemy import create_engine, text
 from app.config import settings
 url = settings.database_url.replace('+asyncpg', '+psycopg2')
@@ -79,11 +150,17 @@ with eng.connect() as c:
     ))
     print('yes' if r.scalar() else 'no')
 eng.dispose()
-" 2>/dev/null || echo "no")
+")
 
 if [ "$HAS_ALEMBIC" = "no" ]; then
-    # Check if the images table exists (i.e. DB was created by create_all)
-    HAS_IMAGES=$(python -c "
+    # Check if the images table exists (i.e. DB has data but no alembic
+    # tracking). Post-squash, this can only mean a pre-checkpoint (pre-v2.0)
+    # install: the migration history that used to let us safely assume
+    # create_all's schema matched "stamp head" no longer exists in this tree,
+    # so silently stamping would claim a schema state the database was never
+    # actually migrated to. Refuse and point at the checkpoint image, same as
+    # the unknown-revision gate below.
+    HAS_IMAGES=$(run_db_probe "images table check" "
 from sqlalchemy import create_engine, text
 from app.config import settings
 url = settings.database_url.replace('+asyncpg', '+psycopg2')
@@ -94,47 +171,68 @@ with eng.connect() as c:
     ))
     print('yes' if r.scalar() else 'no')
 eng.dispose()
-" 2>/dev/null || echo "no")
+")
 
     if [ "$HAS_IMAGES" = "yes" ]; then
-        echo "Existing database detected without alembic tracking - stamping at head"
-        alembic stamp head
+        CHECKPOINT_TAG=$(python -c "from app.config import CHECKPOINT_IMAGE_TAG; print(CHECKPOINT_IMAGE_TAG)" 2>/dev/null || echo "unknown")
+        MIN_REV=$(python -c "from app.config import MIN_UPGRADE_FROM_ALEMBIC_REVISION; print(MIN_UPGRADE_FROM_ALEMBIC_REVISION)" 2>/dev/null || echo "unknown")
+        echo "ERROR: Database has existing tables but no alembic tracking."
+        echo ""
+        echo "The database has NOT been modified."
+        echo ""
+        echo "This database predates alembic tracking entirely, which means it also"
+        echo "predates the checkpoint release and must first be upgraded through the"
+        echo "checkpoint image before this release can proceed."
+        echo "This release supports upgrading from revision $MIN_REV or newer."
+        echo ""
+        echo "Run the checkpoint image first:"
+        echo "  $CHECKPOINT_TAG"
+        echo ""
+        echo "Then retry starting this release."
+        exit 1
     fi
 else
-    # alembic_version exists - check if it points to a revision that no
-    # longer exists (old incremental migrations were replaced by 0001).
-    # If so, re-stamp to the current head.
-    STALE=$(python -c "
-from alembic.config import Config
-from alembic.script import ScriptDirectory
+    # alembic_version exists - check whether the stamped revision is known
+    # to this release's migration history. If it is not, the database was
+    # last touched by a different release (older or newer, or one whose
+    # history was squashed at a checkpoint) and we must refuse to proceed
+    # rather than silently rewrite migration state.
+    STAMPED_REV=$(run_db_probe "stamped alembic revision read" "
 from sqlalchemy import create_engine, text
 from app.config import settings
 url = settings.database_url.replace('+asyncpg', '+psycopg2')
 eng = create_engine(url)
+with eng.connect() as c:
+    row = c.execute(text('SELECT version_num FROM alembic_version')).first()
+    print(row[0] if row else '')
+eng.dispose()
+")
+
+    REV_KNOWN=$(python -c "
+from alembic.config import Config
+from alembic.script import ScriptDirectory
 cfg = Config('alembic.ini')
 scripts = ScriptDirectory.from_config(cfg)
 known = {s.revision for s in scripts.walk_revisions()}
-with eng.connect() as c:
-    row = c.execute(text('SELECT version_num FROM alembic_version')).first()
-    if row and row[0] not in known:
-        print('yes')
-    else:
-        print('no')
-eng.dispose()
+print('yes' if '$STAMPED_REV' in known else 'no')
 " 2>/dev/null || echo "no")
 
-    if [ "$STALE" = "yes" ]; then
-        echo "Stale migration revision detected - re-stamping to current head"
-        python -c "
-from sqlalchemy import create_engine, text
-from app.config import settings
-url = settings.database_url.replace('+asyncpg', '+psycopg2')
-eng = create_engine(url)
-with eng.begin() as c:
-    c.execute(text(\"DELETE FROM alembic_version\"))
-    c.execute(text(\"INSERT INTO alembic_version (version_num) VALUES ('0001')\"))
-eng.dispose()
-"
+    if [ "$REV_KNOWN" = "no" ]; then
+        CHECKPOINT_TAG=$(python -c "from app.config import CHECKPOINT_IMAGE_TAG; print(CHECKPOINT_IMAGE_TAG)" 2>/dev/null || echo "unknown")
+        MIN_REV=$(python -c "from app.config import MIN_UPGRADE_FROM_ALEMBIC_REVISION; print(MIN_UPGRADE_FROM_ALEMBIC_REVISION)" 2>/dev/null || echo "unknown")
+        echo "ERROR: Database is stamped at alembic revision '$STAMPED_REV', which this release does not recognize."
+        echo ""
+        echo "The database has NOT been modified."
+        echo ""
+        echo "This database was last touched by a different release and must first be"
+        echo "upgraded through the checkpoint image before this release can proceed."
+        echo "This release supports upgrading from revision $MIN_REV or newer."
+        echo ""
+        echo "Run the checkpoint image first:"
+        echo "  $CHECKPOINT_TAG"
+        echo ""
+        echo "Then retry starting this release."
+        exit 1
     fi
 fi
 
@@ -143,15 +241,23 @@ ALEMBIC_OUTPUT=$(alembic upgrade head 2>&1) || ALEMBIC_EXIT=$?
 ALEMBIC_EXIT=${ALEMBIC_EXIT:-0}
 echo "$ALEMBIC_OUTPUT"
 
-# Post migration result to Redis activity feed so it shows in the UI
+# Post migration result to Redis activity feed so it shows in the UI. The
+# alembic output is passed via environment variable rather than interpolated
+# into the python source: alembic output can contain quotes/backslashes
+# (e.g. from a migration's docstring or an error traceback) that would break
+# out of a naively-interpolated triple-quoted string literal.
+# Note: the "stamped" (pre-alembic-tracking existing DB) case used to be
+# logged here too, but that path now hard-stops above (see the HAS_IMAGES
+# check) before alembic ever runs, so it can no longer occur at this point.
+export GALACTILOG_ALEMBIC_OUTPUT="$ALEMBIC_OUTPUT"
+export GALACTILOG_ALEMBIC_EXIT="$ALEMBIC_EXIT"
 python -c "
 import json, time, sys, os
 try:
     import redis
     r = redis.from_url(os.environ.get('GALACTILOG_REDIS_URL', 'redis://redis:6379/0'))
-    output = '''$ALEMBIC_OUTPUT'''
-    exit_code = $ALEMBIC_EXIT
-    stamped = '$HAS_ALEMBIC' == 'no' and '$HAS_IMAGES' == 'yes'
+    output = os.environ.get('GALACTILOG_ALEMBIC_OUTPUT', '')
+    exit_code = int(os.environ.get('GALACTILOG_ALEMBIC_EXIT', '0'))
 
     if exit_code != 0:
         entry = {
@@ -169,14 +275,7 @@ try:
         entry = {
             'type': 'migration_applied',
             'message': msg,
-            'details': {'steps': len(steps), 'stamped': stamped},
-            'timestamp': time.time(),
-        }
-    elif stamped:
-        entry = {
-            'type': 'migration_initialized',
-            'message': 'Database migration tracking initialized (existing database detected)',
-            'details': {'stamped': True},
+            'details': {'steps': len(steps)},
             'timestamp': time.time(),
         }
     else:
@@ -189,6 +288,7 @@ try:
 except Exception as e:
     print(f'Warning: could not post migration activity: {e}', file=sys.stderr)
 " 2>&1 || true
+unset GALACTILOG_ALEMBIC_OUTPUT GALACTILOG_ALEMBIC_EXIT
 
 if [ $ALEMBIC_EXIT -ne 0 ]; then
     echo "ERROR: Database migration failed!"
@@ -197,8 +297,53 @@ fi
 
 echo "Migrations complete."
 
-# Dispatch data migrations if needed (runs in Celery background after services start)
-DATA_RESULT=$(python -c "
+# Refuse to start a brand-new, credential-less install: if there is no
+# GALACTILOG_ADMIN_PASSWORD, no admin user row, and no persisted/explicit JWT
+# secret, there is no way for anyone to log in once the container is up.
+# Runs after alembic upgrade head (above) so the users table is guaranteed to
+# exist, and before any Celery jobs are dispatched below so a bad boot leaves
+# nothing to clean up. An existing install with any one of the three signals
+# present boots unchanged - no new log lines, no behavior change.
+HAS_ADMIN_USER=$(run_db_probe "admin user existence check" "
+from app.config import admin_user_exists
+print('yes' if admin_user_exists() else 'no')
+")
+
+MISSING_ALL_CREDS=$(python -c "
+import os
+from app.config import settings, missing_all_credentials
+print('yes' if missing_all_credentials(
+    admin_password_env=settings.admin_password,
+    jwt_secret_env=os.environ.get('GALACTILOG_JWT_SECRET', ''),
+    jwt_secret_file_exists=os.path.exists('$JWT_SECRET_FILE'),
+    has_admin_user=('$HAS_ADMIN_USER' == 'yes'),
+) else 'no')
+" 2>/dev/null || echo "no")
+
+if [ "$MISSING_ALL_CREDS" = "yes" ]; then
+    echo "ERROR: No credentials found for a fresh install."
+    echo ""
+    echo "The database has NOT been modified."
+    echo ""
+    echo "This is a brand-new install with nothing to log in with:"
+    echo "  - GALACTILOG_ADMIN_PASSWORD is not set"
+    echo "  - no admin user exists in the database"
+    echo "  - no session secret has been generated or configured"
+    echo ""
+    echo "Set GALACTILOG_ADMIN_PASSWORD in your .env file and restart."
+    echo ""
+    echo "Refusing to start with no way to log in."
+    exit 1
+fi
+
+# Check stored data version against this release's minimum supported data
+# version before touching anything else. A fresh install (no app_metadata
+# table, or no data_version row yet) has nothing to gate on and proceeds
+# unchanged; an install at or above the minimum proceeds unchanged too.
+# Only an install whose data predates what this release knows how to migrate
+# from is refused, so that a future checkpoint release can delete superseded
+# data-migration code without breaking upgrades from very old installs.
+STORED_DATA_VERSION=$(run_db_probe "stored data version read" "
 from sqlalchemy import create_engine, text
 from app.config import settings
 url = settings.database_url.replace('+asyncpg', '+psycopg2')
@@ -208,18 +353,44 @@ with eng.connect() as c:
         \"SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'app_metadata')\"
     )).scalar()
     if not has_table:
-        print('current')
+        print('')
     else:
         row = c.execute(text(
             \"SELECT value FROM app_metadata WHERE key = 'data_version'\"
         )).first()
-        current = int(row[0]) if row else 0
-        from app.services.data_migrations import DATA_VERSION
-        if current < DATA_VERSION:
-            print(f'{current}')
-        else:
-            print('current')
+        print(row[0] if row else '')
 eng.dispose()
+")
+
+if [ -n "$STORED_DATA_VERSION" ]; then
+    MIN_DATA_VERSION=$(python -c "from app.config import MIN_UPGRADE_FROM_DATA_VERSION; print(MIN_UPGRADE_FROM_DATA_VERSION)" 2>/dev/null || echo "")
+    if [ -n "$MIN_DATA_VERSION" ] && [ "$STORED_DATA_VERSION" -lt "$MIN_DATA_VERSION" ]; then
+        CHECKPOINT_TAG=$(python -c "from app.config import CHECKPOINT_IMAGE_TAG; print(CHECKPOINT_IMAGE_TAG)" 2>/dev/null || echo "unknown")
+        echo "ERROR: Database is at data version $STORED_DATA_VERSION, which this release does not support upgrading from."
+        echo ""
+        echo "The data has NOT been modified."
+        echo ""
+        echo "This database was last touched by a different release and must first be"
+        echo "upgraded through the checkpoint image before this release can proceed."
+        echo "This release supports upgrading from data version $MIN_DATA_VERSION or newer."
+        echo ""
+        echo "Run the checkpoint image first:"
+        echo "  $CHECKPOINT_TAG"
+        echo ""
+        echo "Then retry starting this release."
+        exit 1
+    fi
+fi
+
+# Dispatch data migrations if needed (runs in Celery background after services
+# start). Reuses STORED_DATA_VERSION computed above rather than re-querying.
+DATA_RESULT=$(python -c "
+current = '$STORED_DATA_VERSION'
+from app.services.data_migrations import DATA_VERSION
+if current == '' or int(current) >= DATA_VERSION:
+    print('current')
+else:
+    print(current)
 " 2>/dev/null || echo "current")
 
 if [ "$DATA_RESULT" != "current" ]; then
@@ -228,8 +399,27 @@ if [ "$DATA_RESULT" != "current" ]; then
 import json, time
 import redis
 import os
+from sqlalchemy import create_engine, text
+from app.config import settings
 r = redis.from_url(os.environ.get('GALACTILOG_REDIS_URL', 'redis://redis:6379/0'))
 from app.services.data_migrations import DATA_VERSION
+
+# Register the pending job row before enqueueing so it is visible to the API
+# and operators from the moment the upgrade is scheduled, not only once a
+# worker picks it up. ON CONFLICT DO NOTHING: dispatch never writes
+# status/started_at/attempt_count -- those belong to the worker's pickup
+# step (run_data_migrations), and an existing row (running/succeeded/failed/
+# interrupted from a prior boot) must be left untouched here.
+url = settings.database_url.replace('+asyncpg', '+psycopg2')
+eng = create_engine(url)
+with eng.begin() as conn:
+    conn.execute(text('''
+        INSERT INTO data_jobs (job_type, job_key, status)
+        VALUES ('data_migration', :job_key, 'pending')
+        ON CONFLICT (job_type, job_key) DO NOTHING
+    '''), {'job_key': str(DATA_VERSION)})
+eng.dispose()
+
 entry = {
     'type': 'data_upgrade_started',
     'message': f'Data upgrade v${DATA_RESULT} -> v{DATA_VERSION} starting in background...',
@@ -250,6 +440,19 @@ smart_rebuild_targets.apply_async(countdown=10)
 detect_mosaic_panels_task.apply_async(countdown=30)
 " 2>&1 || echo "Warning: could not dispatch startup maintenance tasks"
 fi
+
+# Load the static reference catalogs (OpenNGC, SAC, Caldwell, Herschel 400,
+# Arp, Abell) if they have never been loaded. Dispatched unconditionally and
+# independent of the data-version branch above: the v2.0 baseline seeds fresh
+# databases at the current data_version so the upgrade gate holds, which means
+# the data migrations that used to load these catalogs as a side effect never
+# fire on a fresh install, leaving the catalog tables permanently empty. The
+# task itself checks openngc_catalog for emptiness before doing any work, so
+# this is a cheap no-op on every other boot.
+python -c "
+from app.worker.tasks import load_reference_catalogs_if_empty
+load_reference_catalogs_if_empty.apply_async(countdown=2)
+" 2>&1 || echo "Warning: could not dispatch reference catalog load task"
 
 if [ "$DID_CHOWN" = "1" ]; then
     python -c "

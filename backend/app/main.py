@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from slowapi.errors import RateLimitExceeded
 from starlette.responses import JSONResponse
 
-from app.config import settings, limiter, async_redis
+from app.config import settings, limiter, async_redis, get_jwt_secret, jwt_secret_persisted
 from app.database import async_session
 from app.api.router import api_router
 from app.api.metrics_endpoint import router as metrics_router
@@ -22,16 +22,29 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Warn if JWT secret was auto-generated. It is now persisted to the secret
-    # file (settings.jwt_secret_file), so sessions survive single-host restarts;
-    # set GALACTILOG_JWT_SECRET explicitly for multi-host/multi-instance setups.
+    # Warn if JWT secret was auto-generated. It's meant to be persisted to the
+    # secret file (settings.jwt_secret_file) so it survives single-host
+    # restarts; set GALACTILOG_JWT_SECRET explicitly for multi-host/multi-
+    # instance setups. Generating it here (under this process's identity,
+    # not a root-context entrypoint snippet) also confirms whether it was
+    # actually persisted, so the log doesn't claim durability it can't back up.
     if not os.environ.get("GALACTILOG_JWT_SECRET"):
-        logger.warning(
-            "GALACTILOG_JWT_SECRET is not set - using an auto-generated secret "
-            "persisted to %s. Sessions survive restarts on this host. Set "
-            "GALACTILOG_JWT_SECRET explicitly for multi-host/multi-instance deployments.",
-            settings.jwt_secret_file,
-        )
+        secret = get_jwt_secret()
+        if jwt_secret_persisted(settings.jwt_secret_file, secret):
+            logger.warning(
+                "GALACTILOG_JWT_SECRET is not set - using an auto-generated secret "
+                "persisted to %s. Sessions survive restarts on this host. Set "
+                "GALACTILOG_JWT_SECRET explicitly for multi-host/multi-instance deployments.",
+                settings.jwt_secret_file,
+            )
+        else:
+            logger.warning(
+                "GALACTILOG_JWT_SECRET is not set and the auto-generated secret "
+                "could not be persisted to %s (see the preceding warning for why). "
+                "A new secret will be generated on every restart, invalidating all "
+                "sessions. Set GALACTILOG_JWT_SECRET explicitly to avoid this.",
+                settings.jwt_secret_file,
+            )
 
     # Install the backend log capture handler (pushes to Redis, drained by Celery)
     from app.services.log_capture import (

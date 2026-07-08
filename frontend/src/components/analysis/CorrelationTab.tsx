@@ -1,6 +1,19 @@
-import { Component, createSignal, createResource, createEffect, Show } from "solid-js";
-import { api } from "../../api/client";
+import { Component, createSignal, createEffect, Show } from "solid-js";
+import { useQuery, keepPreviousData } from "@tanstack/solid-query";
+import { apiClient } from "../../api/generated/client";
+import { unwrap } from "../../api/unwrap";
+import { queryKeys } from "../../api/queryKeys";
 import type { SharedFilters } from "../../pages/AnalysisPage";
+// CorrelationResponse is the hand-written definition in `../../api/types`
+// (`CorrelationPoint.target_id` is `string | null`, no `undefined`) for the
+// cast below -- the generated schema types `target_id` as
+// `string | null | undefined` because the field is optional in the OpenAPI
+// schema (a real backend/OpenAPI schema gap, not a runtime difference; the
+// field is always present in the actual response). Sole consumer is
+// `CorrelationChart`, which imports this same type -- cast at this
+// boundary. Same precedent as `DashboardFilterProvider.tsx`'s
+// `TargetAggregationResponse` cast.
+import type { CorrelationResponse } from "../../api/types";
 import CorrelationChart from "./CorrelationChart";
 import StatsCard from "./StatsCard";
 
@@ -39,6 +52,7 @@ const PRESETS = [
 ];
 
 interface Props {
+  active: boolean;
   filters: SharedFilters;
   navX?: string;
   navY?: string;
@@ -59,27 +73,49 @@ const CorrelationTab: Component<Props> = (props) => {
     }
   });
 
-  const chartKey = () =>
-    `${props.filters.telescope}-${props.filters.camera}-${props.filters.filterUsed}-${props.filters.granularity}-${props.filters.dateFrom}-${props.filters.dateTo}-${customX()}-${customY()}`;
+  // Gate the fetch on tab visibility: while the tab is hidden the query is
+  // disabled so no request fires until the tab is revealed.
+  const params = () => ({
+    x_metric: customX(),
+    y_metric: customY(),
+    telescope: props.filters.telescope,
+    camera: props.filters.camera,
+    filter_used: props.filters.filterUsed,
+    granularity: props.filters.granularity,
+    date_from: props.filters.dateFrom,
+    date_to: props.filters.dateTo,
+  });
 
-  const [data] = createResource(chartKey, () =>
-    api.getCorrelation({
-      x_metric: customX(),
-      y_metric: customY(),
-      telescope: props.filters.telescope,
-      camera: props.filters.camera,
-      filter_used: props.filters.filterUsed,
-      granularity: props.filters.granularity,
-      date_from: props.filters.dateFrom,
-      date_to: props.filters.dateTo,
-    })
-  );
+  const dataQuery = useQuery(() => ({
+    queryKey: queryKeys.correlation(params()),
+    queryFn: ({ signal }: { signal: AbortSignal }) =>
+      apiClient.GET("/api/analysis/correlation", { params: { query: params() }, signal }).then(unwrap),
+    enabled: props.active,
+    // Retain the last successfully-resolved value across a refetch (matching
+    // the old createResource's `.latest` behavior) so the chart doesn't flash
+    // empty while a filter-driven refetch is in flight.
+    placeholderData: keepPreviousData,
+  }));
 
   const filteredData = () => {
-    const d = data.latest;
+    const d = dataQuery.data;
     if (!d || !hideOutliers()) return d;
     const pts = d.points.filter((p) => !p.outlier);
     return { ...d, points: pts };
+  };
+
+  // Show a note only when the response reports that its point set was sampled.
+  // Read defensively so the note stays hidden until the backend supplies the
+  // total/sampled counts.
+  const samplingNote = (): string | null => {
+    const d = dataQuery.data as (typeof dataQuery.data & { total?: number; sampled?: number }) | undefined;
+    if (!d) return null;
+    const total = d.total_count ?? d.total;
+    const sampled = d.sampled_count ?? d.sampled;
+    if (typeof total === "number" && typeof sampled === "number" && sampled < total) {
+      return `Showing ${sampled.toLocaleString()} of ${total.toLocaleString()} frames (sampled for display; trend and statistics use all frames)`;
+    }
+    return null;
   };
 
   const exportCsv = () => {
@@ -148,15 +184,19 @@ const CorrelationTab: Component<Props> = (props) => {
         </button>
       </div>
 
+      <Show when={samplingNote()}>
+        <p class="text-xs text-theme-text-tertiary mb-2">{samplingNote()}</p>
+      </Show>
+
       <div style={{ height: "500px" }} class="relative">
-        <CorrelationChart data={filteredData()} loading={data.loading} />
+        <CorrelationChart data={filteredData() as CorrelationResponse | undefined} loading={dataQuery.isFetching} />
       </div>
 
       {/* Stats cards */}
-      <Show when={data.latest?.x_stats && data.latest?.y_stats}>
+      <Show when={dataQuery.data?.x_stats && dataQuery.data?.y_stats}>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-2 mt-3">
-          <StatsCard stats={data.latest!.x_stats!} label={`X: ${X_OPTIONS.find((o) => o.value === customX())?.label}`} />
-          <StatsCard stats={data.latest!.y_stats!} label={`Y: ${Y_OPTIONS.find((o) => o.value === customY())?.label}`} />
+          <StatsCard stats={dataQuery.data!.x_stats!} label={`X: ${X_OPTIONS.find((o) => o.value === customX())?.label}`} />
+          <StatsCard stats={dataQuery.data!.y_stats!} label={`Y: ${Y_OPTIONS.find((o) => o.value === customY())?.label}`} />
         </div>
       </Show>
     </div>

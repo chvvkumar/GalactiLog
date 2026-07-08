@@ -1,9 +1,10 @@
 import { Component, For, Show, createSignal, createEffect, on } from "solid-js";
 import type { Accessor } from "solid-js";
-import { api } from "../../api/client";
+import { apiClient } from "../../api/generated/client";
+import { unwrap } from "../../api/unwrap";
 import { showToast } from "../Toast";
 import { useAuth } from "../AuthProvider";
-import type { MergeCandidateResponse, OrphanPreviewResponse } from "../../types";
+import type { MergeCandidateResponse, OrphanPreviewResponse } from "../../api/types";
 import CreateTargetFromOrphanModal from "./CreateTargetFromOrphanModal";
 import MergeOrphanModal from "./MergeOrphanModal";
 
@@ -54,8 +55,9 @@ const UnresolvedSection: Component<UnresolvedSectionProps> = (props) => {
           const existing = previews()[c.source_name];
           if (existing && !existing.loading && !existing.error) continue;
 
-          api
-            .orphanPreview(c.source_name)
+          apiClient
+            .POST("/api/targets/orphan-preview", { body: { source_name: c.source_name } })
+            .then(unwrap)
             .then((res) => {
               setPreviews((prev) => ({
                 ...prev,
@@ -76,7 +78,11 @@ const UnresolvedSection: Component<UnresolvedSectionProps> = (props) => {
   const handleAssign = async (c: MergeCandidateResponse) => {
     if (!c.suggested_target_id) return;
     try {
-      await api.mergeTargets(c.suggested_target_id, undefined, c.source_name);
+      await apiClient
+        .POST("/api/targets/merge", {
+          body: { winner_id: c.suggested_target_id, loser_name: c.source_name },
+        })
+        .then(unwrap);
       showToast(`Assigned "${c.source_name}" to "${c.suggested_target_name}"`);
       props.onAction();
       window.dispatchEvent(new Event("merges-changed"));
@@ -87,7 +93,11 @@ const UnresolvedSection: Component<UnresolvedSectionProps> = (props) => {
 
   const handleDismiss = async (candidateId: string) => {
     try {
-      await api.dismissMergeCandidate(candidateId);
+      await apiClient
+        .POST("/api/targets/merge-candidates/{candidate_id}/dismiss", {
+          params: { path: { candidate_id: candidateId } },
+        })
+        .then(unwrap);
       props.onAction();
       window.dispatchEvent(new Event("merges-changed"));
     } catch {

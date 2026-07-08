@@ -1,17 +1,18 @@
 """Unit tests for app.services.sesame - XML parsing, cache helpers, and resolution."""
 import pytest
 import xml.etree.ElementTree as ET
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch, Mock
 
 from app.services.sesame import (
     _query_sesame_raw,
     get_cached_sesame,
     save_sesame_cache,
+    resolve_sesame_cached,
 )
 
 
 # ---------------------------------------------------------------------------
-# _query_sesame_raw (async, HTTP mocked)
+# _query_sesame_raw (sync, HTTP mocked)
 # ---------------------------------------------------------------------------
 
 _SESAME_XML_HIT = """\
@@ -38,27 +39,26 @@ _SESAME_XML_MISS = """\
 """
 
 
-def _make_async_client(text, raise_error=None):
+def _make_client(text, raise_error=None):
     resp = MagicMock()
     resp.text = text
     resp.raise_for_status = MagicMock()
 
-    client = AsyncMock()
+    client = MagicMock()
     if raise_error:
-        client.get = AsyncMock(side_effect=raise_error)
+        client.get = MagicMock(side_effect=raise_error)
     else:
-        client.get = AsyncMock(return_value=resp)
-    client.__aenter__ = AsyncMock(return_value=client)
-    client.__aexit__ = AsyncMock(return_value=False)
+        client.get = MagicMock(return_value=resp)
+    client.__enter__ = MagicMock(return_value=client)
+    client.__exit__ = MagicMock(return_value=False)
     return client
 
 
 class TestQuerySesameRaw:
-    @pytest.mark.asyncio
-    async def test_parses_successful_response(self):
-        client = _make_async_client(_SESAME_XML_HIT)
-        with patch("app.services.sesame.httpx.AsyncClient", return_value=client):
-            result = await _query_sesame_raw("M 42")
+    def test_parses_successful_response(self):
+        client = _make_client(_SESAME_XML_HIT)
+        with patch("app.services.sesame.httpx.Client", return_value=client):
+            result = _query_sesame_raw("M 42")
 
         assert result is not None
         assert result["main_id"] == "M 42"
@@ -68,33 +68,28 @@ class TestQuerySesameRaw:
         assert "NGC 1976" in result["raw_aliases"]
         assert "Orion Nebula" in result["raw_aliases"]
 
-    @pytest.mark.asyncio
-    async def test_returns_none_when_no_resolver_matches(self):
-        client = _make_async_client(_SESAME_XML_MISS)
-        with patch("app.services.sesame.httpx.AsyncClient", return_value=client):
-            result = await _query_sesame_raw("XYZNOTREAL")
+    def test_returns_none_when_no_resolver_matches(self):
+        client = _make_client(_SESAME_XML_MISS)
+        with patch("app.services.sesame.httpx.Client", return_value=client):
+            result = _query_sesame_raw("XYZNOTREAL")
 
         assert result is None
 
-    @pytest.mark.asyncio
-    async def test_returns_none_on_http_error(self):
+    def test_raises_on_http_error(self):
         import httpx
-        client = _make_async_client("", raise_error=httpx.HTTPError("timeout"))
-        with patch("app.services.sesame.httpx.AsyncClient", return_value=client):
-            result = await _query_sesame_raw("M 42")
+        client = _make_client("", raise_error=httpx.HTTPError("timeout"))
+        with patch("app.services.sesame.httpx.Client", return_value=client):
+            with pytest.raises(httpx.HTTPError):
+                _query_sesame_raw("M 42")
+
+    def test_returns_none_on_parse_error(self):
+        client = _make_client("THIS IS NOT XML")
+        with patch("app.services.sesame.httpx.Client", return_value=client):
+            result = _query_sesame_raw("M 42")
 
         assert result is None
 
-    @pytest.mark.asyncio
-    async def test_returns_none_on_parse_error(self):
-        client = _make_async_client("THIS IS NOT XML")
-        with patch("app.services.sesame.httpx.AsyncClient", return_value=client):
-            result = await _query_sesame_raw("M 42")
-
-        assert result is None
-
-    @pytest.mark.asyncio
-    async def test_skips_resolver_with_no_coordinates(self):
+    def test_skips_resolver_with_no_coordinates(self):
         # Resolver element with no jradeg/jdedeg should be skipped
         xml = """\
 <?xml version="1.0" encoding="UTF-8"?>
@@ -106,14 +101,13 @@ class TestQuerySesameRaw:
   </Target>
 </Sesame>
 """
-        client = _make_async_client(xml)
-        with patch("app.services.sesame.httpx.AsyncClient", return_value=client):
-            result = await _query_sesame_raw("M 42")
+        client = _make_client(xml)
+        with patch("app.services.sesame.httpx.Client", return_value=client):
+            result = _query_sesame_raw("M 42")
 
         assert result is None
 
-    @pytest.mark.asyncio
-    async def test_uses_object_name_as_fallback_for_oname(self):
+    def test_uses_object_name_as_fallback_for_oname(self):
         xml = """\
 <?xml version="1.0" encoding="UTF-8"?>
 <Sesame>
@@ -125,60 +119,58 @@ class TestQuerySesameRaw:
   </Target>
 </Sesame>
 """
-        client = _make_async_client(xml)
-        with patch("app.services.sesame.httpx.AsyncClient", return_value=client):
-            result = await _query_sesame_raw("some object")
+        client = _make_client(xml)
+        with patch("app.services.sesame.httpx.Client", return_value=client):
+            result = _query_sesame_raw("some object")
 
         assert result is not None
         assert result["main_id"] == "some object"
 
 
 # ---------------------------------------------------------------------------
-# get_cached_sesame
+# get_cached_sesame and save_sesame_cache (database tests)
 # ---------------------------------------------------------------------------
 
-class TestGetCachedSesame:
+class TestGetCachedSesameAndSave:
+    @pytest.fixture(autouse=True)
+    def setup(self):
+        """Clear catalog_cache before each test."""
+        from app.database import sync_engine
+        from app.models.catalog_cache import CatalogCache
+        from sqlalchemy.orm import Session
+
+        with Session(sync_engine) as session:
+            session.query(CatalogCache).filter(CatalogCache.source == "sesame").delete()
+            session.commit()
+        yield
+        with Session(sync_engine) as session:
+            session.query(CatalogCache).filter(CatalogCache.source == "sesame").delete()
+            session.commit()
+
     def test_returns_none_when_not_in_cache(self):
-        session = MagicMock()
-        session.execute.return_value.scalar_one_or_none.return_value = None
+        from app.database import sync_engine
+        from sqlalchemy.orm import Session
 
-        result = get_cached_sesame("M 42", session)
-        assert result is None
+        with Session(sync_engine) as session:
+            result = get_cached_sesame("NOTCACHED", session)
+            assert result is None
 
-    def test_returns_negative_marker_when_main_id_is_none(self):
-        row = MagicMock()
-        row.main_id = None
-        session = MagicMock()
-        session.execute.return_value.scalar_one_or_none.return_value = row
+    def test_returns_negative_marker_on_negative_cache_hit(self):
+        from app.database import sync_engine
+        from sqlalchemy.orm import Session
 
-        result = get_cached_sesame("NOTFOUND", session)
-        assert result == {"_negative": True}
+        with Session(sync_engine) as session:
+            save_sesame_cache("NOTFOUND", None, session)
+            session.commit()
 
-    def test_returns_dict_on_hit(self):
-        row = MagicMock()
-        row.main_id = "M 42"
-        row.raw_aliases = ["NGC 1976"]
-        row.ra = 83.82
-        row.dec = -5.39
-        row.object_type = "HII"
-        row.resolver = "S=Simbad"
-        session = MagicMock()
-        session.execute.return_value.scalar_one_or_none.return_value = row
+        with Session(sync_engine) as session:
+            result = get_cached_sesame("NOTFOUND", session)
+            assert result == {"_negative": True}
 
-        result = get_cached_sesame("M 42", session)
-        assert result is not None
-        assert result["main_id"] == "M 42"
-        assert result["ra"] == pytest.approx(83.82)
-        assert result["resolver"] == "S=Simbad"
+    def test_returns_dict_on_positive_cache_hit(self):
+        from app.database import sync_engine
+        from sqlalchemy.orm import Session
 
-
-# ---------------------------------------------------------------------------
-# save_sesame_cache (smoke test - verifies session.execute is called)
-# ---------------------------------------------------------------------------
-
-class TestSaveSesameCacheSmoke:
-    def test_positive_result_executes_upsert(self):
-        session = MagicMock()
         data = {
             "main_id": "M 42",
             "raw_aliases": ["NGC 1976"],
@@ -187,10 +179,201 @@ class TestSaveSesameCacheSmoke:
             "object_type": "HII",
             "resolver": "S=Simbad",
         }
-        save_sesame_cache("M 42", data, session)
-        session.execute.assert_called_once()
+        with Session(sync_engine) as session:
+            save_sesame_cache("M 42", data, session)
+            session.commit()
 
-    def test_negative_result_executes_upsert(self):
-        session = MagicMock()
-        save_sesame_cache("NOTFOUND", None, session)
-        session.execute.assert_called_once()
+        with Session(sync_engine) as session:
+            result = get_cached_sesame("M 42", session)
+            assert result is not None
+            assert result["main_id"] == "M 42"
+            assert result["ra"] == pytest.approx(83.82)
+            assert result["object_type"] == "HII"
+            assert result["resolver"] == "S=Simbad"
+            assert "NGC 1976" in result["raw_aliases"]
+
+    def test_save_positive_and_retrieve(self):
+        from app.database import sync_engine
+        from sqlalchemy.orm import Session
+
+        data = {
+            "main_id": "NGC 1976",
+            "raw_aliases": ["Orion Nebula"],
+            "ra": 83.82,
+            "dec": -5.39,
+            "object_type": "EmissionNebula",
+            "resolver": "N=NED",
+        }
+        with Session(sync_engine) as session:
+            save_sesame_cache("NGC 1976", data, session)
+            session.commit()
+
+        with Session(sync_engine) as session:
+            cached = get_cached_sesame("NGC 1976", session)
+            assert cached["main_id"] == "NGC 1976"
+            assert cached["resolver"] == "N=NED"
+
+    def test_save_negative_and_retrieve(self):
+        from app.database import sync_engine
+        from sqlalchemy.orm import Session
+
+        with Session(sync_engine) as session:
+            save_sesame_cache("XYZNOTREAL", None, session)
+            session.commit()
+
+        with Session(sync_engine) as session:
+            cached = get_cached_sesame("XYZNOTREAL", session)
+            assert cached == {"_negative": True}
+
+
+# ---------------------------------------------------------------------------
+# resolve_sesame_cached with negative cache suppression
+# ---------------------------------------------------------------------------
+
+class TestResolveSesameNegativeCache:
+    @pytest.fixture(autouse=True)
+    def setup(self):
+        """Clear catalog_cache before each test."""
+        from app.database import sync_engine
+        from app.models.catalog_cache import CatalogCache
+        from sqlalchemy.orm import Session
+
+        with Session(sync_engine) as session:
+            session.query(CatalogCache).filter(CatalogCache.source == "sesame").delete()
+            session.commit()
+        yield
+        with Session(sync_engine) as session:
+            session.query(CatalogCache).filter(CatalogCache.source == "sesame").delete()
+            session.commit()
+
+    def test_negative_cache_suppresses_refetch(self):
+        """Negative-cached result returns None without calling _query_sesame_raw."""
+        from app.database import sync_engine
+        from sqlalchemy.orm import Session
+        from app.services.simbad import normalize_object_name
+
+        object_name = "NOTFOUND"
+        normalized = normalize_object_name(object_name)
+
+        # Pre-populate negative cache
+        with Session(sync_engine) as session:
+            save_sesame_cache(normalized, None, session)
+            session.commit()
+
+        # Mock _query_sesame_raw to assert it's not called
+        with Session(sync_engine) as session:
+            with patch("app.services.sesame._query_sesame_raw") as mock_query:
+                result = resolve_sesame_cached(object_name, session)
+
+            assert result is None
+            mock_query.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# resolve_sesame_cached error handling (Phase 4 sesame-port follow-up)
+#
+# _query_sesame_raw raises httpx.HTTPError on network/HTTP failure (correct
+# per the catalog_cache port contract). resolve_sesame_cached must not let
+# a transient failure propagate to its callers (api/merges.py's
+# orphan_preview, the duplicate-detection worker task, filename_resolver.py,
+# target_resolver.py), none of which ever handled an exception from this
+# function pre-port. It's routed through catalog_cache.get_or_fetch, which
+# retries transient errors with backoff and negative-caches+swallows once
+# retries are exhausted (returns None), while a non-transient 4xx (other
+# than 429) raises NonTransientError uncaught -- the same semantics
+# enrich_target_from_vizier/hyperleda/gaia already have.
+# ---------------------------------------------------------------------------
+
+class TestResolveSesameErrorHandling:
+    @pytest.fixture(autouse=True)
+    def setup(self):
+        """Clear catalog_cache before/after each test."""
+        from app.database import sync_engine
+        from app.models.catalog_cache import CatalogCache
+        from sqlalchemy.orm import Session
+
+        with Session(sync_engine) as session:
+            session.query(CatalogCache).filter(CatalogCache.source == "sesame").delete()
+            session.commit()
+        yield
+        with Session(sync_engine) as session:
+            session.query(CatalogCache).filter(CatalogCache.source == "sesame").delete()
+            session.commit()
+
+    def test_transient_http_error_does_not_propagate_and_negative_caches(self):
+        """A transient httpx.HTTPError (e.g. a SESAME timeout) exhausting
+        retries must not propagate -- resolve_sesame_cached swallows it,
+        returns None, and negative-caches so the next call short-circuits."""
+        import httpx
+        from app.database import sync_engine
+        from sqlalchemy.orm import Session
+        from app.services import catalog_cache as cc
+
+        with Session(sync_engine) as session:
+            with patch(
+                "app.services.sesame._query_sesame_raw",
+                side_effect=httpx.ConnectTimeout("timed out"),
+            ), patch.object(cc.time, "sleep"):
+                result = resolve_sesame_cached("TRANSIENTFAIL", session)
+            session.commit()
+
+            assert result is None
+            assert get_cached_sesame("TRANSIENTFAIL", session) == {"_negative": True}
+
+    def test_non_transient_http_status_error_propagates(self):
+        """A non-transient 4xx (other than 429) raises NonTransientError
+        uncaught, matching enrich_target_from_vizier/hyperleda/gaia, and
+        nothing is cached for it."""
+        import httpx
+        from app.database import sync_engine
+        from sqlalchemy.orm import Session
+        from app.services import catalog_cache as cc
+
+        request = httpx.Request("GET", "https://cds.unistra.fr/cgi-bin/nph-sesame")
+        response = httpx.Response(400, request=request)
+        error = httpx.HTTPStatusError("bad request", request=request, response=response)
+
+        with Session(sync_engine) as session:
+            with patch("app.services.sesame._query_sesame_raw", side_effect=error):
+                with pytest.raises(cc.NonTransientError):
+                    resolve_sesame_cached("BADREQUEST", session)
+            session.commit()
+
+            assert get_cached_sesame("BADREQUEST", session) is None
+
+    def test_success_after_transient_retry_is_cached_and_curated(self):
+        """A transient failure followed by a successful attempt returns the
+        curated result and caches the positive payload."""
+        import httpx
+        from app.database import sync_engine
+        from sqlalchemy.orm import Session
+        from app.services import catalog_cache as cc
+
+        raw = {
+            "main_id": "M 42",
+            "ra": 83.82208,
+            "dec": -5.39111,
+            "object_type": "HII",
+            "raw_aliases": ["NGC 1976"],
+            "resolver": "N=NED",
+        }
+
+        attempts = []
+
+        def _flaky(object_name, *, resolvers="SNV"):
+            attempts.append(1)
+            if len(attempts) < 2:
+                raise httpx.ConnectError("boom")
+            return raw
+
+        with Session(sync_engine) as session:
+            with patch("app.services.sesame._query_sesame_raw", side_effect=_flaky), \
+                 patch.object(cc.time, "sleep"):
+                result = resolve_sesame_cached("M 42", session)
+            session.commit()
+
+            assert result is not None
+            assert result["ra"] == pytest.approx(83.82208)
+            assert result["object_type"] == "HII"
+            assert len(attempts) == 2
+            assert get_cached_sesame("M 42", session)["main_id"] == "M 42"

@@ -1,9 +1,31 @@
 import pytest
+from types import SimpleNamespace
 from app.services.mosaic_detection import cluster_sessions_by_gap
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 from uuid import uuid4
 
 from app.models.mosaic_suggestion import MosaicSuggestion
+
+
+# _gather_target_records now selects the needed header keys as scalar columns
+# instead of the whole raw_headers JSONB, so its rows are (resolved_target_id,
+# OBJECT, RA, DEC, OBJCTRA, OBJCTDEC, FOCALLEN, XPIXSZ, NAXIS1, NAXIS2) tuples
+# exposed as labeled attributes. This helper turns the legacy
+# (target_id, header_dict) test fixtures into that row shape.
+_GATHER_HEADER_KEYS = (
+    "OBJECT", "RA", "DEC", "OBJCTRA", "OBJCTDEC",
+    "FOCALLEN", "XPIXSZ", "NAXIS1", "NAXIS2",
+)
+
+
+def _hdr_rows(pairs):
+    return [
+        SimpleNamespace(
+            resolved_target_id=tid,
+            **{k: hdr.get(k) for k in _GATHER_HEADER_KEYS},
+        )
+        for tid, hdr in pairs
+    ]
 
 
 def test_single_cluster_when_gap_small():
@@ -48,8 +70,7 @@ def test_exact_gap_boundary_splits():
     assert result == [["2024-01-01"], ["2024-07-01"]]
 
 
-@pytest.mark.asyncio
-async def test_detect_creates_separate_suggestions_per_campaign():
+def test_detect_creates_separate_suggestions_per_campaign():
     """Two temporally distinct campaigns for the same base name → two suggestions.
 
     Drives the name+position pipeline end-to-end through the DB orchestrator
@@ -61,7 +82,7 @@ async def test_detect_creates_separate_suggestions_per_campaign():
     t1 = uuid4()
     t2 = uuid4()
 
-    mock_session = AsyncMock()
+    mock_session = MagicMock()
 
     mock_settings = MagicMock()
     mock_settings.general = {"mosaic_keywords": ["Panel"]}
@@ -78,12 +99,12 @@ async def test_detect_creates_separate_suggestions_per_campaign():
     # _gather_target_records: (resolved_target_id, raw_headers) rows.
     # Two distinct centers ~1.5 deg apart so positions are distinct.
     headers_result = MagicMock()
-    headers_result.all.return_value = [
+    headers_result.all.return_value = _hdr_rows([
         (t1, {"OBJECT": "Heart Nebula Panel 1", "RA": 38.0, "DEC": 61.0,
               "FOCALLEN": 448, "XPIXSZ": 3.76, "NAXIS1": 4144}),
         (t2, {"OBJECT": "Heart Nebula Panel 2", "RA": 39.5, "DEC": 61.0,
               "FOCALLEN": 448, "XPIXSZ": 3.76, "NAXIS1": 4144}),
-    ]
+    ])
 
     rejected_result = MagicMock()
     rejected_result.all.return_value = []  # no dismissed suggestions
@@ -107,7 +128,7 @@ async def test_detect_creates_separate_suggestions_per_campaign():
         (date(2025, 10, 6), "Heart Nebula Panel 2"),
     ]
 
-    mock_session.execute = AsyncMock(side_effect=[
+    mock_session.execute = MagicMock(side_effect=[
         in_mosaic_result,
         target_ids_result,
         headers_result,
@@ -119,7 +140,7 @@ async def test_detect_creates_separate_suggestions_per_campaign():
     ])
 
     from app.services.mosaic_detection import detect_mosaic_panels
-    count = await detect_mosaic_panels(mock_session, gap_days=180)
+    count = detect_mosaic_panels(mock_session, gap_days=180)
 
     added = [call.args[0] for call in mock_session.add.call_args_list
              if isinstance(call.args[0], MosaicSuggestion)]
@@ -137,8 +158,7 @@ async def test_detect_creates_separate_suggestions_per_campaign():
         assert s.geometry is not None and "panels" in s.geometry
 
 
-@pytest.mark.asyncio
-async def test_detect_single_target_two_panel_objects():
+def test_detect_single_target_two_panel_objects():
     """Veil case end-to-end: ONE target whose frames carry two distinct
     panel-token OBJECTs at two distinct sky centers yields a 2-panel suggestion.
     """
@@ -146,7 +166,7 @@ async def test_detect_single_target_two_panel_objects():
 
     tid = uuid4()
 
-    mock_session = AsyncMock()
+    mock_session = MagicMock()
 
     mock_settings = MagicMock()
     mock_settings.general = {"mosaic_keywords": ["Panel"]}
@@ -161,7 +181,7 @@ async def test_detect_single_target_two_panel_objects():
     # Same target id on every row; two distinct OBJECTs ~0.8 deg apart so each
     # OBJECT's robust center is distinct (NOT the target overall median).
     headers_result = MagicMock()
-    headers_result.all.return_value = [
+    headers_result.all.return_value = _hdr_rows([
         (tid, {"OBJECT": "Veil Nebula Panel 1", "RA": 311.0, "DEC": 31.0,
                "FOCALLEN": 448, "XPIXSZ": 3.76, "NAXIS1": 4144}),
         (tid, {"OBJECT": "Veil Nebula Panel 1", "RA": 311.01, "DEC": 31.0,
@@ -170,7 +190,7 @@ async def test_detect_single_target_two_panel_objects():
                "FOCALLEN": 448, "XPIXSZ": 3.76, "NAXIS1": 4144}),
         (tid, {"OBJECT": "Veil Nebula Panel 2", "RA": 311.79, "DEC": 31.0,
                "FOCALLEN": 448, "XPIXSZ": 3.76, "NAXIS1": 4144}),
-    ]
+    ])
 
     rejected_result = MagicMock()
     rejected_result.all.return_value = []
@@ -185,7 +205,7 @@ async def test_detect_single_target_two_panel_objects():
     p2_dates = MagicMock()
     p2_dates.all.return_value = [(date(2024, 8, 2), "Veil Nebula Panel 2")]
 
-    mock_session.execute = AsyncMock(side_effect=[
+    mock_session.execute = MagicMock(side_effect=[
         in_mosaic_result,
         target_ids_result,
         headers_result,
@@ -197,7 +217,7 @@ async def test_detect_single_target_two_panel_objects():
     ])
 
     from app.services.mosaic_detection import detect_mosaic_panels
-    count = await detect_mosaic_panels(mock_session, gap_days=0)
+    count = detect_mosaic_panels(mock_session, gap_days=0)
 
     added = [call.args[0] for call in mock_session.add.call_args_list
              if isinstance(call.args[0], MosaicSuggestion)]
@@ -220,14 +240,13 @@ def _compile_sql(stmt):
         return str(stmt)
 
 
-@pytest.mark.asyncio
-async def test_detect_clears_all_pending_including_legacy_null_base():
+def test_detect_clears_all_pending_including_legacy_null_base():
     """Re-detection deletes ALL pending suggestions (status='pending'),
     including legacy rows with NULL base_name, before regenerating."""
     from datetime import date
 
     tid = uuid4()
-    mock_session = AsyncMock()
+    mock_session = MagicMock()
 
     mock_settings = MagicMock()
     mock_settings.general = {"mosaic_keywords": ["Panel"]}
@@ -238,12 +257,12 @@ async def test_detect_clears_all_pending_including_legacy_null_base():
     target_ids_result = MagicMock()
     target_ids_result.all.return_value = [(tid,)]
     headers_result = MagicMock()
-    headers_result.all.return_value = [
+    headers_result.all.return_value = _hdr_rows([
         (tid, {"OBJECT": "Heart Nebula Panel 1", "RA": 38.0, "DEC": 61.0,
                "FOCALLEN": 448, "XPIXSZ": 3.76, "NAXIS1": 4144}),
         (tid, {"OBJECT": "Heart Nebula Panel 2", "RA": 39.5, "DEC": 61.0,
                "FOCALLEN": 448, "XPIXSZ": 3.76, "NAXIS1": 4144}),
-    ]
+    ])
     existing_result = MagicMock()
     existing_result.all.return_value = []
     rejected_result = MagicMock()
@@ -256,7 +275,7 @@ async def test_detect_clears_all_pending_including_legacy_null_base():
 
     executed = []
 
-    async def _exec(stmt, *a, **k):
+    def _exec(stmt, *a, **k):
         executed.append(stmt)
         # Sequence: in_mosaic, target_ids, headers, SELECT rejected sigs,
         # DELETE(all pending), existing_mosaics, p1_dates, p2_dates
@@ -277,10 +296,10 @@ async def test_detect_clears_all_pending_including_legacy_null_base():
             return p1_dates
         return p2_dates
 
-    mock_session.execute = AsyncMock(side_effect=_exec)
+    mock_session.execute = MagicMock(side_effect=_exec)
 
     from app.services.mosaic_detection import detect_mosaic_panels
-    await detect_mosaic_panels(mock_session, gap_days=0)
+    detect_mosaic_panels(mock_session, gap_days=0)
 
     # There must be exactly one DELETE on mosaic_suggestions, filtered only by
     # status='pending' (no base_name filter, so legacy NULL-base rows go too).
@@ -301,8 +320,7 @@ async def test_detect_clears_all_pending_including_legacy_null_base():
     assert "base_name" not in sql
 
 
-@pytest.mark.asyncio
-async def test_detect_dedupes_duplicate_suggested_names():
+def test_detect_dedupes_duplicate_suggested_names():
     """Two gap-split campaigns of one base that both fall within the same month
     resolve to the same '<base> (Mon YYYY)' name; the run must disambiguate them
     so accepting both cannot violate the unique mosaic name constraint.
@@ -314,7 +332,7 @@ async def test_detect_dedupes_duplicate_suggested_names():
 
     t1 = uuid4()
     t2 = uuid4()
-    mock_session = AsyncMock()
+    mock_session = MagicMock()
 
     mock_settings = MagicMock()
     mock_settings.general = {"mosaic_keywords": ["Panel"]}
@@ -325,12 +343,12 @@ async def test_detect_dedupes_duplicate_suggested_names():
     target_ids_result = MagicMock()
     target_ids_result.all.return_value = [(t1,), (t2,)]
     headers_result = MagicMock()
-    headers_result.all.return_value = [
+    headers_result.all.return_value = _hdr_rows([
         (t1, {"OBJECT": "Foo Panel 1", "RA": 10.0, "DEC": 20.0,
               "FOCALLEN": 448, "XPIXSZ": 3.76, "NAXIS1": 4144}),
         (t2, {"OBJECT": "Foo Panel 2", "RA": 11.5, "DEC": 20.0,
               "FOCALLEN": 448, "XPIXSZ": 3.76, "NAXIS1": 4144}),
-    ]
+    ])
     rejected_result = MagicMock()
     rejected_result.all.return_value = []
     delete_result = MagicMock()
@@ -347,13 +365,13 @@ async def test_detect_dedupes_duplicate_suggested_names():
         (date(2024, 1, 2), "Foo Panel 2"), (date(2024, 1, 21), "Foo Panel 2"),
     ]
 
-    mock_session.execute = AsyncMock(side_effect=[
+    mock_session.execute = MagicMock(side_effect=[
         in_mosaic_result, target_ids_result, headers_result,
         rejected_result, delete_result, existing_result, d1, d2,
     ])
 
     from app.services.mosaic_detection import detect_mosaic_panels
-    await detect_mosaic_panels(mock_session, gap_days=5)
+    detect_mosaic_panels(mock_session, gap_days=5)
 
     added = [call.args[0] for call in mock_session.add.call_args_list
              if isinstance(call.args[0], MosaicSuggestion)]
@@ -378,8 +396,7 @@ def test_unique_name_helper_disambiguates():
     assert len({a, b, c}) == 3
 
 
-@pytest.mark.asyncio
-async def test_detect_skips_dismissed_signature_but_creates_others():
+def test_detect_skips_dismissed_signature_but_creates_others():
     """A rejected suggestion's signature suppresses its re-creation; unrelated
     groups are still created."""
     from datetime import date
@@ -395,7 +412,7 @@ async def test_detect_skips_dismissed_signature_but_creates_others():
         "Heart Nebula", [h1, h2], ["Panel 1", "Panel 2"]
     )
 
-    mock_session = AsyncMock()
+    mock_session = MagicMock()
     mock_settings = MagicMock()
     mock_settings.general = {"mosaic_keywords": ["Panel"]}
     mock_session.get.return_value = mock_settings
@@ -405,7 +422,7 @@ async def test_detect_skips_dismissed_signature_but_creates_others():
     target_ids_result = MagicMock()
     target_ids_result.all.return_value = [(h1,), (h2,), (w1,), (w2,)]
     headers_result = MagicMock()
-    headers_result.all.return_value = [
+    headers_result.all.return_value = _hdr_rows([
         (h1, {"OBJECT": "Heart Nebula Panel 1", "RA": 38.0, "DEC": 61.0,
               "FOCALLEN": 448, "XPIXSZ": 3.76, "NAXIS1": 4144}),
         (h2, {"OBJECT": "Heart Nebula Panel 2", "RA": 39.5, "DEC": 61.0,
@@ -414,7 +431,7 @@ async def test_detect_skips_dismissed_signature_but_creates_others():
               "FOCALLEN": 448, "XPIXSZ": 3.76, "NAXIS1": 4144}),
         (w2, {"OBJECT": "Wizard Nebula Panel 2", "RA": 351.5, "DEC": 60.0,
               "FOCALLEN": 448, "XPIXSZ": 3.76, "NAXIS1": 4144}),
-    ]
+    ])
     rejected_result = MagicMock()
     # Dismissal covered exactly the dates the regenerated Heart campaign will
     # have (2024-01-01, 2024-01-02), so it stays suppressed (AUD-033: a
@@ -434,12 +451,12 @@ async def test_detect_skips_dismissed_signature_but_creates_others():
     for i, m in enumerate(dq):
         m.all.return_value = [(date(2024, 1, 1 + i), dq_objects[i])]
 
-    mock_session.execute = AsyncMock(side_effect=[
+    mock_session.execute = MagicMock(side_effect=[
         in_mosaic_result, target_ids_result, headers_result,
         rejected_result, delete_result, existing_result, *dq,
     ])
 
-    await detect_mosaic_panels(mock_session, gap_days=0)
+    detect_mosaic_panels(mock_session, gap_days=0)
 
     added = [call.args[0] for call in mock_session.add.call_args_list
              if isinstance(call.args[0], MosaicSuggestion)]
@@ -450,8 +467,7 @@ async def test_detect_skips_dismissed_signature_but_creates_others():
     )
 
 
-@pytest.mark.asyncio
-async def test_detect_resurfaces_dismissed_signature_with_genuinely_new_dates():
+def test_detect_resurfaces_dismissed_signature_with_genuinely_new_dates():
     """AUD-033 regression: a dismissed suggestion's dedup_signature is
     date-independent (same base/target/panel-label set), so a later,
     date-separated re-shoot of the identical panel set would previously be
@@ -470,7 +486,7 @@ async def test_detect_resurfaces_dismissed_signature_with_genuinely_new_dates():
         "Heart Nebula", [h1, h2], ["Panel 1", "Panel 2"]
     )
 
-    mock_session = AsyncMock()
+    mock_session = MagicMock()
     mock_settings = MagicMock()
     mock_settings.general = {"mosaic_keywords": ["Panel"]}
     mock_session.get.return_value = mock_settings
@@ -480,12 +496,12 @@ async def test_detect_resurfaces_dismissed_signature_with_genuinely_new_dates():
     target_ids_result = MagicMock()
     target_ids_result.all.return_value = [(h1,), (h2,)]
     headers_result = MagicMock()
-    headers_result.all.return_value = [
+    headers_result.all.return_value = _hdr_rows([
         (h1, {"OBJECT": "Heart Nebula Panel 1", "RA": 38.0, "DEC": 61.0,
               "FOCALLEN": 448, "XPIXSZ": 3.76, "NAXIS1": 4144}),
         (h2, {"OBJECT": "Heart Nebula Panel 2", "RA": 39.5, "DEC": 61.0,
               "FOCALLEN": 448, "XPIXSZ": 3.76, "NAXIS1": 4144}),
-    ]
+    ])
     # Dismissed back in 2024, covering only the 2024 dates.
     rejected_result = MagicMock()
     rejected_result.all.return_value = [
@@ -502,13 +518,13 @@ async def test_detect_resurfaces_dismissed_signature_with_genuinely_new_dates():
     p2_dates = MagicMock()
     p2_dates.all.return_value = [(date(2026, 6, 2), "Heart Nebula Panel 2")]
 
-    mock_session.execute = AsyncMock(side_effect=[
+    mock_session.execute = MagicMock(side_effect=[
         in_mosaic_result, target_ids_result, headers_result,
         rejected_result, delete_result, existing_result,
         p1_dates, p2_dates,
     ])
 
-    await detect_mosaic_panels(mock_session, gap_days=0)
+    detect_mosaic_panels(mock_session, gap_days=0)
 
     added = [call.args[0] for call in mock_session.add.call_args_list
              if isinstance(call.args[0], MosaicSuggestion)]
@@ -518,8 +534,7 @@ async def test_detect_resurfaces_dismissed_signature_with_genuinely_new_dates():
     assert added[0].dedup_signature == heart_sig
 
 
-@pytest.mark.asyncio
-async def test_detect_resurfaces_when_panel_set_changed():
+def test_detect_resurfaces_when_panel_set_changed():
     """A dismissed signature whose panel set has materially changed (an added
     panel) no longer matches, so the suggestion resurfaces."""
     from datetime import date
@@ -534,7 +549,7 @@ async def test_detect_resurfaces_when_panel_set_changed():
         "Heart Nebula", [h1, h2], ["Panel 1", "Panel 2"]
     )
 
-    mock_session = AsyncMock()
+    mock_session = MagicMock()
     mock_settings = MagicMock()
     mock_settings.general = {"mosaic_keywords": ["Panel"]}
     mock_session.get.return_value = mock_settings
@@ -544,14 +559,14 @@ async def test_detect_resurfaces_when_panel_set_changed():
     target_ids_result = MagicMock()
     target_ids_result.all.return_value = [(h1,), (h2,), (h3,)]
     headers_result = MagicMock()
-    headers_result.all.return_value = [
+    headers_result.all.return_value = _hdr_rows([
         (h1, {"OBJECT": "Heart Nebula Panel 1", "RA": 38.0, "DEC": 61.0,
               "FOCALLEN": 448, "XPIXSZ": 3.76, "NAXIS1": 4144}),
         (h2, {"OBJECT": "Heart Nebula Panel 2", "RA": 39.5, "DEC": 61.0,
               "FOCALLEN": 448, "XPIXSZ": 3.76, "NAXIS1": 4144}),
         (h3, {"OBJECT": "Heart Nebula Panel 3", "RA": 41.0, "DEC": 61.0,
               "FOCALLEN": 448, "XPIXSZ": 3.76, "NAXIS1": 4144}),
-    ]
+    ])
     rejected_result = MagicMock()
     rejected_result.all.return_value = [
         (old_sig, {"Panel 1": ["2024-01-01"], "Panel 2": ["2024-01-02"]}),
@@ -564,12 +579,12 @@ async def test_detect_resurfaces_when_panel_set_changed():
     for i, m in enumerate(dq):
         m.all.return_value = [(date(2024, 1, 1 + i), dq_objects[i])]
 
-    mock_session.execute = AsyncMock(side_effect=[
+    mock_session.execute = MagicMock(side_effect=[
         in_mosaic_result, target_ids_result, headers_result,
         rejected_result, delete_result, existing_result, *dq,
     ])
 
-    await detect_mosaic_panels(mock_session, gap_days=0)
+    detect_mosaic_panels(mock_session, gap_days=0)
 
     added = [call.args[0] for call in mock_session.add.call_args_list
              if isinstance(call.args[0], MosaicSuggestion)]
@@ -581,8 +596,7 @@ async def test_detect_resurfaces_when_panel_set_changed():
     assert s.dedup_signature != old_sig
 
 
-@pytest.mark.asyncio
-async def test_detect_panel_1_vs_panel_12_no_cross_contamination():
+def test_detect_panel_1_vs_panel_12_no_cross_contamination():
     """AUD-008 regression: the ILIKE pre-filter built for panel "1"
     ("%Veil Nebula%Panel%1%") also matches OBJECT "Veil Nebula Panel 12"
     because the trailing "%" imposes no boundary after the digit. Simulate
@@ -595,7 +609,7 @@ async def test_detect_panel_1_vs_panel_12_no_cross_contamination():
 
     p1, p12 = uuid4(), uuid4()
 
-    mock_session = AsyncMock()
+    mock_session = MagicMock()
     mock_settings = MagicMock()
     mock_settings.general = {"mosaic_keywords": ["Panel"]}
     mock_session.get.return_value = mock_settings
@@ -605,12 +619,12 @@ async def test_detect_panel_1_vs_panel_12_no_cross_contamination():
     target_ids_result = MagicMock()
     target_ids_result.all.return_value = [(p1,), (p12,)]
     headers_result = MagicMock()
-    headers_result.all.return_value = [
+    headers_result.all.return_value = _hdr_rows([
         (p1, {"OBJECT": "Veil Nebula Panel 1", "RA": 311.0, "DEC": 31.0,
               "FOCALLEN": 448, "XPIXSZ": 3.76, "NAXIS1": 4144}),
         (p12, {"OBJECT": "Veil Nebula Panel 12", "RA": 312.5, "DEC": 31.0,
                "FOCALLEN": 448, "XPIXSZ": 3.76, "NAXIS1": 4144}),
-    ]
+    ])
     rejected_result = MagicMock()
     rejected_result.all.return_value = []
     delete_result = MagicMock()
@@ -631,14 +645,14 @@ async def test_detect_panel_1_vs_panel_12_no_cross_contamination():
         (date(2024, 9, 20), "Veil Nebula Panel 12"),
     ]
 
-    mock_session.execute = AsyncMock(side_effect=[
+    mock_session.execute = MagicMock(side_effect=[
         in_mosaic_result, target_ids_result, headers_result,
         rejected_result, delete_result, existing_result,
         p1_dates, p12_dates,
     ])
 
     from app.services.mosaic_detection import detect_mosaic_panels
-    count = await detect_mosaic_panels(mock_session, gap_days=0)
+    count = detect_mosaic_panels(mock_session, gap_days=0)
 
     added = [call.args[0] for call in mock_session.add.call_args_list
              if isinstance(call.args[0], MosaicSuggestion)]

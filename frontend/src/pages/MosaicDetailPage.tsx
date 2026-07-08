@@ -1,9 +1,13 @@
-import { Component, Show, For, createResource, createSignal, createMemo, createEffect, on, onMount, onCleanup } from "solid-js";
+import { Component, Show, For, createSignal, createMemo, createEffect } from "solid-js";
 import { A, useParams, useNavigate } from "@solidjs/router";
-import { api } from "../api/client";
-import type { PanelStats } from "../types";
+import { useQuery } from "@tanstack/solid-query";
+import { apiClient } from "../api/generated/client";
+import { unwrap } from "../api/unwrap";
+import { queryKeys } from "../api/queryKeys";
+import type { AvailablePanelLabel, PanelStats, MosaicDetailResponse } from "../api/types";
 import { formatIntegration, contentWidthClass } from "../utils/format";
 import { useSettingsContext } from "../components/SettingsProvider";
+import { useAuth } from "../components/AuthProvider";
 import HelpPopover from "../components/HelpPopover";
 import { showToast } from "../components/Toast";
 import InlineEditCell from "../components/InlineEditCell";
@@ -12,41 +16,67 @@ import KonvaMosaicArranger from "../components/mosaics/KonvaMosaicArranger";
 import MosaicCompositeModal from "../components/mosaics/MosaicCompositeModal";
 import ConfirmDialog from "../components/ConfirmDialog";
 import { getErrorMessage } from "../utils/errors";
+import { useNotesAutosave } from "../lib/useNotesAutosave";
+import ActionsMenu from "../components/ActionsMenu";
+import InlineRename from "../components/InlineRename";
 
 const MosaicDetailPage: Component = () => {
   const ctx = useSettingsContext();
   const params = useParams<{ mosaicId: string }>();
   const navigate = useNavigate();
-  const [mosaic, { refetch }] = createResource(() => params.mosaicId, (id) => api.getMosaicDetail(id));
+  const { isAdmin } = useAuth();
+
+  const mosaicQuery = useQuery(() => ({
+    queryKey: queryKeys.mosaicDetail(params.mosaicId),
+    queryFn: () =>
+      apiClient
+        .GET("/api/mosaics/{mosaic_id}", { params: { path: { mosaic_id: params.mosaicId } } })
+        .then(unwrap),
+  }));
+  // Solid `createResource`-shaped accessor kept for source compatibility with
+  // this file's many `mosaic()` / `.loading` / `.error` call sites (same
+  // technique as TargetDetailPage.tsx's `targetDetail`). `.loading` maps to
+  // `isFetching` so it stays true during refetches too.
+  const mosaic = (() => mosaicQuery.data) as (() => MosaicDetailResponse | undefined) & {
+    readonly loading: boolean;
+    readonly error: unknown;
+  };
+  Object.defineProperty(mosaic, "loading", { enumerable: true, get: () => mosaicQuery.isFetching });
+  Object.defineProperty(mosaic, "error", { enumerable: true, get: () => mosaicQuery.error });
+  const refetch = async () => { await mosaicQuery.refetch(); };
+
+  // Promote an available (unconfigured) panel label to a real MosaicPanel.
+  const [addingPanelLabel, setAddingPanelLabel] = createSignal<string | null>(null);
+  const handleAddPanel = async (entry: AvailablePanelLabel) => {
+    const data = mosaic();
+    if (!data || addingPanelLabel() !== null) return;
+    setAddingPanelLabel(entry.label);
+    try {
+      await apiClient
+        .POST("/api/mosaics/{mosaic_id}/panels", {
+          params: { path: { mosaic_id: data.id } },
+          body: { target_id: entry.target_id, panel_label: entry.label },
+        })
+        .then(unwrap);
+      refetch();
+      showToast(`Panel "${entry.label}" added`);
+    } catch (e: unknown) {
+      showToast(getErrorMessage(e, "Failed to add panel"), "error", 5000);
+    } finally {
+      setAddingPanelLabel(null);
+    }
+  };
 
   // Title-row actions: composite, rename, delete, export.
   const [showComposite, setShowComposite] = createSignal(false);
   const [editingName, setEditingName] = createSignal(false);
-  const [editName, setEditName] = createSignal("");
   const [savingName, setSavingName] = createSignal(false);
-  const [actionsMenuOpen, setActionsMenuOpen] = createSignal(false);
   const [deleteConfirm, setDeleteConfirm] = createSignal(false);
-  let actionsMenuRef: HTMLDivElement | undefined;
-  const onActionsMenuDocClick = (e: MouseEvent) => {
-    if (!actionsMenuRef) return;
-    if (!actionsMenuRef.contains(e.target as Node)) setActionsMenuOpen(false);
-  };
-  const onActionsMenuKey = (e: KeyboardEvent) => {
-    if (e.key === "Escape") setActionsMenuOpen(false);
-  };
-  onMount(() => {
-    document.addEventListener("click", onActionsMenuDocClick);
-    document.addEventListener("keydown", onActionsMenuKey);
-  });
-  onCleanup(() => {
-    document.removeEventListener("click", onActionsMenuDocClick);
-    document.removeEventListener("keydown", onActionsMenuKey);
-  });
 
-  const handleRename = async () => {
+  const handleRename = async (nameInput: string) => {
     const data = mosaic();
     if (!data) return;
-    const name = editName().trim();
+    const name = nameInput.trim();
     if (!name) {
       showToast("Name cannot be empty", "error");
       return;
@@ -57,7 +87,9 @@ const MosaicDetailPage: Component = () => {
     }
     setSavingName(true);
     try {
-      await api.updateMosaic(params.mosaicId, { name });
+      await apiClient
+        .PUT("/api/mosaics/{mosaic_id}", { params: { path: { mosaic_id: params.mosaicId } }, body: { name } })
+        .then(unwrap);
       setEditingName(false);
       await refetch();
     } catch (e: unknown) {
@@ -72,7 +104,7 @@ const MosaicDetailPage: Component = () => {
     setDeleteConfirm(false);
     if (!data) return;
     try {
-      await api.deleteMosaic(params.mosaicId);
+      await apiClient.DELETE("/api/mosaics/{mosaic_id}", { params: { path: { mosaic_id: params.mosaicId } } }).then(unwrap);
       showToast(`Deleted mosaic "${data.name}"`);
       navigate("/mosaics");
     } catch (e: unknown) {
@@ -115,8 +147,19 @@ const MosaicDetailPage: Component = () => {
 
   type SortKey = "panel" | "target" | "integration" | "frames" | "session";
   type SortDir = "asc" | "desc";
-  const [sortKey, setSortKey] = createSignal<SortKey>("panel");
-  const [sortDir, setSortDir] = createSignal<SortDir>("asc");
+  // Panel sort persisted to localStorage (Dashboard pattern).
+  const PANEL_SORT_LS = "mosaic_panel_sort";
+  let initialPanelSort: { key: SortKey; dir: SortDir } = { key: "panel", dir: "asc" };
+  try {
+    const stored = localStorage.getItem(PANEL_SORT_LS);
+    if (stored) initialPanelSort = JSON.parse(stored);
+  } catch { /* ignore corrupt localStorage */ }
+  const [sortKey, setSortKey] = createSignal<SortKey>(initialPanelSort.key);
+  const [sortDir, setSortDir] = createSignal<SortDir>(initialPanelSort.dir);
+  const persistPanelSort = (key: SortKey, dir: SortDir) => {
+    try { localStorage.setItem(PANEL_SORT_LS, JSON.stringify({ key, dir })); } catch { /* ignore */ }
+  };
+  const [includingAll, setIncludingAll] = createSignal(false);
   const [selectedFilter, setSelectedFilter] = createSignal<string | null>(null);
   const [filterLoading, setFilterLoading] = createSignal(false);
   const [thumbnailOverrides, setThumbnailOverrides] = createSignal<Record<string, string | null> | null>(null);
@@ -131,10 +174,13 @@ const MosaicDetailPage: Component = () => {
 
   const toggleSort = (key: SortKey) => {
     if (sortKey() === key) {
-      setSortDir(d => d === "asc" ? "desc" : "asc");
+      const dir = sortDir() === "asc" ? "desc" : "asc";
+      setSortDir(dir);
+      persistPanelSort(key, dir);
     } else {
       setSortKey(key);
       setSortDir("asc");
+      persistPanelSort(key, "asc");
     }
   };
 
@@ -165,25 +211,18 @@ const MosaicDetailPage: Component = () => {
   const mosaicCustomColumns = () =>
     (ctx.customColumns() ?? []).filter(c => c.applies_to === "mosaic");
 
-  const [notes, setNotes] = createSignal("");
-  const [notesSaving, setNotesSaving] = createSignal(false);
-  let notesTimer: ReturnType<typeof setTimeout> | undefined;
-
-  createEffect(on(mosaic, (m) => setNotes(m?.notes ?? "")));
-
-  const saveNotes = (text: string) => {
-    clearTimeout(notesTimer);
-    notesTimer = setTimeout(async () => {
-      setNotesSaving(true);
-      try {
-        await api.updateMosaic(params.mosaicId, { notes: text });
-      } catch {
-        showToast("Failed to save notes", "error", 5000);
-      } finally {
-        setNotesSaving(false);
-      }
-    }, 1000);
-  };
+  const { notes, onInput: onNotesInput, saving: notesSaving } = useNotesAutosave({
+    serverValue: () => mosaic()?.notes,
+    save: async (text) => {
+      await apiClient
+        .PUT("/api/mosaics/{mosaic_id}", {
+          params: { path: { mosaic_id: params.mosaicId } },
+          body: { notes: text || undefined },
+        })
+        .then(unwrap);
+    },
+    errorLabel: "Failed to save notes",
+  });
 
   // State for the delete-panel confirmation dialog.
   const [deletePanelConfirm, setDeletePanelConfirm] = createSignal<{
@@ -195,10 +234,14 @@ const MosaicDetailPage: Component = () => {
     setSelectedFilter(filter);
     setFilterLoading(true);
     try {
-      const thumbnails = await api.getMosaicPanelThumbnails(params.mosaicId, filter);
+      const thumbnails = await apiClient
+        .GET("/api/mosaics/{mosaic_id}/panels/thumbnails", {
+          params: { path: { mosaic_id: params.mosaicId }, query: { filter } },
+        })
+        .then(unwrap);
       const overrides: Record<string, string | null> = {};
       for (const t of thumbnails) {
-        overrides[t.panel_id] = t.thumbnail_url;
+        overrides[t.panel_id] = t.thumbnail_url ?? null;
       }
       setThumbnailOverrides(overrides);
     } catch (e) {
@@ -248,10 +291,7 @@ const MosaicDetailPage: Component = () => {
                           title="Rename mosaic"
                           aria-label="Rename mosaic"
                           disabled={savingName()}
-                          onClick={() => {
-                            setEditName(data().name);
-                            setEditingName(true);
-                          }}
+                          onClick={() => setEditingName(true)}
                         >
                           &#9998;
                         </button>
@@ -261,36 +301,15 @@ const MosaicDetailPage: Component = () => {
                       </>
                     }
                   >
-                    <input
-                      type="text"
-                      class="text-sm font-semibold bg-transparent border-b border-theme-accent text-theme-text-primary focus:outline-none min-w-0 flex-1"
-                      value={editName()}
-                      onInput={(e) => setEditName(e.currentTarget.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") handleRename();
-                        if (e.key === "Escape") setEditingName(false);
-                      }}
-                      ref={(el) => { setTimeout(() => el?.focus(), 0); }}
-                      disabled={savingName()}
+                    <InlineRename
+                      initialValue={data().name}
+                      onSave={handleRename}
+                      onCancel={() => setEditingName(false)}
+                      saving={savingName()}
+                      inputClass="text-sm font-semibold bg-transparent border-b border-theme-accent text-theme-text-primary focus:outline-none min-w-0 flex-1"
+                      iconSizeClass="text-base leading-none"
+                      cancelHoverClass="hover:text-theme-danger"
                     />
-                    <button
-                      class="text-theme-text-tertiary hover:text-green-400 transition-colors text-base leading-none"
-                      title="Save"
-                      aria-label="Save name"
-                      onClick={handleRename}
-                      disabled={savingName()}
-                    >
-                      &#10003;
-                    </button>
-                    <button
-                      class="text-theme-text-tertiary hover:text-theme-danger transition-colors text-base leading-none"
-                      title="Cancel"
-                      aria-label="Cancel rename"
-                      onClick={() => setEditingName(false)}
-                      disabled={savingName()}
-                    >
-                      &#10005;
-                    </button>
                   </Show>
                   <HelpPopover>
                     <p class="text-sm text-theme-text-secondary">
@@ -314,12 +333,12 @@ const MosaicDetailPage: Component = () => {
                             columnType={col.column_type}
                             value={data().custom_values?.[col.slug]}
                             dropdownOptions={col.dropdown_options}
-                            onSave={(val) => {
-                              api.setCustomValue({
-                                column_id: col.id,
-                                mosaic_id: params.mosaicId,
-                                value: val,
-                              });
+                            onSave={async (val) => {
+                              await apiClient
+                                .PUT("/api/custom-columns/values", {
+                                  body: { column_id: col.id, mosaic_id: params.mosaicId, value: val },
+                                })
+                                .then(unwrap);
                             }}
                           />
                         </div>
@@ -333,32 +352,15 @@ const MosaicDetailPage: Component = () => {
                     >
                       Composite
                     </button>
-                    <div ref={actionsMenuRef} class="relative inline-flex">
-                      <button
-                        type="button"
-                        aria-label="More actions"
-                        aria-haspopup="menu"
-                        aria-expanded={actionsMenuOpen()}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setActionsMenuOpen((v) => !v);
-                        }}
-                        class="inline-flex items-center justify-center w-8 h-8 rounded border border-theme-border text-theme-text-secondary hover:text-theme-text-primary hover:bg-theme-hover transition-colors cursor-pointer"
-                      >
-                        <span class="text-lg leading-none" aria-hidden="true">&#8943;</span>
-                      </button>
-                      <Show when={actionsMenuOpen()}>
-                        <div
-                          role="menu"
-                          onClick={(e) => e.stopPropagation()}
-                          class="absolute top-full right-0 mt-2 z-50 min-w-[12rem] bg-theme-elevated border border-theme-border rounded-[var(--radius-sm)] shadow-[var(--shadow-lg)] py-1"
-                        >
+                    <ActionsMenu>
+                      {(close) => (
+                        <>
                           <button
                             type="button"
                             role="menuitem"
                             class="w-full text-left px-3 py-1.5 text-sm text-theme-text-primary hover:bg-theme-hover transition-colors cursor-pointer"
                             onClick={() => {
-                              setActionsMenuOpen(false);
+                              close();
                               handleExportCsv();
                             }}
                           >
@@ -369,15 +371,15 @@ const MosaicDetailPage: Component = () => {
                             role="menuitem"
                             class="w-full text-left px-3 py-1.5 text-sm text-theme-danger hover:bg-theme-hover transition-colors cursor-pointer"
                             onClick={() => {
-                              setActionsMenuOpen(false);
+                              close();
                               setDeleteConfirm(true);
                             }}
                           >
                             Delete mosaic
                           </button>
-                        </div>
-                      </Show>
-                    </div>
+                        </>
+                      )}
+                    </ActionsMenu>
                   </div>
                 </div>
               </div>
@@ -408,11 +410,7 @@ const MosaicDetailPage: Component = () => {
                 class="block w-full bg-theme-surface border border-theme-border rounded px-3 py-2 text-sm text-theme-text-primary placeholder-theme-text-secondary resize-y min-h-[50px]"
                 placeholder="Add notes about this mosaic project..."
                 value={notes()}
-                onInput={(e) => {
-                  const val = e.currentTarget.value;
-                  setNotes(val);
-                  saveNotes(val);
-                }}
+                onInput={(e) => onNotesInput(e.currentTarget.value)}
               />
             </div>
 
@@ -426,25 +424,79 @@ const MosaicDetailPage: Component = () => {
                   </p>
                 </div>
                 <button
+                  disabled={includingAll()}
                   onClick={async () => {
                     const data = mosaic();
-                    if (!data) return;
-                    for (const panel of data.panels) {
-                      const sessions = await api.getPanelSessions(data.id, panel.panel_id);
-                      const available = sessions.sessions
-                        .filter((s) => s.status === "available")
-                        .map((s) => s.session_date);
-                      if (available.length > 0) {
-                        await api.updatePanelSessions(data.id, panel.panel_id, available, []);
-                      }
+                    if (!data || includingAll()) return;
+                    setIncludingAll(true);
+                    try {
+                      await Promise.all(
+                        data.panels.map(async (panel) => {
+                          const sessions = await apiClient
+                            .GET("/api/mosaics/{mosaic_id}/panels/{panel_id}/sessions", {
+                              params: { path: { mosaic_id: data.id, panel_id: panel.panel_id } },
+                            })
+                            .then(unwrap);
+                          const available = sessions.sessions
+                            .filter((s) => s.status === "available")
+                            .map((s) => s.session_date);
+                          if (available.length > 0) {
+                            await apiClient
+                              .PUT("/api/mosaics/{mosaic_id}/panels/{panel_id}/sessions", {
+                                params: { path: { mosaic_id: data.id, panel_id: panel.panel_id } },
+                                body: { include: available, exclude: [] },
+                              })
+                              .then(unwrap);
+                          }
+                        }),
+                      );
+                      refetch();
+                      showToast("All sessions included");
+                    } catch (e: unknown) {
+                      showToast(getErrorMessage(e, "Failed to include all sessions"), "error", 5000);
+                    } finally {
+                      setIncludingAll(false);
                     }
-                    refetch();
-                    showToast("All sessions included");
                   }}
-                  class="px-4 py-2 text-sm bg-theme-warning/20 text-theme-warning border border-theme-warning/30 rounded-[var(--radius-sm)] hover:bg-theme-warning/30 transition-colors whitespace-nowrap"
+                  class="px-4 py-2 text-sm bg-theme-warning/20 text-theme-warning border border-theme-warning/30 rounded-[var(--radius-sm)] hover:bg-theme-warning/30 transition-colors whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  Include All
+                  {includingAll() ? "Including..." : "Include All"}
                 </button>
+              </div>
+            </Show>
+
+            {/* Available Panel Labels Banner */}
+            <Show when={(mosaic()?.available_panel_labels?.length ?? 0) > 0}>
+              <div class="rounded-[var(--radius-sm)] bg-theme-accent/10 border border-theme-accent/30 p-4">
+                <div class="flex items-center gap-2">
+                  <p class="text-sm font-medium text-theme-accent">New panel labels available</p>
+                  <HelpPopover>
+                    <p class="text-sm text-theme-text-secondary">
+                      These panel labels were seen in newly-ingested images for this mosaic's targets,
+                      but no panel has been configured for them yet. They will not appear in the panel
+                      grid or stats until a panel is created for the label.
+                    </p>
+                  </HelpPopover>
+                </div>
+                <div class="flex flex-wrap gap-2 mt-2">
+                  <For each={mosaic()?.available_panel_labels ?? []}>
+                    {(entry) => (
+                      <span class="inline-flex items-center gap-2 px-2 py-1 text-xs bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded-[var(--radius-sm)]">
+                        {entry.label}
+                        <Show when={isAdmin()}>
+                          <button
+                            type="button"
+                            disabled={addingPanelLabel() !== null}
+                            class="text-theme-accent hover:underline disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                            onClick={() => handleAddPanel(entry)}
+                          >
+                            {addingPanelLabel() === entry.label ? "Adding..." : "Add panel"}
+                          </button>
+                        </Show>
+                      </span>
+                    )}
+                  </For>
+                </div>
               </div>
             </Show>
 
@@ -485,14 +537,24 @@ const MosaicDetailPage: Component = () => {
                   thumbnailOverrides={thumbnailOverrides()}
                   onSave={async (panels, rotationAngle) => {
                     try {
-                      await api.batchUpdateMosaicPanels(params.mosaicId, panels, rotationAngle);
+                      await apiClient
+                        .PUT("/api/mosaics/{mosaic_id}/panels/batch", {
+                          params: { path: { mosaic_id: params.mosaicId } },
+                          body: { panels, rotation_angle: rotationAngle },
+                        })
+                        .then(unwrap);
                     } catch (e) {
                       showToast("Failed to save panel layout", "error", 5000);
                       throw e;
                     }
                   }}
                   onPixelCoordsConverted={() => {
-                    api.updateMosaic(params.mosaicId, { pixel_coords: true })
+                    apiClient
+                      .PUT("/api/mosaics/{mosaic_id}", {
+                        params: { path: { mosaic_id: params.mosaicId } },
+                        body: { pixel_coords: true },
+                      })
+                      .then(unwrap)
                       .catch(() => showToast("Failed to save coordinate conversion", "error", 5000));
                   }}
                 />
@@ -511,28 +573,58 @@ const MosaicDetailPage: Component = () => {
               </div>
               <For each={mosaic()?.panels ?? []}>
                 {(panel) => {
-                  const [panelSessions, { refetch: refetchSessions }] = createResource(
-                    () => mosaic() ? { mId: mosaic()!.id, pId: panel.panel_id } : null,
-                    (params) => params ? api.getPanelSessions(params.mId, params.pId) : null,
-                  );
+                  // Sessions are fetched lazily and only for the expanded panel.
+                  // Keying on stable primitives (id + panel id + expanded) means a
+                  // mosaic refetch no longer restarts a fetch for every panel.
                   const [expanded, setExpanded] = createSignal(false);
+                  const panelSessionsQuery = useQuery(() => ({
+                    queryKey: queryKeys.panelSessions(params.mosaicId, panel.panel_id),
+                    queryFn: () =>
+                      apiClient
+                        .GET("/api/mosaics/{mosaic_id}/panels/{panel_id}/sessions", {
+                          params: { path: { mosaic_id: params.mosaicId, panel_id: panel.panel_id } },
+                        })
+                        .then(unwrap),
+                    enabled: expanded(),
+                  }));
+                  const panelSessions = () => panelSessionsQuery.data;
+                  const panelSessionsLoading = () => panelSessionsQuery.isFetching;
+                  const refetchSessions = async () => { await panelSessionsQuery.refetch(); };
                   const included = () => panelSessions()?.sessions.filter((s) => s.status === "included") ?? [];
                   const available = () => panelSessions()?.sessions.filter((s) => s.status === "available") ?? [];
 
                   const handleInclude = async (dates: string[]) => {
                     const data = mosaic();
                     if (!data) return;
-                    await api.updatePanelSessions(data.id, panel.panel_id, dates, []);
-                    refetchSessions();
-                    refetch();
+                    try {
+                      await apiClient
+                        .PUT("/api/mosaics/{mosaic_id}/panels/{panel_id}/sessions", {
+                          params: { path: { mosaic_id: data.id, panel_id: panel.panel_id } },
+                          body: { include: dates, exclude: [] },
+                        })
+                        .then(unwrap);
+                      refetchSessions();
+                      refetch();
+                    } catch (e: unknown) {
+                      showToast(getErrorMessage(e, "Failed to include sessions"), "error", 5000);
+                    }
                   };
 
                   const handleExclude = async (dates: string[]) => {
                     const data = mosaic();
                     if (!data) return;
-                    await api.updatePanelSessions(data.id, panel.panel_id, [], dates);
-                    refetchSessions();
-                    refetch();
+                    try {
+                      await apiClient
+                        .PUT("/api/mosaics/{mosaic_id}/panels/{panel_id}/sessions", {
+                          params: { path: { mosaic_id: data.id, panel_id: panel.panel_id } },
+                          body: { include: [], exclude: dates },
+                        })
+                        .then(unwrap);
+                      refetchSessions();
+                      refetch();
+                    } catch (e: unknown) {
+                      showToast(getErrorMessage(e, "Failed to exclude sessions"), "error", 5000);
+                    }
                   };
 
                   const suggestNextLabel = (label: string): string => {
@@ -552,13 +644,22 @@ const MosaicDetailPage: Component = () => {
                     if (!newLabel || !newLabel.trim()) return;
                     const label = newLabel.trim();
                     try {
-                      const res = await api.addMosaicPanel(
-                        data.id,
-                        panel.target_id,
-                        label,
-                        panel.object_pattern ?? null,
-                      );
-                      await api.updatePanelSessions(data.id, res.panel_id, [sessionDate], []);
+                      const res = await apiClient
+                        .POST("/api/mosaics/{mosaic_id}/panels", {
+                          params: { path: { mosaic_id: data.id } },
+                          body: {
+                            target_id: panel.target_id,
+                            panel_label: label,
+                            object_pattern: panel.object_pattern ?? null,
+                          },
+                        })
+                        .then(unwrap);
+                      await apiClient
+                        .PUT("/api/mosaics/{mosaic_id}/panels/{panel_id}/sessions", {
+                          params: { path: { mosaic_id: data.id, panel_id: res.panel_id } },
+                          body: { include: [sessionDate], exclude: [] },
+                        })
+                        .then(unwrap);
                       showToast(`Created panel '${label}' with session`);
                       refetch();
                     } catch (err) {
@@ -686,11 +787,11 @@ const MosaicDetailPage: Component = () => {
                               </div>
                             </Show>
 
-                            <Show when={!panelSessions.loading && included().length === 0 && available().length === 0}>
+                            <Show when={!panelSessionsLoading() && included().length === 0 && available().length === 0}>
                               <div class="p-3 text-xs text-theme-text-secondary">No sessions found for this panel.</div>
                             </Show>
 
-                            <Show when={included().length === 0 && !panelSessions.loading}>
+                            <Show when={included().length === 0 && !panelSessionsLoading()}>
                               <div class="p-3 border-t border-theme-border/50 flex justify-end">
                                 <button
                                   onClick={() =>
@@ -730,7 +831,11 @@ const MosaicDetailPage: Component = () => {
           const data = mosaic();
           if (!data) return;
           try {
-            await api.removeMosaicPanel(data.id, target.panelId);
+            await apiClient
+              .DELETE("/api/mosaics/{mosaic_id}/panels/{panel_id}", {
+                params: { path: { mosaic_id: data.id, panel_id: target.panelId } },
+              })
+              .then(unwrap);
             showToast(`Deleted panel "${target.panelLabel}"`);
             refetch();
           } catch {

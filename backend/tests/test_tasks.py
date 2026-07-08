@@ -19,18 +19,31 @@ from app.services.thumbnail import generate_thumbnail
 # helpers
 # ---------------------------------------------------------------------------
 
-def _bootstrap_tasks():
-    """Load the real app.worker.tasks, patching create_engine so it doesn't
-    need a live DB connection at import time."""
+def _bootstrap_tasks(modname="app.worker.tasks"):
+    """Load the real target module, patching create_engine so it doesn't
+    need a live DB connection at import time.
+
+    Tasks now live in per-domain app.worker.tasks_* modules (app.worker.tasks
+    is a thin facade that re-exports them for external call sites -- see
+    app/worker/tasks.py). A test that patches an internal name (Session,
+    _redis, a helper function, etc.) must bootstrap the module that actually
+    OWNS the function under test, since patch.object() rebinds an attribute on
+    one module's namespace and a function only sees patches made on the
+    module it was defined in (its __globals__), not on the facade that merely
+    re-exports the same function object. Callers pass e.g.
+    modname="app.worker.tasks_scan" for _do_ingest/reingest_changed_file, or
+    "app.worker.tasks_thumbnails" for the chunked thumbnail tasks.
+    """
     import sys as _sys
-    mod = _sys.modules.get("app.worker.tasks")
+    mod = _sys.modules.get(modname)
     if mod is not None and not isinstance(mod, MagicMock):
         return mod
-    _sys.modules.pop("app.worker.tasks", None)
+    _sys.modules.pop(modname, None)
     mock_engine = MagicMock()
     with patch("sqlalchemy.create_engine", return_value=mock_engine):
-        import app.worker.tasks as tasks_mod
-    return tasks_mod
+        import importlib
+        mod = importlib.import_module(modname)
+    return mod
 
 
 def _make_partition_result(chunks: list[list]):
@@ -117,7 +130,7 @@ class TestRegenerateMissingThumbnailsChunked:
         return result, mock_regen
 
     def test_no_rows_returns_complete(self):
-        tasks_mod = _bootstrap_tasks()
+        tasks_mod = _bootstrap_tasks("app.worker.tasks_thumbnails")
         result, mock_regen = self._run(tasks_mod, chunks=[], tmp_path=None)
         assert result["status"] == "complete"
         assert result["checked"] == 0
@@ -125,7 +138,7 @@ class TestRegenerateMissingThumbnailsChunked:
         mock_regen.delay.assert_not_called()
 
     def test_all_present_returns_complete(self, tmp_path):
-        tasks_mod = _bootstrap_tasks()
+        tasks_mod = _bootstrap_tasks("app.worker.tasks_thumbnails")
         # Create two real thumbnail files so _check_missing returns False
         t1 = tmp_path / "t1.jpg"
         t2 = tmp_path / "t2.jpg"
@@ -142,7 +155,7 @@ class TestRegenerateMissingThumbnailsChunked:
         mock_regen.delay.assert_not_called()
 
     def test_missing_thumbnails_queued_across_chunks(self, tmp_path):
-        tasks_mod = _bootstrap_tasks()
+        tasks_mod = _bootstrap_tasks("app.worker.tasks_thumbnails")
         # t1 exists on disk; t2 and t3 do not
         t1 = tmp_path / "t1.jpg"
         t1.write_bytes(b"x")
@@ -165,7 +178,7 @@ class TestRegenerateMissingThumbnailsChunked:
 
     def test_row_without_file_path_skipped(self, tmp_path):
         """Rows where file_path is falsy must not be queued even if thumb is missing."""
-        tasks_mod = _bootstrap_tasks()
+        tasks_mod = _bootstrap_tasks("app.worker.tasks_thumbnails")
         t_missing = str(tmp_path / "missing.jpg")
 
         chunks = [
@@ -244,7 +257,7 @@ class TestPurgeAndRegenerateThumbnailsChunked:
         return result, mock_regen
 
     def test_no_images_returns_complete(self):
-        tasks_mod = _bootstrap_tasks()
+        tasks_mod = _bootstrap_tasks("app.worker.tasks_thumbnails")
         result, mock_regen = self._run(tasks_mod, total_count=0, chunks_data=[], tmp_path=None)
         assert result["status"] == "complete"
         assert result["deleted"] == 0
@@ -252,7 +265,7 @@ class TestPurgeAndRegenerateThumbnailsChunked:
         mock_regen.delay.assert_not_called()
 
     def test_images_queued_across_chunks(self, tmp_path):
-        tasks_mod = _bootstrap_tasks()
+        tasks_mod = _bootstrap_tasks("app.worker.tasks_thumbnails")
         t1 = tmp_path / "t1.jpg"
         t1.write_bytes(b"x")
         t2 = tmp_path / "t2.jpg"
@@ -267,7 +280,7 @@ class TestPurgeAndRegenerateThumbnailsChunked:
         assert mock_regen.delay.call_count == 2
 
     def test_rows_without_file_path_not_queued(self, tmp_path):
-        tasks_mod = _bootstrap_tasks()
+        tasks_mod = _bootstrap_tasks("app.worker.tasks_thumbnails")
         chunks = [
             [("id1", None, str(tmp_path / "t1.jpg")), ("id2", "/fits/b.fits", None)],
         ]
@@ -286,7 +299,9 @@ class TestDetectDuplicatesPass2JoinQuery:
 
     def test_pass2_query_uses_left_join_not_correlated_subquery(self):
         import pathlib
-        src = pathlib.Path("app/worker/tasks.py").read_text()
+        # detect_duplicate_targets now lives in tasks_target_dedup.py (Phase 6
+        # Task 3 split), not directly in tasks.py.
+        src = pathlib.Path("app/worker/tasks_target_dedup.py").read_text()
         # Find the active_targets_query block used in Pass 2
         assert "LEFT JOIN" in src, "Pass 2 query must use LEFT JOIN aggregate"
         assert "COALESCE(ic.img_count, 0)" in src, "Pass 2 must use COALESCE for 0-image targets"
@@ -331,7 +346,7 @@ class TestReingestValidatesBeforeDelete:
     """A truncated/corrupt file must NOT delete the existing catalog row."""
 
     def test_corrupt_file_does_not_delete_existing_row(self):
-        tasks_mod = _bootstrap_tasks()
+        tasks_mod = _bootstrap_tasks("app.worker.tasks_scan")
 
         bad_fitsio = MagicMock()
         bad_fitsio.read_header.side_effect = ValueError("SIMPLE card")
@@ -355,7 +370,7 @@ class TestReingestValidatesBeforeDelete:
         mock_do_ingest.assert_not_called()
 
     def test_valid_file_proceeds_to_ingest(self):
-        tasks_mod = _bootstrap_tasks()
+        tasks_mod = _bootstrap_tasks("app.worker.tasks_scan")
 
         ok_fitsio = MagicMock()
         ok_fitsio.read_header.return_value = MagicMock()  # readable header
@@ -477,7 +492,7 @@ class TestDuplicateIngestPreservesThumbnail:
 
     def test_integrity_error_preserves_thumbnail(self, tmp_path):
         """Duplicate path -> IntegrityError on commit -> thumbnail is kept."""
-        tasks_mod = _bootstrap_tasks()
+        tasks_mod = _bootstrap_tasks("app.worker.tasks_scan")
         exc = IntegrityError("INSERT", {}, Exception("duplicate key"))
         raised, thumb_path = self._run_do_ingest(tasks_mod, tmp_path, exc)
         assert isinstance(raised, IntegrityError)
@@ -485,7 +500,7 @@ class TestDuplicateIngestPreservesThumbnail:
 
     def test_orphaned_insert_removes_unreferenced_thumbnail(self, tmp_path):
         """Genuine insert failure with no row referencing the thumb -> deleted."""
-        tasks_mod = _bootstrap_tasks()
+        tasks_mod = _bootstrap_tasks("app.worker.tasks_scan")
         exc = RuntimeError("boom")
         raised, thumb_path = self._run_do_ingest(
             tasks_mod, tmp_path, exc, thumb_referenced=False
@@ -495,10 +510,175 @@ class TestDuplicateIngestPreservesThumbnail:
 
     def test_orphaned_insert_keeps_referenced_thumbnail(self, tmp_path):
         """Insert failure but another row references the thumb -> kept (defensive)."""
-        tasks_mod = _bootstrap_tasks()
+        tasks_mod = _bootstrap_tasks("app.worker.tasks_scan")
         exc = RuntimeError("boom")
         raised, thumb_path = self._run_do_ingest(
             tasks_mod, tmp_path, exc, thumb_referenced=True
         )
         assert isinstance(raised, RuntimeError)
         assert thumb_path.exists(), "shared thumbnail must not be deleted"
+
+
+# ---------------------------------------------------------------------------
+# Phase 1.1: DetachedInstanceError in ingest.
+#
+# The filename-candidate step reads `image.id` for an Image that was inserted
+# inside an earlier `with Session(...) as session:` block. Under SQLAlchemy's
+# default expire_on_commit, that instance is expired at commit and detached
+# once the block closes, so touching `image.id` afterwards raises
+# DetachedInstanceError (46 such failures observed in production, logged as
+# "Failed to create filename candidate"). The fix captures the id into a local
+# variable while the session is still open.
+# ---------------------------------------------------------------------------
+
+class _DetachOnCloseImage:
+    """Mimics an ORM instance under expire_on_commit=True: `id` is populated at
+    commit but raises DetachedInstanceError once the owning session closes."""
+
+    def __init__(self, **kwargs):
+        self._id = None
+        self._detached = False
+
+    def _assign_id(self, value):
+        self._id = value
+
+    def _detach(self):
+        self._detached = True
+
+    @property
+    def id(self):
+        from sqlalchemy.orm.exc import DetachedInstanceError
+        if self._detached:
+            raise DetachedInstanceError("Instance is not bound to a Session")
+        return self._id
+
+
+class _CandidateQueryResult:
+    """execute() result whose scalars().all() yields no existing candidates."""
+
+    def scalars(self):
+        return self
+
+    def all(self):
+        return []
+
+
+class TestIngestFilenameCandidateNoDetach:
+    """Regression: ingesting a LIGHT frame with no OBJECT header and no resolved
+    target must record a filename candidate without a DetachedInstanceError."""
+
+    def _run(self, tasks_mod, tmp_path):
+        from app.models.filename_candidate import FilenameCandidate
+
+        fits_root = tmp_path / "fits"
+        thumbs = tmp_path / "thumbs"
+        fits_root.mkdir()
+        thumbs.mkdir()
+        fits_path = fits_root / "Light_unknown_001.fits"
+        fits_path.write_bytes(b"stub")
+
+        # Shared state so the fake Session instances cooperate across the
+        # separate `with Session(...)` blocks inside _do_ingest.
+        state = {"image": None, "candidate": None, "id_read_while_open": None}
+        ASSIGNED_ID = 4242
+
+        assigned_ids = iter([ASSIGNED_ID])
+
+        class _FakeSession:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                # Closing the session detaches the inserted image, matching the
+                # real expire_on_commit + session-close semantics.
+                if state["image"] is not None:
+                    state["image"]._detach()
+                return False
+
+            def get(self, *a, **kw):
+                # UserSettings load -> use defaults.
+                return None
+
+            def add(self, obj):
+                if isinstance(obj, _DetachOnCloseImage):
+                    state["image"] = obj
+                elif isinstance(obj, FilenameCandidate):
+                    state["candidate"] = obj
+
+            def execute(self, *a, **kw):
+                return _CandidateQueryResult()
+
+            def commit(self):
+                img = state["image"]
+                if img is not None and img._id is None:
+                    img._assign_id(next(assigned_ids, ASSIGNED_ID))
+
+        def _fake_gen_thumb(path, thumb_path, max_width=None):
+            thumb_path.parent.mkdir(parents=True, exist_ok=True)
+            thumb_path.write_bytes(b"thumbnail-bytes")
+            return thumb_path
+
+        meta = {
+            "file_path": str(fits_path),
+            "file_name": fits_path.name,
+            "object_name": None,  # forces the filename-candidate branch
+            "image_type": "LIGHT",
+            "raw_headers": {},
+            "capture_date": None,
+        }
+
+        resolution = {"method": "none", "confidence": 0.0, "suggested_target_id": None}
+
+        import contextlib
+        patchers = [
+            patch.object(tasks_mod.settings, "fits_data_path", str(fits_root)),
+            patch.object(tasks_mod.settings, "thumbnails_path", str(thumbs)),
+            patch.object(tasks_mod, "fitsio", MagicMock()),
+            patch.object(tasks_mod, "extract_metadata", MagicMock(return_value=meta)),
+            patch.object(tasks_mod, "generate_thumbnail", _fake_gen_thumb),
+            patch.object(tasks_mod, "Image", _DetachOnCloseImage),
+            patch.object(tasks_mod, "Session", lambda *a, **kw: _FakeSession()),
+            patch.object(tasks_mod, "_redis", MagicMock()),
+            patch.object(tasks_mod, "increment_completed_sync", MagicMock()),
+            patch.object(tasks_mod, "increment_csv_enriched_sync", MagicMock()),
+            patch(
+                "app.services.filename_parser.extract_target_from_filename",
+                MagicMock(return_value="UnknownTarget"),
+            ),
+            patch(
+                "app.services.filename_resolver.resolve_filename_candidate",
+                MagicMock(return_value=resolution),
+            ),
+        ]
+
+        captured_logs = []
+        with contextlib.ExitStack() as stack:
+            for p in patchers:
+                stack.enter_context(p)
+            stack.enter_context(
+                patch.object(
+                    tasks_mod.logger, "warning",
+                    MagicMock(side_effect=lambda *a, **kw: captured_logs.append((a, kw))),
+                )
+            )
+            tasks_mod._do_ingest(str(fits_path), include_calibration=True)
+
+        return state, captured_logs, ASSIGNED_ID
+
+    def test_filename_candidate_created_without_detached_instance_error(self, tmp_path):
+        tasks_mod = _bootstrap_tasks("app.worker.tasks_scan")
+        state, captured_logs, assigned_id = self._run(tasks_mod, tmp_path)
+
+        # No "Failed to create filename candidate" warning was emitted.
+        candidate_warnings = [
+            a for (a, _kw) in captured_logs
+            if a and "Failed to create filename candidate" in str(a[0])
+        ]
+        assert not candidate_warnings, (
+            "filename candidate step raised (likely DetachedInstanceError): "
+            f"{candidate_warnings}"
+        )
+
+        # The candidate was persisted with the id captured before session close.
+        assert state["candidate"] is not None, "expected a FilenameCandidate to be added"
+        assert state["candidate"].image_ids == [assigned_id]

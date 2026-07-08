@@ -93,7 +93,7 @@ class TestV11HyperledaBackfill:
     def test_enriches_galaxy_target(self):
         from sqlalchemy import text
         from app.models import Target
-        from app.models.hyperleda_cache import HyperLEDACache
+        from app.models.catalog_cache import CatalogCache
 
         Session, engine = _sync_session_factory()
         catalog_id = f"NGC TEST {uuid.uuid4().hex[:8]}"
@@ -110,9 +110,9 @@ class TestV11HyperledaBackfill:
                 "mosaic_panels",
                 "mosaics",
                 "targets",
-                "hyperleda_cache",
             ):
                 session.execute(text(f"DELETE FROM {tbl}"))
+            session.execute(text("DELETE FROM catalog_cache WHERE source = 'hyperleda'"))
             session.commit()
 
             # Seed one galaxy target.
@@ -143,10 +143,10 @@ class TestV11HyperledaBackfill:
             assert refreshed.hubble_t_type == pytest.approx(4.0)
             assert refreshed.inclination == pytest.approx(67.3)
 
-            cache_row = session.get(HyperLEDACache, catalog_id)
+            cache_row = session.get(CatalogCache, ("hyperleda", catalog_id))
             assert cache_row is not None
-            assert cache_row.t_type == pytest.approx(4.0)
-            assert cache_row.inclination == pytest.approx(67.3)
+            assert cache_row.payload["t_type"] == pytest.approx(4.0)
+            assert cache_row.payload["inclination"] == pytest.approx(67.3)
         finally:
             # Cleanup seeded rows.
             session.rollback()
@@ -154,7 +154,7 @@ class TestV11HyperledaBackfill:
                 text("DELETE FROM targets WHERE id = :id"), {"id": tid}
             )
             session.execute(
-                text("DELETE FROM hyperleda_cache WHERE catalog_id = :cid"),
+                text("DELETE FROM catalog_cache WHERE source = 'hyperleda' AND key = :cid"),
                 {"cid": catalog_id},
             )
             session.commit()
@@ -239,5 +239,67 @@ class TestV12ExposureAndMetricSplit:
                     text("DELETE FROM images WHERE file_path = :fp"), {"fp": fp}
                 )
             session.commit()
+            session.close()
+            engine.dispose()
+
+
+class TestLoadReferenceCatalogs:
+    """H1: static catalogs must load independently of the data-version gate.
+
+    The v2.0 baseline seeds fresh databases at the current data_version, so
+    the data migrations that used to load OpenNGC/SAC/Caldwell/etc. as a side
+    effect (v3, v7, v13) never fire on a fresh install. load_reference_catalogs
+    is the standalone replacement dispatched unconditionally from boot.
+    """
+
+    def test_fresh_db_loads_then_second_run_is_idempotent(self):
+        from sqlalchemy import text
+        from app.services.data_migrations import (
+            reference_catalogs_are_empty, load_reference_catalogs,
+        )
+        from app.models.openngc import OpenNGCEntry
+        from app.models.sac_catalog import SACEntry
+        from app.models.caldwell_catalog import CaldwellEntry
+
+        Session, engine = _sync_session_factory()
+        session = Session()
+        try:
+            # Simulate a fresh install by wiping the catalog tables. This
+            # never gets committed -- the whole test runs in one transaction
+            # that is rolled back in `finally`, so whatever the rest of the
+            # suite had already loaded is restored regardless of test order.
+            for tbl in (
+                "target_catalog_memberships",
+                "openngc_catalog", "sac_catalog", "caldwell_catalog",
+                "herschel400_catalog", "arp_catalog", "abell_catalog",
+            ):
+                session.execute(text(f"DELETE FROM {tbl}"))
+            session.flush()
+
+            assert reference_catalogs_are_empty(session) is True
+
+            summary = load_reference_catalogs(session)
+            session.flush()
+
+            openngc_count = session.query(OpenNGCEntry).count()
+            sac_count = session.query(SACEntry).count()
+            caldwell_count = session.query(CaldwellEntry).count()
+            assert openngc_count > 0, "OpenNGC catalog must be populated on a fresh DB"
+            assert sac_count > 0, "SAC catalog must be populated on a fresh DB"
+            assert caldwell_count > 0, "Caldwell catalog must be populated on a fresh DB"
+            assert reference_catalogs_are_empty(session) is False
+            assert "OpenNGC" in summary and "SAC" in summary
+
+            # Second run must not duplicate rows: every loader upserts on a
+            # natural key (see load_openngc_csv, load_sac_csv, load_catalog_csv,
+            # upsert_membership), so re-running is a no-op on row counts.
+            load_reference_catalogs(session)
+            session.flush()
+
+            assert session.query(OpenNGCEntry).count() == openngc_count
+            assert session.query(SACEntry).count() == sac_count
+            assert session.query(CaldwellEntry).count() == caldwell_count
+        finally:
+            session.rollback()
             session.close()
             engine.dispose()

@@ -1,5 +1,5 @@
 import { Component } from "solid-js";
-import type { OverviewStats } from "../types";
+import type { OverviewStats } from "../api/types";
 import { formatIntegration, formatBytes } from "../utils/format";
 
 function formatSpan(start: string | null, end: string | null): string {

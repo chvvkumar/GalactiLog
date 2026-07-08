@@ -1,6 +1,12 @@
 import { Component, Show, For, createMemo } from "solid-js";
 import { A, useNavigate } from "@solidjs/router";
-import type { TargetAggregation } from "../types";
+import { useMutation, useQueryClient } from "@tanstack/solid-query";
+// TargetAggregation is the hand-written definition in `../api/types`
+// (optional `user_defined`, present `catalog_id`) -- Slice 15 moved it
+// there verbatim rather than aliasing the generated schema; `targetData()`
+// (this component's data source, via DashboardFilterProvider.tsx) is typed
+// against this shape.
+import type { TargetAggregation } from "../api/types";
 import { useCatalog } from "../store/catalog";
 import { useSettingsContext } from "./SettingsProvider";
 import { isColumnVisible } from "../utils/displaySettings";
@@ -8,7 +14,8 @@ import InlineEditCell from "./InlineEditCell";
 import FilterBadges from "./FilterBadges";
 import SessionTable from "./SessionTable";
 import { formatIntegration } from "../utils/format";
-import { api } from "../api/client";
+import { apiClient } from "../api/generated/client";
+import { unwrap } from "../api/unwrap";
 
 const TargetRow: Component<{
   target: TargetAggregation;
@@ -16,8 +23,19 @@ const TargetRow: Component<{
   const { expandedTargets, toggleExpanded } = useCatalog();
   const navigate = useNavigate();
   const ctx = useSettingsContext();
+  const queryClient = useQueryClient();
   const vis = () => ctx.columnVisibility();
   const targetCustomColumns = () => (ctx.customColumns() ?? []).filter(c => c.applies_to === "target");
+
+  // Custom values are embedded in the target aggregation payload, so a save
+  // invalidates the whole targets query (every page/filter/sort variant).
+  const setCustomValueMutation = useMutation(() => ({
+    mutationFn: (body: { column_id: string; target_id: string; value: string }) =>
+      apiClient.PUT("/api/custom-columns/values", { body }).then(unwrap),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["targets"] });
+    },
+  }));
 
   const isOpen = () => expandedTargets().has(props.target.target_id);
 
@@ -86,11 +104,11 @@ const TargetRow: Component<{
                   columnType={col.column_type}
                   value={props.target.custom_values?.[col.slug]}
                   dropdownOptions={col.dropdown_options}
-                  onSave={(val) => api.setCustomValue({
+                  onSave={(val) => setCustomValueMutation.mutateAsync({
                     column_id: col.id,
                     target_id: props.target.target_id,
                     value: val,
-                  })}
+                  }).then(() => undefined)}
                 />
               </td>
             </Show>

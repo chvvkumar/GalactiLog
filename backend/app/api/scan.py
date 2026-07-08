@@ -27,7 +27,6 @@ from app.schemas.scan import (
     ScanAcceptResponse,
     RebuildStatusResponse,
     DbSummaryResponse,
-    AutoscanResponse,
     BackfillCsvResponse,
 )
 from app.services.scan_filters import ScanFilterConfig
@@ -321,14 +320,14 @@ async def db_summary(session: AsyncSession = Depends(get_session), user: User = 
              WHERE resolved_target_id IS NULL AND image_type = 'LIGHT'
                AND raw_headers->>'OBJECT' IS NOT NULL
                AND raw_headers->>'OBJECT' != '') AS unresolved_images,
-            (SELECT COUNT(*) FROM simbad_cache) AS cached_simbad,
-            (SELECT COUNT(*) FROM simbad_cache WHERE main_id IS NULL) AS cached_negative,
+            (SELECT COUNT(*) FROM catalog_cache WHERE source = 'simbad') AS cached_simbad,
+            (SELECT COUNT(*) FROM catalog_cache WHERE source = 'simbad' AND negative) AS cached_negative,
             (SELECT COUNT(*) FROM merge_candidates WHERE status = 'pending') AS pending_merges,
             (SELECT COUNT(*) FROM images WHERE detected_stars IS NOT NULL) AS csv_enriched,
-            (SELECT COUNT(*) FROM vizier_cache) AS cached_vizier,
-            (SELECT COUNT(*) FROM vizier_cache WHERE size_major IS NULL AND size_minor IS NULL) AS cached_vizier_negative,
-            (SELECT COUNT(*) FROM sesame_cache) AS cached_sesame,
-            (SELECT COUNT(*) FROM sesame_cache WHERE main_id IS NULL) AS cached_sesame_negative
+            (SELECT COUNT(*) FROM catalog_cache WHERE source = 'vizier') AS cached_vizier,
+            (SELECT COUNT(*) FROM catalog_cache WHERE source = 'vizier' AND negative) AS cached_vizier_negative,
+            (SELECT COUNT(*) FROM catalog_cache WHERE source = 'sesame') AS cached_sesame,
+            (SELECT COUNT(*) FROM catalog_cache WHERE source = 'sesame' AND negative) AS cached_sesame_negative
     """))
     row = result.one()
     return {
@@ -344,56 +343,6 @@ async def db_summary(session: AsyncSession = Depends(get_session), user: User = 
         "cached_vizier_negative": row[9],
         "cached_sesame": row[10],
         "cached_sesame_negative": row[11],
-    }
-
-
-VALID_INTERVALS = {60, 120, 240, 480, 720, 1440}
-
-
-@router.get("/autoscan", response_model=AutoscanResponse)
-async def get_autoscan(session: AsyncSession = Depends(get_session), user: User = Depends(get_current_user)):
-    """Return current auto-scan settings (deprecated - use /settings/general)."""
-    from app.models.user_settings import UserSettings, SETTINGS_ROW_ID
-    result = await session.execute(
-        select(UserSettings).where(UserSettings.id == SETTINGS_ROW_ID)
-    )
-    row = result.scalar_one_or_none()
-    general = row.general if row else {}
-    return {
-        "enabled": general.get("auto_scan_enabled", True),
-        "interval_minutes": general.get("auto_scan_interval", 240),
-    }
-
-
-@router.put("/autoscan", response_model=AutoscanResponse)
-async def set_autoscan(
-    enabled: bool = Query(...),
-    interval_minutes: int = Query(...),
-    session: AsyncSession = Depends(get_session),
-    user: User = Depends(require_admin),
-):
-    """Update auto-scan settings (deprecated - use /settings/general)."""
-    if interval_minutes not in VALID_INTERVALS:
-        raise HTTPException(status_code=400, detail=f"Invalid interval. Must be one of: {sorted(VALID_INTERVALS)}")
-
-    from app.models.user_settings import UserSettings, SETTINGS_ROW_ID
-    result = await session.execute(
-        select(UserSettings).where(UserSettings.id == SETTINGS_ROW_ID)
-    )
-    row = result.scalar_one_or_none()
-    if row is None:
-        row = UserSettings(id=SETTINGS_ROW_ID)
-        session.add(row)
-
-    row.general = {
-        **(row.general or {}),
-        "auto_scan_enabled": enabled,
-        "auto_scan_interval": interval_minutes,
-    }
-    await session.commit()
-    return {
-        "enabled": enabled,
-        "interval_minutes": interval_minutes,
     }
 
 

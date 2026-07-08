@@ -1,7 +1,7 @@
 import { Component, createSignal, createEffect, onMount, onCleanup, Show, For } from "solid-js";
 import Konva from "konva";
-import { api } from "../../api/client";
-import type { PanelStats } from "../../types";
+import { thumbnailUrl } from "../../api/thumbnailUrl";
+import type { PanelStats } from "../../api/types";
 import { formatIntegration } from "../../utils/format";
 
 // ── Constants ──────────────────────────────────────────────────────────
@@ -177,15 +177,15 @@ const KonvaMosaicArranger: Component<KonvaMosaicArrangerProps> = (props) => {
   };
 
   // ── Resolve a thumbnail value to a loadable src ────────────────────
-  // Persisted mode: thumbnail_url is a file path -> route through
-  // api.thumbnailUrl. Preview mode: the suggestion may supply an
+  // Persisted mode: thumbnail_url is a file path -> route through the shared
+  // thumbnailUrl() builder. Preview mode: the suggestion may supply an
   // already-usable URL/path (absolute http or root-relative); use it as-is,
   // otherwise fall back to the same path normalization.
   const resolveThumbnailSrc = (url: string): string => {
     if (props.previewMode && (/^https?:\/\//.test(url) || url.startsWith("/"))) {
       return url;
     }
-    return api.thumbnailUrl(url);
+    return thumbnailUrl(url);
   };
 
   // ── Badge text for rotation/flip state ─────────────────────────────

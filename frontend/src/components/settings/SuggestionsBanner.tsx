@@ -1,10 +1,15 @@
 // frontend/src/components/settings/SuggestionsBanner.tsx
 import { For, Show, createSignal, type Component } from "solid-js";
-import type { SuggestionGroup } from "../../types";
+// Repointed to the generated-schema alias (Slice 14 closes the deferral from
+// Slice 12's SuggestionsBanner.tsx comment). The generated type's
+// `section?: string | null` is a strict widening of the old hand-written
+// `section?: string` -- `onMerge`/`onDismiss` consumers (EquipmentTab.tsx,
+// FiltersTab.tsx) are updated in the same slice to accept the wider type.
+import type { SuggestionGroup } from "../../api/types";
 
 interface Props {
   suggestions: SuggestionGroup[];
-  onMerge: (canonical: string, aliases: string[], section?: string) => void;
+  onMerge: (canonical: string, aliases: string[], section?: string | null) => void;
   onDismiss?: (group: SuggestionGroup) => void;
 }
 
@@ -23,7 +28,7 @@ export const SuggestionsBanner: Component<Props> = (props) => {
   );
 };
 
-const MergeGroup: Component<{ group: SuggestionGroup; onMerge: (canonical: string, aliases: string[], section?: string) => void; onDismiss?: (group: SuggestionGroup) => void }> = (
+const MergeGroup: Component<{ group: SuggestionGroup; onMerge: (canonical: string, aliases: string[], section?: string | null) => void; onDismiss?: (group: SuggestionGroup) => void }> = (
   props,
 ) => {
   const [selected, setSelected] = createSignal(

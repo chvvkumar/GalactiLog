@@ -9,16 +9,6 @@ class MosaicPanelCreate(BaseModel):
     object_pattern: str | None = None
 
 
-class MosaicPanelUpdate(BaseModel):
-    panel_label: str | None = None
-    sort_order: int | None = None
-    object_pattern: str | None = None
-    grid_row: int | None = None
-    grid_col: int | None = None
-    rotation: int | None = None
-    flip_h: bool | None = None
-
-
 class MosaicCreate(BaseModel):
     name: str
     notes: str | None = None
@@ -91,6 +81,16 @@ class MosaicPanelBatchRequest(BaseModel):
     rotation_angle: float | None = None
 
 
+class AvailablePanelLabel(BaseModel):
+    """A panel label parsed at ingest (Image.panel_label) for one of a
+    mosaic's targets that has no backing MosaicPanel row yet (Image.panel_id
+    IS NULL). target_id identifies which of the mosaic's targets the label
+    was seen on, so a client can promote the label to a real panel via
+    POST /mosaics/{mosaic_id}/panels."""
+    label: str
+    target_id: str
+
+
 class MosaicDetailResponse(BaseModel):
     id: str
     name: str
@@ -104,6 +104,10 @@ class MosaicDetailResponse(BaseModel):
     default_filter: str | None = None
     needs_review: bool = False
     custom_values: dict[str, str] | None = None
+    # Newly-ingested panel labels not yet backed by a MosaicPanel row.
+    # Surfacing only; promoting a label to a real panel is the explicit
+    # POST /mosaics/{mosaic_id}/panels action.
+    available_panel_labels: list[AvailablePanelLabel] = []
 
 
 class SuggestionPanelSession(BaseModel):
@@ -149,6 +153,24 @@ class OkResponse(BaseModel):
 class DetectionResponse(BaseModel):
     status: str
     new_suggestions: int
+
+
+class DetectionStartedResponse(BaseModel):
+    """Returned by POST /mosaics/detect (202). Detection now runs in Celery;
+    the caller polls GET /mosaics/detect/status?task_id=... until it finishes."""
+    status: str  # "started"
+    task_id: str
+
+
+class DetectionStatusResponse(BaseModel):
+    """Poll result for a dispatched detection task.
+
+    state mirrors the Celery task state (PENDING while queued, STARTED while
+    running, SUCCESS/FAILURE when finished). new_suggestions is populated only
+    once the task has succeeded.
+    """
+    state: str
+    new_suggestions: int | None = None
 
 
 class PanelCreateResponse(BaseModel):

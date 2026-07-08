@@ -5,8 +5,17 @@ import { useAuth } from "../AuthProvider";
 import { SuggestionsBanner } from "./SuggestionsBanner";
 import { GroupingEditor, type GroupEntry } from "./GroupingEditor";
 import HelpPopover from "../HelpPopover";
-import type { EquipmentConfig, SuggestionsResponse, DiscoveredItem, SuggestionGroup } from "../../types";
-import { api } from "../../api/client";
+// EquipmentConfig is the hand-written definition in `../../api/types`: it
+// feeds useSettingsContext().saveEquipment, whose signature in
+// SettingsProvider.tsx is pinned to the hand-written, narrower-optional
+// settings types (same precedent as store/settings.ts).
+// SuggestionsResponse/DiscoveredItem/SuggestionGroup come straight back from
+// apiClient responses below, so they're repointed to the generated alias
+// (closes the Slice 12 SuggestionGroup deferral).
+import type { EquipmentConfig } from "../../api/types";
+import type { SuggestionsResponse, DiscoveredItem, SuggestionGroup } from "../../api/types";
+import { apiClient } from "../../api/generated/client";
+import { unwrap } from "../../api/unwrap";
 
 export const EquipmentTab: Component = () => {
   const { isAdmin } = useAuth();
@@ -40,9 +49,9 @@ export const EquipmentTab: Component = () => {
   onMount(async () => {
     try {
       const [cams, tels, sugg] = await Promise.all([
-        api.getDiscovered("cameras"),
-        api.getDiscovered("telescopes"),
-        api.getEquipmentSuggestions(),
+        apiClient.GET("/api/settings/discovered/{section}", { params: { path: { section: "cameras" } } }).then(unwrap),
+        apiClient.GET("/api/settings/discovered/{section}", { params: { path: { section: "telescopes" } } }).then(unwrap),
+        apiClient.GET("/api/settings/suggestions/equipment", {}).then(unwrap),
       ]);
       setDiscoveredCameras(cams.items);
       setDiscoveredTelescopes(tels.items);
@@ -52,7 +61,7 @@ export const EquipmentTab: Component = () => {
     }
   });
 
-  const handleMerge = (canonical: string, aliases: string[], section?: string) => {
+  const handleMerge = (canonical: string, aliases: string[], section?: string | null) => {
     const setter = section === "telescopes" ? setTelescopeGroups : setCameraGroups;
     setter((prev) => {
       const existingIdx = prev.findIndex((g) => g.canonical === canonical);
@@ -94,9 +103,9 @@ export const EquipmentTab: Component = () => {
         ),
       };
       await saveEquipment(payload);
-      await api.updateDismissedSuggestions(dismissed());
+      await apiClient.PUT("/api/settings/dismissed-suggestions", { body: dismissed() }).then(unwrap);
       showToast("Equipment settings saved");
-      const data = await api.getEquipmentSuggestions();
+      const data = await apiClient.GET("/api/settings/suggestions/equipment", {}).then(unwrap);
       setSuggestions(data);
     } catch {
       showToast("Failed to save equipment settings", "error");

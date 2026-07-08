@@ -1,6 +1,6 @@
 import { Component, Show } from "solid-js";
 import { useNavigate } from "@solidjs/router";
-import type { DbSummary } from "../types";
+import type { DbSummary } from "../api/types";
 import { formatBytes } from "../utils/format";
 
 const DatabaseOverview: Component<{

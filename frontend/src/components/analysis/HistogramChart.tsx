@@ -1,7 +1,7 @@
 import { Component, createEffect, onCleanup } from "solid-js";
 import { Chart } from "chart.js";
 import "../../utils/chartRegistry";
-import type { DistributionResponse } from "../../types";
+import type { DistributionResponse } from "../../api/types";
 import { chartFontSize } from "../../utils/chartConfig";
 
 interface Props {

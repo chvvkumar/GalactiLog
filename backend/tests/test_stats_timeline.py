@@ -97,16 +97,17 @@ def _make_async_session_cm():
         _make_default_result(),    # 1 _query_cameras
         _make_default_result(),    # 2 _query_telescopes
         _make_default_result(),    # 3 _query_equipment_perf
-        _make_default_result(),    # 4 _query_filter_usage
-        _make_default_result(),    # 5 _query_timeline_monthly
-        _make_default_result(),    # 6 _query_site_coords (session opened even if fn is patched)
-        _make_default_result(),    # 7 _query_timeline_weekly
-        _make_default_result(),    # 8 _query_timeline_daily
-        _make_default_result(),    # 9 _query_top_targets
-        _make_quality_result(),    # 10 _query_data_quality
-        _make_bucket_result(),     # 11 _query_hfr_buckets
-        _make_default_result(),    # 12 _query_db_size
-        _make_default_result(),    # 13 _query_ingest_history
+        _make_default_result(),    # 4 _query_equipment_mad
+        _make_default_result(),    # 5 _query_filter_usage
+        _make_default_result(),    # 6 _query_timeline_monthly
+        _make_default_result(),    # 7 _query_site_coords (session opened even if fn is patched)
+        _make_default_result(),    # 8 _query_timeline_weekly
+        _make_default_result(),    # 9 _query_timeline_daily
+        _make_default_result(),    # 10 _query_top_targets
+        _make_quality_result(),    # 11 _query_data_quality
+        _make_bucket_result(),     # 12 _query_hfr_buckets
+        _make_default_result(),    # 13 _query_db_size
+        _make_default_result(),    # 14 _query_ingest_history
     ]
     _call_count = [0]
 
@@ -133,7 +134,7 @@ def _make_async_redis_cm():
 
 
 def _make_perf_row(tel, cam, filt, hfr_vals, ecc_vals, fwhm_vals):
-    """Mimic a row from _query_equipment_perf with array_agg columns."""
+    """Mimic a row from _query_equipment_perf (per-group medians only)."""
     import statistics
     row = MagicMock()
     row.telescope = tel
@@ -145,9 +146,17 @@ def _make_perf_row(tel, cam, filt, hfr_vals, ecc_vals, fwhm_vals):
     row.best_hfr = min(hfr_vals) if hfr_vals else None
     row.med_ecc = statistics.median(ecc_vals) if ecc_vals else None
     row.med_fwhm = statistics.median(fwhm_vals) if fwhm_vals else None
-    row.hfr_vals = hfr_vals
-    row.ecc_vals = ecc_vals
-    row.fwhm_vals = fwhm_vals
+    return row
+
+
+def _make_mad_row(norm_tel, norm_cam, mad_hfr, mad_ecc, mad_fwhm):
+    """Mimic a row from _query_equipment_mad (MAD computed in SQL)."""
+    row = MagicMock()
+    row.norm_tel = norm_tel
+    row.norm_cam = norm_cam
+    row.mad_hfr = mad_hfr
+    row.mad_ecc = mad_ecc
+    row.mad_fwhm = mad_fwhm
     return row
 
 
@@ -161,12 +170,13 @@ def _make_perf_result(rows):
     return r
 
 
-def _make_async_session_cm_with_perf(perf_rows):
+def _make_async_session_cm_with_perf(perf_rows, mad_rows=None):
     _results = [
         _make_overview_result(),
         _make_default_result(),
         _make_default_result(),
-        _make_perf_result(perf_rows),  # 3 _query_equipment_perf
+        _make_perf_result(perf_rows),          # 3 _query_equipment_perf
+        _make_perf_result(mad_rows or []),     # 4 _query_equipment_mad
         _make_default_result(),
         _make_default_result(),
         _make_default_result(),
@@ -205,6 +215,12 @@ async def test_equipment_combo_has_mad_fields():
             fwhm_vals=[3.0, 3.4, 3.2, 3.1],
         ),
     ]
+    # MAD is now computed in SQL and returned by _query_equipment_mad, keyed by
+    # normalized (telescope, camera). For [2.0,2.4,2.2,2.1] the median is 2.15
+    # and median(|x-2.15|) = 0.10.
+    mad_rows = [
+        _make_mad_row("Esprit 150", "ASI2600MM", mad_hfr=0.10, mad_ecc=0.025, mad_fwhm=0.15),
+    ]
 
     async def override_session():
         yield session
@@ -216,7 +232,7 @@ async def test_equipment_combo_has_mad_fields():
     app.dependency_overrides[get_current_user] = override_user
 
     try:
-        with patch("app.api.stats.async_session", side_effect=_make_async_session_cm_with_perf(perf_rows)), \
+        with patch("app.api.stats.async_session", side_effect=_make_async_session_cm_with_perf(perf_rows, mad_rows)), \
              patch("app.api.stats.async_redis", side_effect=_make_async_redis_cm()), \
              patch("app.api.stats._extract_site_coords", new=AsyncMock(return_value=None)):
             transport = ASGITransport(app=app)

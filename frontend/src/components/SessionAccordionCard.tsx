@@ -1,6 +1,13 @@
 import { Component, Show, For, createSignal, createEffect, createMemo } from "solid-js";
-import type { SessionOverview, SessionDetail, FrameRecord, IntegrationInstance } from "../types";
-import { api } from "../api/client";
+// SessionOverview/SessionDetail/FrameRecord/IntegrationInstance are the
+// hand-written definitions in `../api/types` (Slice 15 moved them there
+// verbatim rather than aliasing the generated schema, which loosens
+// numeric baseline fields to `number | null | undefined` and would cascade
+// into this component's frame-quality math, utils/frameQuality.ts's
+// `GroupBaseline`/`MetricBaseline`).
+import type { SessionOverview, SessionDetail, FrameRecord, IntegrationInstance } from "../api/types";
+import { apiClient } from "../api/generated/client";
+import { unwrap } from "../api/unwrap";
 import ReferenceThumbnail from "./ReferenceThumbnail";
 import RawHeaderAccordion from "./RawHeaderAccordion";
 import FilterBadges from "./FilterBadges";
@@ -121,7 +128,12 @@ const SessionAccordionCard: Component<{
     noteTimer = setTimeout(async () => {
       setNoteSaving(true);
       try {
-        await api.updateSessionNotes(props.targetId!, props.session.session_date, text || null);
+        await apiClient
+          .PUT("/api/targets/{target_id}/sessions/{date}/notes", {
+            params: { path: { target_id: props.targetId!, date: props.session.session_date } },
+            body: { notes: text || null },
+          })
+          .then(unwrap);
         showToast("Session notes saved");
       } catch {
         showToast("Failed to save session notes", "error");
@@ -202,7 +214,11 @@ const SessionAccordionCard: Component<{
     const key = `nina:${inst.name}`;
     setSendingInstance(key);
     try {
-      const res = await api.sendToNina(inst.url, props.ra!, props.dec!, props.position_angle);
+      const res = await apiClient
+        .POST("/api/integrations/nina/send-coordinates", {
+          body: { url: inst.url, ra: props.ra!, dec: props.dec!, position_angle: props.position_angle },
+        })
+        .then(unwrap);
       if (res.ok) {
         showToast(`Sent to NINA: ${inst.name}`);
       } else {
@@ -220,7 +236,11 @@ const SessionAccordionCard: Component<{
     const key = `stel:${inst.name}`;
     setSendingInstance(key);
     try {
-      const res = await api.sendToStellarium(inst.url, props.ra!, props.dec!, props.targetName ?? null);
+      const res = await apiClient
+        .POST("/api/integrations/stellarium/send-coordinates", {
+          body: { url: inst.url, ra: props.ra!, dec: props.dec!, target_name: props.targetName ?? null },
+        })
+        .then(unwrap);
       if (res.ok) {
         showToast(`Sent to Stellarium: ${inst.name}`);
       } else {
@@ -683,12 +703,18 @@ const SessionAccordionCard: Component<{
                 columnType={col.column_type}
                 value={props.session.custom_values?.[col.slug]}
                 dropdownOptions={col.dropdown_options}
-                onSave={(v) => api.setCustomValue({
-                  column_id: col.id,
-                  target_id: props.targetId!,
-                  session_date: props.session.session_date,
-                  value: v,
-                })}
+                onSave={async (v) => {
+                  await apiClient
+                    .PUT("/api/custom-columns/values", {
+                      body: {
+                        column_id: col.id,
+                        target_id: props.targetId!,
+                        session_date: props.session.session_date,
+                        value: v,
+                      },
+                    })
+                    .then(unwrap);
+                }}
               />
             </td>
           )}
@@ -856,7 +882,7 @@ const SessionAccordionCard: Component<{
                         <span><span class="text-theme-text-tertiary">Exp:</span> <span class="font-bold text-theme-text-primary">{detail().exposure_times.length > 0 ? detail().exposure_times.map(e => e + "s").join(", ") : "—"}</span></span>
                         <span><span class="text-theme-text-tertiary">HFR:</span> <span class="font-bold text-theme-text-primary">{detail().median_hfr?.toFixed(2) ?? "—"}</span></span>
                         <span><span class="text-theme-text-tertiary">Ecc:</span> <span class="font-bold text-theme-text-primary">{detail().median_eccentricity?.toFixed(2) ?? "—"}</span></span>
-                        <span><span class="text-theme-text-tertiary">FWHM:</span> <span class="font-bold text-theme-text-primary">{detail().median_fwhm?.toFixed(2) ?? "—"}</span></span>
+                        <span><span class="text-theme-text-tertiary">FWHM:</span> <span class="font-bold text-theme-text-primary">{detail().median_fwhm !== null && detail().median_fwhm !== undefined ? formatArcsec(detail().median_fwhm) : "—"}</span></span>
                         <span><span class="text-theme-text-tertiary">RMS:</span> <span class="font-bold text-theme-text-primary">{detail().median_guiding_rms !== null ? formatArcsec(detail().median_guiding_rms) : "—"}</span></span>
                       </div>
                       <div class="flex">
@@ -893,7 +919,7 @@ const SessionAccordionCard: Component<{
                             <span><span class="text-theme-text-tertiary">Integration:</span> <span class="font-bold text-theme-text-primary">{formatIntegration(rig.integration_seconds)}</span></span>
                             <span><span class="text-theme-text-tertiary">HFR:</span> <span class="font-bold text-theme-text-primary">{rig.median_hfr?.toFixed(2) ?? "—"}</span></span>
                             <span><span class="text-theme-text-tertiary">Ecc:</span> <span class="font-bold text-theme-text-primary">{rig.median_eccentricity?.toFixed(2) ?? "—"}</span></span>
-                            <span><span class="text-theme-text-tertiary">FWHM:</span> <span class="font-bold text-theme-text-primary">{rig.median_fwhm?.toFixed(2) ?? "—"}</span></span>
+                            <span><span class="text-theme-text-tertiary">FWHM:</span> <span class="font-bold text-theme-text-primary">{rig.median_fwhm !== null && rig.median_fwhm !== undefined ? formatArcsec(rig.median_fwhm) : "—"}</span></span>
                             <span><span class="text-theme-text-tertiary">RMS:</span> <span class="font-bold text-theme-text-primary">{rig.median_guiding_rms !== null ? formatArcsec(rig.median_guiding_rms) : "—"}</span></span>
                           </div>
                           {/* Rig-level custom columns */}
@@ -911,13 +937,19 @@ const SessionAccordionCard: Component<{
                                         columnType={col.column_type}
                                         value={val()?.value}
                                         dropdownOptions={col.dropdown_options}
-                                        onSave={(v) => api.setCustomValue({
-                                          column_id: col.id,
-                                          target_id: props.targetId!,
-                                          session_date: detail().session_date,
-                                          rig_label: rig.rig_label,
-                                          value: v,
-                                        })}
+                                        onSave={async (v) => {
+                                          await apiClient
+                                            .PUT("/api/custom-columns/values", {
+                                              body: {
+                                                column_id: col.id,
+                                                target_id: props.targetId!,
+                                                session_date: detail().session_date,
+                                                rig_label: rig.rig_label,
+                                                value: v,
+                                              },
+                                            })
+                                            .then(unwrap);
+                                        }}
                                       />
                                     </div>
                                   );

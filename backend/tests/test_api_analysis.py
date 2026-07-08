@@ -129,6 +129,48 @@ async def test_get_correlation_empty_data():
     assert body["y_metric"] == "hfr"
     assert body["points"] == []
     assert body["trend"] is None
+    # Contract fields present even with no data.
+    assert body["total_count"] == 0
+    assert body["sampled_count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_get_correlation_downsamples_over_cap():
+    """Frame granularity over the 5,000-point cap returns a downsampled point
+    set, but total_count reflects the full match and trend/stats span all rows."""
+    user = _admin_user()
+
+    n = 12000
+    frame_rows = [
+        MagicMock(x_val=float(i % 100), y_val=float((i * 7) % 100),
+                  night="2024-01-01", resolved_target_id=None)
+        for i in range(n)
+    ]
+    tgt_result = MagicMock()
+    tgt_result.all.return_value = []
+    data_result = MagicMock()
+    data_result.all.return_value = frame_rows
+    session = AsyncMock()
+    session.execute = AsyncMock(side_effect=[data_result, tgt_result])
+
+    app.dependency_overrides[get_current_user] = _override_user(user)
+    app.dependency_overrides[get_session] = _override_session(session)
+
+    with _make_cache_miss_patch():
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.get(
+                "/api/analysis/correlation?x_metric=humidity&y_metric=hfr&granularity=frame"
+            )
+
+    app.dependency_overrides.clear()
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["total_count"] == n
+    assert body["sampled_count"] == 5000
+    assert len(body["points"]) == 5000
+    # Trend is computed over the full set (needs >= 3 points).
+    assert body["trend"] is not None
 
 
 # ---------------------------------------------------------------------------

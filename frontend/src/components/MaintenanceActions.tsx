@@ -1,5 +1,6 @@
 import { Component, Show, createSignal } from "solid-js";
-import { api } from "../api/client";
+import { apiClient } from "../api/generated/client";
+import { unwrap } from "../api/unwrap";
 import { emitWithToast } from "../lib/emitWithToast";
 
 const MaintenanceActions: Component = () => {
@@ -18,7 +19,10 @@ const MaintenanceActions: Component = () => {
   };
 
   const fetchRefImages = (forceAll: boolean) => run(() => emitWithToast({
-    action: () => api.triggerReferenceThumbnails(forceAll) as Promise<{ task_id: string }>,
+    action: () =>
+      apiClient
+        .POST("/api/scan/generate-reference-thumbnails", { params: { query: { force: forceAll || undefined } } })
+        .then(unwrap) as Promise<{ task_id: string }>,
     pendingLabel: "Starting reference image fetch...",
     successLabel: "Reference image fetch complete",
     errorLabel: "Reference image fetch failed",
@@ -28,7 +32,12 @@ const MaintenanceActions: Component = () => {
   }));
 
   const regenThumbs = (opts: { purge?: boolean; missingOnly?: boolean }) => run(() => emitWithToast({
-    action: () => api.regenerateThumbnails(opts) as Promise<{ task_id: string }>,
+    action: () =>
+      apiClient
+        .POST("/api/scan/regenerate-thumbnails", {
+          params: { query: { purge: opts.purge || undefined, missing_only: opts.missingOnly || undefined } },
+        })
+        .then(unwrap) as Promise<{ task_id: string }>,
     pendingLabel: opts.missingOnly ? "Checking for missing thumbnails..." : opts.purge ? "Deleting and regenerating thumbnails..." : "Regenerating thumbnails...",
     successLabel: "Thumbnail regeneration complete",
     errorLabel: "Thumbnail regeneration failed",

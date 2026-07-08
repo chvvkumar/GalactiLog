@@ -1,26 +1,12 @@
-import { Component, Show, createSignal, onMount, For } from "solid-js";
-import { api } from "../api/client";
+import { Component, Show, createSignal, For } from "solid-js";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/solid-query";
+import { apiClient } from "../api/generated/client";
+import { unwrap } from "../api/unwrap";
+import { queryKeys } from "../api/queryKeys";
 import { showToast } from "./Toast";
 import Dialog from "./Dialog";
-
-interface TargetPreview {
-  id?: string;
-  primary_name: string;
-  object_type?: string | null;
-  constellation?: string | null;
-  image_count: number;
-  session_count: number;
-  integration_seconds: number;
-  aliases: string[];
-}
-
-interface MergePreviewData {
-  winner: TargetPreview;
-  loser: TargetPreview;
-  images_to_move: number;
-  aliases_to_add: string[];
-  mosaic_panels_to_move: number;
-}
+import { formatIntegration } from "../utils/format";
+import { getErrorMessage } from "../utils/errors";
 
 interface MergePreviewModalProps {
   winnerId?: string;
@@ -30,56 +16,50 @@ interface MergePreviewModalProps {
   onMerged: () => void;
 }
 
-function formatHours(seconds: number): string {
-  const h = seconds / 3600;
-  if (h < 1) return `${Math.round(seconds / 60)}m`;
-  return `${h.toFixed(1)}h`;
-}
-
 const MergePreviewModal: Component<MergePreviewModalProps> = (props) => {
-  const [preview, setPreview] = createSignal<MergePreviewData | null>(null);
-  const [loading, setLoading] = createSignal(true);
-  const [error, setError] = createSignal<string | null>(null);
+  const queryClient = useQueryClient();
   const [swapped, setSwapped] = createSignal(false);
-  const [merging, setMerging] = createSignal(false);
 
   const effectiveWinnerId = () => swapped() ? props.loserId : props.winnerId;
   const effectiveLoserId = () => swapped() ? props.winnerId : props.loserId;
 
-  const loadPreview = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const data = await api.mergePreview(
-        effectiveWinnerId()!,
-        effectiveLoserId(),
-        props.loserName,
-      );
-      setPreview(data);
-    } catch (e: any) {
-      setError(e?.message ?? "Failed to load preview");
-    } finally {
-      setLoading(false);
-    }
-  };
+  // Reactive on effectiveWinnerId/effectiveLoserId, so toggling `swapped`
+  // (the winner/loser radio) re-derives the query key and refetches --
+  // replacing the old code's explicit `loadPreview()` call inside
+  // `handleSwap` (and the `onMount` call for the initial load).
+  const previewQuery = useQuery(() => ({
+    queryKey: queryKeys.mergePreview(effectiveWinnerId() ?? "", effectiveLoserId(), props.loserName),
+    queryFn: () =>
+      apiClient
+        .POST("/api/targets/merge-preview", {
+          body: {
+            winner_id: effectiveWinnerId()!,
+            ...(effectiveLoserId() ? { loser_id: effectiveLoserId() } : {}),
+            ...(props.loserName ? { loser_name: props.loserName } : {}),
+          },
+        })
+        .then(unwrap),
+    enabled: !!effectiveWinnerId(),
+  }));
+  const preview = () => previewQuery.data ?? null;
+  const loading = () => previewQuery.isFetching;
+  const error = () => (previewQuery.error ? getErrorMessage(previewQuery.error, "Failed to load preview") : null);
 
-  onMount(() => {
-    loadPreview();
-  });
+  const handleSwap = () => setSwapped((s) => !s);
 
-  const handleSwap = async () => {
-    setSwapped((s) => !s);
-    await loadPreview();
-  };
-
-  const handleMerge = async () => {
-    setMerging(true);
-    try {
-      await api.mergeTargets(
-        effectiveWinnerId()!,
-        effectiveLoserId(),
-        props.loserName,
-      );
+  const mergeMutation = useMutation(() => ({
+    mutationFn: () =>
+      apiClient
+        .POST("/api/targets/merge", {
+          body: {
+            winner_id: effectiveWinnerId()!,
+            ...(effectiveLoserId() ? { loser_id: effectiveLoserId() } : {}),
+            ...(props.loserName ? { loser_name: props.loserName } : {}),
+          },
+        })
+        .then(unwrap),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["targets"] });
       const p = preview();
       showToast(
         p
@@ -87,12 +67,13 @@ const MergePreviewModal: Component<MergePreviewModalProps> = (props) => {
           : "Merge complete"
       );
       props.onMerged();
-    } catch (e: any) {
-      showToast(e?.message ?? "Merge failed", "error");
-    } finally {
-      setMerging(false);
-    }
-  };
+    },
+    onError: (e: unknown) => {
+      showToast(getErrorMessage(e, "Merge failed"), "error");
+    },
+  }));
+  const merging = () => mergeMutation.isPending;
+  const handleMerge = () => { mergeMutation.mutate(); };
 
   const canSwap = () => !!props.loserId;
 
@@ -174,7 +155,7 @@ const MergePreviewModal: Component<MergePreviewModalProps> = (props) => {
                     </div>
                     <div>
                       <span class={labelClass}>Integration</span>
-                      <span class={valueClass}>{formatHours(p().winner.integration_seconds)}</span>
+                      <span class={valueClass}>{formatIntegration(p().winner.integration_seconds)}</span>
                     </div>
                     <Show when={p().winner.aliases.length > 0}>
                       <div>
@@ -237,7 +218,7 @@ const MergePreviewModal: Component<MergePreviewModalProps> = (props) => {
                     </div>
                     <div>
                       <span class={labelClass}>Integration</span>
-                      <span class={valueClass}>{formatHours(p().loser.integration_seconds)}</span>
+                      <span class={valueClass}>{formatIntegration(p().loser.integration_seconds)}</span>
                     </div>
                     <Show when={p().loser.aliases.length > 0}>
                       <div>
@@ -282,7 +263,7 @@ const MergePreviewModal: Component<MergePreviewModalProps> = (props) => {
                   </ul>
                 </div>
 
-                <div class="text-xs px-2 py-1.5 rounded bg-yellow-500/10 text-yellow-400 border border-yellow-500/20">
+                <div class="text-xs px-2 py-1.5 rounded bg-theme-warning/10 text-theme-warning border border-theme-warning/20">
                   This merge can be reverted from Settings &gt; Target Merges.
                 </div>
               </>
