@@ -33,6 +33,8 @@ Open `docker-compose.yml` and update the lines marked with `<-- CHANGE`:
 | **Admin password** | Password for the admin account (min 8 characters) |
 | **Port** | Host port for the web UI (default: 8080) |
 
+You must set an admin password before starting a brand-new install. If `GALACTILOG_ADMIN_PASSWORD` is unset, no admin user exists yet, and no session secret has been generated, the container refuses to start rather than boot a site nobody can log into. This check only applies to a genuinely empty database: once an admin account exists, the container starts normally on later boots even if you remove the env var from your compose file.
+
 #### Platform-specific FITS paths
 
 **Linux:**
@@ -73,7 +75,7 @@ docker compose up -d
 docker compose logs -f app
 ```
 
-On first start, GalactiLog runs migrations, creates the admin account, and starts the web UI, API, and background worker.
+On first start, GalactiLog runs migrations, creates the admin account, and starts the web UI, API, and background worker. If `GALACTILOG_ADMIN_PASSWORD` was not set on a brand-new install, the container exits with an error explaining exactly that instead of starting. See [No admin credential: container exits immediately](#no-admin-credential-container-exits-immediately) in Troubleshooting.
 
 ### 4. Verify
 
@@ -219,6 +221,20 @@ docker rmi chvvkumar/galactilog
 Your FITS source files are never modified or deleted.
 
 ## Troubleshooting
+
+### No admin credential: container exits immediately
+
+If `docker compose up -d` starts and the `app` container exits right away, check the logs:
+
+```bash
+docker compose logs app
+```
+
+If you see `ERROR: No credentials found for a fresh install.`, this is a brand-new, empty database with no way to log in: `GALACTILOG_ADMIN_PASSWORD` is not set, no admin user exists in the database, and no session secret has been generated or configured. The container reports the same three conditions and then refuses to start.
+
+Fix: set `GALACTILOG_ADMIN_PASSWORD` in `docker-compose.yml` or `.env` (see Step 2), then run `docker compose up -d` again. The check runs before the application starts, so there is no way to create an admin account from inside the container on a truly fresh install; the env var is the only path forward.
+
+This check only fires on a genuinely empty install. Once an admin account exists, or a session secret has already been generated, the container starts normally even if `GALACTILOG_ADMIN_PASSWORD` is later removed from your compose file.
 
 ### Port 8080 already in use
 
