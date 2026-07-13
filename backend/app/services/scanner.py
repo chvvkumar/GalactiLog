@@ -213,6 +213,10 @@ def extract_metadata(fits_path: Path, header=None) -> dict[str, Any]:
         "image_type": header.get("IMAGETYP"),
         "telescope": header.get("TELESCOP"),
         "camera": header.get("INSTRUME"),
+        # Camera/framing rotation (sky position angle, degrees). NINA writes
+        # this as OBJCTROT; it is what the framing assistant reads back via
+        # set-rotation. CSV metrics below may override for CSV-sourced installs.
+        "rotator_position": _first_float(header, "OBJCTROT"),
         # HFR-family keywords only. FWHM/MEANFWHM are a different metric on a
         # different scale and go to median_fwhm, never median_hfr.
         "median_hfr": _first_float(header, "HFR") or _parse_hfr_from_filename(fits_path.name),

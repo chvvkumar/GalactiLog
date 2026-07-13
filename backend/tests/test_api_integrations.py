@@ -1,4 +1,5 @@
 import uuid
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -7,6 +8,7 @@ from httpx import ASGITransport, AsyncClient
 from app.main import app
 from app.api.deps import get_current_user
 from app.models.user import User, UserRole
+from app.services.target_detail import image_rotation
 
 
 def _admin_user():
@@ -199,6 +201,95 @@ async def test_allowlist_accepts_host_in_list(monkeypatch):
         assert resp.json() == {"ok": True}
     finally:
         app.dependency_overrides.clear()
+
+
+# ---------------------------------------------------------------------------
+# Rotation forwarding (set-rotation) — the framing bug
+# ---------------------------------------------------------------------------
+
+def _mock_nina_client():
+    mock_resp = MagicMock()
+    mock_resp.raise_for_status = MagicMock()
+    mock_client = AsyncMock()
+    mock_client.get = AsyncMock(return_value=mock_resp)
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
+    return mock_client
+
+
+@pytest.mark.asyncio
+async def test_nina_sends_rotation_when_position_angle_present():
+    """A non-null position_angle triggers a second GET to set-rotation with the
+    angle in degrees, after the set-coordinates call."""
+    app.dependency_overrides[get_current_user] = _auth_override()
+    mock_client = _mock_nina_client()
+    try:
+        with patch("app.api.integrations.httpx.AsyncClient", return_value=mock_client), \
+                patch("asyncio.sleep", new=AsyncMock()):
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://test") as client:
+                resp = await client.post(
+                    "/api/integrations/nina/send-coordinates",
+                    json={
+                        "url": "http://192.168.1.50:1888",
+                        "ra": 10.0,
+                        "dec": 20.0,
+                        "position_angle": 42.5,
+                    },
+                )
+        assert resp.status_code == 200
+        assert resp.json() == {"ok": True}
+        called_urls = [c.args[0] for c in mock_client.get.call_args_list]
+        assert any("/v2/api/framing/set-coordinates?RAangle=10.0&DecAngle=20.0" in u for u in called_urls)
+        assert any("/v2/api/framing/set-rotation?rotation=42.5" in u for u in called_urls)
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_nina_omits_rotation_when_position_angle_absent():
+    """With no position_angle, only set-coordinates is called; no set-rotation."""
+    app.dependency_overrides[get_current_user] = _auth_override()
+    mock_client = _mock_nina_client()
+    try:
+        with patch("app.api.integrations.httpx.AsyncClient", return_value=mock_client), \
+                patch("asyncio.sleep", new=AsyncMock()):
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://test") as client:
+                resp = await client.post(
+                    "/api/integrations/nina/send-coordinates",
+                    json={"url": "http://192.168.1.50:1888", "ra": 10.0, "dec": 20.0},
+                )
+        assert resp.status_code == 200
+        called_urls = [c.args[0] for c in mock_client.get.call_args_list]
+        assert len(called_urls) == 1
+        assert "set-rotation" not in called_urls[0]
+    finally:
+        app.dependency_overrides.clear()
+
+
+# ---------------------------------------------------------------------------
+# image_rotation: derive rotation from OBJCTROT when the column is null
+# ---------------------------------------------------------------------------
+
+def test_image_rotation_prefers_column():
+    img = SimpleNamespace(rotator_position=137.0, raw_headers={"OBJCTROT": "10"})
+    assert image_rotation(img) == 137.0
+
+
+def test_image_rotation_falls_back_to_objctrot():
+    img = SimpleNamespace(rotator_position=None, raw_headers={"OBJCTROT": "88.5"})
+    assert image_rotation(img) == 88.5
+
+
+def test_image_rotation_none_when_absent():
+    img = SimpleNamespace(rotator_position=None, raw_headers={"FILTER": "Ha"})
+    assert image_rotation(img) is None
+
+
+def test_image_rotation_handles_bad_objctrot():
+    img = SimpleNamespace(rotator_position=None, raw_headers={"OBJCTROT": "n/a"})
+    assert image_rotation(img) is None
 
 
 # ---------------------------------------------------------------------------
