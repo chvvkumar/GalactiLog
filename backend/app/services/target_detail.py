@@ -30,6 +30,30 @@ from app.services.target_helpers import (
 )
 
 
+def image_rotation(img) -> float | None:
+    """Return an image's camera/framing rotation in degrees, or None.
+
+    Single source of truth for deriving the rotation that is forwarded to
+    NINA's framing assistant (set-rotation). Prefer the parsed
+    ``rotator_position`` column; fall back to the ``OBJCTROT`` FITS keyword
+    stored in ``raw_headers``. Images scanned before rotator extraction (the
+    vast majority) have a null column but still carry OBJCTROT in raw_headers,
+    so this keeps rotation available without a re-scan. Units/convention match
+    what NINA writes to and reads back from OBJCTROT (degrees, sky position
+    angle).
+    """
+    if img.rotator_position is not None:
+        return img.rotator_position
+    raw = img.raw_headers or {}
+    val = raw.get("OBJCTROT")
+    if val is None:
+        return None
+    try:
+        return float(val)
+    except (ValueError, TypeError):
+        return None
+
+
 async def export_target(target_id, sessions: str | None, session: AsyncSession) -> ExportResponse:
     target = await session.get(Target, target_id)
     if not target:
@@ -348,8 +372,9 @@ async def get_target_detail(target_id: str, session: AsyncSession) -> TargetDeta
                 sess_dec_vals.append(dec_val)
             except (ValueError, TypeError):
                 pass
-            if img.rotator_position is not None:
-                sess_rotator = img.rotator_position
+            img_rot = image_rotation(img)
+            if img_rot is not None:
+                sess_rotator = img_rot
 
         session_overviews.append(SessionOverview(
             session_date=date_key,
@@ -397,8 +422,9 @@ async def get_target_detail(target_id: str, session: AsyncSession) -> TargetDeta
     effective_pa = target_obj.position_angle if target_obj else None
     if effective_pa is None and images:
         for img in reversed(images):
-            if img.rotator_position is not None:
-                fallback_pa = img.rotator_position
+            img_rot = image_rotation(img)
+            if img_rot is not None:
+                fallback_pa = img_rot
                 break
 
     # Fetch catalog memberships

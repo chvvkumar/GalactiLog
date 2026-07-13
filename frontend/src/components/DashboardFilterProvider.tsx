@@ -1,6 +1,6 @@
 import { Component, JSX, createContext, createEffect, createMemo, createSignal, useContext } from "solid-js";
 import { useSearchParams } from "@solidjs/router";
-import { useQuery } from "@tanstack/solid-query";
+import { useQuery, keepPreviousData } from "@tanstack/solid-query";
 import { apiClient } from "../api/generated/client";
 import type { paths } from "../api/generated/schema";
 import { unwrap } from "../api/unwrap";
@@ -291,6 +291,19 @@ const DashboardFilterProvider: Component<{ children: JSX.Element }> = (props) =>
         })
         .then(unwrap) as Promise<TargetAggregationResponse>,
     enabled: settingsReady(),
+    // Retain the previous key's data while a filter/search/page change refetches.
+    // @tanstack/solid-query's useQuery is backed by createResource: its `data`
+    // getter reads the (suspending) resource whenever there is no cached data
+    // for the CURRENT key. Every keystroke in the sidebar SearchBar rewrites the
+    // `search` param, changing this query key; without retained data, reading
+    // `targetData()` (in Sidebar/TargetFeed) re-enters the pending resource and
+    // re-suspends the app's single top-level <Suspense>. Under the router's
+    // navigation transition that swaps the resolved subtree out and back in,
+    // which blurs the focused search input on every keystroke. keepPreviousData
+    // keeps `state.data` defined across key changes so the getter returns the
+    // retained value instead of reading the pending resource -- no re-suspend,
+    // no focus loss. Matches the Analysis tabs, which already use this.
+    placeholderData: keepPreviousData,
   }));
 
   // `.latest` mirrors Solid `createResource`'s behavior of retaining the last
