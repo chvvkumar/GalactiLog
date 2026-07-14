@@ -744,28 +744,32 @@ const TargetDetailPage: Component = () => {
                     </HelpPopover>
                   </div>
                   <div class="flex items-center gap-2 shrink-0">
-                    <button
-                      class="px-4 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded text-sm font-medium hover:bg-theme-accent/25 transition-colors"
-                      onClick={() => setShowExport(true)}
+                    <Show when={auth.isAdmin()}>
+                      <button
+                        class="px-4 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded text-sm font-medium hover:bg-theme-accent/25 transition-colors"
+                        onClick={() => setShowMerge(true)}
+                      >
+                        Merge
+                      </button>
+                    </Show>
+                    <ActionsMenu
+                      ariaLabel="Export options"
+                      buttonClass="px-4 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded text-sm font-medium hover:bg-theme-accent/25 transition-colors"
+                      triggerContent={<span class="inline-flex items-center gap-1">Export<span class="text-xs leading-none" aria-hidden="true">&#9662;</span></span>}
                     >
-                      Export
-                    </button>
-                    <ActionsMenu>
                       {(close) => (
                         <>
-                          <Show when={auth.isAdmin()}>
-                            <button
-                              type="button"
-                              role="menuitem"
-                              class="w-full text-left px-3 py-1.5 text-sm text-theme-text-primary hover:bg-theme-hover transition-colors cursor-pointer"
-                              onClick={() => {
-                                close();
-                                setShowMerge(true);
-                              }}
-                            >
-                              Merge
-                            </button>
-                          </Show>
+                          <button
+                            type="button"
+                            role="menuitem"
+                            class="w-full text-left px-3 py-1.5 text-sm text-theme-text-primary hover:bg-theme-hover transition-colors cursor-pointer"
+                            onClick={() => {
+                              close();
+                              setShowExport(true);
+                            }}
+                          >
+                            AstroBin CSV
+                          </button>
                           <button
                             type="button"
                             role="menuitem"
