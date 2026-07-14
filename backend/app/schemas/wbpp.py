@@ -18,6 +18,7 @@ class WbppSessionPreview(BaseModel):
     levels: list[WbppFolderLevel]
     default_level_index: int
     total_frame_count: int
+    excluded_frame_count: int = 0
 
 
 class WbppPreviewRequest(BaseModel):
@@ -26,6 +27,8 @@ class WbppPreviewRequest(BaseModel):
     chosen_levels: dict[str, int] = Field(default_factory=dict)
     library_root: str
     target_os: str | None = None
+    # LIGHT frame paths (relative to the FITS/library root, POSIX) to omit.
+    excluded_source_relatives: list[str] = Field(default_factory=list)
 
 
 class WbppPreviewResponse(BaseModel):
@@ -47,6 +50,8 @@ class WbppGenerateRequest(BaseModel):
             "masters", "Masters", "MASTERS", "*CALIBRATED", "CALIBRATED",
         ]
     )
+    # LIGHT frame paths (relative to the FITS/library root, POSIX) to omit.
+    excluded_source_relatives: list[str] = Field(default_factory=list)
 
 
 class WbppCopyOperation(BaseModel):
@@ -67,3 +72,6 @@ class WbppGenerateResponse(BaseModel):
     script: str
     operations: list[WbppCopyOperation]
     exclusions: list[str]
+    light_total: int = 0
+    light_excluded: int = 0
+    light_copied: int = 0

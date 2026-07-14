@@ -129,13 +129,23 @@ async function resolveDir(root: DirHandle, relPath: string): Promise<DirHandle> 
   return h;
 }
 
-async function countFiles(dir: DirHandle, isExcluded: (n: string) => boolean): Promise<number> {
+async function countFiles(
+  dir: DirHandle,
+  isExcluded: (n: string) => boolean,
+  excludedFiles: Set<string>,
+  relPath: string,
+): Promise<number> {
   let n = 0;
   for await (const entry of dir.values()) {
     if (entry.kind === "directory") {
       if (isExcluded(entry.name)) continue;
-      n += await countFiles(entry, isExcluded);
+      const childRel = relPath ? `${relPath}/${entry.name}` : entry.name;
+      n += await countFiles(entry, isExcluded, excludedFiles, childRel);
     } else {
+      const fileRel = relPath ? `${relPath}/${entry.name}` : entry.name;
+      // Quality-filter exclusion: skip the count too, so progress totals match
+      // what actually copies.
+      if (excludedFiles.has(fileRel)) continue;
       n += 1;
     }
   }
@@ -146,6 +156,8 @@ async function copyDir(
   src: DirHandle,
   dest: DirHandle,
   isExcluded: (n: string) => boolean,
+  excludedFiles: Set<string>,
+  relPath: string,
   onFile: (name: string) => void,
   signal?: AbortSignal,
 ): Promise<void> {
@@ -153,9 +165,13 @@ async function copyDir(
     if (signal?.aborted) throw new CopyCancelledError();
     if (entry.kind === "directory") {
       if (isExcluded(entry.name)) continue;
+      const childRel = relPath ? `${relPath}/${entry.name}` : entry.name;
       const child = await dest.getDirectoryHandle(entry.name, { create: true });
-      await copyDir(entry, child, isExcluded, onFile, signal);
+      await copyDir(entry, child, isExcluded, excludedFiles, childRel, onFile, signal);
     } else {
+      const fileRel = relPath ? `${relPath}/${entry.name}` : entry.name;
+      // Quality-filter exclusion: skip both the copy and the progress callback.
+      if (excludedFiles.has(fileRel)) continue;
       const file = await entry.getFile();
       const fh = await dest.getFileHandle(entry.name, { create: true });
       const writable = await fh.createWritable();
@@ -175,6 +191,9 @@ export interface BrowserCopyResult {
 export interface BrowserCopyOptions {
   operations: WbppCopyOperation[];
   exclusions: string[];
+  // Quality-filter exclude set: fits-root-relative POSIX paths of LIGHT frames to
+  // omit from the copy. Empty when the filter is off (whole-folder copy).
+  excludedSourceRelatives: string[];
   onProgress: (done: number, total: number, label: string) => void;
   signal?: AbortSignal;
 }
@@ -196,9 +215,11 @@ export async function runBrowserCopy(
   }
 
   const isExcluded = makeExcluder(opts.exclusions);
+  const excludedFiles = new Set(opts.excludedSourceRelatives);
 
   // Resolve every source folder up front so a wrong root fails before any copy.
-  const resolved: { src: DirHandle; destDir: DirHandle; label: string }[] = [];
+  // sourceRelative seeds the per-file relative path used to match the exclude set.
+  const resolved: { src: DirHandle; destDir: DirHandle; label: string; sourceRelative: string }[] = [];
   for (const op of opts.operations) {
     let src: DirHandle;
     try {
@@ -210,11 +231,11 @@ export async function runBrowserCopy(
       );
     }
     const destDir = await destHandle.getDirectoryHandle(op.dest_entry, { create: true });
-    resolved.push({ src, destDir, label: op.session_date });
+    resolved.push({ src, destDir, label: op.session_date, sourceRelative: op.source_relative });
   }
 
   let total = 0;
-  for (const r of resolved) total += await countFiles(r.src, isExcluded);
+  for (const r of resolved) total += await countFiles(r.src, isExcluded, excludedFiles, r.sourceRelative);
 
   let done = 0;
   for (const r of resolved) {
@@ -222,6 +243,8 @@ export async function runBrowserCopy(
       r.src,
       r.destDir,
       isExcluded,
+      excludedFiles,
+      r.sourceRelative,
       (name) => {
         done += 1;
         opts.onProgress(done, total, `${r.label}: ${name}`);

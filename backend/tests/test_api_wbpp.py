@@ -90,5 +90,91 @@ async def test_wbpp_generate_returns_script_and_operations_for_windows_root():
         assert "\\" not in op["source_relative"]
         assert op["dest_entry"] == "Light"
         assert isinstance(data["exclusions"], list)
+        # No exclude list supplied -> counts reflect a single copied light.
+        assert data["light_total"] == 1
+        assert data["light_excluded"] == 0
+        assert data["light_copied"] == 1
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_wbpp_preview_counts_excluded_frames():
+    from unittest.mock import patch as _patch
+    from app.api import wbpp as wbpp_module
+
+    fits_root = "/app/data/fits"
+    rel = "M31/2024-01-01/Light/frame.fits"
+
+    mock_session = AsyncMock()
+    mock_result = MagicMock()
+    mock_result.all.return_value = [
+        (f"{fits_root}/{rel}", date(2024, 1, 1), "M 31"),
+    ]
+    mock_session.execute = AsyncMock(return_value=mock_result)
+
+    async def override():
+        yield mock_session
+
+    app.dependency_overrides[get_session] = override
+    app.dependency_overrides[get_current_user] = lambda: _admin()
+    try:
+        with _patch.object(wbpp_module.settings, "fits_data_path", fits_root):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+                resp = await client.post("/api/wbpp/preview", json={
+                    "target_id": str(uuid.uuid4()),
+                    "session_dates": ["2024-01-01"],
+                    "library_root": "/mnt/astro",
+                    "excluded_source_relatives": [rel],
+                })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["sessions"][0]["total_frame_count"] == 1
+        assert data["sessions"][0]["excluded_frame_count"] == 1
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_wbpp_generate_excludes_named_light_and_counts():
+    from unittest.mock import patch as _patch
+    from app.api import wbpp as wbpp_module
+
+    fits_root = "/app/data/fits"
+    good = "M31/2024-01-01/Light/good.fits"
+    bad = "M31/2024-01-01/Light/bad.fits"
+
+    mock_session = AsyncMock()
+    mock_result = MagicMock()
+    mock_result.all.return_value = [
+        (f"{fits_root}/{good}", date(2024, 1, 1), "M 31"),
+        (f"{fits_root}/{bad}", date(2024, 1, 1), "M 31"),
+    ]
+    mock_session.execute = AsyncMock(return_value=mock_result)
+
+    async def override():
+        yield mock_session
+
+    app.dependency_overrides[get_session] = override
+    app.dependency_overrides[get_current_user] = lambda: _admin()
+    try:
+        with _patch.object(wbpp_module.settings, "fits_data_path", fits_root):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+                resp = await client.post("/api/wbpp/generate", json={
+                    "target_id": str(uuid.uuid4()),
+                    "target_name": "M 31",
+                    "session_dates": ["2024-01-01"],
+                    "library_root": "Z:\\Astro",
+                    "excluded_source_relatives": [bad],
+                })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["light_total"] == 2
+        assert data["light_excluded"] == 1
+        assert data["light_copied"] == 1
+        # the named light is emitted as a per-file skip; the good sibling is not.
+        assert "ExcludeFiles = @(" in data["script"]
+        assert "bad.fits" in data["script"]
+        assert "good.fits" not in data["script"]
     finally:
         app.dependency_overrides.clear()

@@ -10,7 +10,9 @@ import statistics
 from collections import defaultdict
 from datetime import datetime
 
+from app.config import settings
 from app.services.normalization import normalize_filter, normalize_equipment
+from app.services.wbpp_export import fits_relative_path
 from app.schemas.target import FilterDetail, FrameRecord, RigDetail, SessionInsight
 
 
@@ -92,6 +94,7 @@ def build_rig_details(
                 file_name=img.file_name,
                 image_id=str(img.id),
                 file_path=img.file_path,
+                source_relative=fits_relative_path(img.file_path, settings.fits_data_path),
                 thumbnail_url=f"/thumbnails/{img.thumbnail_path.split('/')[-1].split(chr(92))[-1]}" if img.thumbnail_path else None,
                 hfr_stdev=img.hfr_stdev,
                 fwhm=img.fwhm,

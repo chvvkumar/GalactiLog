@@ -669,6 +669,7 @@ const TargetDetailPage: Component = () => {
           targetId={params.targetId}
           targetName={targetDetail()!.primary_name}
           selectedDates={selectedChartDates()}
+          sessionCache={sessionCache()}
           onClose={() => setShowWbppExport(false)}
         />
       </Show>
