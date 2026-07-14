@@ -2,6 +2,7 @@ import { Component, Show, createSignal } from "solid-js";
 import { apiClient } from "../api/generated/client";
 import { unwrap } from "../api/unwrap";
 import { emitWithToast } from "../lib/emitWithToast";
+import Button from "./ui/Button";
 
 const MaintenanceActions: Component = () => {
   const [showRefThumbChoice, setShowRefThumbChoice] = createSignal(false);
@@ -51,22 +52,24 @@ const MaintenanceActions: Component = () => {
       <div class="flex justify-between items-center flex-wrap gap-2">
         <h3 class="text-theme-text-primary font-medium">Maintenance</h3>
         <div class="flex gap-2 flex-shrink-0 flex-wrap">
-          <button
+          <Button
+            variant="secondary"
+            size="sm"
             onClick={() => setShowRefThumbChoice(true)}
             disabled={busy()}
             title="Downloads survey images from NASA SkyView for targets with coordinates."
-            class="px-3 py-1.5 border border-theme-border-em text-theme-text-secondary rounded text-sm disabled:opacity-50 hover:text-theme-text-primary hover:border-theme-accent transition-colors"
           >
             Fetch Reference Images
-          </button>
-          <button
+          </Button>
+          <Button
+            variant="warning"
+            size="sm"
             onClick={() => setShowRegenChoice(true)}
             disabled={busy()}
             title="Re-create all thumbnails using current stretch settings. Optionally delete existing thumbnails first."
-            class="px-3 py-1.5 bg-theme-warning/15 text-theme-warning border border-theme-warning/30 rounded text-sm font-medium disabled:opacity-50 hover:bg-theme-warning/25 transition-colors"
           >
             Regenerate Thumbnails
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -77,24 +80,15 @@ const MaintenanceActions: Component = () => {
             Downloads survey images from NASA SkyView. Fetch missing images only, or re-fetch all (replacing existing ones with improved processing)?
           </p>
           <div class="flex gap-2 pt-1">
-            <button
-              onClick={() => fetchRefImages(false)}
-              class="px-3 py-1.5 border border-theme-accent text-theme-accent rounded text-xs font-medium hover:bg-theme-accent/20 transition-colors"
-            >
+            <Button variant="primary" size="sm" onClick={() => fetchRefImages(false)}>
               Missing only
-            </button>
-            <button
-              onClick={() => fetchRefImages(true)}
-              class="px-3 py-1.5 border border-theme-border-em text-theme-text-secondary rounded text-xs hover:border-theme-accent hover:text-theme-text-primary transition-colors"
-            >
+            </Button>
+            <Button variant="secondary" size="sm" onClick={() => fetchRefImages(true)}>
               Re-fetch all
-            </button>
-            <button
-              onClick={() => setShowRefThumbChoice(false)}
-              class="px-3 py-1.5 border border-theme-border-em text-theme-text-secondary rounded text-xs hover:border-white hover:text-theme-text-primary transition-colors"
-            >
+            </Button>
+            <Button variant="secondary" size="sm" onClick={() => setShowRefThumbChoice(false)}>
               Cancel
-            </button>
+            </Button>
           </div>
         </div>
       </Show>
@@ -106,30 +100,18 @@ const MaintenanceActions: Component = () => {
             Regenerate only missing files (fast), overwrite all existing files, or delete all then regenerate?
           </p>
           <div class="flex gap-2 pt-1">
-            <button
-              onClick={() => regenThumbs({ missingOnly: true })}
-              class="px-3 py-1.5 border border-theme-accent text-theme-accent rounded text-xs font-medium hover:bg-theme-accent/20 transition-colors"
-            >
+            <Button variant="primary" size="sm" onClick={() => regenThumbs({ missingOnly: true })}>
               Missing only
-            </button>
-            <button
-              onClick={() => regenThumbs({})}
-              class="px-3 py-1.5 border border-theme-border-em text-theme-text-secondary rounded text-xs hover:border-theme-accent hover:text-theme-text-primary transition-colors"
-            >
+            </Button>
+            <Button variant="secondary" size="sm" onClick={() => regenThumbs({})}>
               Regenerate all
-            </button>
-            <button
-              onClick={() => setConfirmPurgeRegen(true)}
-              class="px-3 py-1.5 border border-theme-error/50 text-theme-error rounded text-xs hover:bg-theme-error/20 transition-colors"
-            >
+            </Button>
+            <Button variant="danger" size="sm" onClick={() => setConfirmPurgeRegen(true)}>
               Delete & regenerate
-            </button>
-            <button
-              onClick={() => setShowRegenChoice(false)}
-              class="px-3 py-1.5 border border-theme-border-em text-theme-text-secondary rounded text-xs hover:border-white hover:text-theme-text-primary transition-colors"
-            >
+            </Button>
+            <Button variant="secondary" size="sm" onClick={() => setShowRegenChoice(false)}>
               Cancel
-            </button>
+            </Button>
           </div>
         </div>
       </Show>
@@ -143,18 +125,16 @@ const MaintenanceActions: Component = () => {
             records are not affected. Progress will be reported in the activity log.
           </p>
           <div class="flex gap-2 pt-1">
-            <button
-              onClick={() => regenThumbs({ purge: true })}
-              class="px-3 py-1.5 bg-theme-error text-theme-text-primary rounded text-xs font-medium hover:opacity-90 transition-colors"
-            >
+            <Button variant="danger" size="sm" onClick={() => regenThumbs({ purge: true })}>
               Yes, delete and regenerate
-            </button>
-            <button
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
               onClick={() => { setConfirmPurgeRegen(false); setShowRegenChoice(false); }}
-              class="px-3 py-1.5 border border-theme-border-em text-theme-text-secondary rounded text-xs hover:border-white hover:text-theme-text-primary transition-colors"
             >
               Cancel
-            </button>
+            </Button>
           </div>
         </div>
       </Show>

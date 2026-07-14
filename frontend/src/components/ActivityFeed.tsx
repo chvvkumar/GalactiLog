@@ -19,6 +19,7 @@ import type {
   ActivitySeverity,
   ActiveJob,
 } from "../api/types";
+import Button from "./ui/Button";
 import FailedFilesList from "./activity/FailedFilesList";
 import EnrichmentFailureList from "./activity/EnrichmentFailureList";
 import DetailsJsonFallback from "./activity/DetailsJsonFallback";
@@ -507,19 +508,12 @@ const ActivityFeed: Component = () => {
           fallback={
             <div class="flex items-center gap-1.5">
               <span class="text-xs text-theme-text-secondary">Clear all?</span>
-              <button
-                onClick={handleClear}
-                disabled={clearing()}
-                class="px-2 py-0.5 text-xs text-theme-error border border-theme-error/40 rounded hover:bg-theme-error/10 transition-colors disabled:opacity-50"
-              >
+              <Button variant="danger" size="sm" onClick={handleClear} disabled={clearing()}>
                 Yes
-              </button>
-              <button
-                onClick={() => setShowClearConfirm(false)}
-                class="px-2 py-0.5 text-xs text-theme-text-secondary border border-theme-border rounded hover:text-theme-text-primary transition-colors"
-              >
+              </Button>
+              <Button variant="secondary" size="sm" onClick={() => setShowClearConfirm(false)}>
                 No
-              </button>
+              </Button>
             </div>
           }
         >
@@ -616,13 +610,9 @@ const ActivityFeed: Component = () => {
 
             <Show when={nextCursor() !== null}>
               <div class="py-3 text-center">
-                <button
-                  onClick={loadMore}
-                  disabled={loadingMore()}
-                  class="px-4 py-1.5 text-xs border border-theme-border text-theme-text-secondary rounded hover:text-theme-text-primary hover:border-theme-border-em transition-colors disabled:opacity-50"
-                >
+                <Button variant="secondary" onClick={loadMore} disabled={loadingMore()}>
                   {loadingMore() ? "Loading..." : "Load older"}
-                </button>
+                </Button>
               </div>
             </Show>
           </Show>

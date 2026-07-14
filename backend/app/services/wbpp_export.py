@@ -49,6 +49,54 @@ def detect_os(library_root: str) -> str:
     return "posix"
 
 
+def fits_relative_path(file_path: str, fits_root: str) -> str:
+    """Return a file's path relative to the FITS/library root, POSIX-separated.
+
+    Single source of truth for the excluded-file identifier: the same domain as
+    FolderLevel.relative_path / WbppCopyOperation.source_relative. Degrades
+    gracefully (returns the input minus a leading slash) if the path is not
+    under fits_root.
+    """
+    root = fits_root.rstrip("/")
+    if file_path.startswith(root + "/"):
+        return file_path[len(root):].lstrip("/")
+    return file_path.lstrip("/")
+
+
+def map_excluded_to_ops(excluded, chosen) -> dict:
+    """Map fits-root-relative excluded LIGHT paths onto chosen copy operations.
+
+    `excluded` is a list of paths relative to the FITS/library root (POSIX). `chosen`
+    is a list of (session_date, FolderLevel). Returns a dict keyed by the 0-based index
+    into `chosen`; each value is the list of paths relative to that op's transfer root
+    (its FolderLevel.relative_path). An excluded path is assigned to the op whose
+    relative_path is the longest matching folder-level prefix; paths matching no chosen
+    folder are dropped.
+    """
+    result: dict[int, list[str]] = {}
+    for path in excluded:
+        norm = path.lstrip("/")
+        best_idx = -1
+        best_len = -1
+        for i, (_, lv) in enumerate(chosen):
+            prefix = lv.relative_path.rstrip("/")
+            if not prefix:
+                score = 0
+            elif norm == prefix or norm.startswith(prefix + "/"):
+                score = len(prefix)
+            else:
+                continue
+            if score > best_len:
+                best_idx, best_len = i, score
+        if best_idx < 0:
+            continue
+        _, lv = chosen[best_idx]
+        prefix = lv.relative_path.rstrip("/")
+        rel = norm[len(prefix):].lstrip("/") if prefix else norm
+        result.setdefault(best_idx, []).append(rel)
+    return result
+
+
 def translate_path(container_path: str, fits_root: str, library_root: str, target_os: str) -> str:
     """Strip fits_root from container_path, prepend library_root, adjust separators.
 
@@ -181,14 +229,20 @@ def disambiguate_staging_names(selected_paths: list[str], session_dates: list[st
     ]
 
 
-def generate_powershell_script(copy_ops, staging_root, target_name, exclusions, session_dates, filename=None):
+def generate_powershell_script(copy_ops, staging_root, target_name, exclusions, session_dates, filename=None, excluded_by_op=None):
     """Generate a PowerShell .ps1 copy script with a progress bar.
 
     Copies recursively (copy only), applies component-level exclusions, gathers
     the full file list first so it can show Write-Progress with an accurate
     overall percentage as files are copied.
+
+    When excluded_by_op is a non-empty dict (0-based op index -> list of
+    transfer-root-relative file paths), those specific files are skipped on top
+    of the folder-level exclusions. When it is None/empty the output is
+    byte-identical to the folder-only behavior.
     """
     excl_patterns = "|".join(re.escape(e).replace(r"\*", ".*") for e in exclusions)
+    has_exclusions = bool(excluded_by_op)
     script_name = filename or "this script"
     # Single-quoted PowerShell literal: double any embedded apostrophes (e.g. "Bode's").
     quoted_name = script_name.replace("'", "''")
@@ -212,11 +266,16 @@ def generate_powershell_script(copy_ops, staging_root, target_name, exclusions, 
         "",
         "$Jobs = @(",
     ]
-    for src, entry_name in copy_ops:
-        lines.append(
+    for op_idx, (src, entry_name) in enumerate(copy_ops):
+        job = (
             f"    @{{ Src = {_ps_quote(src)}; "
-            f"Dst = (Join-Path $StagingRoot {_ps_quote(entry_name)}) }}"
+            f"Dst = (Join-Path $StagingRoot {_ps_quote(entry_name)})"
         )
+        if has_exclusions:
+            excl = excluded_by_op.get(op_idx) or []
+            quoted = ", ".join(_ps_quote(e.replace("/", "\\")) for e in excl)
+            job += f"; ExcludeFiles = @({quoted})"
+        lines.append(job + " }")
     lines += [
         ")",
         "",
@@ -262,12 +321,23 @@ def generate_powershell_script(copy_ops, staging_root, target_name, exclusions, 
     if exclusions:
         # Match a full path COMPONENT (anchored ^...$) rather than an arbitrary
         # substring, so "finals" does not exclude "semifinals".
-        lines.append(
-            f"        -not ($_.FullName.Split([char[]]@('\\', '/')) "
+        base_pred = (
+            f"-not ($_.FullName.Split([char[]]@('\\', '/')) "
             f'| Where-Object {{ $_ -match "^({excl_patterns})$" }})'
         )
     else:
-        lines.append("        $true")
+        base_pred = "$true"
+    if has_exclusions:
+        # Per-file exclusion: compute the file's path relative to this job's
+        # source root (backslash-normalized) and drop it when it is in the job's
+        # ExcludeFiles set (-contains is case-insensitive for strings).
+        lines.append(
+            "        $RelPath = $_.FullName.Substring($Job.Src.Length)"
+            ".TrimStart('\\', '/').Replace('/', '\\')"
+        )
+        lines.append(f"        ({base_pred}) -and (-not ($Job.ExcludeFiles -contains $RelPath))")
+    else:
+        lines.append("        " + base_pred)
     lines += [
         "    } | ForEach-Object {",
         "        $RelPath = $_.FullName.Substring($Job.Src.Length).TrimStart('\\', '/')",
@@ -388,7 +458,7 @@ def generate_powershell_script(copy_ops, staging_root, target_name, exclusions, 
     return "\n".join(lines)
 
 
-def generate_shell_script(copy_ops, staging_root, target_name, exclusions, session_dates, filename=None):
+def generate_shell_script(copy_ops, staging_root, target_name, exclusions, session_dates, filename=None, excluded_by_op=None):
     """Generate a POSIX shell .sh copy script using rsync with a progress meter.
 
     Emits a colorized header/footer (colors auto-disabled when output is not a
@@ -398,15 +468,34 @@ def generate_shell_script(copy_ops, staging_root, target_name, exclusions, sessi
     User-derived values (staging root, source paths) are single-quoted via
     _sh_quote; the target name is passed to printf as a quoted %s argument so
     command substitution in any of them cannot execute.
+
+    When excluded_by_op is a non-empty dict (0-based op index -> list of
+    transfer-root-relative file paths), each such file becomes a per-job
+    --exclude='/<relpath>' (leading slash anchors it to that job's transfer
+    root). When it is None/empty the output is byte-identical to the
+    folder-only behavior.
     """
     excl_args = [f'--exclude="{e}"' for e in exclusions]
+    has_exclusions = bool(excluded_by_op)
     total = len(copy_ops)
     script_name = filename or "wbpp_export.sh"
     # rsync source ($3) carries a trailing slash from the call site; dest is
     # derived inside the helper from the staging root and the entry name ($2).
-    rsync_cmd = " ".join(
-        ["rsync", "-a", "--copy-links", "--info=progress2", *excl_args, '"$3"', '"$dest/"']
-    )
+    # When per-file exclusions are active, $4+ carry extra --exclude args.
+    if has_exclusions:
+        helper_comment = (
+            "    # $1 = index, $2 = entry name, $3 = source dir (with trailing slash), "
+            "$4+ = extra rsync args"
+        )
+        rsync_cmd = " ".join(
+            ["rsync", "-a", "--copy-links", "--info=progress2", *excl_args,
+             '"${@:4}"', '"$3"', '"$dest/"']
+        )
+    else:
+        helper_comment = "    # $1 = index, $2 = entry name, $3 = source dir (with trailing slash)"
+        rsync_cmd = " ".join(
+            ["rsync", "-a", "--copy-links", "--info=progress2", *excl_args, '"$3"', '"$dest/"']
+        )
     lines = [
         "#!/usr/bin/env bash",
         "# WBPP Session Export",
@@ -438,7 +527,7 @@ def generate_shell_script(copy_ops, staging_root, target_name, exclusions, sessi
         "printf '\\n'",
         "",
         "copy_folder() {",
-        "    # $1 = index, $2 = entry name, $3 = source dir (with trailing slash)",
+        helper_comment,
         "    printf '%s[%s/%s] %s%s\\n' \"$C_TITLE\" \"$1\" \"$TOTAL\" \"$2\" \"$C_RESET\"",
         '    local dest="$STAGING_ROOT/$2"',
         '    mkdir -p "$dest"',
@@ -448,9 +537,11 @@ def generate_shell_script(copy_ops, staging_root, target_name, exclusions, sessi
         "",
     ]
     for idx, (src, entry_name) in enumerate(copy_ops, start=1):
-        lines.append(
-            f"copy_folder {idx} {_sh_quote(entry_name)} {_sh_quote(src + '/')}"
-        )
+        call = f"copy_folder {idx} {_sh_quote(entry_name)} {_sh_quote(src + '/')}"
+        if has_exclusions:
+            for e in excluded_by_op.get(idx - 1) or []:
+                call += f" --exclude={_sh_quote('/' + e.lstrip('/'))}"
+        lines.append(call)
     lines += [
         "",
         f"printf '%s%s%s\\n' \"$C_OK\" 'Done. Copied {total} folder(s).' \"$C_RESET\"",

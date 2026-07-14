@@ -6,6 +6,8 @@ interface ActionsMenuProps {
   ariaLabel?: string;
   buttonClass?: string;
   menuClass?: string;
+  // Optional trigger content. Defaults to the "..." ellipsis glyph.
+  triggerContent?: JSX.Element;
 }
 
 // Dropdown "..." actions menu with document click-outside and Escape-to-close
@@ -50,7 +52,9 @@ const ActionsMenu: Component<ActionsMenuProps> = (props) => {
           "inline-flex items-center justify-center w-8 h-8 rounded border border-theme-border text-theme-text-secondary hover:text-theme-text-primary hover:bg-theme-hover transition-colors cursor-pointer"
         }
       >
-        <span class="text-lg leading-none" aria-hidden="true">&#8943;</span>
+        <Show when={props.triggerContent} fallback={<span class="text-lg leading-none" aria-hidden="true">&#8943;</span>}>
+          {props.triggerContent}
+        </Show>
       </button>
       <Show when={open()}>
         <div
@@ -58,7 +62,7 @@ const ActionsMenu: Component<ActionsMenuProps> = (props) => {
           onClick={(e) => e.stopPropagation()}
           class={
             props.menuClass ??
-            "absolute top-full right-0 mt-2 z-50 min-w-[12rem] bg-theme-elevated border border-theme-border rounded-[var(--radius-sm)] shadow-[var(--shadow-lg)] py-1"
+            "absolute top-full right-0 mt-2 z-50 min-w-[12rem] glass-popover border border-theme-border rounded-[var(--radius-sm)] shadow-[var(--shadow-lg)] py-1"
           }
         >
           {props.children(close)}

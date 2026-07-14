@@ -8,6 +8,7 @@ import { formatDate } from "../../utils/dateTime";
 import { useSettingsContext } from "../SettingsProvider";
 import HelpPopover from "../HelpPopover";
 import DataTable, { type DataTableColumn } from "../DataTable";
+import Button from "../ui/Button";
 
 export const UsersTab: Component = () => {
   const { user: currentUser } = useAuth();
@@ -171,30 +172,21 @@ export const UsersTab: Component = () => {
             >
               {u.is_active ? "Disable" : "Enable"}
             </button>
-            <button
-              onClick={() => setConfirmDeleteId(u.id)}
-              class="text-xs text-red-400 hover:text-red-300 transition-colors"
-            >
+            <Button variant="danger" size="sm" onClick={() => setConfirmDeleteId(u.id)}>
               Delete
-            </button>
+            </Button>
           </div>
           <Show when={confirmDeleteId() === u.id}>
             <div class="mt-2 bg-theme-error/20 border border-theme-error/50 rounded-[var(--radius-md)] p-3 space-y-2 text-left">
               <p class="text-sm text-theme-error font-medium">Delete "{u.username}"?</p>
               <p class="text-xs text-theme-error/70">This cannot be undone. All data associated with this user will be removed.</p>
               <div class="flex gap-2 pt-1">
-                <button
-                  onClick={() => handleDelete(u)}
-                  class="px-3 py-1.5 bg-theme-error text-white rounded text-xs font-medium hover:opacity-90 transition-opacity"
-                >
+                <Button variant="danger" size="sm" onClick={() => handleDelete(u)}>
                   Yes, delete
-                </button>
-                <button
-                  onClick={() => setConfirmDeleteId(null)}
-                  class="px-3 py-1.5 border border-theme-border-em text-theme-text-secondary rounded text-xs hover:text-theme-text-primary transition-colors"
-                >
+                </Button>
+                <Button variant="secondary" size="sm" onClick={() => setConfirmDeleteId(null)}>
                   Cancel
-                </button>
+                </Button>
               </div>
             </div>
           </Show>
@@ -215,12 +207,9 @@ export const UsersTab: Component = () => {
             <p>Example: create a viewer account for a collaborator who should see statistics without being able to modify configuration.</p>
           </HelpPopover>
         </div>
-        <button
-          onClick={() => setShowCreate(!showCreate())}
-          class="px-3 py-1.5 text-xs bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded font-medium hover:bg-theme-accent/25 transition-colors"
-        >
+        <Button size="sm" onClick={() => setShowCreate(!showCreate())}>
           {showCreate() ? "Cancel" : "Add User"}
-        </button>
+        </Button>
       </div>
 
       <Show when={showCreate()}>
@@ -259,13 +248,9 @@ export const UsersTab: Component = () => {
               </select>
             </div>
           </div>
-          <button
-            type="submit"
-            disabled={creating()}
-            class="px-3 py-1.5 text-xs bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded font-medium hover:bg-theme-accent/25 transition-colors disabled:opacity-50"
-          >
+          <Button type="submit" size="sm" disabled={creating()}>
             {creating() ? "Creating..." : "Create User"}
-          </button>
+          </Button>
         </form>
       </Show>
 

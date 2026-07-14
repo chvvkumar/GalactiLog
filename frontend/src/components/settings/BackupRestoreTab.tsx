@@ -8,6 +8,7 @@ import type {
 } from "../../api/types";
 import { showToast } from "../Toast";
 import HelpPopover from "../HelpPopover";
+import Button from "../ui/Button";
 import { useSettingsContext } from "../SettingsProvider";
 import { formatDateTime } from "../../utils/dateTime";
 
@@ -228,13 +229,13 @@ export const BackupRestoreTab: Component = () => {
             <p>Example: run Create Backup before upgrading the app, save the file somewhere safe, then restore on the upgraded instance if anything goes wrong.</p>
           </HelpPopover>
         </div>
-        <button
-          class="px-4 py-2 rounded-[var(--radius-md)] bg-theme-accent/15 text-theme-accent border border-theme-accent/30 hover:bg-theme-accent/25 transition-colors disabled:opacity-50"
+        <Button
+          variant="primary"
           disabled={creating()}
           onClick={handleCreateBackup}
         >
           {creating() ? "Creating..." : "Create Backup"}
-        </button>
+        </Button>
       </section>
 
       <section class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
@@ -352,19 +353,19 @@ export const BackupRestoreTab: Component = () => {
             </Show>
 
             <div class="flex gap-3">
-              <button
-                class="px-4 py-2 rounded-[var(--radius-md)] bg-theme-accent/15 text-theme-accent border border-theme-accent/30 hover:bg-theme-accent/25 transition-colors disabled:opacity-50"
+              <Button
+                variant="primary"
                 disabled={selectedSections().size === 0 || restoring()}
                 onClick={() => setShowConfirm(true)}
               >
                 {restoring() ? "Restoring..." : "Restore"}
-              </button>
-              <button
-                class="px-4 py-2 rounded-[var(--radius-md)] bg-theme-elevated text-theme-text-secondary border border-theme-border hover:bg-theme-hover transition-colors"
+              </Button>
+              <Button
+                variant="secondary"
                 onClick={resetRestore}
               >
                 Cancel
-              </button>
+              </Button>
             </div>
           </div>
         </Show>
@@ -415,12 +416,13 @@ export const BackupRestoreTab: Component = () => {
               </Show>
 
               <div class="mt-3">
-                <button
-                  class="px-3 py-1.5 rounded-[var(--radius-md)] bg-theme-elevated text-theme-text-secondary border border-theme-border hover:bg-theme-hover transition-colors text-sm"
+                <Button
+                  variant="secondary"
+                  size="sm"
                   onClick={resetRestore}
                 >
                   Restore another
-                </button>
+                </Button>
               </div>
             </Show>
 
@@ -465,19 +467,19 @@ export const BackupRestoreTab: Component = () => {
               </Show>
             </div>
             <div class="p-4 border-t border-theme-border flex gap-2 justify-end">
-              <button
+              <Button
                 ref={cancelButtonRef}
-                class="px-4 py-2 rounded-[var(--radius-md)] bg-theme-elevated text-theme-text-secondary border border-theme-border hover:bg-theme-hover transition-colors"
+                variant="secondary"
                 onClick={() => setShowConfirm(false)}
               >
                 Cancel
-              </button>
-              <button
-                class="px-4 py-2 rounded-[var(--radius-md)] bg-theme-accent/15 text-theme-accent border border-theme-accent/30 hover:bg-theme-accent/25 transition-colors"
+              </Button>
+              <Button
+                variant="primary"
                 onClick={handleRestore}
               >
                 Confirm Restore
-              </button>
+              </Button>
             </div>
           </div>
         </div>

@@ -1,5 +1,6 @@
 import { Component, Show } from "solid-js";
 import { useAuth } from "./AuthProvider";
+import Button from "./ui/Button";
 
 type FrameFilter = "all" | "light_only";
 
@@ -69,21 +70,13 @@ const ScanControls: Component<{
       <Show when={isAdmin()}>
         <div class="flex gap-2 flex-shrink-0 ml-auto">
           <Show when={props.isActive || props.rebuildRunning}>
-            <button
-              onClick={props.onStopScan}
-              disabled={props.stopping}
-              class="px-4 py-1.5 border border-theme-error/50 text-theme-error rounded text-sm font-medium hover:bg-theme-error/20 transition-colors disabled:opacity-50"
-            >
+            <Button variant="danger" onClick={props.onStopScan} disabled={props.stopping}>
               {props.stopping ? "Stopping..." : "Stop"}
-            </button>
+            </Button>
           </Show>
-          <button
-            onClick={props.onStartScan}
-            disabled={props.isActive}
-            class="px-4 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded text-sm font-medium disabled:opacity-50 hover:bg-theme-accent/25 transition-colors"
-          >
+          <Button variant="primary" onClick={props.onStartScan} disabled={props.isActive}>
             {props.isActive ? (props.stopping ? "Stopping..." : "Scanning...") : "Scan Directory"}
-          </button>
+          </Button>
         </div>
       </Show>
     </>

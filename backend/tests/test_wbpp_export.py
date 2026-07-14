@@ -8,6 +8,7 @@ from app.services.wbpp_export import (
     disambiguate_staging_names, generate_powershell_script,
     generate_shell_script, DEFAULT_EXCLUSIONS, sanitize_script_name,
 )
+from app.services.wbpp_export import fits_relative_path, map_excluded_to_ops
 
 
 def test_detect_os_windows_drive():
@@ -242,6 +243,102 @@ def test_shell_script_includes_run_instruction():
         "M31", ["WBPP"], ["2024-01-01"], "wbpp_M31.sh",
     )
     assert "chmod +x wbpp_M31.sh" in s
+
+# ---------------------------------------------------------------------------
+# Per-file quality-filter exclusion (excluded_by_op)
+# ---------------------------------------------------------------------------
+
+def test_fits_relative_path_strips_root():
+    assert fits_relative_path(
+        "/app/data/fits/M31/2024-01-01/Light/x.fits", "/app/data/fits",
+    ) == "M31/2024-01-01/Light/x.fits"
+    # trailing slash on root and paths outside root both degrade gracefully
+    assert fits_relative_path("/app/data/fits/a.fits", "/app/data/fits/") == "a.fits"
+    assert fits_relative_path("/other/a.fits", "/app/data/fits") == "other/a.fits"
+
+
+def test_map_excluded_to_ops_prefix_and_drop():
+    chosen = [
+        ("2024-01-01", FolderLevel("/mnt/a/M31/2024-01-01", "/fits/M31/2024-01-01", 2, 5,
+                                   relative_path="M31/2024-01-01")),
+        ("2024-01-02", FolderLevel("/mnt/a/M31/2024-01-02", "/fits/M31/2024-01-02", 2, 5,
+                                   relative_path="M31/2024-01-02")),
+    ]
+    excluded = [
+        "M31/2024-01-01/Ha/bad1.fits",
+        "M31/2024-01-02/OIII/bad2.fits",
+        "M31/2099-12-31/Ha/orphan.fits",  # matches no chosen folder -> dropped
+    ]
+    result = map_excluded_to_ops(excluded, chosen)
+    # mapped by folder-level prefix, stored relative to each op's transfer root
+    assert result[0] == ["Ha/bad1.fits"]
+    assert result[1] == ["OIII/bad2.fits"]
+    # the orphan produced no entry for any op
+    assert len(result) == 2
+
+
+def test_map_excluded_to_ops_longest_prefix_wins():
+    # Nested chosen folders: the deeper (longer) prefix claims the file.
+    chosen = [
+        ("outer", FolderLevel("/mnt/a/M31", "/fits/M31", 1, 5, relative_path="M31")),
+        ("inner", FolderLevel("/mnt/a/M31/2024-01-01", "/fits/M31/2024-01-01", 2, 5,
+                              relative_path="M31/2024-01-01")),
+    ]
+    result = map_excluded_to_ops(["M31/2024-01-01/Ha/bad.fits"], chosen)
+    assert result == {1: ["Ha/bad.fits"]}
+
+
+def test_powershell_no_exclusions_byte_identical():
+    args = (
+        [("Z:\\Astro\\M31\\2024-01-01", "2024-01-01")], "Z:\\Staging",
+        "M31", DEFAULT_EXCLUSIONS, ["2024-01-01"], "wbpp_M31.ps1",
+    )
+    base = generate_powershell_script(*args)
+    assert generate_powershell_script(*args, excluded_by_op=None) == base
+    assert generate_powershell_script(*args, excluded_by_op={}) == base
+    assert "ExcludeFiles" not in base
+
+
+def test_shell_no_exclusions_byte_identical():
+    args = (
+        [("/mnt/astro/M31/2024-01-01", "2024-01-01")], "/tmp/staging",
+        "M31", DEFAULT_EXCLUSIONS, ["2024-01-01"], "wbpp_M31.sh",
+    )
+    base = generate_shell_script(*args)
+    assert generate_shell_script(*args, excluded_by_op=None) == base
+    assert generate_shell_script(*args, excluded_by_op={}) == base
+    assert "${@:4}" not in base
+
+
+def test_powershell_per_file_exclusion():
+    s = generate_powershell_script(
+        [("Z:\\Astro\\M31\\2024-01-01", "2024-01-01")], "Z:\\Staging",
+        "M31", ["WBPP"], ["2024-01-01"], "wbpp_M31.ps1",
+        excluded_by_op={0: ["Ha/light_bad.fits"]},
+    )
+    # the named light appears as a backslash-normalized ExcludeFiles entry, checked
+    # against each file's job-relative path
+    assert "ExcludeFiles = @(" in s
+    assert "'Ha\\light_bad.fits'" in s
+    assert "$Job.ExcludeFiles -contains $RelPath" in s
+    # a non-excluded sibling and any calibration file are never named
+    assert "light_good.fits" not in s
+    assert "Calib_dark_001.fits" not in s
+
+
+def test_shell_per_file_exclusion():
+    s = generate_shell_script(
+        [("/mnt/astro/M31/2024-01-01", "2024-01-01")], "/tmp/staging",
+        "M31", ["WBPP"], ["2024-01-01"], "wbpp_M31.sh",
+        excluded_by_op={0: ["Ha/light_bad.fits"]},
+    )
+    # one --exclude anchored to the job's transfer root, passed through $4+
+    assert "--exclude='/Ha/light_bad.fits'" in s
+    assert "${@:4}" in s
+    # a non-excluded sibling and any calibration file are never named
+    assert "light_good.fits" not in s
+    assert "Calib_dark_001.fits" not in s
+
 
 def test_powershell_exclusion_matches_component_not_substring():
     """'finals' excludes a 'finals' folder but NOT a 'semifinals' folder."""

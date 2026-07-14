@@ -2,6 +2,7 @@ import { Component, createSignal, createEffect, onCleanup, onMount, Show } from 
 import { A } from "@solidjs/router";
 import { scanFilters } from "../api/scanFilters";
 import { showToast } from "./Toast";
+import Button, { buttonClasses } from "./ui/Button";
 
 interface Props {
   variant?: "inline" | "global";
@@ -56,13 +57,6 @@ const ScanFiltersOnboarding: Component<Props> = (props) => {
     }
   };
 
-  const primaryBtnClass =
-    "px-4 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 " +
-    "rounded text-sm font-medium disabled:opacity-50 hover:bg-theme-accent/25 transition-colors";
-  const secondaryBtnClass =
-    "px-4 py-1.5 bg-theme-surface text-theme-text-primary border border-theme-border " +
-    "rounded text-sm font-medium disabled:opacity-50 hover:bg-theme-hover transition-colors";
-
   return (
     <Show when={show()}>
       <div class="mx-4 mt-4 rounded-[var(--radius-md)] border border-theme-accent/40 bg-theme-accent/10 p-4 space-y-3">
@@ -109,25 +103,18 @@ const ScanFiltersOnboarding: Component<Props> = (props) => {
           <Show
             when={variant() === "global"}
             fallback={
-              <button
-                class={primaryBtnClass}
-                onClick={props.onReview}
-              >
+              <Button variant="primary" onClick={props.onReview}>
                 Review scan filters
-              </button>
+              </Button>
             }
           >
-            <A href="/settings?tab=scan" class={primaryBtnClass}>
+            <A href="/settings?tab=scan" class={buttonClasses("primary")}>
               Open scan settings
             </A>
           </Show>
-          <button
-            class={secondaryBtnClass}
-            disabled={saving()}
-            onClick={useDefaults}
-          >
+          <Button variant="secondary" disabled={saving()} onClick={useDefaults}>
             {saving() ? "Saving…" : "Use defaults (scan everything)"}
-          </button>
+          </Button>
         </div>
       </div>
     </Show>

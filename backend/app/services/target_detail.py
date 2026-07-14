@@ -15,10 +15,12 @@ from fastapi import HTTPException
 from sqlalchemy import select, or_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.models import Target, Image
 from app.models.catalog_membership import TargetCatalogMembership
 from app.models.session_note import SessionNote
 from app.services.normalization import load_alias_maps, normalize_filter, normalize_equipment
+from app.services.wbpp_export import fits_relative_path
 from app.schemas.target import (
     SessionDetailResponse, TargetDetailResponse, SessionOverview,
     FilterDetail, FilterMedian, SessionInsight, FrameRecord,
@@ -638,6 +640,7 @@ async def get_session_detail(target_id: str, date: str, session: AsyncSession) -
             file_name=img.file_name,
             image_id=str(img.id),
             file_path=img.file_path,
+            source_relative=fits_relative_path(img.file_path, settings.fits_data_path),
             thumbnail_url=f"/thumbnails/{img.thumbnail_path.split('/')[-1].split(chr(92))[-1]}" if img.thumbnail_path else None,
             hfr_stdev=img.hfr_stdev,
             fwhm=img.fwhm,

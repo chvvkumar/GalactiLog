@@ -7,6 +7,7 @@ import type { DisplaySettings, MetricGroupSettings } from "../api/types";
 import { THEMES_SORTED, TEXT_SIZES, type ThemeMeta } from "../themes";
 import { FILTER_STYLE_OPTIONS, getFilterBadgeStyle, type FilterBadgeStyle } from "../utils/filterStyles";
 import { timezoneLabel } from "../utils/dateTime";
+import Button from "./ui/Button";
 
 const PREVIEW_FILTERS: { name: string; color: string }[] = [
   { name: "L", color: "#e0e0e0" },
@@ -597,9 +598,9 @@ export default function DisplayTab() {
 
       <Show when={local() && isAdmin()}>
         <div class="flex justify-end">
-          <button type="button" class="px-3 py-1.5 text-sm rounded-[var(--radius-sm)] bg-theme-accent/15 text-theme-accent border border-theme-accent/30 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-theme-accent/25 transition-colors font-medium" disabled={saving()} onClick={handleSave}>
+          <Button type="button" size="sm" disabled={saving()} onClick={handleSave}>
             {saving() ? "Saving..." : "Save"}
-          </button>
+          </Button>
         </div>
       </Show>
     </div>

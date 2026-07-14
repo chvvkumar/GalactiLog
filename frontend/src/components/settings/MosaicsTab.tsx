@@ -23,6 +23,8 @@ import InlineEditCell from "../InlineEditCell";
 import ColumnPicker from "../ColumnPicker";
 import { isColumnVisible } from "../../utils/displaySettings";
 import KonvaMosaicArranger, { type PreviewPanel } from "../mosaics/KonvaMosaicArranger";
+import Button from "../ui/Button";
+import IconButton from "../ui/IconButton";
 
 export const MosaicsTab: Component = () => {
   const { isAdmin } = useAuth();
@@ -679,13 +681,13 @@ export const MosaicsTab: Component = () => {
             </HelpPopover>
           </div>
           <Show when={isAdmin()}>
-            <button
+            <Button
+              variant="primary"
               onClick={(e) => { e.stopPropagation(); handleDetect(); }}
               disabled={detecting()}
-              class="px-4 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded text-sm font-medium disabled:opacity-50 hover:bg-theme-accent/25 transition-colors"
             >
               {detecting() ? "Detecting..." : "Run Detection"}
-            </button>
+            </Button>
           </Show>
         </div>
         <Show when={!keywordsCollapsed()}>
@@ -695,13 +697,14 @@ export const MosaicsTab: Component = () => {
               <span class="inline-flex items-center gap-1 px-2 py-1 text-sm bg-theme-base/50 border border-theme-border rounded-[var(--radius-sm)] text-theme-text-primary">
                 {kw}
                 <Show when={isAdmin()}>
-                  <button
+                  <IconButton
+                    variant="danger"
                     onClick={() => removeKeyword(kw)}
-                    class="text-theme-text-secondary hover:text-theme-danger ml-1 text-xs"
+                    class="ml-1 text-xs"
                     title="Remove"
                   >
                     &times;
-                  </button>
+                  </IconButton>
                 </Show>
               </span>
             )}
@@ -717,12 +720,9 @@ export const MosaicsTab: Component = () => {
               placeholder="New keyword..."
               class="flex-1 px-2 py-1.5 text-sm bg-theme-base border border-theme-border rounded-[var(--radius-sm)] text-theme-text-primary placeholder:text-theme-text-secondary/50 focus:outline-none focus:border-theme-accent"
             />
-            <button
-              onClick={addKeyword}
-              class="px-3 py-1.5 text-sm border border-theme-accent/50 text-theme-accent rounded-[var(--radius-sm)] hover:bg-theme-accent/10 transition-colors"
-            >
+            <Button variant="primary" size="sm" onClick={addKeyword}>
               Add
-            </button>
+            </Button>
           </div>
         </Show>
         </Show>
@@ -817,18 +817,12 @@ export const MosaicsTab: Component = () => {
                 {selectedSuggestionCount() > 0 ? `${selectedSuggestionCount()} selected` : "Select all"}
               </span>
               <div class="flex gap-2 ml-auto">
-                <button
-                  onClick={handleBulkAccept}
-                  class="px-3 py-1.5 text-xs bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded-[var(--radius-sm)] font-medium hover:bg-theme-accent/25 transition-colors"
-                >
+                <Button variant="primary" size="sm" onClick={handleBulkAccept}>
                   Accept {selectedSuggestionCount() > 0 ? `(${selectedSuggestionCount()})` : `All (${filteredSuggestions().length})`}
-                </button>
-                <button
-                  onClick={handleBulkDismiss}
-                  class="px-3 py-1.5 text-xs border border-theme-border text-theme-text-secondary rounded-[var(--radius-sm)] hover:text-theme-danger hover:border-theme-danger transition-colors"
-                >
+                </Button>
+                <Button variant="danger" size="sm" onClick={handleBulkDismiss}>
                   Dismiss {selectedSuggestionCount() > 0 ? `(${selectedSuggestionCount()})` : `All (${filteredSuggestions().length})`}
-                </button>
+                </Button>
               </div>
             </div>
           </Show>
@@ -932,27 +926,29 @@ export const MosaicsTab: Component = () => {
                             const count = sel?.size ?? s.panel_labels.length;
                             const noneSelected = !!sel && sel.size === 0;
                             return (
-                              <button
+                              <Button
+                                variant="primary"
+                                size="sm"
                                 onClick={(e) => { e.stopPropagation(); handleAccept(s); }}
                                 disabled={!!acceptingId() || !!bulkAction() || noneSelected}
                                 title={noneSelected ? "Select at least one panel to accept" : undefined}
-                                class="px-4 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded text-sm font-medium hover:bg-theme-accent/25 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                               >
                                 {acceptingId() === s.id ? "Accepting..." : "Accept"}
                                 {count < s.panel_labels.length ? ` (${count}/${s.panel_labels.length})` : ""}
-                              </button>
+                              </Button>
                             );
                           })()}
                           <Show
                             when={confirmDismissId() === s.id}
                             fallback={
-                              <button
+                              <Button
+                                variant="secondary"
+                                size="sm"
                                 onClick={(e) => { e.stopPropagation(); setConfirmDismissId(s.id); }}
                                 disabled={!!bulkAction()}
-                                class="px-2.5 py-1.5 text-sm border border-theme-border text-theme-text-secondary rounded-[var(--radius-sm)] hover:text-theme-text-primary transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                               >
                                 Dismiss
-                              </button>
+                              </Button>
                             }
                           >
                             <div class="flex items-center gap-2">
@@ -962,18 +958,20 @@ export const MosaicsTab: Component = () => {
                               >
                                 Dismiss?
                               </span>
-                              <button
+                              <Button
+                                variant="danger"
+                                size="sm"
                                 onClick={(e) => { e.stopPropagation(); handleDismiss(s); }}
-                                class="px-2.5 py-1.5 text-sm border border-theme-border text-theme-text-secondary rounded-[var(--radius-sm)] hover:text-theme-danger hover:border-theme-danger transition-colors"
                               >
                                 Confirm
-                              </button>
-                              <button
+                              </Button>
+                              <Button
+                                variant="secondary"
+                                size="sm"
                                 onClick={(e) => { e.stopPropagation(); setConfirmDismissId(null); }}
-                                class="px-2.5 py-1.5 text-sm border border-theme-border text-theme-text-secondary rounded-[var(--radius-sm)] hover:text-theme-text-primary transition-colors"
                               >
                                 Cancel
-                              </button>
+                              </Button>
                             </div>
                           </Show>
                         </div>
@@ -1129,31 +1127,30 @@ export const MosaicsTab: Component = () => {
           <Show when={isAdmin()}>
             <div class="flex gap-2">
               <Show when={selectedMosaicIds().size > 0 && !bulkAction()}>
-                <button
-                  onClick={handleBulkDeleteMosaics}
-                  class="px-3 py-1.5 text-sm border border-theme-danger/50 text-theme-danger rounded-[var(--radius-sm)] hover:bg-theme-danger/10 transition-colors"
-                >
+                <Button variant="danger" size="sm" onClick={handleBulkDeleteMosaics}>
                   Delete Selected ({selectedMosaicIds().size})
-                </button>
+                </Button>
               </Show>
               <Show when={mosaics().some(m => m.needs_review)}>
-                <button
+                <Button
+                  variant="secondary"
+                  size="sm"
                   onClick={async (e) => {
                     e.stopPropagation();
                     await apiClient.POST("/api/mosaics/clear-reviews").then(unwrap);
                     await refresh();
                   }}
-                  class="px-3 py-1.5 text-sm border border-theme-border text-theme-text-secondary rounded-[var(--radius-sm)] hover:text-theme-text-primary hover:border-theme-accent transition-colors"
                 >
                   Clear All Reviews
-                </button>
+                </Button>
               </Show>
-              <button
+              <Button
+                variant="secondary"
+                size="sm"
                 onClick={() => setShowCreate(!showCreate())}
-                class="px-3 py-1.5 text-sm border border-theme-border text-theme-text-secondary rounded-[var(--radius-sm)] hover:text-theme-text-primary hover:border-theme-accent transition-colors"
               >
                 {showCreate() ? "Cancel" : "Create Mosaic"}
-              </button>
+              </Button>
             </div>
           </Show>
           </div>
@@ -1187,12 +1184,9 @@ export const MosaicsTab: Component = () => {
               placeholder="Mosaic name..."
               class="flex-1 px-2 py-1.5 text-sm bg-theme-base border border-theme-border rounded-[var(--radius-sm)] text-theme-text-primary placeholder:text-theme-text-secondary/50 focus:outline-none focus:border-theme-accent"
             />
-            <button
-              onClick={handleCreate}
-              class="px-4 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded text-sm font-medium hover:bg-theme-accent/25 transition-colors"
-            >
+            <Button variant="primary" onClick={handleCreate}>
               Create
-            </button>
+            </Button>
           </div>
         </Show>
 
@@ -1359,29 +1353,32 @@ export const MosaicsTab: Component = () => {
                             <Show
                               when={confirmDeleteId() === m.id}
                               fallback={
-                                <button
+                                <Button
+                                  variant="danger"
+                                  size="sm"
                                   onClick={() => setConfirmDeleteId(m.id)}
                                   disabled={!!bulkAction()}
-                                  class="px-2 py-1.5 text-sm border border-theme-border text-theme-text-secondary rounded hover:text-theme-danger hover:border-theme-danger transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                                 >
                                   Delete
-                                </button>
+                                </Button>
                               }
                             >
                               <div class="flex items-center gap-2">
                                 <span class="text-xs text-theme-danger">Delete?</span>
-                                <button
+                                <Button
+                                  variant="danger"
+                                  size="sm"
                                   onClick={() => handleDeleteMosaic(m.id)}
-                                  class="px-2 py-1.5 text-sm border border-theme-error/50 text-theme-error rounded-[var(--radius-sm)] hover:bg-theme-error/10 transition-colors"
                                 >
                                   Confirm
-                                </button>
-                                <button
+                                </Button>
+                                <Button
+                                  variant="secondary"
+                                  size="sm"
                                   onClick={() => setConfirmDeleteId(null)}
-                                  class="px-2 py-1.5 text-sm border border-theme-border text-theme-text-secondary rounded hover:text-theme-text-primary transition-colors"
                                 >
                                   Cancel
-                                </button>
+                                </Button>
                               </div>
                             </Show>
                           </Show>
@@ -1422,18 +1419,20 @@ export const MosaicsTab: Component = () => {
                                     onKeyDown={(e) => e.key === "Enter" && handleRename(m.id)}
                                     class="flex-1 px-2 py-1 text-sm bg-theme-base border border-theme-border rounded-[var(--radius-sm)] text-theme-text-primary focus:outline-none focus:border-theme-accent"
                                   />
-                                  <button
+                                  <Button
+                                    variant="primary"
+                                    size="sm"
                                     onClick={() => handleRename(m.id)}
-                                    class="px-2 py-1 text-xs border border-theme-accent/50 text-theme-accent rounded-[var(--radius-sm)] hover:bg-theme-accent/10 transition-colors"
                                   >
                                     Save
-                                  </button>
-                                  <button
+                                  </Button>
+                                  <Button
+                                    variant="secondary"
+                                    size="sm"
                                     onClick={() => setRenamingId(null)}
-                                    class="px-2 py-1 text-xs border border-theme-border text-theme-text-secondary rounded hover:text-theme-text-primary transition-colors"
                                   >
                                     Cancel
-                                  </button>
+                                  </Button>
                                 </div>
                               </Show>
                             </Show>
@@ -1459,12 +1458,13 @@ export const MosaicsTab: Component = () => {
                                           </div>
                                         </div>
                                         <Show when={isAdmin()}>
-                                          <button
+                                          <Button
+                                            variant="danger"
+                                            size="sm"
                                             onClick={() => handleRemovePanel(m.id, p.panel_id)}
-                                            class="px-2 py-1 text-xs border border-theme-border text-theme-text-secondary rounded hover:text-theme-danger hover:border-theme-danger transition-colors"
                                           >
                                             Remove
-                                          </button>
+                                          </Button>
                                         </Show>
                                       </div>
                                     )}
@@ -1483,7 +1483,9 @@ export const MosaicsTab: Component = () => {
                               <Show
                                 when={addingPanelFor() === m.id}
                                 fallback={
-                                  <button
+                                  <Button
+                                    variant="secondary"
+                                    size="sm"
                                     onClick={() => {
                                       setAddingPanelFor(m.id);
                                       setPanelSearch("");
@@ -1491,10 +1493,9 @@ export const MosaicsTab: Component = () => {
                                       setSelectedTarget(null);
                                       setSearchResults([]);
                                     }}
-                                    class="px-2 py-1 text-xs border border-theme-border text-theme-text-secondary rounded hover:text-theme-text-primary transition-colors"
                                   >
                                     + Add Panel
-                                  </button>
+                                  </Button>
                                 }
                               >
                                 <div class="p-2 bg-theme-elevated border border-theme-border-em rounded-[var(--radius-sm)] space-y-2">
@@ -1529,18 +1530,20 @@ export const MosaicsTab: Component = () => {
                                     class="w-full px-2 py-1.5 text-sm bg-theme-base border border-theme-border rounded-[var(--radius-sm)] text-theme-text-primary placeholder:text-theme-text-secondary/50 focus:outline-none focus:border-theme-accent"
                                   />
                                   <div class="flex gap-2">
-                                    <button
+                                    <Button
+                                      variant="primary"
+                                      size="sm"
                                       onClick={() => handleAddPanel(m.id)}
-                                      class="px-2 py-1 text-xs border border-theme-accent/50 text-theme-accent rounded-[var(--radius-sm)] hover:bg-theme-accent/10 transition-colors"
                                     >
                                       Add
-                                    </button>
-                                    <button
+                                    </Button>
+                                    <Button
+                                      variant="secondary"
+                                      size="sm"
                                       onClick={() => setAddingPanelFor(null)}
-                                      class="px-2 py-1 text-xs border border-theme-border text-theme-text-secondary rounded hover:text-theme-text-primary transition-colors"
                                     >
                                       Cancel
-                                    </button>
+                                    </Button>
                                   </div>
                                 </div>
                               </Show>
