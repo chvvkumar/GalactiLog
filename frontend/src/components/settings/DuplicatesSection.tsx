@@ -5,6 +5,7 @@ import { showToast } from "../Toast";
 import { useAuth } from "../AuthProvider";
 import type { MergeCandidateResponse } from "../../api/types";
 import MergePreviewModal from "../MergePreviewModal";
+import Button from "../ui/Button";
 
 interface DuplicatesSectionProps {
   candidates: () => MergeCandidateResponse[];
@@ -142,18 +143,12 @@ const DuplicatesSection: Component<DuplicatesSectionProps> = (props) => {
                     {/* Admin actions */}
                     <Show when={isAdmin()}>
                       <div class="flex gap-1.5 ml-3 flex-shrink-0">
-                        <button
-                          onClick={() => handlePreviewMerge(c)}
-                          class="px-2 py-1 text-xs border border-theme-accent/50 text-theme-accent rounded-[var(--radius-sm)] hover:bg-theme-accent/10 transition-colors"
-                        >
+                        <Button size="sm" onClick={() => handlePreviewMerge(c)}>
                           Preview Merge
-                        </button>
-                        <button
-                          onClick={() => handleDismiss(c.id)}
-                          class="px-2 py-1 text-xs border border-theme-border text-theme-text-secondary rounded-[var(--radius-sm)] hover:text-theme-text-primary transition-colors"
-                        >
+                        </Button>
+                        <Button variant="secondary" size="sm" onClick={() => handleDismiss(c.id)}>
                           Not a Duplicate
-                        </button>
+                        </Button>
                       </div>
                     </Show>
                   </div>

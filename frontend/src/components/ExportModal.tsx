@@ -8,6 +8,8 @@ import type { ExportResponse, SessionOverview } from "../api/types";
 import { formatIntegration } from "../utils/format";
 import { showToast } from "./Toast";
 import Dialog from "./Dialog";
+import Button from "./ui/Button";
+import IconButton from "./ui/IconButton";
 
 function generateTextExport(data: ExportResponse): string {
   const lines: string[] = [];
@@ -244,11 +246,11 @@ const ExportModal: Component<Props> = (props) => {
       >
         <div class="p-4 border-b border-theme-border flex items-center justify-between">
           <h2 id="export-modal-title" class="text-sm font-medium text-theme-text-primary">Export - {props.targetName}</h2>
-          <button class="text-theme-text-secondary hover:text-theme-text-primary" onClick={props.onClose} aria-label="Close">
+          <IconButton onClick={props.onClose} aria-label="Close">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
               <line x1="6" y1="6" x2="18" y2="18" /><line x1="6" y1="18" x2="18" y2="6" />
             </svg>
-          </button>
+          </IconButton>
         </div>
 
         <div class="p-4 space-y-3">
@@ -317,20 +319,22 @@ const ExportModal: Component<Props> = (props) => {
         </div>
 
         <div class="p-4 border-t border-theme-border flex gap-2 justify-end">
-          <button
-            class="text-xs px-3 py-1.5 bg-theme-elevated border border-theme-border rounded hover:bg-theme-surface transition-colors text-theme-text-primary disabled:opacity-50"
+          <Button
+            variant="secondary"
+            size="sm"
             disabled={!exportData() || selectedDates().size === 0}
             onClick={copyText}
           >
             {copied() ? "Copied!" : "Copy to Clipboard"}
-          </button>
-          <button
-            class="text-xs px-3 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded font-medium hover:bg-theme-accent/25 transition-colors disabled:opacity-50"
+          </Button>
+          <Button
+            variant="primary"
+            size="sm"
             disabled={!exportData() || selectedDates().size === 0}
             onClick={downloadFile}
           >
             Download {format().toUpperCase()}
-          </button>
+          </Button>
         </div>
       </div>
     </Dialog>

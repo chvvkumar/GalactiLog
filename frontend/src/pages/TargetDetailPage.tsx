@@ -31,6 +31,7 @@ import ActionsMenu from "../components/ActionsMenu";
 import InlineRename from "../components/InlineRename";
 import CollapsibleHeader from "../components/CollapsibleHeader";
 import MergePreviewModal from "../components/MergePreviewModal";
+import Button, { buttonClasses } from "../components/ui/Button";
 import { useAuth } from "../components/AuthProvider";
 import { OBJECT_TYPE_OPTIONS } from "../constants/objectTypes";
 
@@ -172,12 +173,9 @@ const MergeFromDetailFlow: Component<MergeFromDetailFlowProps> = (props) => {
                 <p class="text-xs text-theme-text-secondary">No targets found</p>
               </Show>
               <div class="flex justify-end gap-2 pt-2">
-                <button
-                  onClick={props.onClose}
-                  class="px-3 py-1.5 text-sm border border-theme-border text-theme-text-secondary rounded-[var(--radius-sm)] hover:text-theme-text-primary transition-colors"
-                >
+                <Button variant="secondary" size="sm" onClick={props.onClose}>
                   Cancel
-                </button>
+                </Button>
               </div>
             </div>
           </div>
@@ -745,16 +743,13 @@ const TargetDetailPage: Component = () => {
                   </div>
                   <div class="flex items-center gap-2 shrink-0">
                     <Show when={auth.isAdmin()}>
-                      <button
-                        class="px-4 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded text-sm font-medium hover:bg-theme-accent/25 transition-colors"
-                        onClick={() => setShowMerge(true)}
-                      >
+                      <Button variant="primary" onClick={() => setShowMerge(true)}>
                         Merge
-                      </button>
+                      </Button>
                     </Show>
                     <ActionsMenu
                       ariaLabel="Export options"
-                      buttonClass="px-4 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded text-sm font-medium hover:bg-theme-accent/25 transition-colors"
+                      buttonClass={buttonClasses("primary")}
                       triggerContent={<span class="inline-flex items-center gap-1">Export<span class="text-xs leading-none" aria-hidden="true">&#9662;</span></span>}
                     >
                       {(close) => (
@@ -977,13 +972,15 @@ const TargetDetailPage: Component = () => {
                             </div>
                           </div>
                           <Show when={auth.isAdmin()}>
-                            <button
+                            <Button
+                              variant="secondary"
+                              size="sm"
                               onClick={() => handleUndoMerge(merged)}
                               disabled={undoingMerge() === merged.id}
-                              class="px-2 py-1 text-xs border border-theme-border text-theme-text-secondary rounded-[var(--radius-sm)] hover:text-theme-text-primary transition-colors disabled:opacity-50 shrink-0 ml-3"
+                              class="shrink-0 ml-3"
                             >
                               {undoingMerge() === merged.id ? "Undoing..." : "Undo Merge"}
-                            </button>
+                            </Button>
                           </Show>
                         </div>
                       )}

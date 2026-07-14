@@ -7,6 +7,8 @@ import { useSettingsContext } from "./SettingsProvider";
 import { isFieldVisible } from "../utils/displaySettings";
 import { madZ, bandForZ, bandToCellClass } from "../utils/frameQuality";
 import Dialog from "./Dialog";
+import Button from "./ui/Button";
+import IconButton from "./ui/IconButton";
 import {
   isFsAccessSupported,
   runBrowserCopy,
@@ -569,15 +571,11 @@ const WbppExportModal: Component<Props> = (props) => {
           <h2 id="wbpp-export-title" class="text-sm font-medium text-theme-text-primary">
             Export to WBPP - {props.targetName}
           </h2>
-          <button
-            class="text-theme-text-secondary hover:text-theme-text-primary"
-            onClick={props.onClose}
-            aria-label="Close"
-          >
+          <IconButton onClick={props.onClose} aria-label="Close">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
               <line x1="6" y1="6" x2="18" y2="18" /><line x1="6" y1="18" x2="18" y2="6" />
             </svg>
-          </button>
+          </IconButton>
         </div>
 
         <div class="p-4 space-y-4">
@@ -680,13 +678,14 @@ const WbppExportModal: Component<Props> = (props) => {
             onToggle={() => setLevelsOpen(!levelsOpen())}
           >
             <div>
-              <button
-                class="text-xs px-3 py-1.5 bg-theme-elevated border border-theme-border rounded hover:bg-theme-surface transition-colors text-theme-text-primary disabled:opacity-50"
+              <Button
+                variant="secondary"
+                size="sm"
                 onClick={loadPreview}
                 disabled={previewing() || !libraryRoot().trim()}
               >
                 {previewing() ? "Loading..." : sessions().length ? "Refresh folder levels" : "Preview folder levels"}
-              </button>
+              </Button>
             </div>
 
             <Show
@@ -1038,12 +1037,9 @@ const WbppExportModal: Component<Props> = (props) => {
 
                   <div class="flex items-center gap-2 flex-wrap">
                     <span class="text-tiny text-theme-text-tertiary w-24">Library folder</span>
-                    <button
-                      class="text-tiny px-2 py-0.5 bg-theme-surface border border-theme-border rounded hover:text-theme-text-primary text-theme-text-secondary"
-                      onClick={chooseSource}
-                    >
+                    <Button variant="secondary" size="sm" onClick={chooseSource}>
                       {srcHandle() ? "Change..." : "Choose..."}
-                    </button>
+                    </Button>
                     <Show when={srcHandle()}>
                       <span class="text-tiny font-mono text-theme-text-secondary truncate max-w-[12rem]">{srcHandle().name}</span>
                     </Show>
@@ -1055,12 +1051,9 @@ const WbppExportModal: Component<Props> = (props) => {
 
                   <div class="flex items-center gap-2 flex-wrap">
                     <span class="text-tiny text-theme-text-tertiary w-24">Destination</span>
-                    <button
-                      class="text-tiny px-2 py-0.5 bg-theme-surface border border-theme-border rounded hover:text-theme-text-primary text-theme-text-secondary"
-                      onClick={chooseDest}
-                    >
+                    <Button variant="secondary" size="sm" onClick={chooseDest}>
                       {destHandle() ? "Change..." : "Choose..."}
-                    </button>
+                    </Button>
                     <Show when={destHandle()}>
                       <span class="text-tiny font-mono text-theme-text-secondary truncate max-w-[12rem]">{destHandle().name}</span>
                     </Show>
@@ -1075,20 +1068,18 @@ const WbppExportModal: Component<Props> = (props) => {
                   </p>
 
                   <div class="flex items-center gap-2">
-                    <button
-                      class="text-xs px-3 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded font-medium hover:bg-theme-accent/25 transition-colors disabled:opacity-50"
+                    <Button
+                      variant="primary"
+                      size="sm"
                       onClick={startBrowserCopy}
                       disabled={copying() || !copyReady()}
                     >
                       {copying() ? "Copying..." : "Copy files now"}
-                    </button>
+                    </Button>
                     <Show when={copying()}>
-                      <button
-                        class="text-xs px-3 py-1.5 bg-theme-surface border border-theme-border rounded hover:text-theme-text-primary text-theme-text-secondary transition-colors"
-                        onClick={stopCopy}
-                      >
+                      <Button variant="secondary" size="sm" onClick={stopCopy}>
                         Stop
-                      </button>
+                      </Button>
                     </Show>
                   </div>
 
@@ -1128,18 +1119,12 @@ const WbppExportModal: Component<Props> = (props) => {
                       Script
                     </div>
                     <div class="flex items-center gap-2 flex-wrap">
-                      <button
-                        class="text-xs px-3 py-1.5 bg-theme-surface border border-theme-border rounded hover:text-theme-text-primary transition-colors text-theme-text-secondary"
-                        onClick={downloadScript}
-                      >
+                      <Button variant="secondary" size="sm" onClick={downloadScript}>
                         Download {g().filename}
-                      </button>
-                      <button
-                        class="text-xs px-3 py-1.5 bg-theme-surface border border-theme-border rounded hover:text-theme-text-primary transition-colors text-theme-text-secondary"
-                        onClick={copyScript}
-                      >
+                      </Button>
+                      <Button variant="secondary" size="sm" onClick={copyScript}>
                         {copied() ? "Copied!" : "Copy script"}
-                      </button>
+                      </Button>
                     </div>
                     <div class="text-tiny">
                       <span class="text-theme-text-tertiary">Then run: </span>
@@ -1164,19 +1149,17 @@ const WbppExportModal: Component<Props> = (props) => {
         </div>
 
         <div class="p-4 border-t border-theme-border flex gap-2 justify-end">
-          <button
-            class="text-xs px-3 py-1.5 bg-theme-elevated border border-theme-border rounded hover:bg-theme-surface transition-colors text-theme-text-primary"
-            onClick={props.onClose}
-          >
+          <Button variant="secondary" size="sm" onClick={props.onClose}>
             Close
-          </button>
-          <button
-            class="text-xs px-3 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded font-medium hover:bg-theme-accent/25 transition-colors disabled:opacity-50"
+          </Button>
+          <Button
+            variant="primary"
+            size="sm"
             onClick={generate}
             disabled={generating() || !libraryRoot().trim()}
           >
             {generating() ? "Generating..." : generated() ? "Regenerate script" : "Generate script"}
-          </button>
+          </Button>
         </div>
       </div>
     </Dialog>

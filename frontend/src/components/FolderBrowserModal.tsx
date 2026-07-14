@@ -2,6 +2,7 @@ import { Component, createSignal, createEffect, onCleanup, onMount, Show, For } 
 import { createStore, produce } from "solid-js/store";
 import { scanFilters } from "../api/scanFilters";
 import type { BrowseEntry } from "../api/scanFilters";
+import Button from "./ui/Button";
 
 interface Props {
   open: boolean;
@@ -324,19 +325,16 @@ const FolderBrowserModal: Component<Props> = (props) => {
               {selected().size} folder(s) selected
             </span>
             <div class="flex gap-2">
-              <button
-                class="px-4 py-1.5 bg-theme-surface text-theme-text-primary border border-theme-border rounded text-sm font-medium hover:bg-theme-hover transition-colors"
-                onClick={props.onCancel}
-              >
+              <Button variant="secondary" onClick={props.onCancel}>
                 Cancel
-              </button>
-              <button
-                class="px-4 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded text-sm font-medium disabled:opacity-50 hover:bg-theme-accent/25 transition-colors"
+              </Button>
+              <Button
+                variant="primary"
                 disabled={selected().size === 0}
                 onClick={() => props.onConfirm(Array.from(selected()))}
               >
                 Add {selected().size > 0 ? selected().size : ""}
-              </button>
+              </Button>
             </div>
           </div>
         </div>

@@ -1,6 +1,8 @@
 import { Component, For, Show, createSignal } from "solid-js";
 import { useDashboardFilters } from "./DashboardFilterProvider";
 import { useFilterOptions } from "../store/filterOptions";
+import Button from "./ui/Button";
+import IconButton from "./ui/IconButton";
 
 const OPERATORS = [
   { value: "eq", label: "=" },
@@ -46,7 +48,7 @@ const FitsQueryBuilder: Component = () => {
         {(row, i) => (
           <div class="flex items-center gap-1 text-xs">
             <span class="text-theme-text-primary font-mono flex-1 truncate">{row.key} {row.operator} {row.value}</span>
-            <button onClick={() => removeRow(i())} class="text-theme-error hover:text-theme-error px-1">&times;</button>
+            <IconButton variant="danger" onClick={() => removeRow(i())} class="px-1" aria-label="Remove filter">&times;</IconButton>
           </div>
         )}
       </For>
@@ -83,7 +85,7 @@ const FitsQueryBuilder: Component = () => {
             placeholder="Value"
             class="flex-1 px-2 py-1.5 bg-theme-input border border-theme-border rounded-[var(--radius-sm)] text-xs text-theme-text-primary placeholder:text-theme-text-tertiary focus:border-theme-accent outline-none"
           />
-          <button onClick={addRow} class="px-3 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded-[var(--radius-sm)] text-xs font-medium hover:bg-theme-accent/25 transition-colors">+</button>
+          <Button variant="primary" size="sm" onClick={addRow}>+</Button>
         </div>
       </div>
     </div>

@@ -3,6 +3,8 @@ import { apiClient } from "../../api/generated/client";
 import { unwrap } from "../../api/unwrap";
 import { getErrorMessage } from "../../utils/errors";
 import Dialog from "../Dialog";
+import Button from "../ui/Button";
+import IconButton from "../ui/IconButton";
 
 interface Props {
   mosaicId: string;
@@ -64,15 +66,16 @@ const MosaicCompositeModal: Component<Props> = (props) => {
               <span class="text-theme-text-secondary"> ({props.filter})</span>
             </Show>
           </h2>
-          <button
-            class="text-theme-text-secondary hover:text-theme-text-primary shrink-0"
+          <IconButton
+            variant="default"
+            class="shrink-0"
             onClick={props.onClose}
             aria-label="Close"
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
               <line x1="6" y1="6" x2="18" y2="18" /><line x1="6" y1="18" x2="18" y2="6" />
             </svg>
-          </button>
+          </IconButton>
         </div>
 
         <div class="p-4 flex-1 overflow-auto flex items-center justify-center min-h-[200px]">
@@ -88,12 +91,9 @@ const MosaicCompositeModal: Component<Props> = (props) => {
               <p class="text-sm text-theme-danger">
                 {getErrorMessage(composite.error, "Failed to generate composite")}
               </p>
-              <button
-                class="text-xs px-3 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded font-medium hover:bg-theme-accent/25 transition-colors"
-                onClick={() => refetch()}
-              >
+              <Button variant="primary" size="sm" onClick={() => refetch()}>
                 Retry
-              </button>
+              </Button>
             </div>
           </Show>
 

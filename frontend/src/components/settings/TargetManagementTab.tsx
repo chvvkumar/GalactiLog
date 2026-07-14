@@ -8,6 +8,7 @@ import UnresolvedSection from "./UnresolvedSection";
 import MergeHistorySection from "./MergeHistorySection";
 import MaintenanceSection from "./MaintenanceSection";
 import CreateTargetModal from "./CreateTargetModal";
+import Button from "../ui/Button";
 
 interface ScanSummary {
   completed_at: string;
@@ -59,12 +60,13 @@ export const TargetManagementTab: Component = () => {
       {/* Header actions */}
       <Show when={isAdmin()}>
         <div class="flex justify-end">
-          <button
+          <Button
+            variant="primary"
+            size="sm"
             onClick={() => setShowCreate(true)}
-            class="px-3 py-1.5 text-sm bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded-[var(--radius-sm)] hover:bg-theme-accent/25 transition-colors"
           >
             Create Target
-          </button>
+          </Button>
         </div>
       </Show>
 

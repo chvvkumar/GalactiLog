@@ -5,6 +5,7 @@ import { showToast, dismissToast } from "../Toast";
 import { useAuth } from "../AuthProvider";
 import { pollTask } from "../../store/taskPoller";
 import type { FilenameCandidateResponse } from "../../api/types";
+import Button from "../ui/Button";
 
 const methodLabel = (c: FilenameCandidateResponse) => {
   switch (c.method) {
@@ -222,27 +223,18 @@ export const UnresolvedFilesTab: Component = () => {
             <Show when={isAdmin()}>
               <Show when={props.mode === "pending"}>
                 <Show when={c.suggested_target_id || c.method === "simbad_new"}>
-                  <button
-                    onClick={() => setConfirmId(c.id)}
-                    class="px-2 py-1 text-xs border border-theme-accent/50 text-theme-accent rounded-[var(--radius-sm)] hover:bg-theme-accent/10 transition-colors"
-                  >
+                  <Button size="sm" onClick={() => setConfirmId(c.id)}>
                     Assign
-                  </button>
+                  </Button>
                 </Show>
-                <button
-                  onClick={() => handleDismiss(c)}
-                  class="px-2 py-1 text-xs border border-theme-border text-theme-text-secondary rounded hover:text-theme-text-primary transition-colors"
-                >
+                <Button variant="secondary" size="sm" onClick={() => handleDismiss(c)}>
                   Dismiss
-                </button>
+                </Button>
               </Show>
               <Show when={props.mode === "accepted"}>
-                <button
-                  onClick={() => setConfirmRevertId(c.id)}
-                  class="px-2 py-1 text-xs border border-theme-border text-theme-text-secondary rounded-[var(--radius-sm)] hover:text-theme-text-primary transition-colors"
-                >
+                <Button variant="secondary" size="sm" onClick={() => setConfirmRevertId(c.id)}>
                   Revert
-                </button>
+                </Button>
               </Show>
             </Show>
           </div>
@@ -258,18 +250,12 @@ export const UnresolvedFilesTab: Component = () => {
               Matching files will be linked to the target. This can be reverted later.
             </p>
             <div class="flex gap-2 pt-1">
-              <button
-                onClick={() => handleAccept(c)}
-                class="px-3 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded text-xs font-medium hover:bg-theme-accent/25 transition-colors"
-              >
+              <Button size="sm" onClick={() => handleAccept(c)}>
                 Yes, assign
-              </button>
-              <button
-                onClick={() => setConfirmId(null)}
-                class="px-3 py-1.5 border border-theme-border-em text-theme-text-secondary rounded text-xs hover:text-theme-text-primary transition-colors"
-              >
+              </Button>
+              <Button variant="secondary" size="sm" onClick={() => setConfirmId(null)}>
                 Cancel
-              </button>
+              </Button>
             </div>
           </div>
         </Show>
@@ -282,18 +268,12 @@ export const UnresolvedFilesTab: Component = () => {
               Files will be unlinked from "{c.suggested_target_name}" and returned to pending.
             </p>
             <div class="flex gap-2 pt-1">
-              <button
-                onClick={() => handleRevert(c)}
-                class="px-3 py-1.5 bg-theme-warning/15 text-theme-warning border border-theme-warning/30 rounded text-xs font-medium hover:bg-theme-warning/25 transition-colors"
-              >
+              <Button variant="warning" size="sm" onClick={() => handleRevert(c)}>
                 Yes, revert
-              </button>
-              <button
-                onClick={() => setConfirmRevertId(null)}
-                class="px-3 py-1.5 border border-theme-border-em text-theme-text-secondary rounded text-xs hover:text-theme-text-primary transition-colors"
-              >
+              </Button>
+              <Button variant="secondary" size="sm" onClick={() => setConfirmRevertId(null)}>
                 Cancel
-              </button>
+              </Button>
             </div>
           </div>
         </Show>
@@ -333,13 +313,9 @@ export const UnresolvedFilesTab: Component = () => {
             </span>
           </div>
           <Show when={isAdmin()}>
-            <button
-              onClick={handleDetect}
-              disabled={detecting()}
-              class="px-4 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded text-sm font-medium disabled:opacity-50 hover:bg-theme-accent/25 transition-colors"
-            >
+            <Button onClick={handleDetect} disabled={detecting()}>
               {detecting() ? "Detecting..." : "Run Detection"}
-            </button>
+            </Button>
           </Show>
         </div>
 

@@ -1,5 +1,6 @@
 import { Component, Show, createEffect, onCleanup } from "solid-js";
 import { Portal } from "solid-js/web";
+import Button from "./ui/Button";
 
 interface Props {
   open: boolean;
@@ -104,18 +105,12 @@ const ConfirmDialog: Component<Props> = (props) => {
             </h3>
             <p class="text-sm text-theme-text-secondary">{props.message}</p>
             <div class="flex justify-end gap-2">
-              <button
-                class="px-4 py-1.5 bg-theme-surface text-theme-text-primary border border-theme-border rounded text-sm font-medium hover:bg-theme-hover transition-colors"
-                onClick={props.onCancel}
-              >
+              <Button variant="secondary" onClick={props.onCancel}>
                 {props.cancelLabel ?? "Cancel"}
-              </button>
-              <button
-                class="px-4 py-1.5 bg-theme-error/15 text-theme-error border border-theme-error/30 rounded text-sm font-medium hover:bg-theme-error/25 transition-colors"
-                onClick={props.onConfirm}
-              >
+              </Button>
+              <Button variant="danger" onClick={props.onConfirm}>
                 {props.confirmLabel ?? "Confirm"}
-              </button>
+              </Button>
             </div>
           </div>
         </div>

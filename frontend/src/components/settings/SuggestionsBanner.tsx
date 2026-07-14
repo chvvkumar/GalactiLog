@@ -6,6 +6,7 @@ import { For, Show, createSignal, type Component } from "solid-js";
 // `section?: string` -- `onMerge`/`onDismiss` consumers (EquipmentTab.tsx,
 // FiltersTab.tsx) are updated in the same slice to accept the wider type.
 import type { SuggestionGroup } from "../../api/types";
+import Button from "../ui/Button";
 
 interface Props {
   suggestions: SuggestionGroup[];
@@ -59,19 +60,13 @@ const MergeGroup: Component<{ group: SuggestionGroup; onMerge: (canonical: strin
           </button>
         )}
       </For>
-      <button
-        onClick={handleMerge}
-        class="px-2 py-1 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 text-xs rounded font-medium hover:bg-theme-accent/25 transition-colors"
-      >
+      <Button size="sm" onClick={handleMerge}>
         Merge
-      </button>
+      </Button>
       <Show when={props.onDismiss}>
-        <button
-          onClick={() => props.onDismiss?.(props.group)}
-          class="px-2 py-1 border border-theme-border text-theme-text-secondary text-xs rounded hover:border-theme-error hover:text-theme-error transition-colors"
-        >
+        <Button variant="secondary" size="sm" onClick={() => props.onDismiss?.(props.group)}>
           Dismiss
-        </button>
+        </Button>
       </Show>
     </div>
   );

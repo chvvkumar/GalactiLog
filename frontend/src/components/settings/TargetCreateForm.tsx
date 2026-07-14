@@ -1,6 +1,7 @@
 import { Component, Show, For, createSignal } from "solid-js";
 import { DEEP_SKY_TYPES, SOLAR_SYSTEM_TYPES, isSolarSystemType } from "../../constants/objectTypes";
 import { showToast } from "../Toast";
+import Button from "../ui/Button";
 
 // Coordinates display at most 4 decimals so prefilled FITS/SIMBAD values do not
 // surface full float noise (e.g. 83.82208333333334).
@@ -161,19 +162,21 @@ const TargetCreateForm: Component<Props> = (props) => {
       </label>
 
       <div class="flex justify-end gap-2 pt-2">
-        <button
+        <Button
+          variant="secondary"
+          size="sm"
           onClick={props.onCancel}
-          class="px-3 py-1.5 text-sm border border-theme-border text-theme-text-secondary rounded-[var(--radius-sm)] hover:text-theme-text-primary transition-colors"
         >
           Cancel
-        </button>
-        <button
+        </Button>
+        <Button
+          variant="primary"
+          size="sm"
           onClick={handleSubmit}
           disabled={props.submitting || !primaryName().trim()}
-          class="px-3 py-1.5 text-sm bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded-[var(--radius-sm)] hover:bg-theme-accent/25 transition-colors disabled:opacity-50"
         >
           {props.submitLabel}
-        </button>
+        </Button>
       </div>
     </div>
   );

@@ -12,6 +12,7 @@ import { useSettingsContext } from "./SettingsProvider";
 import HelpPopover from "./HelpPopover";
 import ConfirmDialog from "./ConfirmDialog";
 import DataTable, { type DataTableColumn } from "./DataTable";
+import Button from "./ui/Button";
 
 type CustomColumnCreate = components["schemas"]["CustomColumnCreate"];
 type CustomColumnUpdate = components["schemas"]["CustomColumnUpdate"];
@@ -204,10 +205,10 @@ export default function CustomColumnsTab() {
               <button onClick={() => startEdit(col)} class="text-xs text-theme-accent hover:underline">Edit</button>
             }
           >
-            <button onClick={() => handleSaveEdit(col)} class="px-4 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded text-sm font-medium hover:bg-theme-accent/25 transition-colors">Save</button>
+            <Button onClick={() => handleSaveEdit(col)}>Save</Button>
             <button onClick={() => setEditingId(null)} class="text-xs text-theme-text-secondary hover:underline">Cancel</button>
           </Show>
-          <button onClick={() => setDeleteConfirmId(col.id)} class="text-xs text-red-500 hover:underline">Delete</button>
+          <Button variant="danger" size="sm" onClick={() => setDeleteConfirmId(col.id)}>Delete</Button>
         </div>
       ),
     },
@@ -271,12 +272,9 @@ export default function CustomColumnsTab() {
               <option value="mosaic">Mosaic</option>
             </select>
           </div>
-          <button
-            onClick={handleCreate}
-            class="px-3 py-1 rounded bg-theme-accent/15 text-theme-accent border border-theme-accent/30 text-sm font-medium hover:bg-theme-accent/25 transition-colors"
-          >
+          <Button size="sm" onClick={handleCreate}>
             Add
-          </button>
+          </Button>
         </div>
         <Show when={newType() === "dropdown"}>
           <div>

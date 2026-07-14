@@ -1,5 +1,7 @@
 import { createSignal, createMemo, For, Show, type Component } from "solid-js";
 import type { DiscoveredItem } from "../../api/types";
+import Button from "../ui/Button";
+import IconButton from "../ui/IconButton";
 
 export interface GroupEntry {
   canonical: string;
@@ -167,18 +169,19 @@ export const GroupingEditor: Component<Props> = (props) => {
           </Show>
         </div>
         <div class="flex gap-2">
-          <button
+          <Button
+            variant="primary"
+            size="sm"
             onClick={groupSelected}
             disabled={checkedCount() < 2}
-            class="px-3 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 text-sm font-medium rounded hover:bg-theme-accent/25 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
           >
             Group Selected ({checkedCount()})
-          </button>
+          </Button>
           <Show when={checkedCount() > 0 && props.groups.length > 0}>
             <div class="relative group">
-              <button class="px-3 py-1.5 border border-theme-border text-theme-text-secondary text-sm rounded hover:border-theme-accent hover:text-theme-text-primary transition-colors">
+              <Button variant="secondary" size="sm">
                 Add to...
-              </button>
+              </Button>
               <div class="absolute left-0 top-full pt-1 bg-transparent hidden group-hover:block min-w-[180px] z-10">
                 <div class="bg-theme-surface border border-theme-border rounded shadow-lg">
                 <For each={props.groups}>
@@ -245,12 +248,12 @@ export const GroupingEditor: Component<Props> = (props) => {
                     {(alias) => (
                       <span class="inline-flex items-center gap-1 px-2 py-0.5 bg-theme-elevated rounded text-xs text-theme-text-secondary">
                         {alias}
-                        <button
+                        <IconButton
+                          variant="danger"
                           onClick={() => removeAlias(i(), alias)}
-                          class="text-theme-text-tertiary hover:text-theme-error"
                         >
                           x
-                        </button>
+                        </IconButton>
                       </span>
                     )}
                   </For>

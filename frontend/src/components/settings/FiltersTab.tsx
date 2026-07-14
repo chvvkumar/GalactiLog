@@ -17,6 +17,7 @@ import type { SuggestionsResponse, DiscoveredItem, SuggestionGroup } from "../..
 import { apiClient } from "../../api/generated/client";
 import { unwrap } from "../../api/unwrap";
 import { getFilterColorMap } from "../../store/settings";
+import Button from "../ui/Button";
 
 export const FiltersTab: Component = () => {
   const { isAdmin } = useAuth();
@@ -200,24 +201,15 @@ export const FiltersTab: Component = () => {
             onKeyDown={(e) => e.key === "Enter" && addFilter()}
             class="px-3 py-1.5 bg-theme-input border border-theme-border rounded-[var(--radius-sm)] text-sm text-theme-text-primary focus:ring-1 focus:ring-theme-accent focus:border-theme-accent outline-none"
           />
-          <button
-            onClick={addFilter}
-            class="px-4 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded text-sm font-medium hover:bg-theme-accent/25 transition-colors"
-          >
-            Add Filter
-          </button>
+          <Button onClick={addFilter}>Add Filter</Button>
         </div>
       </div>
 
       <Show when={isAdmin()}>
         <div class="flex justify-end">
-          <button
-            onClick={handleSave}
-            disabled={saving()}
-            class="px-3 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded text-sm font-medium hover:bg-theme-accent/25 disabled:opacity-50 transition-colors"
-          >
+          <Button size="sm" onClick={handleSave} disabled={saving()}>
             {saving() ? "Saving..." : "Save"}
-          </button>
+          </Button>
         </div>
       </Show>
     </div>
