@@ -49,6 +49,25 @@ export const RAW_METRIC_LABELS: Record<RawMetric, string> = {
   adu_median: "ADU median",
 };
 
+// Preview columns mirroring the session frame table's toggled metric columns.
+// group/field feed isFieldVisible so the preview honors the user's display
+// settings. Lives here rather than in the panel because the column set is the
+// metric domain (same six metrics as RAW_METRICS), not a rendering choice.
+export const METRIC_COLUMNS: {
+  metric: RawMetric;
+  label: string;
+  group: "quality" | "guiding" | "adu";
+  field: string;
+  format: (v: number) => string;
+}[] = [
+  { metric: "median_hfr", label: "HFR", group: "quality", field: "hfr", format: (v) => v.toFixed(2) },
+  { metric: "eccentricity", label: "Ecc", group: "quality", field: "eccentricity", format: (v) => v.toFixed(2) },
+  { metric: "fwhm", label: "FWHM", group: "quality", field: "fwhm", format: (v) => v.toFixed(2) },
+  { metric: "detected_stars", label: "Stars", group: "quality", field: "detected_stars", format: (v) => v.toFixed(0) },
+  { metric: "guiding_rms_arcsec", label: "RMS", group: "guiding", field: "rms_total", format: (v) => v.toFixed(2) },
+  { metric: "adu_median", label: "ADU", group: "adu", field: "median", format: (v) => v.toFixed(0) },
+];
+
 export interface RawConstraint {
   metric: RawMetric;
   value: number;
@@ -120,6 +139,29 @@ export function scoreFrame(
   return combinedScore(zSignal, zSharp, zRound);
 }
 
+// Signed robust z for ONE frame metric against the active baseline, mirroring
+// SessionAccordionCard row coloring. Same baseline lookup as scoreFrame, which is
+// why it lives beside it: signal (detected_stars) is always session-scoped, the
+// rest follow `baseline`. Guiding RMS has no baseline, hence null.
+export function cellZ(
+  detail: SessionDetail,
+  frame: FrameRecord,
+  metric: RawMetric,
+  baseline: BaselineMode,
+): number | null {
+  const eq = equipmentForFrame(detail, frame);
+  const active = baselineFor(detail, frame, eq.telescope, eq.camera, baseline);
+  const sess = baselineFor(detail, frame, eq.telescope, eq.camera, "session");
+  switch (metric) {
+    case "median_hfr": return madZ(frame.median_hfr, active?.median_hfr);
+    case "fwhm": return madZ(frame.fwhm, active?.fwhm);
+    case "eccentricity": return madZ(frame.eccentricity, active?.eccentricity);
+    case "detected_stars": return madZ(frame.detected_stars, sess?.detected_stars, true);
+    case "guiding_rms_arcsec": return null;
+    case "adu_median": return madZ(frame.adu_median, sess?.adu_median);
+  }
+}
+
 // Raw multi-metric AND with the partial-metric rule (spec #5):
 //   - Judge a frame only on the active constraints it HAS data for.
 //   - A missing metric is skipped (not an auto-fail).
@@ -173,6 +215,50 @@ export function computeVerdicts(
 // backend excluded_source_relatives field.
 export function excludedSourceRelatives(verdicts: FrameVerdict[]): string[] {
   return verdicts.filter((v) => !v.keep).map((v) => v.frame.source_relative);
+}
+
+/**
+ * Is `sourceRelative` inside the folder level at `relativePath`?
+ *
+ * Matches at COMPONENT boundaries, never as a bare substring -- the same test the
+ * backend makes (services/wbpp_export.py: `fp.startswith(anc + "/") or fp == anc`
+ * in compute_session_levels, and `norm == prefix or norm.startswith(prefix + "/")`
+ * in map_excluded_to_ops, which has a test asserting the distinction), and the same
+ * one wbppBrowserCopy makes implicitly by walking the subtree from the level down.
+ * A substring test would claim "M31/2026-07-01/Ha_old/x.fits" for the "Ha" level.
+ *
+ * An empty `relativePath` is the fits root itself, which contains everything.
+ */
+export function isUnderRelativePath(sourceRelative: string, relativePath: string): boolean {
+  const prefix = relativePath.replace(/^\/+/, "").replace(/\/+$/, "");
+  const path = sourceRelative.replace(/^\/+/, "");
+  if (!prefix) return true;
+  return path === prefix || path.startsWith(`${prefix}/`);
+}
+
+/**
+ * The excluded frames a copy of the SELECTED levels would actually skip.
+ *
+ * `verdicts` covers every light in every selected session, but a session's chosen
+ * folder level may be narrower than the session (e.g. .../Ha when the session also
+ * has .../OIII). Frames outside the chosen subtree are never copied in the first
+ * place, so excluding them subtracts nothing. Counting them makes the footer's
+ * count and byte total describe two different sets of frames.
+ *
+ * `relativePathByDate` maps a session date to its selected level's relative_path.
+ * A date with no selection contributes nothing. Each verdict is tested only against
+ * its OWN session's level, so no frame is counted twice.
+ */
+export function excludedUnderSelectedLevels(
+  verdicts: FrameVerdict[],
+  relativePathByDate: Map<string, string>,
+): FrameVerdict[] {
+  return verdicts.filter((v) => {
+    if (v.keep) return false;
+    const relativePath = relativePathByDate.get(v.sessionDate);
+    if (relativePath === undefined) return false;
+    return isUnderRelativePath(v.frame.source_relative, relativePath);
+  });
 }
 
 export interface QualityTotals {

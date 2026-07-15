@@ -3,7 +3,10 @@ import {
   evaluateRaw,
   computeVerdicts,
   excludedSourceRelatives,
+  excludedUnderSelectedLevels,
+  isUnderRelativePath,
   scoreFrame,
+  type FrameVerdict,
   type RawConstraint,
 } from "./wbppQualityFilter";
 import type { SessionDetail, FrameRecord } from "../api/types";
@@ -22,6 +25,7 @@ function frame(overrides: Partial<FrameRecord>): FrameRecord {
     file_name: "light_001.fits",
     image_id: "img-1",
     file_path: "/data/2026/03/15/Target/Ha/light_001.fits",
+    file_size: null,
     source_relative: "2026/03/15/Target/Ha/light_001.fits",
     thumbnail_url: null,
     hfr_stdev: null,
@@ -201,5 +205,71 @@ describe("excludedSourceRelatives", () => {
     expect(excluded).toContain("unscorable.fits");
     expect(excluded).not.toContain("good.fits");
     expect(excluded).toHaveLength(2);
+  });
+});
+
+describe("isUnderRelativePath", () => {
+  it("matches the level itself and anything beneath it", () => {
+    expect(isUnderRelativePath("M31/2026-07-01/Ha/a.fits", "M31/2026-07-01/Ha")).toBe(true);
+    expect(isUnderRelativePath("M31/2026-07-01/Ha/sub/a.fits", "M31/2026-07-01/Ha")).toBe(true);
+    expect(isUnderRelativePath("M31/2026-07-01/Ha", "M31/2026-07-01/Ha")).toBe(true);
+    expect(isUnderRelativePath("M31/2026-07-01/Ha/a.fits", "M31/2026-07-01")).toBe(true);
+  });
+
+  it("matches on component boundaries, never as a bare substring", () => {
+    // The distinction the backend's map_excluded_to_ops test asserts: a sibling
+    // whose name merely starts with the level's name is NOT inside it.
+    expect(isUnderRelativePath("M31/2026-07-01/Ha_old/a.fits", "M31/2026-07-01/Ha")).toBe(false);
+    expect(isUnderRelativePath("M31/2026-07-01/Halpha/a.fits", "M31/2026-07-01/Ha")).toBe(false);
+    expect(isUnderRelativePath("M31/2026-07-01/OIII/a.fits", "M31/2026-07-01/Ha")).toBe(false);
+  });
+
+  it("treats an empty level as the fits root, which contains everything", () => {
+    expect(isUnderRelativePath("M31/2026-07-01/Ha/a.fits", "")).toBe(true);
+  });
+
+  it("tolerates leading and trailing slashes on either side", () => {
+    expect(isUnderRelativePath("/M31/2026-07-01/Ha/a.fits", "M31/2026-07-01/Ha/")).toBe(true);
+  });
+});
+
+describe("excludedUnderSelectedLevels", () => {
+  const verdict = (sessionDate: string, source_relative: string, keep: boolean): FrameVerdict =>
+    ({ frame: frame({ source_relative }), sessionDate, score: null, keep, reason: keep ? "pass" : "fail" });
+
+  it("drops excluded frames that sit outside the session's selected level", () => {
+    const verdicts = [
+      verdict("2026-07-01", "M31/2026-07-01/Ha/bad.fits", false),
+      verdict("2026-07-01", "M31/2026-07-01/OIII/bad.fits", false),
+      verdict("2026-07-01", "M31/2026-07-01/Ha/good.fits", true),
+    ];
+    const result = excludedUnderSelectedLevels(
+      verdicts,
+      new Map([["2026-07-01", "M31/2026-07-01/Ha"]]),
+    );
+    // The OIII frame is excluded by the filter but the Ha copy never touches it,
+    // so it must not be deducted from Ha's count or bytes.
+    expect(result.map((v) => v.frame.source_relative)).toEqual(["M31/2026-07-01/Ha/bad.fits"]);
+  });
+
+  it("tests each verdict only against its own session's level", () => {
+    const verdicts = [
+      verdict("2026-07-01", "M31/2026-07-01/Ha/bad.fits", false),
+      verdict("2026-07-02", "M31/2026-07-02/Ha/bad.fits", false),
+    ];
+    const result = excludedUnderSelectedLevels(
+      verdicts,
+      new Map([
+        ["2026-07-01", "M31/2026-07-01/Ha"],
+        ["2026-07-02", "M31/2026-07-02/Ha"],
+      ]),
+    );
+    // One each, counted once -- not cross-matched against the other's level.
+    expect(result).toHaveLength(2);
+  });
+
+  it("ignores sessions with no selected level", () => {
+    const verdicts = [verdict("2026-07-01", "M31/2026-07-01/Ha/bad.fits", false)];
+    expect(excludedUnderSelectedLevels(verdicts, new Map())).toEqual([]);
   });
 });
