@@ -73,6 +73,45 @@ export interface RawConstraint {
   value: number;
 }
 
+// Short names for the one-line failure reason on a verdict ("ecc 0.62 > 0.55").
+// Deliberately terser than RAW_METRIC_LABELS: this string sits inside a table
+// cell beside the badge, where "Eccentricity" would not fit.
+export const RAW_METRIC_SHORT: Record<RawMetric, string> = {
+  median_hfr: "HFR",
+  fwhm: "FWHM",
+  eccentricity: "ecc",
+  detected_stars: "stars",
+  guiding_rms_arcsec: "RMS",
+  adu_median: "ADU",
+};
+
+const METRIC_FORMAT: Record<RawMetric, (v: number) => string> = Object.fromEntries(
+  METRIC_COLUMNS.map((c) => [c.metric, c.format]),
+) as Record<RawMetric, (v: number) => string>;
+
+/** Format a metric value the way the preview table's column formats it. */
+export function formatMetric(metric: RawMetric, value: number): string {
+  return METRIC_FORMAT[metric](value);
+}
+
+/**
+ * Starting value for a newly added raw constraint.
+ *
+ * Only eccentricity gets one, and that is a deliberate limit rather than an
+ * unfinished table. Eccentricity is dimensionless and bounded 0..1, so a number
+ * typed here means the same thing on every rig. HFR, FWHM, guiding RMS and ADU
+ * median are not: they scale with pixel scale, focal length, seeing and exposure,
+ * so any constant shipped for them would be a number invented to look helpful.
+ * Those metrics start at 0 and the user supplies the value their own data implies.
+ */
+export const RAW_METRIC_DEFAULTS: Partial<Record<RawMetric, number>> = {
+  eccentricity: 0.6,
+};
+
+export function defaultConstraintValue(metric: RawMetric): number {
+  return RAW_METRIC_DEFAULTS[metric] ?? 0;
+}
+
 export type Verdict = "pass" | "fail" | "unmeasured";
 
 export interface FrameVerdict {
@@ -81,6 +120,17 @@ export interface FrameVerdict {
   score: number | null;
   keep: boolean;
   reason: Verdict;
+  /**
+   * Which gate excluded this frame, and with what numbers -- "ecc 0.62 > 0.55",
+   * "score 41 < 60". Null when the frame passed or was unmeasured (there is no
+   * gate to name: nothing was measured to compare).
+   *
+   * `reason` stays a bare pass/fail/unmeasured because the badge and the exclude
+   * set are keyed off it. This is the human sentence beside the badge, and it is
+   * the difference between a user learning their rig floors above the threshold
+   * and a user staring at a red box.
+   */
+  failedBy: string | null;
 }
 
 // Train+filter group key matching the backend: "telescope|camera|filter".
@@ -162,21 +212,48 @@ export function cellZ(
   }
 }
 
-// Raw multi-metric AND with the partial-metric rule (spec #5):
-//   - Judge a frame only on the active constraints it HAS data for.
-//   - A missing metric is skipped (not an auto-fail).
-//   - Of the metrics present, ALL must pass (AND) -> "pass"; any fails -> "fail".
-//   - Zero present active metrics (or zero constraints) -> "unmeasured".
-export function evaluateRaw(frame: FrameRecord, constraints: RawConstraint[]): Verdict {
+export function constraintPasses(c: RawConstraint, value: number): boolean {
+  return HIGHER_IS_BETTER[c.metric] ? value >= c.value : value <= c.value;
+}
+
+/** The failure sentence for a constraint a frame's `actual` violated. */
+function rawFailureText(c: RawConstraint, actual: number): string {
+  const op = HIGHER_IS_BETTER[c.metric] ? "<" : ">";
+  return `${RAW_METRIC_SHORT[c.metric]} ${formatMetric(c.metric, actual)} ${op} ${formatMetric(c.metric, c.value)}`;
+}
+
+/**
+ * Raw multi-metric AND with the partial-metric rule (spec #5), reporting WHICH
+ * constraint fired:
+ *   - Judge a frame only on the active constraints it HAS data for.
+ *   - A MISSING METRIC IS SKIPPED, NOT an auto-fail. This is deliberate, not an
+ *     oversight: a constraint the user added for their guided nights must not
+ *     silently delete every unguided frame, and coverage of the metrics is
+ *     uneven across a library (a frame from before FWHM was recorded is not a
+ *     bad frame). A frame with none of the constrained metrics lands in
+ *     "unmeasured", which the panel counts and labels separately, so the skip is
+ *     visible rather than a quiet pass.
+ *   - Of the metrics present, ALL must pass (AND) -> "pass"; any fails -> "fail".
+ *   - Zero present active metrics (or zero constraints) -> "unmeasured".
+ *
+ * `failedBy` names the FIRST constraint that failed, in the user's own order.
+ */
+export function evaluateRawDetailed(
+  frame: FrameRecord,
+  constraints: RawConstraint[],
+): { verdict: Verdict; failedBy: string | null } {
   let present = 0;
   for (const c of constraints) {
     const v = frame[c.metric];
     if (v == null) continue;
     present += 1;
-    const passes = HIGHER_IS_BETTER[c.metric] ? v >= c.value : v <= c.value;
-    if (!passes) return "fail";
+    if (!constraintPasses(c, v)) return { verdict: "fail", failedBy: rawFailureText(c, v) };
   }
-  return present === 0 ? "unmeasured" : "pass";
+  return { verdict: present === 0 ? "unmeasured" : "pass", failedBy: null };
+}
+
+export function evaluateRaw(frame: FrameRecord, constraints: RawConstraint[]): Verdict {
+  return evaluateRawDetailed(frame, constraints).verdict;
 }
 
 // Verdict for every LIGHT frame across the selected dates.
@@ -198,13 +275,20 @@ export function computeVerdicts(
     for (const frame of detail.frames) {
       const score = scoreFrame(detail, frame, baselineMode);
       let reason: Verdict;
+      let failedBy: string | null = null;
       if (mode === "score") {
         if (score == null) reason = "unmeasured";
-        else reason = score >= scoreThreshold ? "pass" : "fail";
+        else if (score >= scoreThreshold) reason = "pass";
+        else {
+          reason = "fail";
+          failedBy = `score ${score.toFixed(0)} < ${scoreThreshold}`;
+        }
       } else {
-        reason = evaluateRaw(frame, constraints);
+        const d = evaluateRawDetailed(frame, constraints);
+        reason = d.verdict;
+        failedBy = d.failedBy;
       }
-      out.push({ frame, sessionDate: date, score, keep: reason === "pass", reason });
+      out.push({ frame, sessionDate: date, score, keep: reason === "pass", reason, failedBy });
     }
   }
   return out;
@@ -266,6 +350,95 @@ export interface QualityTotals {
   copy: number;
   fail: number;
   unmeasured: number;
+}
+
+/**
+ * A loosening of ONE gate that would let at least one frame through, derived
+ * entirely from the user's own frames.
+ *
+ * `metric` is null in score mode, where the gate is the threshold itself.
+ * `keeps` is counted by re-running the real evaluation with the relaxed value,
+ * not estimated, so the offer cannot promise frames it will not deliver.
+ */
+export interface Relaxation {
+  metric: RawMetric | null;
+  value: number;
+  label: string;
+  keeps: number;
+}
+
+/**
+ * Two decimals, rounded in the direction that keeps the best frame passing: out
+ * for lower-is-better (0.5519 -> 0.56), down for higher-is-better.
+ *
+ * The toFixed pass is not decoration. `0.55 * 100` is 55.00000000000001 in
+ * binary floating point, so a bare Math.ceil turns an exactly-achievable 0.55
+ * into 0.56 -- an offer one hundredth looser than the user's data warrants,
+ * from a rounding artifact rather than from anything measured.
+ */
+function roundOutward(value: number, higherIsBetter: boolean): number {
+  const scaled = Number((value * 100).toFixed(6));
+  return (higherIsBetter ? Math.floor(scaled) : Math.ceil(scaled)) / 100;
+}
+
+/**
+ * What to loosen when a filter excludes every frame.
+ *
+ * The value is the user's OWN best frame, not a recommended constant: a rig
+ * whose eccentricity floors at 0.55 is offered 0.56, because that is what its
+ * data says is achievable. Nothing here encodes an opinion about what a good
+ * frame is; it only reports what this dataset could pass.
+ *
+ * Only ONE gate is ever loosened. That is the shape of the problem this exists
+ * for -- a single absolute constraint sitting under a rig's achievable floor --
+ * and it keeps the offer something the user can read in one line. When two gates
+ * each exclude every frame, no single change frees anything and this returns
+ * null; the caller says so instead of offering a button that moves zero to zero.
+ *
+ * Null also when every frame is unmeasured (nothing was measured, so no
+ * threshold lets anything in) or no constrained metric has a value anywhere.
+ */
+export function suggestRelaxation(
+  verdicts: FrameVerdict[],
+  mode: FilterMode,
+  scoreThreshold: number,
+  constraints: RawConstraint[],
+): Relaxation | null {
+  if (mode === "score") {
+    const scores = verdicts.map((v) => v.score).filter((s): s is number => s != null);
+    if (!scores.length) return null;
+    const value = Math.floor(Math.max(...scores));
+    if (value >= scoreThreshold) return null;
+    return {
+      metric: null,
+      value,
+      label: `score ≥ ${value}`,
+      keeps: scores.filter((s) => s >= value).length,
+    };
+  }
+
+  let best: Relaxation | null = null;
+  for (const c of constraints) {
+    const values = verdicts
+      .map((v) => v.frame[c.metric])
+      .filter((n): n is number => n != null);
+    if (!values.length) continue;
+    const higher = HIGHER_IS_BETTER[c.metric];
+    const relaxed = roundOutward(higher ? Math.max(...values) : Math.min(...values), higher);
+    if (relaxed === c.value) continue;
+    const next = constraints.map((o) => (o.metric === c.metric ? { ...o, value: relaxed } : o));
+    const keeps = verdicts.filter((v) => evaluateRaw(v.frame, next) === "pass").length;
+    if (keeps === 0) continue;
+    if (!best || keeps > best.keeps) {
+      best = {
+        metric: c.metric,
+        value: relaxed,
+        label: `${RAW_METRIC_LABELS[c.metric]} ${higher ? "≥" : "≤"} ${formatMetric(c.metric, relaxed)}`,
+        keeps,
+      };
+    }
+  }
+  return best;
 }
 
 export function qualityTotals(verdicts: FrameVerdict[]): QualityTotals {

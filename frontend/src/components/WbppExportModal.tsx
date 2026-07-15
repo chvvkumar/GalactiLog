@@ -5,6 +5,7 @@ import {
   createSignal,
   createMemo,
   createEffect,
+  onCleanup,
   onMount,
   untrack,
 } from "solid-js";
@@ -37,7 +38,9 @@ import {
   excludedSourceRelatives,
   excludedUnderSelectedLevels,
   qualityTotals,
+  RAW_METRICS,
   type FrameVerdict,
+  type RawConstraint,
 } from "../lib/wbppQualityFilter";
 import type {
   WbppSessionPreview,
@@ -45,6 +48,7 @@ import type {
   WbppGenerateResponse,
   WbppCopyOperation,
   SessionDetail,
+  GeneralSettings,
 } from "../api/types";
 
 interface Props {
@@ -72,6 +76,44 @@ const FIELD_CLASS =
 
 const ZONE_TITLE_CLASS =
   "text-xs font-semibold uppercase tracking-wider text-theme-text-secondary";
+
+// How long a config edit sits still before it is written back. Long enough that
+// dragging the threshold slider is one PUT rather than one per pixel.
+const QUALITY_SAVE_DEBOUNCE_MS = 800;
+
+const RAW_METRIC_SET: ReadonlySet<string> = new Set<string>(RAW_METRICS);
+
+/**
+ * The stored quality config, narrowed to what this build can actually evaluate.
+ *
+ * Everything here is defensive on purpose. The values arrive as loose wire types
+ * and may have been written by an older build, so an unrecognised mode or
+ * baseline falls back to the default rather than reaching the filter, and a
+ * constraint naming a metric that no longer exists is dropped rather than kept
+ * as a gate that silently matches nothing. The defaults are exactly the values
+ * the modal used to hardcode, so an install with nothing stored behaves as it
+ * did before the config was persisted.
+ */
+function qualityConfigFromSettings(g: GeneralSettings | undefined): QualityConfig {
+  return {
+    mode: g?.wbpp_quality_mode === "raw" ? "raw" : "score",
+    scoreThreshold: g?.wbpp_quality_score_threshold ?? 60,
+    baseline: g?.wbpp_quality_baseline === "rig" ? "rig" : "session",
+    rawConstraints: (g?.wbpp_quality_raw_constraints ?? []).filter((c) =>
+      RAW_METRIC_SET.has(c.metric),
+    ) as RawConstraint[],
+  };
+}
+
+function qualityConfigToSettings(on: boolean, c: QualityConfig): Partial<GeneralSettings> {
+  return {
+    wbpp_quality_enabled: on,
+    wbpp_quality_mode: c.mode,
+    wbpp_quality_score_threshold: c.scoreThreshold,
+    wbpp_quality_baseline: c.baseline,
+    wbpp_quality_raw_constraints: c.rawConstraints,
+  };
+}
 
 function permText(p: PermOrNone): string {
   switch (p) {
@@ -152,14 +194,14 @@ const WbppExportModal: Component<Props> = (props) => {
   let abortController: AbortController | null = null;
   let scriptRef: HTMLDivElement | undefined;
 
-  // --- Quality filter state (all reset each modal open; no persistence) ---
-  const [qualityFilterOn, setQualityFilterOn] = createSignal(false);
-  const [qualityConfig, setQualityConfig] = createSignal<QualityConfig>({
-    mode: "score",
-    scoreThreshold: 60,
-    rawConstraints: [],
-    baseline: "session",
-  });
+  // --- Quality filter state, seeded from the saved settings ---
+  // These used to reset on every modal open, so the same tuning was redone by
+  // hand for every export. They now hydrate from GeneralSettings and are written
+  // back (debounced) by the effect below.
+  const [qualityFilterOn, setQualityFilterOn] = createSignal(general()?.wbpp_quality_enabled ?? false);
+  const [qualityConfig, setQualityConfig] = createSignal<QualityConfig>(
+    qualityConfigFromSettings(general()),
+  );
   // Session details keyed by date, seeded from props.sessionCache then filled in
   // for any selected date not already cached.
   const [qualitySessions, setQualitySessions] = createSignal<Record<string, SessionDetail>>({});
@@ -234,6 +276,67 @@ const WbppExportModal: Component<Props> = (props) => {
   );
   const excludedSet = createMemo<string[]>(() => excludedSourceRelatives(verdicts()));
   const qTotals = createMemo(() => qualityTotals(verdicts()));
+
+  /**
+   * Write the quality config back so it survives the modal closing.
+   *
+   * Silent on failure by design. PUT /settings/general requires admin, while the
+   * export itself does not, so a non-admin would otherwise get an error banner
+   * over a modal that is working perfectly -- for a convenience they never asked
+   * for. They lose the persistence, not the export.
+   */
+  const persistQuality = async (on: boolean, cfg: QualityConfig) => {
+    const current = general();
+    if (!current) return;
+    try {
+      await ctx.saveGeneral({ ...current, ...qualityConfigToSettings(on, cfg) });
+    } catch {
+      /* see above: persistence is best-effort */
+    }
+  };
+
+  let saveTimer: ReturnType<typeof setTimeout> | undefined;
+  let pendingSave: { on: boolean; cfg: QualityConfig } | null = null;
+  let hydrated = false;
+
+  /**
+   * Send the pending config now.
+   *
+   * Cleanup FLUSHES rather than cancels. Cancelling would lose every edit made
+   * in the last debounce window before the modal closed -- and closing the modal
+   * right after the final tweak is the normal way to use it, so a plain
+   * clearTimeout would drop exactly the save this feature exists to make. The
+   * write reads only module-level stores, so it is safe once the modal is gone.
+   */
+  const flushQualitySave = () => {
+    clearTimeout(saveTimer);
+    saveTimer = undefined;
+    const p = pendingSave;
+    pendingSave = null;
+    if (p) void persistQuality(p.on, p.cfg);
+  };
+
+  /**
+   * Debounced write-back of the filter toggle and config.
+   *
+   * The first run is skipped: an effect fires once on mount, and at that point
+   * the signals still hold exactly what they were just hydrated FROM, so writing
+   * them back would be a PUT that changes nothing -- on every open of the modal,
+   * for every user, including the ones who never touch the filter.
+   */
+  createEffect(() => {
+    const on = qualityFilterOn();
+    const cfg = qualityConfig();
+    if (!hydrated) {
+      hydrated = true;
+      return;
+    }
+    pendingSave = { on, cfg };
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(flushQualitySave, QUALITY_SAVE_DEBOUNCE_MS);
+  });
+
+  onCleanup(flushQualitySave);
 
   onMount(async () => {
     if (!canBrowserCopy) return;
@@ -356,6 +459,25 @@ const WbppExportModal: Component<Props> = (props) => {
   // lights the quality filter drops from inside those levels.
   const frameCount = () =>
     selections().reduce((a, c) => a + c.level.frame_count, 0) - excludedInSelection().length;
+
+  /**
+   * The filter has emptied the export: the selected folders hold frames, and the
+   * filter excludes every one of them.
+   *
+   * The panel warns about the SESSION-wide wipeout; this is the narrower and more
+   * consequential one -- what the copy would actually write. They can disagree:
+   * a filter that keeps frames elsewhere in the session can still take every
+   * frame under the selected level. The guard requires the levels to hold frames
+   * at all, so an empty folder is not blamed on the filter.
+   *
+   * Stated up here at the top of the body because the filter's own controls are
+   * further down inside Options, and the one thing a user must not do is find
+   * this out by opening an empty staging folder.
+   */
+  const filterEmptiedExport = () =>
+    qualityFilterOn() &&
+    selections().reduce((a, c) => a + c.level.frame_count, 0) > 0 &&
+    frameCount() === 0;
 
   /**
    * Bytes the copy will actually write, or null when that is genuinely unknown.
@@ -537,12 +659,17 @@ const WbppExportModal: Component<Props> = (props) => {
     const current = general();
     if (!current) return;
     try {
+      // The quality config rides along from the live signals rather than from
+      // `current`. A debounced write may still be in flight, which would make
+      // `current` a stale snapshot of the filter and quietly revert the user's
+      // last edit as a side effect of saving unrelated defaults.
       await ctx.saveGeneral({
         ...current,
         wbpp_library_root: libraryRoot().trim() || null,
         wbpp_default_os: osChoice() === "auto" ? null : osChoice(),
         wbpp_staging_path: stagingPath().trim() || null,
         wbpp_exclusions: parsedExclusions(),
+        ...qualityConfigToSettings(qualityFilterOn(), qualityConfig()),
       });
       setSavedDefaults(true);
       showToast("Saved as defaults");
@@ -688,6 +815,20 @@ const WbppExportModal: Component<Props> = (props) => {
           <Show when={error()}>
             <div class="text-xs text-theme-error bg-theme-error/10 border border-theme-error/30 rounded-[var(--radius-sm)] px-3 py-2">
               {error()}
+            </div>
+          </Show>
+
+          {/* Never ship zero frames silently. The filter's controls live further
+              down inside Options, so the fact that they have emptied the export
+              has to be stated where the user is already looking. */}
+          <Show when={filterEmptiedExport()}>
+            <div
+              data-testid="wbpp-empty-export"
+              class="text-xs text-theme-warning bg-theme-warning/10 border border-theme-warning/30 rounded-[var(--radius-sm)] px-3 py-2"
+            >
+              The quality filter excludes every frame in the selected folders, so this export
+              would copy nothing. Loosen it under Options below, or switch it off to copy
+              everything.
             </div>
           </Show>
 

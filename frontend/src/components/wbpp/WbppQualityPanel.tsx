@@ -8,13 +8,15 @@
 // Default-collapsed: when the filter is off, only the checkbox row renders. The
 // common case (filter off) costs one row.
 
-import { For, Show, type JSX } from "solid-js";
+import { For, Show, createMemo, type JSX } from "solid-js";
 import {
   HIGHER_IS_BETTER,
   METRIC_COLUMNS,
   RAW_METRICS,
   RAW_METRIC_LABELS,
   cellZ,
+  defaultConstraintValue,
+  suggestRelaxation,
   type BaselineMode,
   type FilterMode,
   type FrameVerdict,
@@ -99,7 +101,12 @@ export default function WbppQualityPanel(props: WbppQualityPanelProps): JSX.Elem
   const addConstraint = () => {
     const used = new Set(props.config.rawConstraints.map((c) => c.metric));
     const next = RAW_METRICS.find((m) => !used.has(m)) ?? RAW_METRICS[0];
-    patch({ rawConstraints: [...props.config.rawConstraints, { metric: next, value: 0 }] });
+    patch({
+      rawConstraints: [
+        ...props.config.rawConstraints,
+        { metric: next, value: defaultConstraintValue(next) },
+      ],
+    });
   };
 
   const updateConstraint = (i: number, delta: Partial<RawConstraint>) =>
@@ -111,6 +118,48 @@ export default function WbppQualityPanel(props: WbppQualityPanelProps): JSX.Elem
 
   const removeConstraint = (i: number) =>
     patch({ rawConstraints: props.config.rawConstraints.filter((_, idx) => idx !== i) });
+
+  /**
+   * The wipeout: every light in the selected sessions excluded, so the export
+   * would stage an empty folder.
+   *
+   * This is a live risk rather than a theoretical one. An absolute threshold is
+   * a claim about a rig's achievable floor, and floors vary by roughly two to
+   * one across rigs -- a default that is generous for one is impossible for the
+   * next, which then loses its whole night with nothing said.
+   *
+   * `total > 0` guards the empty case: before any session loads there is nothing
+   * to warn about, and "0 of 0 excluded" is not a wipeout.
+   */
+  const wipeout = () => props.totals.total > 0 && props.totals.copy === 0;
+
+  // Nothing measured at all: no threshold change can free a frame, so the panel
+  // must diagnose rather than offer.
+  const allUnmeasured = () => wipeout() && props.totals.fail === 0;
+
+  const relaxation = createMemo(() =>
+    wipeout() && !allUnmeasured()
+      ? suggestRelaxation(
+          props.verdicts,
+          props.config.mode,
+          props.config.scoreThreshold,
+          props.config.rawConstraints,
+        )
+      : null,
+  );
+
+  // A null metric is score mode, where the gate is the threshold itself.
+  const applyRelaxation = () => {
+    const r = relaxation();
+    if (!r) return;
+    if (r.metric === null) patch({ scoreThreshold: r.value });
+    else
+      patch({
+        rawConstraints: props.config.rawConstraints.map((c) =>
+          c.metric === r.metric ? { ...c, value: r.value } : c,
+        ),
+      });
+  };
 
   return (
     <div class="space-y-3">
@@ -145,6 +194,57 @@ export default function WbppQualityPanel(props: WbppQualityPanelProps): JSX.Elem
             threshold, <span class="tabular-nums">{props.totals.unmeasured}</span> unmeasured).
             Calibration frames are always copied.
           </p>
+
+          {/* Wipeout guard: an empty export is never allowed to be a surprise
+              discovered in the staging folder. The banner states the outcome
+              first, then diagnoses, then offers the one change that is provably
+              derived from the user's own frames rather than from a convention. */}
+          <Show when={wipeout()}>
+            <div class="text-tiny bg-theme-warning/10 border border-theme-warning/30 rounded-[var(--radius-sm)] px-3 py-2 space-y-1.5">
+              <p class="text-theme-text-primary">
+                This export would copy no light frames: all{" "}
+                <span class="tabular-nums">{props.totals.total}</span> are excluded.
+              </p>
+              <Show
+                when={!allUnmeasured()}
+                fallback={
+                  <p class="text-theme-text-secondary">
+                    None of these frames could be measured, so none could pass. A composite score
+                    needs a baseline of 8 frames sharing one telescope, camera and filter; raw
+                    constraints need the frames to carry the metrics you constrained.
+                  </p>
+                }
+              >
+                <Show
+                  when={relaxation()}
+                  fallback={
+                    <p class="text-theme-text-secondary">
+                      No single threshold change lets any frame through. Loosen more than one
+                      constraint, or switch the filter off and copy everything.
+                    </p>
+                  }
+                >
+                  {(r) => (
+                    <>
+                      <p class="text-theme-text-secondary">
+                        Your best frame reaches {r().label}, which suggests the threshold is below
+                        what this rig and these conditions can achieve. Relaxing to it keeps{" "}
+                        <span class="tabular-nums">{r().keeps}</span> of{" "}
+                        <span class="tabular-nums">{props.totals.total}</span>.
+                      </p>
+                      <button
+                        type="button"
+                        class="text-tiny text-theme-accent hover:text-theme-accent-hover cursor-pointer"
+                        onClick={applyRelaxation}
+                      >
+                        Relax to {r().label}
+                      </button>
+                    </>
+                  )}
+                </Show>
+              </Show>
+            </div>
+          </Show>
 
           {/* Mode */}
           <div class="flex items-center gap-2">
@@ -253,6 +353,42 @@ export default function WbppQualityPanel(props: WbppQualityPanelProps): JSX.Elem
                       value={c.value}
                       onInput={(e) => updateConstraint(i(), { value: Number(e.currentTarget.value) })}
                     />
+                    {/* Eccentricity is the only metric here with a default, so
+                        it is the only one that needs its number accounted for.
+                        The landmarks are reported with their actual provenance:
+                        one perception measurement and two conventions. Nothing
+                        in astrophotography sanctions a reject threshold, and
+                        eccentricity is a ratio of rig error to seeing, so the
+                        same rig reads differently on different nights. Dressing
+                        any of these up as a standard would be the real bug. */}
+                    <Show when={c.metric === "eccentricity"}>
+                      <HelpPopover
+                        label="About eccentricity thresholds"
+                        title="Eccentricity thresholds"
+                      >
+                        <p>
+                          Eccentricity runs 0 (round) to 1 (a line). These are landmarks people
+                          quote, not settings to adopt: the right value depends on your optics and
+                          on how much data you can afford to discard.
+                        </p>
+                        <p>
+                          0.42 is where PixInsight's documentation says distortion becomes visible
+                          to most people. That is a statement about perception, not a recommendation
+                          to reject: their own worked example rejects nothing at it.
+                        </p>
+                        <p>
+                          0.5 to 0.6 is where many practitioners sit, and above 0.6 is the closest
+                          thing to a shared reject line. Both are convention with no official
+                          backing.
+                        </p>
+                        <p>
+                          Every rig has a floor it cannot beat, set largely by sampling, and a
+                          well-sampled one can sit above 0.55 while working perfectly. A threshold
+                          under your floor excludes every frame, so read the preview below before
+                          trusting any number here.
+                        </p>
+                      </HelpPopover>
+                    </Show>
                     <button
                       type="button"
                       class="text-tiny text-theme-error hover:text-theme-error/80 cursor-pointer"
@@ -360,7 +496,17 @@ export default function WbppQualityPanel(props: WbppQualityPanelProps): JSX.Elem
                           <td class="py-0.5 px-1.5 text-right tabular-nums text-theme-text-secondary">
                             {v.score != null ? v.score.toFixed(0) : "—"}
                           </td>
+                          {/* The badge says THAT the frame was dropped; the
+                              reason beside it says which gate fired and by how
+                              much. Without the numbers a user whose rig floors
+                              above the threshold reads a wall of red and cannot
+                              tell a bad night from a bad setting. */}
                           <td class="py-0.5 px-1.5 text-right">
+                            <Show when={v.failedBy}>
+                              <span class="mr-1.5 font-mono text-theme-text-tertiary">
+                                {v.failedBy}
+                              </span>
+                            </Show>
                             <span
                               class={`px-1.5 py-0.5 rounded-[var(--radius-sm)] text-tiny font-medium ${verdictBadgeClass(v)}`}
                             >

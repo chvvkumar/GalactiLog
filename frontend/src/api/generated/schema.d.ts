@@ -3315,6 +3315,28 @@ export interface components {
             wbpp_exclusions?: string[];
             /** Wbpp Library Root */
             wbpp_library_root?: string | null;
+            /**
+             * Wbpp Quality Baseline
+             * @default session
+             */
+            wbpp_quality_baseline: string;
+            /**
+             * Wbpp Quality Enabled
+             * @default false
+             */
+            wbpp_quality_enabled: boolean;
+            /**
+             * Wbpp Quality Mode
+             * @default score
+             */
+            wbpp_quality_mode: string;
+            /** Wbpp Quality Raw Constraints */
+            wbpp_quality_raw_constraints?: components["schemas"]["WbppRawConstraint"][];
+            /**
+             * Wbpp Quality Score Threshold
+             * @default 60
+             */
+            wbpp_quality_score_threshold: number;
             /** Wbpp Staging Path */
             wbpp_staging_path?: string | null;
         };
@@ -4433,8 +4455,16 @@ export interface components {
         };
         /** SessionInsight */
         SessionInsight: {
-            /** Level */
-            level: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "session_duration" | "hfr_vs_target" | "sensor_temp" | "hfr_outliers" | "eccentricity_outliers" | "eccentricity_vs_rig";
+            /**
+             * Level
+             * @enum {string}
+             */
+            level: "info" | "good" | "warning";
             /** Message */
             message: string;
         };
@@ -4562,10 +4592,7 @@ export interface components {
             /** Top Targets */
             top_targets: components["schemas"]["TopTarget"][];
         };
-        /**
-         * StatusResponse
-         * @description Generic single-field status response, e.g. {"status": "ok"}.
-         */
+        /** StatusResponse */
         StatusResponse: {
             /** Status */
             status: string;
@@ -5153,6 +5180,23 @@ export interface components {
             /** Target Os */
             target_os: string;
         };
+        /**
+         * WbppRawConstraint
+         * @description One raw-metric threshold in the WBPP export's quality filter.
+         *
+         *     Direction is not stored: it is a property of the metric (only detected_stars
+         *     is higher-is-better) and is derived on the client from HIGHER_IS_BETTER. A
+         *     stored direction could contradict the metric.
+         */
+        WbppRawConstraint: {
+            /**
+             * Metric
+             * @enum {string}
+             */
+            metric: "median_hfr" | "fwhm" | "eccentricity" | "detected_stars" | "guiding_rms_arcsec" | "adu_median";
+            /** Value */
+            value: number;
+        };
         /** WbppSessionPreview */
         WbppSessionPreview: {
             /** Default Level Index */
@@ -5169,13 +5213,16 @@ export interface components {
             /** Total Frame Count */
             total_frame_count: number;
         };
-        /** StatusResponse */
-        app__schemas__mosaic__StatusResponse: {
+        /**
+         * StatusResponse
+         * @description Generic single-field status response, e.g. {"status": "ok"}.
+         */
+        app__schemas__common__StatusResponse: {
             /** Status */
             status: string;
         };
         /** StatusResponse */
-        app__schemas__target__StatusResponse: {
+        app__schemas__mosaic__StatusResponse: {
             /** Status */
             status: string;
         };
@@ -5242,7 +5289,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["StatusResponse"];
+                    "application/json": components["schemas"]["app__schemas__common__StatusResponse"];
                 };
             };
             /** @description Validation Error */
@@ -5577,7 +5624,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["StatusResponse"];
+                    "application/json": components["schemas"]["app__schemas__common__StatusResponse"];
                 };
             };
             /** @description Validation Error */
@@ -5643,7 +5690,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["StatusResponse"];
+                    "application/json": components["schemas"]["app__schemas__common__StatusResponse"];
                 };
             };
             /** @description Validation Error */
@@ -5674,7 +5721,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["StatusResponse"];
+                    "application/json": components["schemas"]["app__schemas__common__StatusResponse"];
                 };
             };
             /** @description Validation Error */
@@ -6210,7 +6257,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["StatusResponse"];
+                    "application/json": components["schemas"]["app__schemas__common__StatusResponse"];
                 };
             };
             /** @description Validation Error */
@@ -6243,7 +6290,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["StatusResponse"];
+                    "application/json": components["schemas"]["app__schemas__common__StatusResponse"];
                 };
             };
             /** @description Validation Error */
@@ -6276,7 +6323,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["StatusResponse"];
+                    "application/json": components["schemas"]["app__schemas__common__StatusResponse"];
                 };
             };
             /** @description Validation Error */
@@ -6466,7 +6513,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["StatusResponse"];
+                    "application/json": components["schemas"]["app__schemas__common__StatusResponse"];
                 };
             };
             /** @description Validation Error */
@@ -8605,7 +8652,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["app__schemas__target__StatusResponse"];
+                    "application/json": components["schemas"]["StatusResponse"];
                 };
             };
             /** @description Validation Error */
@@ -8671,7 +8718,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["app__schemas__target__StatusResponse"];
+                    "application/json": components["schemas"]["StatusResponse"];
                 };
             };
             /** @description Validation Error */
@@ -8704,7 +8751,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["app__schemas__target__StatusResponse"];
+                    "application/json": components["schemas"]["StatusResponse"];
                 };
             };
             /** @description Validation Error */
@@ -9051,7 +9098,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["app__schemas__target__StatusResponse"];
+                    "application/json": components["schemas"]["StatusResponse"];
                 };
             };
             /** @description Validation Error */
@@ -9156,7 +9203,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["app__schemas__target__StatusResponse"];
+                    "application/json": components["schemas"]["StatusResponse"];
                 };
             };
             /** @description Validation Error */
@@ -9189,7 +9236,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["app__schemas__target__StatusResponse"];
+                    "application/json": components["schemas"]["StatusResponse"];
                 };
             };
             /** @description Validation Error */

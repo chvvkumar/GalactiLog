@@ -235,8 +235,24 @@ export interface FilterDetail {
   exposure_time: number | null;
 }
 
+// Mirrors the backend's InsightLevel/InsightKind literals (schemas/target.py).
+// Exported as named unions rather than inlined so the render-side lookup tables
+// can be keyed by them: a Record<InsightLevel, T> stops compiling the moment
+// the backend grows a level the UI has no style for, instead of silently
+// looking up undefined and rendering an element with a broken class.
+export type InsightLevel = "info" | "good" | "warning";
+
+export type InsightKind =
+  | "session_duration"
+  | "hfr_vs_target"
+  | "sensor_temp"
+  | "hfr_outliers"
+  | "eccentricity_outliers"
+  | "eccentricity_vs_rig";
+
 export interface SessionInsight {
-  level: "good" | "warning" | "info";
+  level: InsightLevel;
+  kind: InsightKind;
   message: string;
 }
 
@@ -418,6 +434,16 @@ export interface GeneralSettings {
   wbpp_default_os?: string | null;
   wbpp_staging_path?: string | null;
   wbpp_exclusions?: string[];
+  // WBPP export quality filter, persisted so tuning survives a modal close.
+  // `metric` is deliberately `string` rather than the lib's `RawMetric` union:
+  // this describes what the wire carries, and an older install's stored config
+  // may name a metric this build no longer has. WbppExportModal narrows it on
+  // hydration instead of asserting the wire is already correct.
+  wbpp_quality_enabled?: boolean;
+  wbpp_quality_mode?: string;
+  wbpp_quality_score_threshold?: number;
+  wbpp_quality_baseline?: string;
+  wbpp_quality_raw_constraints?: { metric: string; value: number }[];
 }
 
 export interface FilterConfig {

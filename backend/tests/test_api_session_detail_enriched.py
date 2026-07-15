@@ -27,6 +27,8 @@ def make_image(
     ecc=0.38,
     temp=-10.0,
     gain=100,
+    camera="ZWO ASI2600MM",
+    telescope="Esprit 150",
 ):
     img = MagicMock(spec=Image)
     img.capture_date = datetime.fromisoformat(date_str).replace(tzinfo=timezone.utc)
@@ -36,8 +38,8 @@ def make_image(
     img.eccentricity = ecc
     img.sensor_temp = temp
     img.camera_gain = gain
-    img.camera = "ZWO ASI2600MM"
-    img.telescope = "Esprit 150"
+    img.camera = camera
+    img.telescope = telescope
     img.file_name = f"Light_{filter_used}_{date_str}.fits"
     img.file_path = f"/data/Light_{filter_used}_{date_str}.fits"
     img.pier_side = "W"
@@ -229,8 +231,218 @@ async def test_session_detail_hfr_outlier_insight():
         resp = await client.get(f"/api/targets/{tid}/sessions/2026-03-20")
 
     data = resp.json()
-    messages = [i["message"] for i in data["insights"]]
-    hfr_warning = [m for m in messages if "HFR" in m and "outlier" in m.lower()]
-    assert len(hfr_warning) == 1
+    insights = data["insights"]
+    hfr_outliers = [i for i in insights if i["kind"] == "hfr_outliers"]
+    assert len(hfr_outliers) == 1
+    # median HFR 2.0 -> threshold 3.0 -> the 3.5 and 4.0 frames trip it. HFR is
+    # unbounded, so the 1.5x-median rule is always reachable and is kept as-is.
+    assert hfr_outliers[0]["level"] == "warning"
+    assert hfr_outliers[0]["message"] == "2 frames with HFR outliers (> 3.0)"
 
     app.dependency_overrides.clear()
+
+
+async def _fetch_session(images, catalog_rows=None, avg_hfr=2.0, tid=None):
+    """Drive GET /api/targets/{tid}/sessions/{date} against mocked DB results.
+
+    `catalog_rows` are the rows the "this rig overall" baseline query returns:
+    (telescope, camera, filter_used, median_hfr, fwhm, eccentricity,
+     detected_stars, adu_median, guiding_rms_arcsec).
+    """
+    tid = tid or uuid.uuid4()
+    target = MagicMock(spec=Target)
+    target.id = tid
+    target.primary_name = "M 42"
+
+    mock_session = AsyncMock()
+    mock_session.get = AsyncMock(return_value=target)
+
+    mock_img_result = MagicMock()
+    mock_img_result.scalars.return_value.all.return_value = images
+
+    mock_avg_result = MagicMock()
+    mock_avg_result.scalar.return_value = avg_hfr
+
+    mock_alias_result = MagicMock()
+    mock_alias_result.scalar_one_or_none.return_value = None
+
+    mock_all_hfr_result = MagicMock()
+    mock_all_hfr_result.scalars.return_value.all.return_value = []
+
+    mock_note_result = MagicMock()
+    mock_note_result.scalar_one_or_none.return_value = None
+
+    mock_cv_result = MagicMock()
+    mock_cv_result.all.return_value = []
+
+    mock_catalog_frames_result = MagicMock()
+    mock_catalog_frames_result.all.return_value = catalog_rows or []
+
+    mock_session.execute = AsyncMock(
+        side_effect=[
+            mock_img_result, mock_avg_result, mock_alias_result,
+            mock_all_hfr_result, mock_note_result, mock_cv_result,
+            mock_catalog_frames_result,
+        ]
+    )
+
+    async def override():
+        yield mock_session
+
+    from app.services.normalization import invalidate_alias_cache
+    invalidate_alias_cache()
+    app.dependency_overrides[get_session] = override
+    app.dependency_overrides[get_current_user] = lambda: _admin_user()
+    try:
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.get(f"/api/targets/{tid}/sessions/2026-03-20")
+        assert resp.status_code == 200
+        return resp.json()
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def no_baseline_cache(monkeypatch):
+    """Bypass the Redis-backed rig-baseline cache.
+
+    Without this the rig baseline is shared across tests (and across runs) via a
+    real Redis if one is up, which would make these assertions order-dependent.
+    """
+    import app.services.cache as cache_mod
+
+    async def passthrough(key, ttl, compute):
+        return await compute()
+
+    monkeypatch.setattr(cache_mod, "cached_json", passthrough)
+
+
+def _ecc_session(eccs, **kwargs):
+    return [
+        make_image(f"2026-03-20T21:{i:02d}:00", ecc=e, **kwargs)
+        for i, e in enumerate(eccs)
+    ]
+
+
+@pytest.mark.asyncio
+async def test_session_detail_eccentricity_outlier_insight(no_baseline_cache):
+    # Eight frames, tight spread, one blown frame. Note the median is 0.335, so
+    # the old `median * 1.5` rule would have used a 0.50 threshold; the MAD rule
+    # keys off dispersion instead.
+    images = _ecc_session([0.30, 0.31, 0.32, 0.33, 0.34, 0.35, 0.36, 0.90])
+    data = await _fetch_session(images)
+
+    ecc = [i for i in data["insights"] if i["kind"] == "eccentricity_outliers"]
+    assert len(ecc) == 1
+    assert ecc[0]["level"] == "warning"
+    assert ecc[0]["message"] == "1 frame with eccentricity outlier (≥ 3 MAD above the group median)"
+
+
+@pytest.mark.asyncio
+async def test_session_detail_eccentricity_insight_reachable_above_two_thirds(no_baseline_cache):
+    # median 0.70. The old rule's threshold would be 1.05 -- unreachable, since
+    # eccentricity is bounded [0, 1]. The rule went dark exactly when frames were
+    # worst. This must now fire.
+    images = _ecc_session([0.68, 0.69, 0.70, 0.70, 0.71, 0.72, 0.70, 0.95])
+    data = await _fetch_session(images)
+
+    ecc = [i for i in data["insights"] if i["kind"] == "eccentricity_outliers"]
+    assert len(ecc) == 1
+    assert ecc[0]["message"].startswith("1 frame with eccentricity outlier")
+
+
+@pytest.mark.asyncio
+async def test_session_detail_no_eccentricity_insight_on_uniform_session(no_baseline_cache):
+    images = _ecc_session([0.30, 0.31, 0.32, 0.33, 0.34, 0.35, 0.36, 0.37])
+    data = await _fetch_session(images)
+    assert [i for i in data["insights"] if i["kind"] == "eccentricity_outliers"] == []
+
+
+@pytest.mark.asyncio
+async def test_session_detail_no_eccentricity_insight_when_group_sparse(no_baseline_cache):
+    # Six frames < MIN_GROUP (8): no trustworthy MAD, so no claim. The old rule
+    # fired here on three frames.
+    images = _ecc_session([0.30, 0.31, 0.32, 0.33, 0.34, 0.90])
+    data = await _fetch_session(images)
+    assert [i for i in data["insights"] if i["kind"] == "eccentricity_outliers"] == []
+
+
+@pytest.mark.asyncio
+async def test_session_detail_whole_night_eccentricity_insight(no_baseline_cache):
+    # Every frame elongated. Per-frame z cannot see this (the session median
+    # moves with the frames), so only the rig-history comparison catches it.
+    images = _ecc_session([0.68, 0.70, 0.71, 0.72, 0.69, 0.73, 0.70, 0.71])
+    # Rig history: 20 well-behaved frames on the same telescope|camera|filter.
+    catalog_rows = [
+        ("Esprit 150", "ZWO ASI2600MM", "Ha", 2.0, None, e, None, None, None)
+        for e in [0.32, 0.34, 0.36, 0.38] * 5
+    ]
+    data = await _fetch_session(images, catalog_rows=catalog_rows)
+
+    assert [i for i in data["insights"] if i["kind"] == "eccentricity_outliers"] == []
+    night = [i for i in data["insights"] if i["kind"] == "eccentricity_vs_rig"]
+    assert len(night) == 1
+    assert night[0]["level"] == "warning"
+    assert "Whole session is elongated" in night[0]["message"]
+
+
+@pytest.mark.asyncio
+async def test_session_detail_no_whole_night_insight_when_night_is_typical(no_baseline_cache):
+    images = _ecc_session([0.32, 0.34, 0.36, 0.38, 0.33, 0.35, 0.37, 0.34])
+    catalog_rows = [
+        ("Esprit 150", "ZWO ASI2600MM", "Ha", 2.0, None, e, None, None, None)
+        for e in [0.32, 0.34, 0.36, 0.38] * 5
+    ]
+    data = await _fetch_session(images, catalog_rows=catalog_rows)
+    assert [i for i in data["insights"] if i["kind"] == "eccentricity_vs_rig"] == []
+
+
+@pytest.mark.asyncio
+async def test_session_detail_no_whole_night_insight_without_rig_history(no_baseline_cache):
+    images = _ecc_session([0.68, 0.70, 0.71, 0.72, 0.69, 0.73, 0.70, 0.71])
+    data = await _fetch_session(images, catalog_rows=[])
+    assert [i for i in data["insights"] if i["kind"] == "eccentricity_vs_rig"] == []
+
+
+@pytest.mark.asyncio
+async def test_session_detail_per_rig_insights_for_multi_rig_session(no_baseline_cache):
+    # Two rigs the same night: rig A clean, rig B with one blown frame. Nothing
+    # in the suite built a multi-rig session before, so the per-rig block was
+    # entirely untested.
+    rig_a = [
+        make_image(f"2026-03-20T21:{i:02d}:00", ecc=e, hfr=2.0,
+                   telescope="Esprit 150", camera="ZWO ASI2600MM")
+        for i, e in enumerate([0.30, 0.31, 0.32, 0.33, 0.34, 0.35, 0.36, 0.37])
+    ]
+    rig_b = [
+        make_image(f"2026-03-20T22:{i:02d}:00", ecc=e, hfr=2.0,
+                   telescope="RedCat 51", camera="ZWO ASI533MC")
+        for i, e in enumerate([0.30, 0.31, 0.32, 0.33, 0.34, 0.35, 0.36, 0.90])
+    ]
+    data = await _fetch_session(rig_a + rig_b, avg_hfr=2.0)
+
+    ecc = [i for i in data["insights"] if i["kind"] == "eccentricity_outliers"]
+    # One per-rig insight for rig B only. Rig A is clean, and the session-level
+    # rule is silent too: each frame is graded against its own train+filter
+    # group, so rig B's outlier surfaces once at session level as well.
+    prefixed = [i for i in ecc if i["message"].startswith("[RedCat 51 / ZWO ASI533MC] ")]
+    assert len(prefixed) == 1
+    assert prefixed[0]["message"].endswith("1 frame with eccentricity outlier (≥ 3 MAD above the group median)")
+    assert not any(i["message"].startswith("[Esprit 150") for i in ecc)
+
+
+@pytest.mark.asyncio
+async def test_session_detail_insight_levels_and_kinds_are_within_the_schema(no_baseline_cache):
+    images = _ecc_session([0.30, 0.31, 0.32, 0.33, 0.34, 0.35, 0.36, 0.90])
+    data = await _fetch_session(images)
+
+    assert data["insights"]
+    for i in data["insights"]:
+        # The frontend keys INSIGHT_STYLES/INSIGHT_ICONS off `level`; an unknown
+        # value renders an undefined class.
+        assert i["level"] in {"info", "good", "warning"}
+        assert i["kind"] in {
+            "session_duration", "hfr_vs_target", "sensor_temp",
+            "hfr_outliers", "eccentricity_outliers", "eccentricity_vs_rig",
+        }

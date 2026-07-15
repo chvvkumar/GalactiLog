@@ -35,8 +35,9 @@ function verdict(
   reason: FrameVerdict["reason"],
   score: number | null,
   over: Partial<FrameRecord> = {},
+  failedBy: string | null = null,
 ): FrameVerdict {
-  return { frame: frame(name, over), sessionDate: DATE, score, keep, reason };
+  return { frame: frame(name, over), sessionDate: DATE, score, keep, reason, failedBy };
 }
 
 const VERDICTS: FrameVerdict[] = [
@@ -504,6 +505,169 @@ describe("WbppQualityPanel live count line", () => {
   });
 });
 
+describe("WbppQualityPanel failure reasons", () => {
+  // "Exclude" alone is a black box: the user whose rig floors above the default
+  // cannot tell an eccentricity gate from a score gate, nor by how much they
+  // missed. The numbers are the whole point.
+  it("names the gate and the numbers beside an excluded frame", () => {
+    const { container } = setup({
+      enabled: true,
+      config: { ...DEFAULT_CONFIG, mode: "raw", rawConstraints: [{ metric: "eccentricity", value: 0.55 }] },
+      verdicts: [verdict("e.fits", false, "fail", null, { eccentricity: 0.62 }, "ecc 0.62 > 0.55")],
+    });
+    const cell = container.querySelector("tbody tr td:last-child")!;
+    expect(cell.textContent).toContain("Exclude");
+    expect(cell.textContent).toContain("ecc 0.62 > 0.55");
+  });
+
+  it("shows the score gate's arithmetic in score mode", () => {
+    const { container } = setup({
+      enabled: true,
+      verdicts: [verdict("s.fits", false, "fail", 41, {}, "score 41 < 60")],
+    });
+    expect(container.querySelector("tbody tr td:last-child")!.textContent).toContain(
+      "score 41 < 60",
+    );
+  });
+
+  it("adds nothing beside a passing or unmeasured frame", () => {
+    const { container } = setup({ enabled: true });
+    const cells = Array.from(container.querySelectorAll("tbody tr td:last-child"));
+    expect(cells[0].textContent!.trim()).toBe("Copy");
+    expect(cells[2].textContent!.trim()).toBe("Unmeasured");
+  });
+});
+
+describe("WbppQualityPanel empty-export guard", () => {
+  // A default eccentricity can sit under a rig's achievable floor and exclude
+  // 100% of frames. Shipping an empty staging folder with no explanation is the
+  // failure this guards.
+  const setupEmpty = (over: Partial<Parameters<typeof WbppQualityPanel>[0]> = {}) =>
+    setup({
+      enabled: true,
+      config: { ...DEFAULT_CONFIG, mode: "raw", rawConstraints: [{ metric: "eccentricity", value: 0.5 }] },
+      totals: { total: 3, copy: 0, fail: 3, unmeasured: 0 },
+      verdicts: [
+        verdict("a.fits", false, "fail", null, { eccentricity: 0.5519 }, "ecc 0.55 > 0.50"),
+        verdict("b.fits", false, "fail", null, { eccentricity: 0.58 }, "ecc 0.58 > 0.50"),
+        verdict("c.fits", false, "fail", null, { eccentricity: 0.61 }, "ecc 0.61 > 0.50"),
+      ],
+      ...over,
+    });
+
+  it("says plainly that the export would copy nothing", () => {
+    const { container } = setupEmpty();
+    const text = container.textContent!.replace(/\s+/g, " ");
+    expect(text).toContain("copy no light frames");
+    expect(text).toContain("all 3 are excluded");
+  });
+
+  it("offers a relaxation drawn from the user's own best frame", () => {
+    const { container, getByText } = setupEmpty();
+    const text = container.textContent!.replace(/\s+/g, " ");
+    // 0.5519 rounded outward to 0.56 -- what this rig can actually reach, not a
+    // number from a table of conventions.
+    expect(text).toContain("Eccentricity ≤ 0.56");
+    expect(text).toContain("keeps 1 of 3");
+    expect(getByText("Relax to Eccentricity ≤ 0.56")).toBeTruthy();
+  });
+
+  it("applies the relaxation to the constraint it names", () => {
+    const { getByText, calls } = setupEmpty();
+    fireEvent.click(getByText("Relax to Eccentricity ≤ 0.56"));
+    expect(calls.config[0].rawConstraints).toEqual([{ metric: "eccentricity", value: 0.56 }]);
+  });
+
+  it("relaxes the threshold itself in score mode", () => {
+    const { getByText, calls } = setupEmpty({
+      config: DEFAULT_CONFIG,
+      verdicts: [
+        verdict("a.fits", false, "fail", 41, {}, "score 41 < 60"),
+        verdict("b.fits", false, "fail", 30, {}, "score 30 < 60"),
+      ],
+      totals: { total: 2, copy: 0, fail: 2, unmeasured: 0 },
+    });
+    fireEvent.click(getByText("Relax to score ≥ 41"));
+    expect(calls.config[0]).toEqual({ ...DEFAULT_CONFIG, scoreThreshold: 41 });
+  });
+
+  // Nothing was measured, so no threshold change can help. Offering one would
+  // be offering a fix that cannot work.
+  it("explains an all-unmeasured wipeout instead of offering a relaxation", () => {
+    const { container, queryByText } = setupEmpty({
+      config: DEFAULT_CONFIG,
+      verdicts: [verdict("a.fits", false, "unmeasured", null), verdict("b.fits", false, "unmeasured", null)],
+      totals: { total: 2, copy: 0, fail: 0, unmeasured: 2 },
+    });
+    const text = container.textContent!.replace(/\s+/g, " ");
+    expect(text).toContain("None of these frames could be measured");
+    expect(queryByText(/^Relax to/)).toBe(null);
+  });
+
+  it("stays quiet when at least one frame is copied", () => {
+    const { container } = setup({ enabled: true, totals: { total: 3, copy: 1, fail: 2, unmeasured: 0 } });
+    expect(container.textContent).not.toContain("copy no light frames");
+  });
+
+  it("stays quiet when there are no lights at all to judge", () => {
+    // Nothing selected yet is not a wipeout; there is nothing to warn about.
+    const { container } = setup({
+      enabled: true,
+      verdicts: [],
+      totals: { total: 0, copy: 0, fail: 0, unmeasured: 0 },
+    });
+    expect(container.textContent).not.toContain("copy no light frames");
+  });
+});
+
+describe("WbppQualityPanel eccentricity guidance", () => {
+  const eccConfig = {
+    ...DEFAULT_CONFIG,
+    mode: "raw" as const,
+    rawConstraints: [{ metric: "eccentricity" as const, value: 0.6 }],
+  };
+
+  it("offers the landmarks behind the icon on the eccentricity row", () => {
+    const { container, getByLabelText } = setup({ enabled: true, config: eccConfig });
+    fireEvent.click(getByLabelText("About eccentricity thresholds"));
+    const text = container.textContent!.replace(/\s+/g, " ");
+    expect(text).toContain("0.42");
+    expect(text).toContain("0.5 to 0.6");
+    expect(text).toContain("0.6");
+  });
+
+  // The provenance is the point. 0.42 is PixInsight's PERCEPTION threshold --
+  // their own docs reject nothing at it and both default expressions ship blank
+  // -- and every other number in circulation is third-party convention. Copy
+  // that dressed any of them as an authority would be the bug.
+  it("states each landmark's provenance honestly and claims no authority", () => {
+    const { container, getByLabelText } = setup({ enabled: true, config: eccConfig });
+    fireEvent.click(getByLabelText("About eccentricity thresholds"));
+    const text = container.textContent!.replace(/\s+/g, " ");
+    // 0.42 is about visibility, not rejection.
+    expect(text).toContain("visible");
+    expect(text).toContain("not a recommendation to reject");
+    // The rest is convention, and says so.
+    expect(text).toContain("convention");
+    // Never dressed as a standard.
+    expect(text).not.toContain("the PixInsight standard");
+    expect(text).not.toContain("recommended value");
+    // The choice is the user's, and depends on their gear and their tolerance.
+    expect(text).toContain("optics");
+    expect(text).toContain("discard");
+    // The floor is why a default can wipe an export out.
+    expect(text).toContain("floor");
+  });
+
+  it("keeps the guidance off rows for other metrics", () => {
+    const { queryByLabelText } = setup({
+      enabled: true,
+      config: { ...DEFAULT_CONFIG, mode: "raw", rawConstraints: [{ metric: "median_hfr", value: 3 }] },
+    });
+    expect(queryByLabelText("About eccentricity thresholds")).toBe(null);
+  });
+});
+
 describe("WbppQualityPanel is controlled", () => {
   it("emits the full config when the threshold changes", () => {
     const { getByLabelText, calls } = setup({ enabled: true });
@@ -539,6 +703,22 @@ describe("WbppQualityPanel is controlled", () => {
       { metric: "median_hfr", value: 3 },
       { metric: "fwhm", value: 0 },
     ]);
+  });
+
+  // Eccentricity is the one metric that can carry a default: dimensionless and
+  // bounded 0..1, so the number means the same on every rig. It arrives at 0.6
+  // rather than 0, which would have excluded every frame the moment it was added.
+  it("adds eccentricity at its default rather than at 0", () => {
+    const { getByText, calls } = setup({
+      enabled: true,
+      config: {
+        ...DEFAULT_CONFIG,
+        mode: "raw",
+        rawConstraints: [{ metric: "median_hfr", value: 3 }, { metric: "fwhm", value: 4 }],
+      },
+    });
+    fireEvent.click(getByText("+ Add constraint"));
+    expect(calls.config[0].rawConstraints[2]).toEqual({ metric: "eccentricity", value: 0.6 });
   });
 
   it("removes the clicked constraint", () => {

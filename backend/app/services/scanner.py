@@ -8,7 +8,7 @@ from typing import Any, Iterator
 
 import fitsio
 
-from app.services.csv_metadata import get_csv_metrics
+from app.services.csv_metadata import get_csv_metrics, merge_csv_metrics
 from app.services.scan_filters import ScanFilterConfig
 
 logger = logging.getLogger(__name__)
@@ -154,25 +154,30 @@ def _parse_hfr_from_filename(filename: str) -> float | None:
     return None
 
 
-def _eccentricity_from_header(header) -> float | None:
-    """Return eccentricity, reading ECCENTRICITY directly or deriving from ELLIPTICITY.
+def _eccentricity_from_header(header) -> tuple[float | None, str | None]:
+    """Return (eccentricity, source), reading ECCENTRICITY or deriving from ELLIPTICITY.
 
     Eccentricity (e) and ellipticity (1 - b/a) are different quantities that must
     not be stored interchangeably. For an ellipse with axis ratio b/a,
     e = sqrt(1 - (b/a)^2) = sqrt(1 - (1 - ellipticity)^2). Prefer a native
     ECCENTRICITY keyword; only convert ELLIPTICITY when eccentricity is absent.
+
+    The source is returned alongside the value because the two origins are not
+    comparable measurements: a value converted from an ELLIPTICITY written by
+    one application cannot be pooled with a native ECCENTRICITY written by
+    another. Callers store it so the distinction survives ingest.
     """
     ecc = _first_float(header, "ECCENTRICITY")
     if ecc is not None:
-        return ecc
+        return ecc, "header"
     ellip = _first_float(header, "ELLIPTICITY")
     if ellip is None:
-        return None
+        return None, None
     axis_ratio = 1.0 - ellip
     val = 1.0 - axis_ratio * axis_ratio
     if val < 0:
-        return None
-    return math.sqrt(val)
+        return None, None
+    return math.sqrt(val), "ellipticity"
 
 
 def extract_metadata(fits_path: Path, header=None) -> dict[str, Any]:
@@ -202,6 +207,8 @@ def extract_metadata(fits_path: Path, header=None) -> dict[str, Any]:
                 date_obs, fits_path,
             )
 
+    eccentricity, eccentricity_source = _eccentricity_from_header(header)
+
     metadata = {
         "file_path": str(fits_path),
         "file_name": fits_path.name,
@@ -221,15 +228,23 @@ def extract_metadata(fits_path: Path, header=None) -> dict[str, Any]:
         # different scale and go to median_fwhm, never median_hfr.
         "median_hfr": _first_float(header, "HFR") or _parse_hfr_from_filename(fits_path.name),
         "median_fwhm": _first_float(header, "MEANFWHM", "FWHM"),
-        "eccentricity": _eccentricity_from_header(header),
+        "eccentricity": eccentricity,
+        "eccentricity_source": eccentricity_source,
+        # Altitude of the frame centre. Eccentricity is contaminated by
+        # atmospheric dispersion, which grows with tan(zenith distance), so a
+        # given eccentricity means something different at 30 vs 60 degrees.
+        # OBJCTALT (MaxIm-style) first, CENTALT second; both are written by
+        # common capture software and agree when both are present.
+        "altitude_deg": _first_float(header, "OBJCTALT", "CENTALT"),
         "capture_date": capture_date,
         "raw_headers": raw_headers,
     }
 
-    # Merge CSV metrics - CSV values take priority for median_hfr and eccentricity
+    # Merge CSV metrics - a real CSV value takes priority for median_hfr and
+    # eccentricity, but a blank cell must not erase the header value.
     csv_metrics = get_csv_metrics(fits_path)
     if csv_metrics:
-        metadata.update(csv_metrics)
+        merge_csv_metrics(metadata, csv_metrics)
 
     return metadata
 

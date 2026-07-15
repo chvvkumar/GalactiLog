@@ -38,6 +38,7 @@ function PixInsightExportSection() {
           <p>Library root: the folder on the machine running PixInsight that mirrors the server's FITS data root. Stored container paths are rewritten relative to this root.</p>
           <p>Staging path: where session folders are copied to. Leave blank to use &lt;library root&gt;/_WBPP_staging/&lt;target&gt;.</p>
           <p>Excluded folder patterns skip processing-output folders so they are not re-ingested by WBPP.</p>
+          <p>The export's quality filter ("Skip low-quality light frames") is configured in the modal itself and saved from there, so its mode, threshold, baseline and raw constraints carry over to your next export. It is not repeated here because it is tuned against the frame preview beside it.</p>
         </HelpPopover>
       </div>
 

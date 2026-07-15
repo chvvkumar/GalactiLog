@@ -64,12 +64,13 @@ vi.mock("../api/generated/client", () => ({
 }));
 
 let general: Record<string, unknown> = {};
+const saveGeneralMock = vi.fn((_g: Record<string, unknown>) => Promise.resolve({}));
 
 vi.mock("./SettingsProvider", () => ({
   useSettingsContext: () => ({
     settings: () => ({ general }),
     displaySettings: () => undefined,
-    saveGeneral: vi.fn(() => Promise.resolve({})),
+    saveGeneral: (g: Record<string, unknown>) => saveGeneralMock(g),
   }),
 }));
 
@@ -205,6 +206,7 @@ beforeEach(() => {
   }));
   postMock.mockClear();
   getMock.mockClear();
+  saveGeneralMock.mockClear();
 });
 
 describe("WbppExportModal layout", () => {
@@ -503,6 +505,175 @@ describe("WbppExportModal quality filter", () => {
     // their 100 B each comes off the 1000 B level total.
     expect(primaryButton().textContent?.trim()).toBe("Copy 8 frames");
     expect(bodyText()).toContain("8 frames · 1 folder · 800 B");
+  });
+});
+
+describe("WbppExportModal quality config persistence", () => {
+  const checkbox = () =>
+    document.body.querySelector('input[type="checkbox"]') as HTMLInputElement;
+
+  it("hydrates the filter from the saved settings instead of resetting it", async () => {
+    general.wbpp_quality_enabled = true;
+    general.wbpp_quality_mode = "raw";
+    general.wbpp_quality_baseline = "rig";
+    general.wbpp_quality_score_threshold = 72;
+    general.wbpp_quality_raw_constraints = [{ metric: "eccentricity", value: 0.55 }];
+    renderModal();
+    await flush();
+
+    // Opening the modal used to reset every one of these, so the same tuning was
+    // redone by hand on every export.
+    expect(checkbox().checked).toBe(true);
+    const mode = document.body.querySelector('select[aria-label="Mode"]') as HTMLSelectElement;
+    expect(mode.value).toBe("raw");
+    const value = document.body.querySelector(
+      'input[aria-label="Eccentricity value"]',
+    ) as HTMLInputElement;
+    expect(value.value).toBe("0.55");
+    expect(bodyText()).toContain("Rig (catalog)");
+  });
+
+  it("falls back to the modal's original defaults when nothing is stored", () => {
+    renderModal();
+    expect(checkbox().checked).toBe(false);
+    const mode = document.body.querySelector('select[aria-label="Mode"]');
+    // Filter off: the panel is collapsed to its checkbox row, as it always was.
+    expect(mode).toBe(null);
+  });
+
+  // Stored config can predate this build. A metric it no longer evaluates must
+  // be dropped, not carried into the filter as a gate that matches nothing.
+  it("drops a stored constraint naming an unknown metric", async () => {
+    general.wbpp_quality_enabled = true;
+    general.wbpp_quality_mode = "raw";
+    general.wbpp_quality_raw_constraints = [
+      { metric: "snr", value: 5 },
+      { metric: "eccentricity", value: 0.55 },
+    ];
+    renderModal();
+    await flush();
+    expect(
+      document.body.querySelectorAll('select[aria-label="Metric"]').length,
+    ).toBe(1);
+    expect(bodyText()).not.toContain("snr");
+  });
+
+  it("writes the config back, debounced, when it changes", async () => {
+    vi.useFakeTimers();
+    try {
+      renderModal();
+      fireEvent.click(checkbox());
+      // Nothing yet: a slider drag must not be one PUT per pixel.
+      expect(saveGeneralMock).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(800);
+      expect(saveGeneralMock).toHaveBeenCalledTimes(1);
+      expect(saveGeneralMock.mock.calls[0][0]).toMatchObject({
+        wbpp_quality_enabled: true,
+        wbpp_quality_mode: "score",
+        wbpp_quality_score_threshold: 60,
+        wbpp_quality_baseline: "session",
+        wbpp_quality_raw_constraints: [],
+      });
+      // Unrelated settings survive the write.
+      expect(saveGeneralMock.mock.calls[0][0]).toMatchObject({ wbpp_library_root: "Z:\\Astro" });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not write anything back when the filter is never touched", async () => {
+    vi.useFakeTimers();
+    try {
+      renderModal();
+      vi.advanceTimersByTime(5000);
+      // The effect's first run holds exactly what it hydrated FROM. Writing that
+      // back would be a PUT on every modal open, for every user.
+      expect(saveGeneralMock).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("flushes a pending write when the modal closes", () => {
+    vi.useFakeTimers();
+    try {
+      const { unmount } = renderModal();
+      fireEvent.click(checkbox());
+      expect(saveGeneralMock).not.toHaveBeenCalled();
+      // Closing right after the last tweak is the normal way to use this modal.
+      // Cancelling the timer on cleanup would drop exactly the save that matters.
+      unmount();
+      expect(saveGeneralMock).toHaveBeenCalledTimes(1);
+      expect(saveGeneralMock.mock.calls[0][0]).toMatchObject({ wbpp_quality_enabled: true });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps the export working when the settings write is refused", async () => {
+    // PUT /settings/general is admin-only; the export is not. A non-admin loses
+    // the persistence, never the export.
+    saveGeneralMock.mockImplementationOnce(() => Promise.reject(new Error("403")));
+    renderModal();
+    await preview();
+    fireEvent.click(checkbox());
+    await flush();
+    await new Promise((r) => setTimeout(r, 900));
+    expect(bodyText()).not.toContain("Could not save");
+    expect(bodyText()).toContain("Skips");
+  });
+});
+
+describe("WbppExportModal empty-export guard", () => {
+  const emptied = () => document.body.querySelector('[data-testid="wbpp-empty-export"]');
+
+  it("says so when the filter excludes every frame in the selected folders", async () => {
+    // The level holds exactly the two cached lights, both unmeasured, so the
+    // filter takes all of them: the copy would write an empty folder.
+    previewSessions = [
+      session({ levels: [level({ frame_count: 2, frame_bytes: 200 })], total_frame_count: 2 }),
+    ];
+    renderModal();
+    await preview();
+    expect(emptied()).toBe(null);
+
+    fireEvent.click(document.body.querySelector('input[type="checkbox"]') as HTMLElement);
+    await flush();
+
+    expect(emptied()).not.toBe(null);
+    expect(bodyText()).toContain("would copy nothing");
+    await pickBothFolders();
+    expect(primaryButton().textContent?.trim()).toBe("Copy 0 frames");
+  });
+
+  it("stays quiet while the filter still keeps frames", async () => {
+    renderModal();
+    await preview();
+    fireEvent.click(document.body.querySelector('input[type="checkbox"]') as HTMLElement);
+    await flush();
+    // 10 frames in the level, 2 excluded: 8 still copy.
+    expect(emptied()).toBe(null);
+  });
+
+  it("does not blame the filter for a genuinely empty folder", async () => {
+    previewSessions = [
+      session({ levels: [level({ frame_count: 0, frame_bytes: 0 })], total_frame_count: 0 }),
+    ];
+    renderModal({});
+    await preview();
+    fireEvent.click(document.body.querySelector('input[type="checkbox"]') as HTMLElement);
+    await flush();
+    // Nothing was there to exclude, so the filter is not the reason.
+    expect(emptied()).toBe(null);
+  });
+
+  it("stays quiet when the filter is off", async () => {
+    previewSessions = [
+      session({ levels: [level({ frame_count: 2, frame_bytes: 200 })], total_frame_count: 2 }),
+    ];
+    renderModal();
+    await preview();
+    expect(emptied()).toBe(null);
   });
 });
 

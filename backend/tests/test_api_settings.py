@@ -862,6 +862,123 @@ async def test_put_general_persists_wbpp_fields():
         app.dependency_overrides.clear()
 
 
+@pytest.mark.asyncio
+async def test_put_general_persists_wbpp_quality_config():
+    """PUT /api/settings/general round-trips the WBPP quality filter config.
+
+    This is the whole point of persisting it: the export modal used to reset the
+    filter on every open, so the same tuning was redone by hand each export. The
+    stored dict is re-parsed by _row_to_response, so this covers the dump/reload
+    of the nested constraint list, not just the accept.
+    """
+    row = _make_settings_row(general={})
+
+    mock_result = MagicMock()
+    mock_result.scalar_one_or_none.return_value = row
+
+    mock_session = AsyncMock()
+    mock_session.execute = AsyncMock(return_value=mock_result)
+    mock_session.commit = AsyncMock()
+    mock_session.refresh = AsyncMock()
+
+    async def override():
+        yield mock_session
+
+    app.dependency_overrides[get_session] = override
+    app.dependency_overrides[get_current_user] = lambda: _admin_user()
+    app.dependency_overrides[require_admin] = lambda: _admin_user()
+    try:
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.put(
+                "/api/settings/general",
+                json={
+                    "wbpp_quality_enabled": True,
+                    "wbpp_quality_mode": "raw",
+                    "wbpp_quality_score_threshold": 72,
+                    "wbpp_quality_baseline": "rig",
+                    "wbpp_quality_raw_constraints": [
+                        {"metric": "eccentricity", "value": 0.6},
+                        {"metric": "median_hfr", "value": 3.2},
+                    ],
+                },
+            )
+
+        assert resp.status_code == 200
+        general = resp.json()["general"]
+        assert general["wbpp_quality_enabled"] is True
+        assert general["wbpp_quality_mode"] == "raw"
+        assert general["wbpp_quality_score_threshold"] == 72
+        assert general["wbpp_quality_baseline"] == "rig"
+        assert general["wbpp_quality_raw_constraints"] == [
+            {"metric": "eccentricity", "value": 0.6},
+            {"metric": "median_hfr", "value": 3.2},
+        ]
+        assert mock_session.commit.called
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_get_general_defaults_the_wbpp_quality_config():
+    """An install that has never touched the filter reads back the modal's own
+    starting state, so persistence remembers rather than changes behaviour."""
+    row = _make_settings_row(general={"_migrated": True})
+
+    mock_result = MagicMock()
+    mock_result.scalar_one_or_none.return_value = row
+
+    mock_session = AsyncMock()
+    mock_session.execute = AsyncMock(return_value=mock_result)
+
+    async def override():
+        yield mock_session
+
+    app.dependency_overrides[get_session] = override
+    _override_admin()
+    try:
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.get("/api/settings")
+
+        assert resp.status_code == 200
+        general = resp.json()["general"]
+        assert general["wbpp_quality_enabled"] is False
+        assert general["wbpp_quality_mode"] == "score"
+        assert general["wbpp_quality_score_threshold"] == 60
+        assert general["wbpp_quality_baseline"] == "session"
+        assert general["wbpp_quality_raw_constraints"] == []
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_put_general_rejects_an_unknown_quality_metric():
+    """A typo'd metric would evaluate to "missing" on the client and silently
+    skip every frame, so it must not be storable."""
+    row = _make_settings_row(general={})
+    mock_result = MagicMock()
+    mock_result.scalar_one_or_none.return_value = row
+    mock_session = AsyncMock()
+    mock_session.execute = AsyncMock(return_value=mock_result)
+
+    async def override():
+        yield mock_session
+
+    app.dependency_overrides[get_session] = override
+    _override_admin()
+    try:
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.put(
+                "/api/settings/general",
+                json={"wbpp_quality_raw_constraints": [{"metric": "snr", "value": 5}]},
+            )
+        assert resp.status_code == 422
+    finally:
+        app.dependency_overrides.clear()
+
+
 def test_activity_retention_days_default():
     from app.schemas.settings import GeneralSettings
     assert GeneralSettings().activity_retention_days == 90

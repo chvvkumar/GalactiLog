@@ -474,6 +474,8 @@ def _do_ingest(fits_path: str, include_calibration: bool = True) -> dict:
                 median_hfr=meta.get("median_hfr"),
                 median_fwhm=meta.get("median_fwhm"),
                 eccentricity=meta.get("eccentricity"),
+                eccentricity_source=meta.get("eccentricity_source"),
+                altitude_deg=meta.get("altitude_deg"),
                 raw_headers=meta.get("raw_headers", {}),
                 # CSV metrics (N.I.N.A. Session Metadata)
                 hfr_stdev=meta.get("hfr_stdev"),

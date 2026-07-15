@@ -3164,6 +3164,37 @@
             ],
             "title": "Wbpp Library Root"
           },
+          "wbpp_quality_baseline": {
+            "default": "session",
+            "pattern": "^(session|rig)$",
+            "title": "Wbpp Quality Baseline",
+            "type": "string"
+          },
+          "wbpp_quality_enabled": {
+            "default": false,
+            "title": "Wbpp Quality Enabled",
+            "type": "boolean"
+          },
+          "wbpp_quality_mode": {
+            "default": "score",
+            "pattern": "^(score|raw)$",
+            "title": "Wbpp Quality Mode",
+            "type": "string"
+          },
+          "wbpp_quality_raw_constraints": {
+            "items": {
+              "$ref": "#/components/schemas/WbppRawConstraint"
+            },
+            "title": "Wbpp Quality Raw Constraints",
+            "type": "array"
+          },
+          "wbpp_quality_score_threshold": {
+            "default": 60,
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "Wbpp Quality Score Threshold",
+            "type": "integer"
+          },
           "wbpp_staging_path": {
             "anyOf": [
               {
@@ -6473,7 +6504,24 @@
       },
       "SessionInsight": {
         "properties": {
+          "kind": {
+            "enum": [
+              "session_duration",
+              "hfr_vs_target",
+              "sensor_temp",
+              "hfr_outliers",
+              "eccentricity_outliers",
+              "eccentricity_vs_rig"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
           "level": {
+            "enum": [
+              "info",
+              "good",
+              "warning"
+            ],
             "title": "Level",
             "type": "string"
           },
@@ -6484,6 +6532,7 @@
         },
         "required": [
           "level",
+          "kind",
           "message"
         ],
         "title": "SessionInsight",
@@ -6895,7 +6944,6 @@
         "type": "object"
       },
       "StatusResponse": {
-        "description": "Generic single-field status response, e.g. {\"status\": \"ok\"}.",
         "properties": {
           "status": {
             "title": "Status",
@@ -8652,6 +8700,33 @@
         "title": "WbppPreviewResponse",
         "type": "object"
       },
+      "WbppRawConstraint": {
+        "description": "One raw-metric threshold in the WBPP export's quality filter.\n\nDirection is not stored: it is a property of the metric (only detected_stars\nis higher-is-better) and is derived on the client from HIGHER_IS_BETTER. A\nstored direction could contradict the metric.",
+        "properties": {
+          "metric": {
+            "enum": [
+              "median_hfr",
+              "fwhm",
+              "eccentricity",
+              "detected_stars",
+              "guiding_rms_arcsec",
+              "adu_median"
+            ],
+            "title": "Metric",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value",
+            "type": "number"
+          }
+        },
+        "required": [
+          "metric",
+          "value"
+        ],
+        "title": "WbppRawConstraint",
+        "type": "object"
+      },
       "WbppSessionPreview": {
         "properties": {
           "default_level_index": {
@@ -8688,7 +8763,8 @@
         "title": "WbppSessionPreview",
         "type": "object"
       },
-      "app__schemas__mosaic__StatusResponse": {
+      "app__schemas__common__StatusResponse": {
+        "description": "Generic single-field status response, e.g. {\"status\": \"ok\"}.",
         "properties": {
           "status": {
             "title": "Status",
@@ -8701,7 +8777,7 @@
         "title": "StatusResponse",
         "type": "object"
       },
-      "app__schemas__target__StatusResponse": {
+      "app__schemas__mosaic__StatusResponse": {
         "properties": {
           "status": {
             "title": "Status",
@@ -8750,7 +8826,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/StatusResponse"
+                  "$ref": "#/components/schemas/app__schemas__common__StatusResponse"
                 }
               }
             },
@@ -9886,7 +9962,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/StatusResponse"
+                  "$ref": "#/components/schemas/app__schemas__common__StatusResponse"
                 }
               }
             },
@@ -9994,7 +10070,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/StatusResponse"
+                  "$ref": "#/components/schemas/app__schemas__common__StatusResponse"
                 }
               }
             },
@@ -10043,7 +10119,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/StatusResponse"
+                  "$ref": "#/components/schemas/app__schemas__common__StatusResponse"
                 }
               }
             },
@@ -10957,7 +11033,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/StatusResponse"
+                  "$ref": "#/components/schemas/app__schemas__common__StatusResponse"
                 }
               }
             },
@@ -11017,7 +11093,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/StatusResponse"
+                  "$ref": "#/components/schemas/app__schemas__common__StatusResponse"
                 }
               }
             },
@@ -11077,7 +11153,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/StatusResponse"
+                  "$ref": "#/components/schemas/app__schemas__common__StatusResponse"
                 }
               }
             },
@@ -11310,7 +11386,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/StatusResponse"
+                  "$ref": "#/components/schemas/app__schemas__common__StatusResponse"
                 }
               }
             },
@@ -15777,7 +15853,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/app__schemas__target__StatusResponse"
+                  "$ref": "#/components/schemas/StatusResponse"
                 }
               }
             },
@@ -15901,7 +15977,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/app__schemas__target__StatusResponse"
+                  "$ref": "#/components/schemas/StatusResponse"
                 }
               }
             },
@@ -15961,7 +16037,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/app__schemas__target__StatusResponse"
+                  "$ref": "#/components/schemas/StatusResponse"
                 }
               }
             },
@@ -16618,7 +16694,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/app__schemas__target__StatusResponse"
+                  "$ref": "#/components/schemas/StatusResponse"
                 }
               }
             },
@@ -16821,7 +16897,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/app__schemas__target__StatusResponse"
+                  "$ref": "#/components/schemas/StatusResponse"
                 }
               }
             },
@@ -16881,7 +16957,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/app__schemas__target__StatusResponse"
+                  "$ref": "#/components/schemas/StatusResponse"
                 }
               }
             },

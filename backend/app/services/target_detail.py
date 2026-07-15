@@ -29,6 +29,7 @@ from app.schemas.export import ExportResponse, ExportFilterRow, ExportEquipment,
 from app.services import frame_quality
 from app.services.target_helpers import (
     parse_sexa_ra, parse_sexa_dec, categorize_object_type, build_rig_details, compute_insights,
+    hfr_outlier_insight, ecc_outlier_insight, session_ecc_vs_rig_insights,
 )
 
 
@@ -673,6 +674,43 @@ async def get_session_detail(target_id: str, date: str, session: AsyncSession) -
 
     rig_details = build_rig_details(images, filter_map, cam_map, tel_map)
 
+    # --- Frame-quality baselines (MAD-based, computed on the fly) ---
+    # Group keys use normalized telescope/camera/filter so they match the
+    # frontend `groupKey(frame)` built from the same normalized values.
+    # Computed here, above the insight rules, because the insights grade
+    # eccentricity against these very baselines: one statistical spine feeds both
+    # the per-frame grading table and the sentences printed above it.
+    def _baseline_frame(tel, cam, filt, hfr, fwhm_v, ecc, stars, adu_med, guide):
+        return {
+            "telescope": normalize_equipment(tel, tel_map),
+            "camera": normalize_equipment(cam, cam_map),
+            "filter_used": normalize_filter(filt, filter_map),
+            "median_hfr": hfr,
+            "fwhm": fwhm_v,
+            "eccentricity": ecc,
+            "detected_stars": stars,
+            "adu_median": adu_med,
+            "guiding_rms_arcsec": guide,
+        }
+
+    session_frame_dicts = [
+        _baseline_frame(
+            img.telescope, img.camera, img.filter_used,
+            img.median_hfr, img.fwhm, img.eccentricity,
+            img.detected_stars, img.adu_median, img.guiding_rms_arcsec,
+        )
+        for img in images
+    ]
+    session_baselines = frame_quality.group_baselines(session_frame_dicts)
+
+    # Same frames, bucketed by the label build_rig_details assigns, so the
+    # per-rig insight block can grade a rig's frames against their own
+    # train+filter baselines without rebuilding them a second way.
+    rig_frame_dicts: dict[str, list[dict]] = defaultdict(list)
+    for fd in session_frame_dicts:
+        label = f"{fd['telescope'] or 'Unknown'} / {fd['camera'] or 'Unknown'}"
+        rig_frame_dicts[label].append(fd)
+
     is_best_hfr = False
     if median_hfr is not None:
         # Query HFR data across all sessions for this target
@@ -709,51 +747,45 @@ async def get_session_detail(target_id: str, date: str, session: AsyncSession) -
 
     insights = compute_insights(
         median_hfr=median_hfr,
-        median_ecc=median_ecc,
         hfr_values=hfr_values,
-        ecc_values=ecc_values,
         temp_values=temp_values,
         target_avg_hfr=target_avg_hfr,
         is_best_hfr=is_best_hfr,
         first_frame=images[0],
         last_frame=images[-1],
+        frames=session_frame_dicts,
+        baselines=session_baselines,
     )
 
     # Per-rig insights for multi-rig sessions
     if len(rig_details) > 1:
         for rd in rig_details:
             rig_hfr = [f.median_hfr for f in rd.frames if f.median_hfr is not None]
-            rig_ecc = [f.eccentricity for f in rd.frames if f.eccentricity is not None]
             rig_median_hfr = statistics.median(rig_hfr) if rig_hfr else None
-            rig_median_ecc = statistics.median(rig_ecc) if rig_ecc else None
             prefix = f"[{rd.rig_label}] "
             if rig_median_hfr is not None and target_avg_hfr is not None:
                 if rig_median_hfr <= target_avg_hfr:
                     insights.append(SessionInsight(
                         level="good",
+                        kind="hfr_vs_target",
                         message=f"{prefix}Good HFR (median {rig_median_hfr:.2f} vs target avg {target_avg_hfr:.2f})",
                     ))
                 elif rig_median_hfr > target_avg_hfr * 1.3:
                     insights.append(SessionInsight(
                         level="warning",
+                        kind="hfr_vs_target",
                         message=f"{prefix}Poor HFR (median {rig_median_hfr:.2f} vs target avg {target_avg_hfr:.2f})",
                     ))
-            if rig_median_hfr is not None and len(rig_hfr) > 2:
-                threshold = rig_median_hfr * 1.5
-                outlier_count = sum(1 for v in rig_hfr if v > threshold)
-                if outlier_count > 0:
-                    insights.append(SessionInsight(
-                        level="warning",
-                        message=f"{prefix}{outlier_count} frame{'s' if outlier_count > 1 else ''} with HFR outlier{'s' if outlier_count > 1 else ''} (> {threshold:.1f})",
-                    ))
-            if rig_median_ecc is not None and len(rig_ecc) > 2:
-                threshold = rig_median_ecc * 1.5
-                outlier_count = sum(1 for v in rig_ecc if v > threshold)
-                if outlier_count > 0:
-                    insights.append(SessionInsight(
-                        level="warning",
-                        message=f"{prefix}{outlier_count} frame{'s' if outlier_count > 1 else ''} with eccentricity outlier{'s' if outlier_count > 1 else ''} (> {threshold:.2f})",
-                    ))
+            # Same two rules as the session-level block, same helpers: HFR keeps
+            # its 1.5x-median rule, eccentricity is graded by MAD z.
+            rig_hfr_insight = hfr_outlier_insight(rig_median_hfr, rig_hfr, prefix=prefix)
+            if rig_hfr_insight:
+                insights.append(rig_hfr_insight)
+            rig_ecc_insight = ecc_outlier_insight(
+                rig_frame_dicts.get(rd.rig_label, []), session_baselines, prefix=prefix
+            )
+            if rig_ecc_insight:
+                insights.append(rig_ecc_insight)
 
     # Fetch session note
     session_note = None
@@ -791,32 +823,6 @@ async def get_session_detail(target_id: str, date: str, session: AsyncSession) -
                 for slug, sd, rl, val in cv_rows
             ]
 
-    # --- Frame-quality baselines (MAD-based, computed on the fly) ---
-    # Group keys use normalized telescope/camera/filter so they match the
-    # frontend `groupKey(frame)` built from the same normalized values.
-    def _baseline_frame(tel, cam, filt, hfr, fwhm_v, ecc, stars, adu_med, guide):
-        return {
-            "telescope": normalize_equipment(tel, tel_map),
-            "camera": normalize_equipment(cam, cam_map),
-            "filter_used": normalize_filter(filt, filter_map),
-            "median_hfr": hfr,
-            "fwhm": fwhm_v,
-            "eccentricity": ecc,
-            "detected_stars": stars,
-            "adu_median": adu_med,
-            "guiding_rms_arcsec": guide,
-        }
-
-    session_frame_dicts = [
-        _baseline_frame(
-            img.telescope, img.camera, img.filter_used,
-            img.median_hfr, img.fwhm, img.eccentricity,
-            img.detected_stars, img.adu_median, img.guiding_rms_arcsec,
-        )
-        for img in images
-    ]
-    session_baselines = frame_quality.group_baselines(session_frame_dicts)
-
     # Catalog-wide frames: every LIGHT frame across all targets and sessions,
     # grouped by telescope|camera|filter. This is the "This rig overall"
     # baseline. It is target-independent, which makes the per-frame
@@ -847,6 +853,12 @@ async def get_session_detail(target_id: str, date: str, session: AsyncSession) -
     rig_baselines = await cached_json(
         RIG_BASELINES_CACHE_KEY, RIG_BASELINES_CACHE_TTL, _compute_rig_baselines
     )
+
+    # Whole-night eccentricity check. Deliberately last: it needs the rig
+    # baseline, which is the only sample wide enough to notice that every frame
+    # tonight is elongated. The per-frame z-score above is blind to that case
+    # because the session median it compares against moves with the bad frames.
+    insights.extend(session_ecc_vs_rig_insights(session_baselines, rig_baselines))
 
     return SessionDetailResponse(
         target_name=target_name,
