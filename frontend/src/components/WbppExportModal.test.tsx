@@ -28,10 +28,38 @@ const postMock = vi.fn((path: string, _opts?: any) => {
   });
 });
 
+// Session detail for a date the PAGE has not cached, so the modal must fetch it.
+// Two lights, one clearly good and one clearly bad against the baseline, so the
+// verdicts the panel renders are real rather than "unmeasured".
+const fetchedDetail = () => ({
+  equipment: { telescope: "TS", camera: "Cam" },
+  rigs: [],
+  frames: [
+    {
+      file_name: "fetched_good.fits", filter_used: "Ha",
+      source_relative: "M31/2026-07-05/Ha/fetched_good.fits", file_size: 100,
+      median_hfr: 1.0, eccentricity: null, fwhm: null, detected_stars: null,
+      guiding_rms_arcsec: null, adu_median: null, rig: null,
+    },
+    {
+      file_name: "fetched_bad.fits", filter_used: "Ha",
+      source_relative: "M31/2026-07-05/Ha/fetched_bad.fits", file_size: 100,
+      median_hfr: 3.0, eccentricity: null, fwhm: null, detected_stars: null,
+      guiding_rms_arcsec: null, adu_median: null, rig: null,
+    },
+  ],
+  session_baselines: { "TS|Cam|Ha": { median_hfr: { median: 2.0, mad: 0.5, n: 20 } } },
+  rig_baselines: {},
+});
+
+const getMock = vi.fn((_path: string, _opts?: any) =>
+  Promise.resolve({ data: fetchedDetail(), response: { ok: true } }),
+);
+
 vi.mock("../api/generated/client", () => ({
   apiClient: {
     POST: (path: string, opts: any) => postMock(path, opts),
-    GET: () => Promise.resolve({ data: null, response: { ok: true } }),
+    GET: (path: string, opts: any) => getMock(path, opts),
   },
 }));
 
@@ -176,6 +204,7 @@ beforeEach(() => {
     requestPermission: async () => "granted",
   }));
   postMock.mockClear();
+  getMock.mockClear();
 });
 
 describe("WbppExportModal layout", () => {
@@ -356,6 +385,70 @@ const HA_LEVEL = level({
   relative_path: "M31/2026-07-01/Ha",
   frame_count: 30,
   frame_bytes: 600_000_000,
+});
+
+describe("WbppExportModal quality frame fetch", () => {
+  // Every other test in this file passes a populated sessionCache, which is exactly
+  // why the loop below shipped: `props.sessionCache[date] ?? qualitySessions()[date]`
+  // short-circuits, so a cached date never reads (never tracks) the signal the
+  // effect writes. Only an UNCACHED date reaches that read. These tests use an
+  // empty cache on purpose.
+  const UNCACHED = "2026-07-05";
+
+  const renderUncached = (dates: string[] = [UNCACHED]) =>
+    render(() => (
+      <WbppExportModal
+        targetId="t-1"
+        targetName="M31"
+        selectedDates={dates}
+        sessionCache={{}}
+        onClose={() => {}}
+      />
+    ));
+
+  const enableFilter = async () => {
+    fireEvent.click(document.body.querySelector('input[type="checkbox"]') as HTMLInputElement);
+    await flush();
+  };
+
+  it("fetches an uncached session exactly once instead of looping forever", async () => {
+    renderUncached();
+    await enableFilter();
+    // The effect used to subscribe to the signal it writes, so each write retriggered
+    // it and fired another GET: thousands of identical requests per second at the
+    // backend, for as long as the modal stayed open.
+    expect(getMock).toHaveBeenCalledTimes(1);
+    expect(getMock.mock.calls[0][0]).toBe("/api/targets/{target_id}/sessions/{date}");
+    expect(getMock.mock.calls[0][1].params.path.date).toBe(UNCACHED);
+
+    // Still settled after further ticks: a loop would keep climbing.
+    await flush();
+    await flush();
+    expect(getMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("fetches each uncached date once and no more", async () => {
+    renderUncached([UNCACHED, "2026-07-06", "2026-07-07"]);
+    await enableFilter();
+    expect(getMock).toHaveBeenCalledTimes(3);
+    expect(getMock.mock.calls.map((c) => c[1].params.path.date).sort()).toEqual([
+      "2026-07-05",
+      "2026-07-06",
+      "2026-07-07",
+    ]);
+  });
+
+  it("lands the fetched frames in state rather than overwriting them each pass", async () => {
+    // The other half of the same bug: every rerun reset state to a snapshot taken
+    // before the in-flight fetch resolved, so the arriving frames were discarded and
+    // the panel reported "0 of 0 lights" on a session that had plenty.
+    renderUncached();
+    await enableFilter();
+    expect(bodyText()).not.toContain("0 of 0 lights");
+    // Real verdicts from the fetched frames: hfr 1.0 passes, hfr 3.0 fails.
+    expect(bodyText()).toContain("Skips 1 of 2 lights");
+    expect(bodyText()).toContain("fetched_bad.fits");
+  });
 });
 
 describe("WbppExportModal quality filter", () => {

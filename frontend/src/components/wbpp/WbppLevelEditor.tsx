@@ -110,12 +110,6 @@ export default function WbppLevelEditor(props: WbppLevelEditorProps): JSX.Elemen
                     {lastSegment(level.path)}
                   </span>
 
-                  <Show when={i() === props.session.default_level_index}>
-                    <span class="shrink-0 text-micro px-1.5 py-0.5 rounded-[var(--radius-sm)] text-theme-accent bg-theme-accent/15 border border-theme-accent/30">
-                      Recommended
-                    </span>
-                  </Show>
-
                   <span class="ml-auto shrink-0">
                     <Show when={cost().length > 0}>
                       <span

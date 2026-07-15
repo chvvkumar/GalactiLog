@@ -42,16 +42,14 @@ const contaminated = () =>
   });
 
 describe("WbppLevelEditor", () => {
-  it("marks the default level with a Recommended chip", () => {
-    const { getAllByRole, container } = render(() => (
+  // The editor does not recommend a level. The parent still seeds the selection
+  // from default_level_index, but that stays a starting point rather than advice
+  // the rows argue for.
+  it("does not badge the default level as recommended", () => {
+    const { container } = render(() => (
       <WbppLevelEditor session={session()} chosenIndex={1} onSelect={() => {}} libraryRoot="/lib" separator="/" />
     ));
-    expect(getAllByRole("radio").length).toBe(3);
-    // The chip lives on the default_level_index row (index 1), not any other.
-    const rows = Array.from(container.querySelectorAll("label"));
-    expect(rows[1].textContent).toContain("Recommended");
-    expect(rows[0].textContent).not.toContain("Recommended");
-    expect(rows[2].textContent).not.toContain("Recommended");
+    expect(container.textContent).not.toContain("Recommended");
   });
 
   it("quantifies contamination instead of a bare '!'", () => {

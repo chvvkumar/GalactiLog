@@ -158,6 +158,32 @@ export default function WbppQualityPanel(props: WbppQualityPanelProps): JSX.Elem
               <option value="score">Composite score</option>
               <option value="raw">Raw metrics (AND)</option>
             </select>
+            {/* Describes scoreFrame + combinedScore + madZ as they actually are:
+                three weighted axes, robust z against a per-train-and-filter
+                baseline, MIN_GROUP = 8. Kept in step with the baseline popover
+                below, which owns the session-vs-rig half of the story. */}
+            <HelpPopover label="About the composite score" title="Composite score">
+              <p>
+                Three metrics feed the score: detected stars at weight 0.5, HFR at 0.25, and
+                eccentricity at 0.25. FWHM, guiding RMS and ADU median never affect it.
+              </p>
+              <p>
+                Each is graded against the baseline median for the frame's telescope, camera and
+                filter, measured in MAD. Their weighted average sets the score: 50 sits at the
+                baseline median, and the scale runs 0 to 100 across 3 MAD either side. Default 60
+                keeps frames about 0.6 MAD better than the median, the cutoff that greens a row on
+                the session table.
+              </p>
+              <p>
+                Baseline sets what HFR and eccentricity compare against. Detected stars always
+                compare within the session.
+              </p>
+              <p>
+                A metric with no value drops out and the remaining weights rescale. A baseline needs
+                8 frames sharing one telescope, camera and filter before it grades anything, so a
+                short session scores nothing and its frames read as unmeasured.
+              </p>
+            </HelpPopover>
           </div>
 
           {/* Score mode: threshold */}
@@ -278,8 +304,18 @@ export default function WbppQualityPanel(props: WbppQualityPanelProps): JSX.Elem
 
           {/* Per-frame preview */}
           <Show when={props.verdicts.length > 0}>
-            <div class="max-h-[200px] overflow-y-auto bg-theme-elevated rounded-[var(--radius-sm)] p-2">
-              <table class="w-full text-tiny">
+            {/* This table is how the threshold gets chosen, so it has to show
+                enough rows to see a pattern in. The cap is rem-based because the
+                row height is: the text tiers scale with the root font-size preset,
+                and a px cap would show fewer and fewer rows as the preset grows.
+                Capped rather than unbounded so the modal body stays the scroller.
+
+                whitespace-nowrap sits on the table, not the cells: every column
+                here is an atom (a date, a number, a verdict, a truncated file
+                name), none of them may break, and putting it at the one place
+                they all inherit from means a new column cannot forget it. */}
+            <div class="max-h-[22rem] overflow-y-auto bg-theme-elevated rounded-[var(--radius-sm)] p-2">
+              <table class="w-full text-tiny whitespace-nowrap">
                 <thead>
                   <tr class="text-theme-text-tertiary border-b border-theme-border">
                     <th class="text-left py-1 px-1.5 font-normal">File</th>

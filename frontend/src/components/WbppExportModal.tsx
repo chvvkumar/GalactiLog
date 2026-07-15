@@ -1,4 +1,13 @@
-import { Component, For, Show, createSignal, createMemo, createEffect, onMount } from "solid-js";
+import {
+  Component,
+  For,
+  Show,
+  createSignal,
+  createMemo,
+  createEffect,
+  onMount,
+  untrack,
+} from "solid-js";
 import { apiClient } from "../api/generated/client";
 import { unwrap } from "../api/unwrap";
 import { showToast } from "./Toast";
@@ -156,14 +165,33 @@ const WbppExportModal: Component<Props> = (props) => {
   const [qualitySessions, setQualitySessions] = createSignal<Record<string, SessionDetail>>({});
   const [qualityLoading, setQualityLoading] = createSignal(false);
 
-  // When the filter is switched on, seed from the page's cache and fetch the rest.
-  // (Mirrors TargetDetailPage.tsx loadSessionDetail's GET.)
+  /**
+   * When the filter is switched on, seed from the page's cache and fetch the rest.
+   * (Mirrors TargetDetailPage.tsx loadSessionDetail's GET.)
+   *
+   * This effect WRITES `qualitySessions`, so it must not TRACK it, or it becomes
+   * its own trigger: write -> rerun -> write, fetching again on every pass. Hence
+   * the untracked read below. The bug this replaced was invisible for a subtle
+   * reason worth keeping in mind if this is edited again: the read used to be
+   * `props.sessionCache[date] ?? qualitySessions()[date]`, and `??` short-circuits.
+   * When every selected date was already in the page's cache, `qualitySessions()`
+   * was never called, never tracked, and nothing looped. Only an uncached date --
+   * exactly the case that needs the fetch -- reached the read, subscribed the
+   * effect to its own output, and spun. Both the loop and the empty frame table
+   * followed from that: each rerun reset state to `seeded`, which was built before
+   * the in-flight fetch could resolve, so the arriving frames were overwritten by
+   * the next pass and never landed.
+   *
+   * Dependencies are therefore the inputs only: the filter toggle, the selected
+   * dates, the page's cache, and the target.
+   */
   createEffect(() => {
     if (!qualityFilterOn()) return;
+    const have = untrack(qualitySessions);
     const seeded: Record<string, SessionDetail> = {};
     const missing: string[] = [];
     for (const date of props.selectedDates) {
-      const cached = props.sessionCache[date] ?? qualitySessions()[date];
+      const cached = props.sessionCache[date] ?? have[date];
       if (cached) seeded[date] = cached;
       else missing.push(date);
     }

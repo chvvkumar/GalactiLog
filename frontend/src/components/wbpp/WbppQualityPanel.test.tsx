@@ -179,6 +179,48 @@ describe("WbppQualityPanel expanded", () => {
     expect(container.textContent).toContain("≤");
   });
 
+  // The score popover has to describe scoreFrame/combinedScore/madZ as they are.
+  // These assertions pin the load-bearing claims, not the prose: the three axes
+  // and their weights, what the number is measured against, the 50/60 anchors,
+  // and MIN_GROUP. If the algorithm changes, this should fail.
+  it("explains the composite score next to the Mode selector", () => {
+    const { container, getByLabelText } = setup({ enabled: true });
+    fireEvent.click(getByLabelText("About the composite score"));
+    const text = container.textContent!.replace(/\s+/g, " ");
+
+    // Three weighted axes, and only three: scoreFrame feeds madZ exactly
+    // detected_stars, median_hfr and eccentricity into combinedScore.
+    expect(text).toContain("detected stars at weight 0.5");
+    expect(text).toContain("HFR at 0.25");
+    expect(text).toContain("eccentricity at 0.25");
+    expect(text).toContain("FWHM, guiding RMS and ADU median never affect it");
+
+    // Relative, not absolute: madZ grades against the group baseline median.
+    expect(text).toContain("baseline median");
+    expect(text).toContain("MAD");
+    // combinedScore: 50 - 16.7 * clamp(zc, -3, 3), so 50 is the median and the
+    // 0-100 range is 3 MAD either side.
+    expect(text).toContain("50 sits at the baseline median");
+    expect(text).toContain("0 to 100 across 3 MAD either side");
+    // Stays consistent with the existing "green row cutoff" hint.
+    expect(text).toContain("greens a row on the session table");
+
+    // madZ returns null below MIN_GROUP (8), which nulls the axis.
+    expect(text).toContain("8 frames sharing one telescope, camera and filter");
+    expect(text).toContain("read as unmeasured");
+  });
+
+  // The two popovers split one story and must not contradict: baseline owns
+  // session-vs-rig, and only HFR/eccentricity follow it because scoreFrame
+  // always looks detected_stars up in the session baselines.
+  it("agrees with the baseline popover about what the baseline governs", () => {
+    const { container, getByLabelText } = setup({ enabled: true });
+    fireEvent.click(getByLabelText("About the composite score"));
+    const text = container.textContent!.replace(/\s+/g, " ");
+    expect(text).toContain("Baseline sets what HFR and eccentricity compare against");
+    expect(text).toContain("Detected stars always compare within the session");
+  });
+
   // FIX 3: with no constraints there is nothing to read off the rows, so the
   // guidance must be on screen rather than behind the help icon.
   it("explains constraints inline while there are none", () => {
@@ -218,8 +260,34 @@ describe("WbppQualityPanel expanded", () => {
     const { container } = setup({ enabled: true });
     const scroller = container.querySelector(".overflow-y-auto");
     expect(scroller).not.toBe(null);
-    expect(scroller!.className).toContain("max-h-[200px]");
+    expect(scroller!.className).toContain("max-h-[");
     expect(scroller!.querySelector("table")).not.toBe(null);
+  });
+
+  // The cap is pinned by intent, not by its exact value: it must stay bounded
+  // (the modal body is the scroller), and it must be rem-based and roomy enough
+  // to show a scannable run of rows. A px cap does not survive the root
+  // font-size presets, because the row height scales with them and it does not.
+  it("caps the table in rem so the visible row count survives the font presets", () => {
+    const { container } = setup({ enabled: true });
+    const scroller = container.querySelector(".overflow-y-auto") as HTMLElement;
+    const cap = /max-h-\[(\d+(?:\.\d+)?)rem\]/.exec(scroller.className);
+    expect(cap).not.toBe(null);
+    // ~1.2rem a row plus header and padding: 22rem is roughly 8-10 rows at any
+    // preset. The old 200px cap was ~14rem at the default and shrank from there.
+    expect(Number(cap![1])).toBeGreaterThanOrEqual(20);
+  });
+
+  // The session date is a fixed-width atom. Letting it break to "2026-" / "07-13"
+  // doubles every row's height and halves what the table can show.
+  it("never breaks a cell across lines, session date included", () => {
+    const { container } = setup({ enabled: true });
+    const table = container.querySelector("table") as HTMLElement;
+    expect(table.className).toContain("whitespace-nowrap");
+    // whitespace inherits, so the one class on the table covers every cell.
+    const sessionCell = container.querySelectorAll("tbody tr td")[1] as HTMLElement;
+    expect(sessionCell.textContent).toBe(DATE);
+    expect(sessionCell.closest("table")).toBe(table);
   });
 
   it("renders a badge per verdict kind", () => {
