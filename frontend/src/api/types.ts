@@ -251,6 +251,9 @@ export interface FrameRecord {
   file_name: string;
   image_id: string;
   file_path: string;
+  // Bytes on disk. Null for ingests that predate the column: never coalesce it to
+  // 0, or a total built from it presents an undercount as fact.
+  file_size: number | null;
   source_relative: string;
   thumbnail_url?: string | null;
   hfr_stdev: number | null;

@@ -640,6 +640,7 @@ async def get_session_detail(target_id: str, date: str, session: AsyncSession) -
             file_name=img.file_name,
             image_id=str(img.id),
             file_path=img.file_path,
+            file_size=img.file_size,
             source_relative=fits_relative_path(img.file_path, settings.fits_data_path),
             thumbnail_url=f"/thumbnails/{img.thumbnail_path.split('/')[-1].split(chr(92))[-1]}" if img.thumbnail_path else None,
             hfr_stdev=img.hfr_stdev,

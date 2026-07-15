@@ -9,6 +9,7 @@ from app.services.wbpp_export import (
     generate_shell_script, DEFAULT_EXCLUSIONS, sanitize_script_name,
 )
 from app.services.wbpp_export import fits_relative_path, map_excluded_to_ops
+from app.services.wbpp_export import subtree_bytes
 
 
 def test_detect_os_windows_drive():
@@ -88,6 +89,81 @@ def test_pick_default_falls_back_when_all_contaminated():
         FolderLevel("/mnt/a/M31/2024-01-01", "/fits/M31/2024-01-01", 2, 10, other_dates=["x"], is_contaminated=True),
     ]
     assert pick_default_level(levels) == 1
+
+
+FITS = "/app/data/fits"
+_HA_A = f"{FITS}/M31/2024-01-01/Ha/a.fits"
+_HA_B = f"{FITS}/M31/2024-01-01/Ha/b.fits"
+_O3_C = f"{FITS}/M31/2024-01-01/OIII/c.fits"
+_SESSION_FILES = [_HA_A, _HA_B, _O3_C]
+
+
+def _levels_by_rel(sizes_by_path):
+    """Compute one session's levels, keyed by relative_path.
+
+    Sibling levels at equal depth have no guaranteed order, so tests address
+    levels by path rather than by index.
+    """
+    all_paths = {("M31", "2024-01-01"): list(_SESSION_FILES)}
+    levels = compute_session_levels(
+        "2024-01-01", list(_SESSION_FILES), all_paths, FITS, "/mnt/a", "posix",
+        sizes_by_path=sizes_by_path,
+    )
+    return {lv.relative_path: lv for lv in levels}
+
+
+def test_frame_bytes_sums_root_and_nested_levels():
+    lv = _levels_by_rel({_HA_A: 100, _HA_B: 200, _O3_C: 400})
+    # root level holds every frame in the session
+    assert lv["M31"].frame_count == 3
+    assert lv["M31"].frame_bytes == 700
+    assert lv["M31/2024-01-01"].frame_bytes == 700
+    # nested levels hold only their own subtree
+    assert lv["M31/2024-01-01/Ha"].frame_count == 2
+    assert lv["M31/2024-01-01/Ha"].frame_bytes == 300
+    assert lv["M31/2024-01-01/OIII"].frame_count == 1
+    assert lv["M31/2024-01-01/OIII"].frame_bytes == 400
+
+def test_frame_bytes_tracks_frame_count():
+    # A frame outside a level's subtree contributes to neither its count nor its sum.
+    lv = _levels_by_rel({_HA_A: 100, _HA_B: 200, _O3_C: 400})
+    o3 = lv["M31/2024-01-01/OIII"]
+    assert o3.frame_count == 1 and o3.frame_bytes == 400  # not 700: Ha frames excluded
+    assert sum(l.frame_bytes for l in (lv["M31/2024-01-01/Ha"], o3)) == lv["M31"].frame_bytes
+
+def test_frame_bytes_none_when_any_contributing_size_is_null():
+    # b.fits has an unknown size: every level containing it goes None, all-or-nothing.
+    lv = _levels_by_rel({_HA_A: 100, _HA_B: None, _O3_C: 400})
+    assert lv["M31"].frame_bytes is None            # not 500 (partial), not 0
+    assert lv["M31/2024-01-01"].frame_bytes is None
+    assert lv["M31/2024-01-01/Ha"].frame_bytes is None
+    # a sibling level that does not contain the NULL frame is still reported
+    assert lv["M31/2024-01-01/OIII"].frame_bytes == 400
+    # counts are unaffected by unknown sizes
+    assert lv["M31"].frame_count == 3
+
+def test_frame_bytes_none_when_size_missing_from_map():
+    # An absent entry is as unknown as an explicit NULL.
+    lv = _levels_by_rel({_HA_A: 100, _O3_C: 400})
+    assert lv["M31/2024-01-01/Ha"].frame_bytes is None
+    assert lv["M31/2024-01-01/OIII"].frame_bytes == 400
+
+def test_frame_bytes_none_when_no_sizes_supplied():
+    lv = _levels_by_rel(None)
+    assert all(l.frame_bytes is None for l in lv.values())
+    assert lv["M31"].frame_count == 3  # counts still work without sizes
+
+def test_subtree_bytes_zero_frames_is_zero_not_none():
+    # Zero frames is a known quantity, unlike an unknown size.
+    assert subtree_bytes([], {_HA_A: 100}) == 0
+
+def test_subtree_bytes_without_size_map_is_none():
+    assert subtree_bytes([_HA_A], None) is None
+
+def test_compute_session_levels_no_frames_yields_no_levels():
+    assert compute_session_levels(
+        "2024-01-01", [], {}, FITS, "/mnt/a", "posix", sizes_by_path={},
+    ) == []
 
 
 def test_disambiguate_no_collision():

@@ -119,6 +119,7 @@ class FrameRecord(BaseModel):
     file_name: str
     image_id: str
     file_path: str
+    file_size: int | None = None  # bytes; None for older ingests that predate the column
     source_relative: str = ""
     thumbnail_url: str | None = None
     hfr_stdev: float | None = None

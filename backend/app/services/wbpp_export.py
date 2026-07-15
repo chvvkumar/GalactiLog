@@ -122,6 +122,37 @@ class FolderLevel:
     other_dates: list[str] = field(default_factory=list)
     is_contaminated: bool = False
     relative_path: str = ""  # path relative to the FITS/library root (POSIX, for browser copy)
+    frame_bytes: int | None = None  # bytes of the same frames frame_count counts; None = unknown
+
+
+def subtree_bytes(member_paths: list[str], sizes_by_path: dict | None) -> int | None:
+    """Sum the byte sizes of a level's frames, or None if any size is unknown.
+
+    All-or-nothing by design. `Image.file_size` is nullable (older ingests predate
+    the column), and a missing size is indistinguishable from a zero-byte file only
+    in the sense that both would vanish from a naive sum -- so a partial sum would
+    silently understate the transfer size while the UI presents it to the user as
+    fact ("24.1 GB") before they commit to a copy. One unknown size therefore makes
+    the whole level unknown, and the UI omits the figure rather than lying about it.
+
+    Do NOT "fix" this into a coalesce/skip-nulls sum: understating by an unknown
+    amount is worse than saying nothing. (The `func.coalesce(func.sum(...), 0)`
+    pattern in api/stats.py is a different contract: a soft dashboard statistic, not
+    a pre-flight number the user acts on.)
+
+    A level with no frames sums to 0, not None: zero frames is a known quantity.
+    """
+    if sizes_by_path is None:
+        return None
+    total = 0
+    for fp in member_paths:
+        # .get() returns None for both an absent path and a NULL file_size;
+        # both are genuinely unknown, and both poison the level.
+        size = sizes_by_path.get(fp)
+        if size is None:
+            return None
+        total += size
+    return total
 
 
 def compute_ancestor_chain(container_path: str, fits_root: str) -> list[str]:
@@ -152,10 +183,16 @@ def compute_session_levels(
     fits_root: str,
     library_root: str,
     target_os: str,
+    sizes_by_path: dict | None = None,
 ) -> list[FolderLevel]:
     """Compute ancestor-chain levels for one session, annotated with contamination.
 
     Returned shallowest-first (closest to library root first).
+
+    `sizes_by_path` maps container file path -> byte size (may be None for an
+    unknown size). When supplied, each level also carries `frame_bytes`; when
+    omitted, `frame_bytes` stays None. Pure string/dict work over DB rows -- this
+    never touches the filesystem, which is what keeps the preview fast.
     """
     if not file_paths:
         return []
@@ -179,7 +216,10 @@ def compute_session_levels(
 
     levels = []
     for anc in sorted_ancestors:
-        count = sum(1 for fp in file_paths if fp.startswith(anc + "/") or fp == anc)
+        # One membership test feeds both the count and the byte sum, so the two can
+        # never drift: if a frame is counted, its size is included, and vice versa.
+        members = [fp for fp in file_paths if fp.startswith(anc + "/") or fp == anc]
+        count = len(members)
         occupants = folder_occupants.get(anc, set())
         other_t = sorted({t for t, d in occupants if t != current_target})
         other_d = sorted({d for t, d in occupants if d != session_date})
@@ -192,6 +232,7 @@ def compute_session_levels(
             other_dates=other_d,
             is_contaminated=bool(other_t or other_d),
             relative_path=anc[len(fits_root):].lstrip("/"),
+            frame_bytes=subtree_bytes(members, sizes_by_path),
         ))
     return levels
 

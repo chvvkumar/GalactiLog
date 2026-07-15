@@ -3122,6 +3122,8 @@ export interface components {
             file_name: string;
             /** File Path */
             file_path: string;
+            /** File Size */
+            file_size?: number | null;
             /** Filter Used */
             filter_used?: string | null;
             /** Focuser Position */
@@ -5056,6 +5058,8 @@ export interface components {
             container_path: string;
             /** Depth From Root */
             depth_from_root: number;
+            /** Frame Bytes */
+            frame_bytes?: number | null;
             /** Frame Count */
             frame_count: number;
             /** Is Contaminated */

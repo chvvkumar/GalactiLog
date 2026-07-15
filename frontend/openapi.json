@@ -2682,6 +2682,17 @@
             "title": "File Path",
             "type": "string"
           },
+          "file_size": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File Size"
+          },
           "filter_used": {
             "anyOf": [
               {
@@ -8382,6 +8393,17 @@
           "depth_from_root": {
             "title": "Depth From Root",
             "type": "integer"
+          },
+          "frame_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Frame Bytes"
           },
           "frame_count": {
             "title": "Frame Count",
