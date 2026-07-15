@@ -19,10 +19,6 @@ RUN pip install --no-cache-dir .
 
 # Stage 3: Runtime
 FROM python:3.12-slim AS runtime
-ARG GALACTILOG_VERSION=dev
-ARG GALACTILOG_GIT_SHA=unknown
-ENV GALACTILOG_VERSION=${GALACTILOG_VERSION} \
-    GALACTILOG_GIT_SHA=${GALACTILOG_GIT_SHA}
 
 # Install runtime packages first (cacheable independent of app code)
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -62,6 +58,16 @@ COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 COPY backend/entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh \
     && chown -R galactilog:galactilog /app/data /app/run
+
+# Keep this block LAST. Both values change on every commit, and BuildKit folds
+# ENV into the cache key of every layer below it, so hoisting this any higher
+# invalidates the apt install and everything after it on every single build.
+# Nothing above this line reads either value -- they are consumed only at
+# runtime (backend/app/api/router.py) and by readers of the image config.
+ARG GALACTILOG_VERSION=dev
+ARG GALACTILOG_GIT_SHA=unknown
+ENV GALACTILOG_VERSION=${GALACTILOG_VERSION} \
+    GALACTILOG_GIT_SHA=${GALACTILOG_GIT_SHA}
 
 WORKDIR /app
 ENV GALACTILOG_CELERY_CONCURRENCY=4
