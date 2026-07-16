@@ -251,6 +251,7 @@ export interface FrameRecord {
   file_name: string;
   image_id: string;
   file_path: string;
+  source_relative: string;
   thumbnail_url?: string | null;
   hfr_stdev: number | null;
   fwhm: number | null;

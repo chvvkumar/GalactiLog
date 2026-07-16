@@ -2873,6 +2873,11 @@
             ],
             "title": "Sky Quality"
           },
+          "source_relative": {
+            "default": "",
+            "title": "Source Relative",
+            "type": "string"
+          },
           "thumbnail_url": {
             "anyOf": [
               {
@@ -6879,6 +6884,7 @@
         "type": "object"
       },
       "StatusResponse": {
+        "description": "Generic single-field status response, e.g. {\"status\": \"ok\"}.",
         "properties": {
           "status": {
             "title": "Status",
@@ -8428,6 +8434,13 @@
             "title": "Chosen Levels",
             "type": "object"
           },
+          "excluded_source_relatives": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Excluded Source Relatives",
+            "type": "array"
+          },
           "exclusions": {
             "items": {
               "type": "string"
@@ -8499,6 +8512,21 @@
             "title": "Filename",
             "type": "string"
           },
+          "light_copied": {
+            "default": 0,
+            "title": "Light Copied",
+            "type": "integer"
+          },
+          "light_excluded": {
+            "default": 0,
+            "title": "Light Excluded",
+            "type": "integer"
+          },
+          "light_total": {
+            "default": 0,
+            "title": "Light Total",
+            "type": "integer"
+          },
           "operations": {
             "items": {
               "$ref": "#/components/schemas/WbppCopyOperation"
@@ -8538,6 +8566,13 @@
             },
             "title": "Chosen Levels",
             "type": "object"
+          },
+          "excluded_source_relatives": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Excluded Source Relatives",
+            "type": "array"
           },
           "library_root": {
             "title": "Library Root",
@@ -8601,6 +8636,11 @@
             "title": "Default Level Index",
             "type": "integer"
           },
+          "excluded_frame_count": {
+            "default": 0,
+            "title": "Excluded Frame Count",
+            "type": "integer"
+          },
           "levels": {
             "items": {
               "$ref": "#/components/schemas/WbppFolderLevel"
@@ -8626,8 +8666,7 @@
         "title": "WbppSessionPreview",
         "type": "object"
       },
-      "app__schemas__common__StatusResponse": {
-        "description": "Generic single-field status response, e.g. {\"status\": \"ok\"}.",
+      "app__schemas__mosaic__StatusResponse": {
         "properties": {
           "status": {
             "title": "Status",
@@ -8689,7 +8728,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/app__schemas__common__StatusResponse"
+                  "$ref": "#/components/schemas/StatusResponse"
                 }
               }
             },
@@ -9825,7 +9864,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/app__schemas__common__StatusResponse"
+                  "$ref": "#/components/schemas/StatusResponse"
                 }
               }
             },
@@ -9933,7 +9972,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/app__schemas__common__StatusResponse"
+                  "$ref": "#/components/schemas/StatusResponse"
                 }
               }
             },
@@ -9982,7 +10021,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/app__schemas__common__StatusResponse"
+                  "$ref": "#/components/schemas/StatusResponse"
                 }
               }
             },
@@ -10896,7 +10935,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/app__schemas__common__StatusResponse"
+                  "$ref": "#/components/schemas/StatusResponse"
                 }
               }
             },
@@ -10956,7 +10995,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/app__schemas__common__StatusResponse"
+                  "$ref": "#/components/schemas/StatusResponse"
                 }
               }
             },
@@ -11016,7 +11055,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/app__schemas__common__StatusResponse"
+                  "$ref": "#/components/schemas/StatusResponse"
                 }
               }
             },
@@ -11249,7 +11288,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/app__schemas__common__StatusResponse"
+                  "$ref": "#/components/schemas/StatusResponse"
                 }
               }
             },
@@ -11938,7 +11977,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/StatusResponse"
+                  "$ref": "#/components/schemas/app__schemas__mosaic__StatusResponse"
                 }
               }
             },
@@ -11997,7 +12036,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/StatusResponse"
+                  "$ref": "#/components/schemas/app__schemas__mosaic__StatusResponse"
                 }
               }
             },
@@ -12121,7 +12160,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/StatusResponse"
+                  "$ref": "#/components/schemas/app__schemas__mosaic__StatusResponse"
                 }
               }
             },
@@ -12479,7 +12518,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/StatusResponse"
+                  "$ref": "#/components/schemas/app__schemas__mosaic__StatusResponse"
                 }
               }
             },
@@ -12627,7 +12666,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/StatusResponse"
+                  "$ref": "#/components/schemas/app__schemas__mosaic__StatusResponse"
                 }
               }
             },

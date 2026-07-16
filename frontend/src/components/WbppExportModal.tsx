@@ -1,10 +1,14 @@
-import { Component, For, Show, JSX, createSignal, createMemo, onMount } from "solid-js";
+import { Component, For, Show, JSX, createSignal, createMemo, createEffect, onMount } from "solid-js";
 import { apiClient } from "../api/generated/client";
 import { unwrap } from "../api/unwrap";
 import { showToast } from "./Toast";
 import { getErrorMessage } from "../utils/errors";
 import { useSettingsContext } from "./SettingsProvider";
+import { isFieldVisible } from "../utils/displaySettings";
+import { madZ, bandForZ, bandToCellClass } from "../utils/frameQuality";
 import Dialog from "./Dialog";
+import Button from "./ui/Button";
+import IconButton from "./ui/IconButton";
 import {
   isFsAccessSupported,
   runBrowserCopy,
@@ -17,12 +21,35 @@ import {
   HANDLE_KEYS,
   type PermState,
 } from "../lib/wbppBrowserCopy";
-import type { WbppSessionPreview, WbppFolderLevel, WbppGenerateResponse, WbppCopyOperation } from "../api/types";
+import {
+  RAW_METRICS,
+  RAW_METRIC_LABELS,
+  HIGHER_IS_BETTER,
+  computeVerdicts,
+  excludedSourceRelatives,
+  qualityTotals,
+  equipmentForFrame,
+  baselineFor,
+  type FilterMode,
+  type BaselineMode,
+  type RawConstraint,
+  type RawMetric,
+  type FrameVerdict,
+} from "../lib/wbppQualityFilter";
+import type {
+  WbppSessionPreview,
+  WbppFolderLevel,
+  WbppGenerateResponse,
+  WbppCopyOperation,
+  SessionDetail,
+  FrameRecord,
+} from "../api/types";
 
 interface Props {
   targetId: string;
   targetName: string;
   selectedDates: string[];
+  sessionCache: Record<string, SessionDetail>;
   onClose: () => void;
 }
 
@@ -37,6 +64,23 @@ const DEFAULT_EXCLUSIONS = [
 // Raised section card, matching the target detail page.
 const CARD_CLASS =
   "bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-4";
+
+// Preview columns mirroring the session frame table's toggled metric columns.
+// group/field feed isFieldVisible so the preview honors the user's display settings.
+const METRIC_COLUMNS: {
+  metric: RawMetric;
+  label: string;
+  group: "quality" | "guiding" | "adu";
+  field: string;
+  format: (v: number) => string;
+}[] = [
+  { metric: "median_hfr", label: "HFR", group: "quality", field: "hfr", format: (v) => v.toFixed(2) },
+  { metric: "eccentricity", label: "Ecc", group: "quality", field: "eccentricity", format: (v) => v.toFixed(2) },
+  { metric: "fwhm", label: "FWHM", group: "quality", field: "fwhm", format: (v) => v.toFixed(2) },
+  { metric: "detected_stars", label: "Stars", group: "quality", field: "detected_stars", format: (v) => v.toFixed(0) },
+  { metric: "guiding_rms_arcsec", label: "RMS", group: "guiding", field: "rms_total", format: (v) => v.toFixed(2) },
+  { metric: "adu_median", label: "ADU", group: "adu", field: "median", format: (v) => v.toFixed(0) },
+];
 
 function detectOs(root: string): "windows" | "posix" {
   return /^[A-Za-z]:\\|\\/.test(root) ? "windows" : "posix";
@@ -138,6 +182,103 @@ const WbppExportModal: Component<Props> = (props) => {
   const [copyLabel, setCopyLabel] = createSignal("");
   const [copyFinished, setCopyFinished] = createSignal<number | null>(null);
   let abortController: AbortController | null = null;
+
+  // --- Quality filter state (all reset each modal open; no persistence) ---
+  const [qualityOpen, setQualityOpen] = createSignal(true);
+  const [qualityFilterOn, setQualityFilterOn] = createSignal(false);
+  const [filterMode, setFilterMode] = createSignal<FilterMode>("score");
+  const [scoreThreshold, setScoreThreshold] = createSignal(60);
+  const [rawConstraints, setRawConstraints] = createSignal<RawConstraint[]>([]);
+  const [qualityBaseline, setQualityBaseline] = createSignal<BaselineMode>("session");
+  // Session details keyed by date, seeded from props.sessionCache then filled in
+  // for any selected date not already cached.
+  const [qualitySessions, setQualitySessions] = createSignal<Record<string, SessionDetail>>({});
+  const [qualityLoading, setQualityLoading] = createSignal(false);
+
+  // When the filter is switched on, seed from the page's cache and fetch the rest.
+  // (Mirrors TargetDetailPage.tsx loadSessionDetail's GET.)
+  createEffect(() => {
+    if (!qualityFilterOn()) return;
+    const seeded: Record<string, SessionDetail> = {};
+    const missing: string[] = [];
+    for (const date of props.selectedDates) {
+      const cached = props.sessionCache[date] ?? qualitySessions()[date];
+      if (cached) seeded[date] = cached;
+      else missing.push(date);
+    }
+    setQualitySessions(seeded);
+    if (missing.length === 0) return;
+    setQualityLoading(true);
+    Promise.all(
+      missing.map((date) =>
+        (apiClient
+          .GET("/api/targets/{target_id}/sessions/{date}", {
+            params: { path: { target_id: props.targetId, date } },
+          })
+          .then(unwrap) as Promise<SessionDetail>)
+          .then((detail) => [date, detail] as const)
+          .catch(() => null),
+      ),
+    )
+      .then((results) => {
+        setQualitySessions((prev) => {
+          const next = { ...prev };
+          for (const r of results) if (r) next[r[0]] = r[1];
+          return next;
+        });
+      })
+      .finally(() => setQualityLoading(false));
+  });
+
+  // Verdicts, exclude set, and totals recompute reactively from the filter inputs.
+  const verdicts = createMemo<FrameVerdict[]>(() =>
+    qualityFilterOn()
+      ? computeVerdicts(
+          qualitySessions(),
+          props.selectedDates,
+          filterMode(),
+          qualityBaseline(),
+          scoreThreshold(),
+          rawConstraints(),
+        )
+      : [],
+  );
+  const excludedSet = createMemo<string[]>(() => excludedSourceRelatives(verdicts()));
+  const qTotals = createMemo(() => qualityTotals(verdicts()));
+  // Per-frame verdict lookup by fits-root-relative path, for the preview table.
+  const verdictByPath = createMemo(() => {
+    const m = new Map<string, FrameVerdict>();
+    for (const v of verdicts()) m.set(v.frame.source_relative, v);
+    return m;
+  });
+
+  const addConstraint = () => {
+    const used = new Set(rawConstraints().map((c) => c.metric));
+    const next = RAW_METRICS.find((m) => !used.has(m)) ?? RAW_METRICS[0];
+    setRawConstraints([...rawConstraints(), { metric: next, value: 0 }]);
+  };
+  const updateConstraint = (i: number, patch: Partial<RawConstraint>) => {
+    setRawConstraints(rawConstraints().map((c, idx) => (idx === i ? { ...c, ...patch } : c)));
+  };
+  const removeConstraint = (i: number) => {
+    setRawConstraints(rawConstraints().filter((_, idx) => idx !== i));
+  };
+
+  // Signed robust z for a frame metric against the active baseline, mirroring
+  // SessionAccordionCard row coloring. Signal (detected_stars) is session-scoped.
+  const cellZ = (detail: SessionDetail, frame: FrameRecord, metric: RawMetric): number | null => {
+    const eq = equipmentForFrame(detail, frame);
+    const active = baselineFor(detail, frame, eq.telescope, eq.camera, qualityBaseline());
+    const sess = baselineFor(detail, frame, eq.telescope, eq.camera, "session");
+    switch (metric) {
+      case "median_hfr": return madZ(frame.median_hfr, active?.median_hfr);
+      case "fwhm": return madZ(frame.fwhm, active?.fwhm);
+      case "eccentricity": return madZ(frame.eccentricity, active?.eccentricity);
+      case "detected_stars": return madZ(frame.detected_stars, sess?.detected_stars, true);
+      case "guiding_rms_arcsec": return null;
+      case "adu_median": return madZ(frame.adu_median, sess?.adu_median);
+    }
+  };
 
   onMount(async () => {
     if (!canBrowserCopy) return;
@@ -278,6 +419,7 @@ const WbppExportModal: Component<Props> = (props) => {
             target_os: targetOsParam(),
             staging_path: stagingPath().trim() || null,
             exclusions: parsedExclusions(),
+            excluded_source_relatives: excludedSet(),
           },
         })
         .then(unwrap);
@@ -395,6 +537,7 @@ const WbppExportModal: Component<Props> = (props) => {
       const result = await runBrowserCopy(srcHandle(), destHandle(), {
         operations: plan(),
         exclusions: parsedExclusions(),
+        excludedSourceRelatives: excludedSet(),
         onProgress: (done, total, label) => {
           setCopyDone(done);
           setCopyTotal(total);
@@ -428,15 +571,11 @@ const WbppExportModal: Component<Props> = (props) => {
           <h2 id="wbpp-export-title" class="text-sm font-medium text-theme-text-primary">
             Export to WBPP - {props.targetName}
           </h2>
-          <button
-            class="text-theme-text-secondary hover:text-theme-text-primary"
-            onClick={props.onClose}
-            aria-label="Close"
-          >
+          <IconButton onClick={props.onClose} aria-label="Close">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
               <line x1="6" y1="6" x2="18" y2="18" /><line x1="6" y1="18" x2="18" y2="6" />
             </svg>
-          </button>
+          </IconButton>
         </div>
 
         <div class="p-4 space-y-4">
@@ -539,13 +678,14 @@ const WbppExportModal: Component<Props> = (props) => {
             onToggle={() => setLevelsOpen(!levelsOpen())}
           >
             <div>
-              <button
-                class="text-xs px-3 py-1.5 bg-theme-elevated border border-theme-border rounded hover:bg-theme-surface transition-colors text-theme-text-primary disabled:opacity-50"
+              <Button
+                variant="secondary"
+                size="sm"
                 onClick={loadPreview}
                 disabled={previewing() || !libraryRoot().trim()}
               >
                 {previewing() ? "Loading..." : sessions().length ? "Refresh folder levels" : "Preview folder levels"}
-              </button>
+              </Button>
             </div>
 
             <Show
@@ -629,6 +769,229 @@ const WbppExportModal: Component<Props> = (props) => {
             </Show>
           </SectionCard>
 
+          {/* Quality filter (optional; excludes low-quality LIGHT subs) */}
+          <Show when={sessions().length > 0}>
+            <SectionCard
+              title="Quality filter"
+              subtitle={
+                qualityFilterOn()
+                  ? `${qTotals().copy} copy / ${qTotals().fail + qTotals().unmeasured} exclude`
+                  : "off"
+              }
+              open={qualityOpen()}
+              onToggle={() => setQualityOpen(!qualityOpen())}
+            >
+              <label class="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  class="w-3.5 h-3.5 rounded border-theme-border cursor-pointer"
+                  checked={qualityFilterOn()}
+                  onChange={(e) => setQualityFilterOn(e.currentTarget.checked)}
+                />
+                <span class="text-xs text-theme-text-primary">
+                  Exclude low-quality light frames from the copy
+                </span>
+              </label>
+              <p class="text-tiny text-theme-text-tertiary">
+                Copies the same folder tree, minus the light frames that fail the threshold or
+                are unmeasured. All calibration files and folder structure are always kept.
+              </p>
+
+              <Show when={qualityFilterOn()}>
+                <Show when={qualityLoading()}>
+                  <p class="text-tiny text-theme-text-tertiary">Loading session frames…</p>
+                </Show>
+
+                {/* Mode select */}
+                <div class="flex items-center gap-2">
+                  <span class="text-tiny text-theme-text-tertiary w-20">Mode</span>
+                  <select
+                    class="text-xs px-2 py-1.5 bg-theme-elevated border border-theme-border rounded text-theme-text-primary focus:outline-none focus:border-theme-accent"
+                    value={filterMode()}
+                    onChange={(e) => setFilterMode(e.currentTarget.value as FilterMode)}
+                  >
+                    <option value="score">Composite score</option>
+                    <option value="raw">Raw metrics (AND)</option>
+                  </select>
+                </div>
+
+                {/* Score mode: threshold slider */}
+                <Show when={filterMode() === "score"}>
+                  <div class="flex items-center gap-3">
+                    <span class="text-tiny text-theme-text-tertiary w-20">Keep ≥</span>
+                    <input
+                      type="range"
+                      min="0"
+                      max="100"
+                      step="1"
+                      value={scoreThreshold()}
+                      onInput={(e) => setScoreThreshold(Number(e.currentTarget.value))}
+                      class="flex-1"
+                    />
+                    <span class="text-xs font-mono text-theme-text-primary w-8 text-right">{scoreThreshold()}</span>
+                  </div>
+                  <p class="text-tiny text-theme-text-tertiary">
+                    Default 60 matches the green row cutoff on the session table.
+                  </p>
+                </Show>
+
+                {/* Raw mode: constraint rows */}
+                <Show when={filterMode() === "raw"}>
+                  <div class="space-y-2">
+                    <For each={rawConstraints()}>
+                      {(c, i) => (
+                        <div class="flex items-center gap-2">
+                          <select
+                            class="text-xs px-2 py-1.5 bg-theme-elevated border border-theme-border rounded text-theme-text-primary focus:outline-none focus:border-theme-accent"
+                            value={c.metric}
+                            onChange={(e) => updateConstraint(i(), { metric: e.currentTarget.value as RawMetric })}
+                          >
+                            <For each={RAW_METRICS}>
+                              {(m) => <option value={m}>{RAW_METRIC_LABELS[m]}</option>}
+                            </For>
+                          </select>
+                          <span class="text-tiny text-theme-text-tertiary">
+                            {HIGHER_IS_BETTER[c.metric] ? "≥" : "≤"}
+                          </span>
+                          <input
+                            type="number"
+                            step="any"
+                            class="w-24 text-xs px-2 py-1.5 bg-theme-elevated border border-theme-border rounded text-theme-text-primary focus:outline-none focus:border-theme-accent"
+                            value={c.value}
+                            onInput={(e) => updateConstraint(i(), { value: Number(e.currentTarget.value) })}
+                          />
+                          <button
+                            class="text-tiny text-theme-error hover:text-theme-error/80"
+                            onClick={() => removeConstraint(i())}
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      )}
+                    </For>
+                    <button
+                      class="text-tiny text-theme-accent hover:text-theme-accent-hover"
+                      onClick={addConstraint}
+                      disabled={rawConstraints().length >= RAW_METRICS.length}
+                    >
+                      + Add constraint
+                    </button>
+                    <Show when={rawConstraints().length === 0}>
+                      <p class="text-tiny text-theme-text-tertiary">
+                        Add one or more constraints. A frame is kept only if every metric it has
+                        data for passes. Frames with none of the constrained metrics are unmeasured.
+                      </p>
+                    </Show>
+                  </div>
+                </Show>
+
+                {/* Baseline toggle */}
+                <div class="flex items-center gap-2">
+                  <span class="text-tiny text-theme-text-tertiary w-20">Baseline</span>
+                  <div class="flex gap-1">
+                    <For each={["session", "rig"] as BaselineMode[]}>
+                      {(m) => (
+                        <button
+                          class={`text-tiny px-2 py-0.5 rounded border transition-colors ${
+                            qualityBaseline() === m
+                              ? "bg-theme-accent/15 text-theme-accent border-theme-accent/30"
+                              : "bg-theme-surface text-theme-text-secondary border-theme-border hover:text-theme-text-primary"
+                          }`}
+                          onClick={() => setQualityBaseline(m)}
+                        >
+                          {m === "session" ? "This session" : "Rig (catalog)"}
+                        </button>
+                      )}
+                    </For>
+                  </div>
+                </div>
+                <p class="text-tiny text-theme-text-tertiary">
+                  Baseline affects the composite-score mode and the preview colors only. Raw-metric
+                  thresholds compare each frame's literal value, not the baseline.
+                </p>
+
+                {/* Totals */}
+                <div class="text-tiny text-theme-text-secondary bg-theme-base border border-theme-border rounded px-3 py-2">
+                  Lights: <span class="font-medium text-theme-text-primary">{qTotals().copy}</span> copy /{" "}
+                  <span class="font-medium text-theme-text-primary">{qTotals().fail + qTotals().unmeasured}</span> exclude
+                  {" "}({qTotals().fail} fail, {qTotals().unmeasured} unmeasured) · Calibration: always copied
+                </div>
+
+                {/* Live per-session preview */}
+                <div class="space-y-3">
+                  <For each={props.selectedDates}>
+                    {(date) => {
+                      const detail = () => qualitySessions()[date];
+                      const cols = () => METRIC_COLUMNS.filter((c) => isFieldVisible(ctx.displaySettings(), c.group, c.field));
+                      return (
+                        <Show when={detail()}>
+                          <div class="bg-theme-elevated rounded p-2">
+                            <div class="text-xs font-medium text-theme-text-primary mb-1">{date}</div>
+                            <div class="overflow-x-auto">
+                              <table class="w-full text-tiny">
+                                <thead>
+                                  <tr class="text-theme-text-tertiary border-b border-theme-border">
+                                    <th class="text-left py-1 px-1.5 font-normal">File</th>
+                                    <th class="text-center py-1 px-1.5 font-normal">Filter</th>
+                                    <For each={cols()}>
+                                      {(c) => <th class="text-right py-1 px-1.5 font-normal">{c.label}</th>}
+                                    </For>
+                                    <th class="text-right py-1 px-1.5 font-normal">Score</th>
+                                    <th class="text-right py-1 px-1.5 font-normal">Verdict</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  <For each={detail()!.frames}>
+                                    {(frame) => {
+                                      const v = () => verdictByPath().get(frame.source_relative);
+                                      return (
+                                        <tr class="border-b border-theme-border/30">
+                                          <td class="py-0.5 px-1.5 text-theme-text-secondary font-mono truncate max-w-[14rem]">{frame.file_name}</td>
+                                          <td class="py-0.5 px-1.5 text-theme-text-primary text-center">{frame.filter_used ?? "—"}</td>
+                                          <For each={cols()}>
+                                            {(c) => {
+                                              const raw = frame[c.metric];
+                                              const z = () => (filterMode() === "score" ? cellZ(detail()!, frame, c.metric) : null);
+                                              return (
+                                                <td class={`py-0.5 px-1.5 text-right tabular-nums ${filterMode() === "score" ? bandToCellClass(bandForZ(z())) : "text-theme-text-primary"}`}>
+                                                  {raw != null ? c.format(raw) : "—"}
+                                                </td>
+                                              );
+                                            }}
+                                          </For>
+                                          <td class="py-0.5 px-1.5 text-right tabular-nums text-theme-text-secondary">
+                                            {v()?.score != null ? v()!.score!.toFixed(0) : "—"}
+                                          </td>
+                                          <td class="py-0.5 px-1.5 text-right">
+                                            <span
+                                              class={`px-1.5 py-0.5 rounded text-tiny font-medium ${
+                                                v()?.keep
+                                                  ? "bg-theme-success/15 text-theme-success"
+                                                  : v()?.reason === "unmeasured"
+                                                    ? "bg-theme-warning/15 text-theme-warning"
+                                                    : "bg-theme-error/15 text-theme-error"
+                                              }`}
+                                            >
+                                              {v()?.keep ? "Copy" : v()?.reason === "unmeasured" ? "Unmeasured" : "Exclude"}
+                                            </span>
+                                          </td>
+                                        </tr>
+                                      );
+                                    }}
+                                  </For>
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                        </Show>
+                      );
+                    }}
+                  </For>
+                </div>
+              </Show>
+            </SectionCard>
+          </Show>
+
           {/* Copy plan + copy controls */}
           <Show when={plan().length > 0}>
             <SectionCard
@@ -674,12 +1037,9 @@ const WbppExportModal: Component<Props> = (props) => {
 
                   <div class="flex items-center gap-2 flex-wrap">
                     <span class="text-tiny text-theme-text-tertiary w-24">Library folder</span>
-                    <button
-                      class="text-tiny px-2 py-0.5 bg-theme-surface border border-theme-border rounded hover:text-theme-text-primary text-theme-text-secondary"
-                      onClick={chooseSource}
-                    >
+                    <Button variant="secondary" size="sm" onClick={chooseSource}>
                       {srcHandle() ? "Change..." : "Choose..."}
-                    </button>
+                    </Button>
                     <Show when={srcHandle()}>
                       <span class="text-tiny font-mono text-theme-text-secondary truncate max-w-[12rem]">{srcHandle().name}</span>
                     </Show>
@@ -691,12 +1051,9 @@ const WbppExportModal: Component<Props> = (props) => {
 
                   <div class="flex items-center gap-2 flex-wrap">
                     <span class="text-tiny text-theme-text-tertiary w-24">Destination</span>
-                    <button
-                      class="text-tiny px-2 py-0.5 bg-theme-surface border border-theme-border rounded hover:text-theme-text-primary text-theme-text-secondary"
-                      onClick={chooseDest}
-                    >
+                    <Button variant="secondary" size="sm" onClick={chooseDest}>
                       {destHandle() ? "Change..." : "Choose..."}
-                    </button>
+                    </Button>
                     <Show when={destHandle()}>
                       <span class="text-tiny font-mono text-theme-text-secondary truncate max-w-[12rem]">{destHandle().name}</span>
                     </Show>
@@ -711,20 +1068,18 @@ const WbppExportModal: Component<Props> = (props) => {
                   </p>
 
                   <div class="flex items-center gap-2">
-                    <button
-                      class="text-xs px-3 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded font-medium hover:bg-theme-accent/25 transition-colors disabled:opacity-50"
+                    <Button
+                      variant="primary"
+                      size="sm"
                       onClick={startBrowserCopy}
                       disabled={copying() || !copyReady()}
                     >
                       {copying() ? "Copying..." : "Copy files now"}
-                    </button>
+                    </Button>
                     <Show when={copying()}>
-                      <button
-                        class="text-xs px-3 py-1.5 bg-theme-surface border border-theme-border rounded hover:text-theme-text-primary text-theme-text-secondary transition-colors"
-                        onClick={stopCopy}
-                      >
+                      <Button variant="secondary" size="sm" onClick={stopCopy}>
                         Stop
-                      </button>
+                      </Button>
                     </Show>
                   </div>
 
@@ -764,18 +1119,12 @@ const WbppExportModal: Component<Props> = (props) => {
                       Script
                     </div>
                     <div class="flex items-center gap-2 flex-wrap">
-                      <button
-                        class="text-xs px-3 py-1.5 bg-theme-surface border border-theme-border rounded hover:text-theme-text-primary transition-colors text-theme-text-secondary"
-                        onClick={downloadScript}
-                      >
+                      <Button variant="secondary" size="sm" onClick={downloadScript}>
                         Download {g().filename}
-                      </button>
-                      <button
-                        class="text-xs px-3 py-1.5 bg-theme-surface border border-theme-border rounded hover:text-theme-text-primary transition-colors text-theme-text-secondary"
-                        onClick={copyScript}
-                      >
+                      </Button>
+                      <Button variant="secondary" size="sm" onClick={copyScript}>
                         {copied() ? "Copied!" : "Copy script"}
-                      </button>
+                      </Button>
                     </div>
                     <div class="text-tiny">
                       <span class="text-theme-text-tertiary">Then run: </span>
@@ -800,19 +1149,17 @@ const WbppExportModal: Component<Props> = (props) => {
         </div>
 
         <div class="p-4 border-t border-theme-border flex gap-2 justify-end">
-          <button
-            class="text-xs px-3 py-1.5 bg-theme-elevated border border-theme-border rounded hover:bg-theme-surface transition-colors text-theme-text-primary"
-            onClick={props.onClose}
-          >
+          <Button variant="secondary" size="sm" onClick={props.onClose}>
             Close
-          </button>
-          <button
-            class="text-xs px-3 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded font-medium hover:bg-theme-accent/25 transition-colors disabled:opacity-50"
+          </Button>
+          <Button
+            variant="primary"
+            size="sm"
             onClick={generate}
             disabled={generating() || !libraryRoot().trim()}
           >
             {generating() ? "Generating..." : generated() ? "Regenerate script" : "Generate script"}
-          </button>
+          </Button>
         </div>
       </div>
     </Dialog>

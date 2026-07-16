@@ -19,6 +19,8 @@ import { getErrorMessage } from "../utils/errors";
 import { useNotesAutosave } from "../lib/useNotesAutosave";
 import ActionsMenu from "../components/ActionsMenu";
 import InlineRename from "../components/InlineRename";
+import Button from "../components/ui/Button";
+import IconButton from "../components/ui/IconButton";
 
 const MosaicDetailPage: Component = () => {
   const ctx = useSettingsContext();
@@ -265,12 +267,9 @@ const MosaicDetailPage: Component = () => {
       <Show when={mosaic.error}>
         <div class="text-center text-theme-error py-8">
           Failed to load mosaic
-          <button
-            onClick={() => refetch()}
-            class="ml-3 px-3 py-1 text-sm bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded hover:bg-theme-accent/25 transition-colors"
-          >
+          <Button variant="primary" size="sm" class="ml-3" onClick={() => refetch()}>
             Retry
-          </button>
+          </Button>
         </div>
       </Show>
 
@@ -286,15 +285,16 @@ const MosaicDetailPage: Component = () => {
                     fallback={
                       <>
                         <h2 class="text-sm font-semibold text-theme-text-primary truncate">{data().name}</h2>
-                        <button
-                          class="text-theme-text-tertiary hover:text-theme-text-primary transition-colors text-base leading-none"
+                        <IconButton
+                          variant="default"
+                          class="text-base leading-none"
                           title="Rename mosaic"
                           aria-label="Rename mosaic"
                           disabled={savingName()}
                           onClick={() => setEditingName(true)}
                         >
                           &#9998;
-                        </button>
+                        </IconButton>
                         <Show when={savingName()}>
                           <span class="text-xs text-theme-text-secondary">Saving...</span>
                         </Show>
@@ -346,12 +346,9 @@ const MosaicDetailPage: Component = () => {
                     )}
                   </For>
                   <div class="flex items-center gap-2">
-                    <button
-                      class="px-4 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded text-sm font-medium hover:bg-theme-accent/25 transition-colors"
-                      onClick={() => setShowComposite(true)}
-                    >
+                    <Button variant="primary" onClick={() => setShowComposite(true)}>
                       Composite
-                    </button>
+                    </Button>
                     <ActionsMenu>
                       {(close) => (
                         <>
@@ -423,7 +420,9 @@ const MosaicDetailPage: Component = () => {
                     This mosaic was created before session management. Select which sessions to include for each panel.
                   </p>
                 </div>
-                <button
+                <Button
+                  variant="warning"
+                  class="whitespace-nowrap"
                   disabled={includingAll()}
                   onClick={async () => {
                     const data = mosaic();
@@ -458,10 +457,9 @@ const MosaicDetailPage: Component = () => {
                       setIncludingAll(false);
                     }
                   }}
-                  class="px-4 py-2 text-sm bg-theme-warning/20 text-theme-warning border border-theme-warning/30 rounded-[var(--radius-sm)] hover:bg-theme-warning/30 transition-colors whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {includingAll() ? "Including..." : "Include All"}
-                </button>
+                </Button>
               </div>
             </Show>
 

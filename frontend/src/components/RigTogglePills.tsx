@@ -1,4 +1,5 @@
 import { For } from "solid-js";
+import Toggle from "./ui/Toggle";
 
 /** A small palette of distinguishable rig colors. */
 const RIG_COLORS = [
@@ -28,17 +29,13 @@ export default function RigTogglePills(props: Props) {
           const isActive = () => props.enabledRigs.includes(rig);
           const color = () => rigColor(index());
           return (
-            <button
-              class="px-2 py-0.5 rounded text-caption font-medium border transition-colors cursor-pointer"
-              style={{
-                "border-color": isActive() ? color() : "var(--color-border-default)",
-                "background-color": isActive() ? `${color()}22` : "var(--color-bg-elevated)",
-                color: isActive() ? color() : "var(--color-text-tertiary)",
-              }}
+            <Toggle
+              active={isActive()}
+              color={color()}
               onClick={() => props.onToggle(rig)}
             >
               {rig}
-            </button>
+            </Toggle>
           );
         }}
       </For>

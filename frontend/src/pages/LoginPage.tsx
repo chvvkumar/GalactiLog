@@ -2,6 +2,7 @@ import { Component, createSignal, Show } from "solid-js";
 import { useNavigate } from "@solidjs/router";
 import { useAuth } from "../components/AuthProvider";
 import { showToast } from "../components/Toast";
+import Button from "../components/ui/Button";
 
 const LoginPage: Component = () => {
   const { login } = useAuth();
@@ -74,13 +75,9 @@ const LoginPage: Component = () => {
             />
             <span class="text-sm text-theme-text-secondary">Remember me</span>
           </label>
-          <button
-            type="submit"
-            disabled={submitting()}
-            class="w-full py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded text-sm font-medium disabled:opacity-50 hover:bg-theme-accent/25 transition-colors"
-          >
+          <Button type="submit" variant="primary" disabled={submitting()} class="w-full">
             {submitting() ? "Signing in..." : "Sign in"}
-          </button>
+          </Button>
         </form>
       </div>
     </div>

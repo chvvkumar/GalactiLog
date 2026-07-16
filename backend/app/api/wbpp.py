@@ -18,7 +18,7 @@ from app.schemas.wbpp import (
 from app.services.wbpp_export import (
     detect_os, compute_session_levels, pick_default_level,
     disambiguate_staging_names, generate_powershell_script, generate_shell_script,
-    sanitize_script_name,
+    sanitize_script_name, fits_relative_path, map_excluded_to_ops,
 )
 
 router = APIRouter(prefix="/wbpp", tags=["wbpp"])
@@ -70,15 +70,19 @@ async def wbpp_preview(
     session_paths = await _fetch_session_paths(target_id, payload.session_dates, db)
     all_paths = await _fetch_all_paths_for_contamination(db)
 
+    excluded_set = set(payload.excluded_source_relatives)
+
     previews = []
     for d in payload.session_dates:
         fps = session_paths.get(d, [])
         levels = compute_session_levels(d, fps, all_paths, fits_root, payload.library_root, target_os)
+        excluded_count = sum(1 for fp in fps if fits_relative_path(fp, fits_root) in excluded_set)
         previews.append(WbppSessionPreview(
             session_date=d,
             levels=[WbppFolderLevel(**lv.__dict__) for lv in levels],
             default_level_index=pick_default_level(levels),
             total_frame_count=len(fps),
+            excluded_frame_count=excluded_count,
         ))
     return WbppPreviewResponse(sessions=previews, target_os=target_os)
 
@@ -124,6 +128,17 @@ async def wbpp_generate(
     copy_ops = list(zip(sources, names))
     safe = sanitize_script_name(payload.target_name)
 
+    excluded_by_op = map_excluded_to_ops(payload.excluded_source_relatives, chosen)
+    excluded_set = set(payload.excluded_source_relatives)
+    light_total = 0
+    light_excluded = 0
+    for d in used_dates:
+        for fp in session_paths.get(d, []):
+            light_total += 1
+            if fits_relative_path(fp, fits_root) in excluded_set:
+                light_excluded += 1
+    light_copied = light_total - light_excluded
+
     staging_base = staging_root.rstrip("/\\")
 
     operations = [
@@ -139,10 +154,10 @@ async def wbpp_generate(
 
     if target_os == "windows":
         filename = f"wbpp_{safe}.ps1"
-        script = generate_powershell_script(copy_ops, staging_root, payload.target_name, payload.exclusions, used_dates, filename)
+        script = generate_powershell_script(copy_ops, staging_root, payload.target_name, payload.exclusions, used_dates, filename, excluded_by_op=excluded_by_op)
     else:
         filename = f"wbpp_{safe}.sh"
-        script = generate_shell_script(copy_ops, staging_root, payload.target_name, payload.exclusions, used_dates, filename)
+        script = generate_shell_script(copy_ops, staging_root, payload.target_name, payload.exclusions, used_dates, filename, excluded_by_op=excluded_by_op)
 
     return WbppGenerateResponse(
         filename=filename,
@@ -151,4 +166,7 @@ async def wbpp_generate(
         script=script,
         operations=operations,
         exclusions=payload.exclusions,
+        light_total=light_total,
+        light_excluded=light_excluded,
+        light_copied=light_copied,
     )

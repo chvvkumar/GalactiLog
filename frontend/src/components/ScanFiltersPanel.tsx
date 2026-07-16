@@ -12,6 +12,8 @@ import type {
 } from "../api/scanFilters";
 import FolderBrowserModal from "./FolderBrowserModal";
 import ConfirmDialog from "./ConfirmDialog";
+import Button from "./ui/Button";
+import IconButton from "./ui/IconButton";
 import SettingsHelpSection from "./settings/SettingsHelpSection";
 import { showToast } from "./Toast";
 import { getErrorMessage } from "../utils/errors";
@@ -263,12 +265,9 @@ const ScanFiltersPanel: Component<Props> = (props) => {
       <section class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-2">
         <div class="flex items-center justify-between">
           <h4 class="text-sm font-medium text-theme-text-primary">{p.label}</h4>
-          <button
-            class="px-4 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded text-sm font-medium hover:bg-theme-accent/25 transition-colors"
-            onClick={p.onBrowse}
-          >
+          <Button variant="primary" onClick={p.onBrowse}>
             Browse…
-          </button>
+          </Button>
         </div>
         <p class="text-xs text-theme-text-secondary">{p.help}</p>
         <Show
@@ -307,8 +306,8 @@ const ScanFiltersPanel: Component<Props> = (props) => {
               draftError() ? "border-theme-error" : "border-theme-border"
             }`}
           />
-          <button
-            class="px-4 py-1.5 bg-theme-surface text-theme-text-primary border border-theme-border rounded text-sm font-medium disabled:opacity-50 hover:bg-theme-hover transition-colors"
+          <Button
+            variant="secondary"
             disabled={!draft().trim() || !!draftError()}
             onClick={() => {
               p.onAdd(draft().trim());
@@ -316,7 +315,7 @@ const ScanFiltersPanel: Component<Props> = (props) => {
             }}
           >
             Add
-          </button>
+          </Button>
         </div>
         <Show when={draftError()}>
           <p class="text-xs text-theme-error">{draftError()}</p>
@@ -527,8 +526,8 @@ include rule   ^M\\d+$          (regex, folder)`}
                       />
                     </td>
                     <td class="p-1">
-                      <button
-                        class="text-red-400"
+                      <IconButton
+                        variant="danger"
                         onClick={() => {
                           const next = filters.name_rules.filter((_, idx) => idx !== i());
                           updateFilters({ name_rules: next });
@@ -536,15 +535,16 @@ include rule   ^M\\d+$          (regex, folder)`}
                         aria-label="Remove rule"
                       >
                         ×
-                      </button>
+                      </IconButton>
                     </td>
                   </tr>
                 )}</For>
               </tbody>
             </table>
           </div>
-          <button
-            class="px-2 py-1 text-xs rounded border border-theme-border"
+          <Button
+            variant="secondary"
+            size="sm"
             onClick={() => {
               const newRule: NameRule = {
                 id: crypto.randomUUID(),
@@ -558,7 +558,7 @@ include rule   ^M\\d+$          (regex, folder)`}
             }}
           >
             Add rule
-          </button>
+          </Button>
         </section>
 
         <section class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-2">
@@ -590,13 +590,13 @@ include rule   ^M\\d+$          (regex, folder)`}
                 <option value="file">file</option>
                 <option value="folder">folder</option>
               </select>
-              <button
-                class="px-4 py-1.5 bg-theme-surface text-theme-text-primary border border-theme-border rounded text-sm font-medium hover:bg-theme-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              <Button
+                variant="secondary"
                 onClick={runTest}
                 disabled={testing() || !testPath().trim()}
               >
                 {testing() ? "Testing…" : "Test"}
-              </button>
+              </Button>
             </div>
             <Show when={testResult()}>
               <div class="text-xs space-y-0.5">
@@ -640,8 +640,8 @@ include rule   ^M\\d+$          (regex, folder)`}
         </section>
 
         <div class="flex flex-wrap gap-2">
-          <button
-            class="px-4 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded text-sm font-medium disabled:opacity-50 hover:bg-theme-accent/25 transition-colors"
+          <Button
+            variant="primary"
             disabled={!canSave()}
             onClick={save}
             title={
@@ -653,17 +653,17 @@ include rule   ^M\\d+$          (regex, folder)`}
             }
           >
             {saving() ? "Saving…" : "Save rules"}
-          </button>
-          <button
-            class="px-4 py-1.5 bg-theme-surface text-theme-text-primary border border-theme-border rounded text-sm font-medium disabled:opacity-50 hover:bg-theme-hover transition-colors"
+          </Button>
+          <Button
+            variant="secondary"
             disabled={!dirty()}
             onClick={revert}
             title="Discard unsaved changes and reload the last saved filters"
           >
             Revert
-          </button>
-          <button
-            class="px-4 py-1.5 bg-theme-warning/15 text-theme-warning border border-theme-warning/30 rounded text-sm font-medium disabled:opacity-50 hover:bg-theme-warning/25 transition-colors"
+          </Button>
+          <Button
+            variant="warning"
             disabled={dirty() || applying()}
             onClick={applyNow}
             title={
@@ -673,7 +673,7 @@ include rule   ^M\\d+$          (regex, folder)`}
             }
           >
             {applying() ? "Checking\u2026" : "Apply now"}
-          </button>
+          </Button>
         </div>
       </div>
 

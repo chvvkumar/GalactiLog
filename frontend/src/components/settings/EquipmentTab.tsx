@@ -5,6 +5,7 @@ import { useAuth } from "../AuthProvider";
 import { SuggestionsBanner } from "./SuggestionsBanner";
 import { GroupingEditor, type GroupEntry } from "./GroupingEditor";
 import HelpPopover from "../HelpPopover";
+import Button from "../ui/Button";
 // EquipmentConfig is the hand-written definition in `../../api/types`: it
 // feeds useSettingsContext().saveEquipment, whose signature in
 // SettingsProvider.tsx is pinned to the hand-written, narrower-optional
@@ -154,13 +155,14 @@ export const EquipmentTab: Component = () => {
 
       <Show when={isAdmin()}>
         <div class="flex justify-end">
-          <button
+          <Button
+            variant="primary"
+            size="sm"
             onClick={handleSave}
             disabled={saving()}
-            class="px-3 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded text-sm font-medium hover:bg-theme-accent/25 disabled:opacity-50 transition-colors"
           >
             {saving() ? "Saving..." : "Save"}
-          </button>
+          </Button>
         </div>
       </Show>
     </div>

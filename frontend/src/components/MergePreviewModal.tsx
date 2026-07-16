@@ -5,6 +5,7 @@ import { unwrap } from "../api/unwrap";
 import { queryKeys } from "../api/queryKeys";
 import { showToast } from "./Toast";
 import Dialog from "./Dialog";
+import Button from "./ui/Button";
 import { formatIntegration } from "../utils/format";
 import { getErrorMessage } from "../utils/errors";
 
@@ -271,19 +272,17 @@ const MergePreviewModal: Component<MergePreviewModalProps> = (props) => {
           </Show>
 
           <div class="flex justify-end gap-2 pt-1">
-            <button
-              onClick={props.onClose}
-              class="px-3 py-1.5 text-sm border border-theme-border text-theme-text-secondary rounded-[var(--radius-sm)] hover:text-theme-text-primary transition-colors"
-            >
+            <Button variant="secondary" size="sm" onClick={props.onClose}>
               Cancel
-            </button>
-            <button
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
               onClick={handleMerge}
               disabled={merging() || loading() || !!error() || !preview()}
-              class="px-3 py-1.5 text-sm bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded-[var(--radius-sm)] hover:bg-theme-accent/25 transition-colors disabled:opacity-50"
             >
               {merging() ? "Merging..." : "Merge"}
-            </button>
+            </Button>
           </div>
         </div>
       </div>

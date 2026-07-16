@@ -3,6 +3,7 @@ import { apiClient } from "../../api/generated/client";
 import { unwrap, ApiError } from "../../api/unwrap";
 import { showToast } from "../Toast";
 import { useAuth } from "../AuthProvider";
+import Button from "../ui/Button";
 import { getErrorMessage } from "../../utils/errors";
 
 export const AccountTab: Component = () => {
@@ -97,13 +98,13 @@ export const AccountTab: Component = () => {
             onInput={(e) => setConfirm(e.currentTarget.value)}
           />
         </div>
-        <button
+        <Button
           type="submit"
+          variant="primary"
           disabled={saving()}
-          class="px-4 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded text-sm font-medium hover:bg-theme-accent/25 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {saving() ? "Saving..." : "Change Password"}
-        </button>
+        </Button>
       </form>
     </div>
   );

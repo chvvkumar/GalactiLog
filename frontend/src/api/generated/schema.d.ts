@@ -3158,6 +3158,11 @@ export interface components {
             sensor_temp?: number | null;
             /** Sky Quality */
             sky_quality?: number | null;
+            /**
+             * Source Relative
+             * @default
+             */
+            source_relative: string;
             /** Thumbnail Url */
             thumbnail_url?: string | null;
             /** Timestamp */
@@ -4555,7 +4560,10 @@ export interface components {
             /** Top Targets */
             top_targets: components["schemas"]["TopTarget"][];
         };
-        /** StatusResponse */
+        /**
+         * StatusResponse
+         * @description Generic single-field status response, e.g. {"status": "ok"}.
+         */
         StatusResponse: {
             /** Status */
             status: string;
@@ -5070,6 +5078,8 @@ export interface components {
             chosen_levels?: {
                 [key: string]: number;
             };
+            /** Excluded Source Relatives */
+            excluded_source_relatives?: string[];
             /** Exclusions */
             exclusions?: string[];
             /** Library Root */
@@ -5091,6 +5101,21 @@ export interface components {
             exclusions: string[];
             /** Filename */
             filename: string;
+            /**
+             * Light Copied
+             * @default 0
+             */
+            light_copied: number;
+            /**
+             * Light Excluded
+             * @default 0
+             */
+            light_excluded: number;
+            /**
+             * Light Total
+             * @default 0
+             */
+            light_total: number;
             /** Operations */
             operations: components["schemas"]["WbppCopyOperation"][];
             /** Script */
@@ -5106,6 +5131,8 @@ export interface components {
             chosen_levels?: {
                 [key: string]: number;
             };
+            /** Excluded Source Relatives */
+            excluded_source_relatives?: string[];
             /** Library Root */
             library_root: string;
             /** Session Dates */
@@ -5126,6 +5153,11 @@ export interface components {
         WbppSessionPreview: {
             /** Default Level Index */
             default_level_index: number;
+            /**
+             * Excluded Frame Count
+             * @default 0
+             */
+            excluded_frame_count: number;
             /** Levels */
             levels: components["schemas"]["WbppFolderLevel"][];
             /** Session Date */
@@ -5133,11 +5165,8 @@ export interface components {
             /** Total Frame Count */
             total_frame_count: number;
         };
-        /**
-         * StatusResponse
-         * @description Generic single-field status response, e.g. {"status": "ok"}.
-         */
-        app__schemas__common__StatusResponse: {
+        /** StatusResponse */
+        app__schemas__mosaic__StatusResponse: {
             /** Status */
             status: string;
         };
@@ -5209,7 +5238,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["app__schemas__common__StatusResponse"];
+                    "application/json": components["schemas"]["StatusResponse"];
                 };
             };
             /** @description Validation Error */
@@ -5544,7 +5573,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["app__schemas__common__StatusResponse"];
+                    "application/json": components["schemas"]["StatusResponse"];
                 };
             };
             /** @description Validation Error */
@@ -5610,7 +5639,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["app__schemas__common__StatusResponse"];
+                    "application/json": components["schemas"]["StatusResponse"];
                 };
             };
             /** @description Validation Error */
@@ -5641,7 +5670,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["app__schemas__common__StatusResponse"];
+                    "application/json": components["schemas"]["StatusResponse"];
                 };
             };
             /** @description Validation Error */
@@ -6177,7 +6206,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["app__schemas__common__StatusResponse"];
+                    "application/json": components["schemas"]["StatusResponse"];
                 };
             };
             /** @description Validation Error */
@@ -6210,7 +6239,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["app__schemas__common__StatusResponse"];
+                    "application/json": components["schemas"]["StatusResponse"];
                 };
             };
             /** @description Validation Error */
@@ -6243,7 +6272,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["app__schemas__common__StatusResponse"];
+                    "application/json": components["schemas"]["StatusResponse"];
                 };
             };
             /** @description Validation Error */
@@ -6433,7 +6462,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["app__schemas__common__StatusResponse"];
+                    "application/json": components["schemas"]["StatusResponse"];
                 };
             };
             /** @description Validation Error */
@@ -6731,7 +6760,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["StatusResponse"];
+                    "application/json": components["schemas"]["app__schemas__mosaic__StatusResponse"];
                 };
             };
             /** @description Validation Error */
@@ -6801,7 +6830,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["StatusResponse"];
+                    "application/json": components["schemas"]["app__schemas__mosaic__StatusResponse"];
                 };
             };
             /** @description Validation Error */
@@ -6834,7 +6863,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["StatusResponse"];
+                    "application/json": components["schemas"]["app__schemas__mosaic__StatusResponse"];
                 };
             };
             /** @description Validation Error */
@@ -7012,7 +7041,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["StatusResponse"];
+                    "application/json": components["schemas"]["app__schemas__mosaic__StatusResponse"];
                 };
             };
             /** @description Validation Error */
@@ -7084,7 +7113,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["StatusResponse"];
+                    "application/json": components["schemas"]["app__schemas__mosaic__StatusResponse"];
                 };
             };
             /** @description Validation Error */

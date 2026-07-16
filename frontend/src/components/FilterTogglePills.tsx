@@ -1,5 +1,6 @@
 import { For } from "solid-js";
 import { useSettingsContext } from "./SettingsProvider";
+import Toggle from "./ui/Toggle";
 
 interface Props {
   filters: string[];
@@ -20,17 +21,13 @@ export default function FilterTogglePills(props: Props) {
             return filterColorMap()[filter] ?? "var(--color-text-secondary)";
           };
           return (
-            <button
-              class="px-2 py-0.5 rounded text-caption font-medium border transition-colors cursor-pointer"
-              style={{
-                "border-color": isActive() ? color() : "var(--color-border-default)",
-                "background-color": isActive() ? `${color()}22` : "var(--color-bg-elevated)",
-                color: isActive() ? color() : "var(--color-text-tertiary)",
-              }}
+            <Toggle
+              active={isActive()}
+              color={color()}
               onClick={() => toggleFilter(filter)}
             >
               {filter === "overall" ? "Overall" : filter}
-            </button>
+            </Toggle>
           );
         }}
       </For>

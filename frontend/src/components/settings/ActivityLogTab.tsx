@@ -19,16 +19,13 @@ import type {
 import { useAuth } from "../AuthProvider";
 import { showToast } from "../Toast";
 import HelpPopover from "../HelpPopover";
+import Button, { buttonClasses } from "../ui/Button";
 import { useSettingsContext } from "../SettingsProvider";
 import { formatDateTime } from "../../utils/dateTime";
 
 const LEVELS: AppLogLevel[] = ["debug", "info", "warning", "error", "critical"];
 const CAPTURE_LEVELS: AppLogLevel[] = ["debug", "info", "warning", "error"];
 const SOURCES: ("all" | AppLogSource)[] = ["all", "api", "worker", "beat"];
-
-// Shared style for the action buttons in the settings strip (Save, Clear, Download).
-const ACTION_BTN_CLASS =
-  "px-3 py-1.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded text-sm disabled:opacity-50 hover:bg-theme-accent/25 transition-colors";
 
 // Severity ranking, low to high. Drives the minimum-severity view filter.
 const LEVEL_ORDER: Record<AppLogLevel, number> = {
@@ -526,13 +523,14 @@ const ActivityLogTab: Component = () => {
                 />
               </div>
 
-              <button
+              <Button
+                variant="primary"
+                size="sm"
                 onClick={handleSaveSettings}
                 disabled={savingSettings() || !isAdmin()}
-                class={ACTION_BTN_CLASS}
               >
                 {savingSettings() ? "Saving..." : "Save"}
-              </button>
+              </Button>
             </div>
 
             <p class="text-xs text-theme-text-secondary">
@@ -549,28 +547,31 @@ const ActivityLogTab: Component = () => {
                   fallback={
                     <div class="flex items-center gap-1.5">
                       <span class="text-xs text-theme-error">Clear activity log?</span>
-                      <button
+                      <Button
+                        variant="danger"
+                        size="sm"
                         onClick={handleClearActivity}
-                        class="px-2 py-1 text-xs bg-theme-error text-theme-text-primary rounded hover:opacity-90 transition-colors"
                       >
                         Yes
-                      </button>
-                      <button
+                      </Button>
+                      <Button
+                        variant="secondary"
+                        size="sm"
                         onClick={() => setShowClearActivityConfirm(false)}
-                        class="px-2 py-1 text-xs border border-theme-border-em text-theme-text-secondary rounded hover:text-theme-text-primary transition-colors"
                       >
                         Cancel
-                      </button>
+                      </Button>
                     </div>
                   }
                 >
-                  <button
+                  <Button
+                    variant="primary"
+                    size="sm"
                     onClick={() => setShowClearActivityConfirm(true)}
                     disabled={clearingActivity()}
-                    class={ACTION_BTN_CLASS}
                   >
                     Clear activity log
-                  </button>
+                  </Button>
                 </Show>
 
                 {/* Clear application logs */}
@@ -579,34 +580,37 @@ const ActivityLogTab: Component = () => {
                   fallback={
                     <div class="flex items-center gap-1.5">
                       <span class="text-xs text-theme-error">Clear application logs?</span>
-                      <button
+                      <Button
+                        variant="danger"
+                        size="sm"
                         onClick={handleClearLogs}
-                        class="px-2 py-1 text-xs bg-theme-error text-theme-text-primary rounded hover:opacity-90 transition-colors"
                       >
                         Yes
-                      </button>
-                      <button
+                      </Button>
+                      <Button
+                        variant="secondary"
+                        size="sm"
                         onClick={() => setShowClearLogsConfirm(false)}
-                        class="px-2 py-1 text-xs border border-theme-border-em text-theme-text-secondary rounded hover:text-theme-text-primary transition-colors"
                       >
                         Cancel
-                      </button>
+                      </Button>
                     </div>
                   }
                 >
-                  <button
+                  <Button
+                    variant="primary"
+                    size="sm"
                     onClick={() => setShowClearLogsConfirm(true)}
                     disabled={clearingLogs()}
-                    class={ACTION_BTN_CLASS}
                   >
                     Clear application logs
-                  </button>
+                  </Button>
                 </Show>
 
                 <a
                   href={downloadUrl()}
                   download="galactilog-app.log"
-                  class={ACTION_BTN_CLASS}
+                  class={buttonClasses("primary", "sm")}
                 >
                   Download
                 </a>

@@ -7,6 +7,7 @@ import { useAuth } from "../AuthProvider";
 import type { MergeCandidateResponse, OrphanPreviewResponse } from "../../api/types";
 import CreateTargetFromOrphanModal from "./CreateTargetFromOrphanModal";
 import MergeOrphanModal from "./MergeOrphanModal";
+import Button from "../ui/Button";
 
 interface UnresolvedSectionProps {
   candidates: Accessor<MergeCandidateResponse[]>;
@@ -175,31 +176,19 @@ const UnresolvedSection: Component<UnresolvedSectionProps> = (props) => {
                     <Show when={isAdmin()}>
                       <div class="flex gap-1.5 ml-3 flex-shrink-0 flex-wrap justify-end">
                         <Show when={c.suggested_target_id}>
-                          <button
-                            onClick={() => handleAssign(c)}
-                            class="px-2 py-1 text-xs border border-theme-accent/50 text-theme-accent rounded-[var(--radius-sm)] hover:bg-theme-accent/10 transition-colors"
-                          >
+                          <Button size="sm" onClick={() => handleAssign(c)}>
                             Assign to {c.suggested_target_name ?? "target"}
-                          </button>
+                          </Button>
                         </Show>
-                        <button
-                          onClick={() => handleResolve(c, "merge")}
-                          class="px-2 py-1 text-xs border border-theme-border text-theme-text-secondary rounded-[var(--radius-sm)] hover:text-theme-text-primary transition-colors"
-                        >
+                        <Button variant="secondary" size="sm" onClick={() => handleResolve(c, "merge")}>
                           Merge into Existing
-                        </button>
-                        <button
-                          onClick={() => handleResolve(c, "create")}
-                          class="px-2 py-1 text-xs border border-theme-border text-theme-text-secondary rounded-[var(--radius-sm)] hover:text-theme-text-primary transition-colors"
-                        >
+                        </Button>
+                        <Button variant="secondary" size="sm" onClick={() => handleResolve(c, "create")}>
                           Create New Target
-                        </button>
-                        <button
-                          onClick={() => handleDismiss(c.id)}
-                          class="px-2 py-1 text-xs border border-theme-border text-theme-text-secondary rounded-[var(--radius-sm)] hover:text-theme-text-primary transition-colors"
-                        >
+                        </Button>
+                        <Button variant="secondary" size="sm" onClick={() => handleDismiss(c.id)}>
                           Dismiss
-                        </button>
+                        </Button>
                       </div>
                     </Show>
                   </div>
