@@ -1,40 +1,46 @@
-import { Component, For, Show, JSX, createSignal, createMemo, createEffect, onMount } from "solid-js";
+import {
+  Component,
+  For,
+  Show,
+  createSignal,
+  createMemo,
+  createEffect,
+  onCleanup,
+  onMount,
+  untrack,
+} from "solid-js";
 import { apiClient } from "../api/generated/client";
 import { unwrap } from "../api/unwrap";
 import { showToast } from "./Toast";
 import { getErrorMessage } from "../utils/errors";
 import { useSettingsContext } from "./SettingsProvider";
-import { isFieldVisible } from "../utils/displaySettings";
-import { madZ, bandForZ, bandToCellClass } from "../utils/frameQuality";
 import Dialog from "./Dialog";
 import Button from "./ui/Button";
 import IconButton from "./ui/IconButton";
+import WbppLevelEditor from "./wbpp/WbppLevelEditor";
+import WbppQualityPanel, { type QualityConfig } from "./wbpp/WbppQualityPanel";
+import WbppScriptMenu, { type ScriptOs } from "./wbpp/WbppScriptMenu";
+import WbppFooter, { type CopyBlocker } from "./wbpp/WbppFooter";
+import { detectOs, lastSegment, parentContext } from "./wbpp/paths";
 import {
   isFsAccessSupported,
   runBrowserCopy,
   CopyCancelledError,
   pickDirectory,
   queryHandlePermission,
-  requestHandlePermission,
   loadStoredHandle,
   storeHandle,
   HANDLE_KEYS,
   type PermState,
 } from "../lib/wbppBrowserCopy";
 import {
-  RAW_METRICS,
-  RAW_METRIC_LABELS,
-  HIGHER_IS_BETTER,
   computeVerdicts,
   excludedSourceRelatives,
+  excludedUnderSelectedLevels,
   qualityTotals,
-  equipmentForFrame,
-  baselineFor,
-  type FilterMode,
-  type BaselineMode,
-  type RawConstraint,
-  type RawMetric,
+  RAW_METRICS,
   type FrameVerdict,
+  type RawConstraint,
 } from "../lib/wbppQualityFilter";
 import type {
   WbppSessionPreview,
@@ -42,7 +48,7 @@ import type {
   WbppGenerateResponse,
   WbppCopyOperation,
   SessionDetail,
-  FrameRecord,
+  GeneralSettings,
 } from "../api/types";
 
 interface Props {
@@ -53,7 +59,7 @@ interface Props {
   onClose: () => void;
 }
 
-type OsChoice = "auto" | "windows" | "posix";
+type OsChoice = "auto" | ScriptOs;
 type PermOrNone = PermState | "none";
 
 const DEFAULT_EXCLUSIONS = [
@@ -61,34 +67,52 @@ const DEFAULT_EXCLUSIONS = [
   "masters", "Masters", "MASTERS", "*CALIBRATED", "CALIBRATED",
 ];
 
-// Raised section card, matching the target detail page.
+// Raised body zone, matching the target detail page's section cards.
 const CARD_CLASS =
   "bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-4";
 
-// Preview columns mirroring the session frame table's toggled metric columns.
-// group/field feed isFieldVisible so the preview honors the user's display settings.
-const METRIC_COLUMNS: {
-  metric: RawMetric;
-  label: string;
-  group: "quality" | "guiding" | "adu";
-  field: string;
-  format: (v: number) => string;
-}[] = [
-  { metric: "median_hfr", label: "HFR", group: "quality", field: "hfr", format: (v) => v.toFixed(2) },
-  { metric: "eccentricity", label: "Ecc", group: "quality", field: "eccentricity", format: (v) => v.toFixed(2) },
-  { metric: "fwhm", label: "FWHM", group: "quality", field: "fwhm", format: (v) => v.toFixed(2) },
-  { metric: "detected_stars", label: "Stars", group: "quality", field: "detected_stars", format: (v) => v.toFixed(0) },
-  { metric: "guiding_rms_arcsec", label: "RMS", group: "guiding", field: "rms_total", format: (v) => v.toFixed(2) },
-  { metric: "adu_median", label: "ADU", group: "adu", field: "median", format: (v) => v.toFixed(0) },
-];
+const FIELD_CLASS =
+  "w-full text-xs px-2 py-1.5 bg-theme-elevated border border-theme-border rounded-[var(--radius-sm)] text-theme-text-primary focus:outline-none focus:border-theme-accent";
 
-function detectOs(root: string): "windows" | "posix" {
-  return /^[A-Za-z]:\\|\\/.test(root) ? "windows" : "posix";
+const ZONE_TITLE_CLASS =
+  "text-xs font-semibold uppercase tracking-wider text-theme-text-secondary";
+
+// How long a config edit sits still before it is written back. Long enough that
+// dragging the threshold slider is one PUT rather than one per pixel.
+const QUALITY_SAVE_DEBOUNCE_MS = 800;
+
+const RAW_METRIC_SET: ReadonlySet<string> = new Set<string>(RAW_METRICS);
+
+/**
+ * The stored quality config, narrowed to what this build can actually evaluate.
+ *
+ * Everything here is defensive on purpose. The values arrive as loose wire types
+ * and may have been written by an older build, so an unrecognised mode or
+ * baseline falls back to the default rather than reaching the filter, and a
+ * constraint naming a metric that no longer exists is dropped rather than kept
+ * as a gate that silently matches nothing. The defaults are exactly the values
+ * the modal used to hardcode, so an install with nothing stored behaves as it
+ * did before the config was persisted.
+ */
+function qualityConfigFromSettings(g: GeneralSettings | undefined): QualityConfig {
+  return {
+    mode: g?.wbpp_quality_mode === "raw" ? "raw" : "score",
+    scoreThreshold: g?.wbpp_quality_score_threshold ?? 60,
+    baseline: g?.wbpp_quality_baseline === "rig" ? "rig" : "session",
+    rawConstraints: (g?.wbpp_quality_raw_constraints ?? []).filter((c) =>
+      RAW_METRIC_SET.has(c.metric),
+    ) as RawConstraint[],
+  };
 }
 
-function lastSegment(path: string): string {
-  const parts = path.split(/[/\\]/).filter((p) => p.length > 0);
-  return parts.length ? parts[parts.length - 1] : path;
+function qualityConfigToSettings(on: boolean, c: QualityConfig): Partial<GeneralSettings> {
+  return {
+    wbpp_quality_enabled: on,
+    wbpp_quality_mode: c.mode,
+    wbpp_quality_score_threshold: c.scoreThreshold,
+    wbpp_quality_baseline: c.baseline,
+    wbpp_quality_raw_constraints: c.rawConstraints,
+  };
 }
 
 function permText(p: PermOrNone): string {
@@ -103,52 +127,36 @@ function permText(p: PermOrNone): string {
 
 function permClass(p: PermOrNone): string {
   switch (p) {
-    case "granted": return "text-green-400";
+    case "granted": return "text-theme-success";
     case "denied": return "text-theme-error";
     case "prompt": return "text-theme-warning";
     default: return "text-theme-text-tertiary";
   }
 }
 
-// Collapsible raised section, matching the target detail page header pattern
-// (title with accent rule + rotating chevron, content gated by `open`).
-const SectionCard: Component<{
-  title: string;
-  subtitle?: string;
-  open: boolean;
-  onToggle: () => void;
-  children: JSX.Element;
-}> = (p) => (
-  <div class={CARD_CLASS}>
-    <button class="flex items-center gap-2 w-full cursor-pointer group" onClick={p.onToggle}>
-      <h3 class="text-xs font-semibold uppercase tracking-wider text-theme-text-secondary border-l-2 border-theme-accent pl-2 group-hover:text-theme-text-primary transition-colors">
-        {p.title}
-        <Show when={p.subtitle}>
-          <span class="text-theme-text-tertiary font-normal normal-case tracking-normal ml-2">{p.subtitle}</span>
-        </Show>
-      </h3>
-      <svg
-        class={`w-3.5 h-3.5 transition-transform duration-200 text-theme-text-tertiary ${p.open ? "rotate-180" : ""}`}
-        viewBox="0 0 20 20"
-        fill="currentColor"
-      >
-        <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
-      </svg>
-    </button>
-    <Show when={p.open}>
-      <div class="mt-3 space-y-3">{p.children}</div>
-    </Show>
-  </div>
-);
-
+/**
+ * Export to WBPP.
+ *
+ * Layout is header / body / footer, with the BODY as the only scroll container:
+ * the primary action lives in the sticky footer beside a statement of what it is
+ * about to do, so it can never scroll out of reach. `modal-surface` is repeated
+ * on the sticky footer (WbppFooter) so body content does not bleed through it --
+ * the same technique as ReleaseNotesModal's sticky header.
+ *
+ * The zones are ordered by the decision the user is making: where the files go,
+ * which folders go there, then the options that modify that. App configuration
+ * (library root, staging, exclusions) is deliberately NOT a peer section: it is
+ * folded behind a "Change" inside Options, because it is a setting, not a step.
+ */
 const WbppExportModal: Component<Props> = (props) => {
   const ctx = useSettingsContext();
   const general = () => ctx.settings()?.general;
 
   const [libraryRoot, setLibraryRoot] = createSignal(general()?.wbpp_library_root ?? "");
-  const [osChoice, setOsChoice] = createSignal<OsChoice>(
-    (general()?.wbpp_default_os as OsChoice) ?? "auto",
-  );
+  // Read-only here: the pinned script-type preference is edited in
+  // Settings > External Tools > PixInsight Export. The modal only resolves it
+  // into the script menu's default and round-trips it through saveAsDefaults.
+  const [osChoice] = createSignal<OsChoice>((general()?.wbpp_default_os as OsChoice) ?? "auto");
   const [stagingPath, setStagingPath] = createSignal(general()?.wbpp_staging_path ?? "");
   const [exclusionsText, setExclusionsText] = createSignal(
     (general()?.wbpp_exclusions ?? DEFAULT_EXCLUSIONS).join("\n"),
@@ -163,10 +171,12 @@ const WbppExportModal: Component<Props> = (props) => {
   const [copied, setCopied] = createSignal(false);
   const [showScript, setShowScript] = createSignal(false);
 
-  // Section open/closed state (collapsible cards, like the target page).
+  // Which session rows have their level editor mounted. The parent owns this so
+  // an editor can be reopened without the row remounting its own state.
+  const [editingDates, setEditingDates] = createSignal<string[]>([]);
+  // The app-config fields inside Options. Open by default only when there is no
+  // library root yet, because then it is the one thing blocking the export.
   const [settingsOpen, setSettingsOpen] = createSignal(!(general()?.wbpp_library_root ?? "").trim());
-  const [levelsOpen, setLevelsOpen] = createSignal(true);
-  const [copyOpen, setCopyOpen] = createSignal(true);
   const [savedDefaults, setSavedDefaults] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
 
@@ -182,27 +192,48 @@ const WbppExportModal: Component<Props> = (props) => {
   const [copyLabel, setCopyLabel] = createSignal("");
   const [copyFinished, setCopyFinished] = createSignal<number | null>(null);
   let abortController: AbortController | null = null;
+  let scriptRef: HTMLDivElement | undefined;
 
-  // --- Quality filter state (all reset each modal open; no persistence) ---
-  const [qualityOpen, setQualityOpen] = createSignal(true);
-  const [qualityFilterOn, setQualityFilterOn] = createSignal(false);
-  const [filterMode, setFilterMode] = createSignal<FilterMode>("score");
-  const [scoreThreshold, setScoreThreshold] = createSignal(60);
-  const [rawConstraints, setRawConstraints] = createSignal<RawConstraint[]>([]);
-  const [qualityBaseline, setQualityBaseline] = createSignal<BaselineMode>("session");
+  // --- Quality filter state, seeded from the saved settings ---
+  // These used to reset on every modal open, so the same tuning was redone by
+  // hand for every export. They now hydrate from GeneralSettings and are written
+  // back (debounced) by the effect below.
+  const [qualityFilterOn, setQualityFilterOn] = createSignal(general()?.wbpp_quality_enabled ?? false);
+  const [qualityConfig, setQualityConfig] = createSignal<QualityConfig>(
+    qualityConfigFromSettings(general()),
+  );
   // Session details keyed by date, seeded from props.sessionCache then filled in
   // for any selected date not already cached.
   const [qualitySessions, setQualitySessions] = createSignal<Record<string, SessionDetail>>({});
   const [qualityLoading, setQualityLoading] = createSignal(false);
 
-  // When the filter is switched on, seed from the page's cache and fetch the rest.
-  // (Mirrors TargetDetailPage.tsx loadSessionDetail's GET.)
+  /**
+   * When the filter is switched on, seed from the page's cache and fetch the rest.
+   * (Mirrors TargetDetailPage.tsx loadSessionDetail's GET.)
+   *
+   * This effect WRITES `qualitySessions`, so it must not TRACK it, or it becomes
+   * its own trigger: write -> rerun -> write, fetching again on every pass. Hence
+   * the untracked read below. The bug this replaced was invisible for a subtle
+   * reason worth keeping in mind if this is edited again: the read used to be
+   * `props.sessionCache[date] ?? qualitySessions()[date]`, and `??` short-circuits.
+   * When every selected date was already in the page's cache, `qualitySessions()`
+   * was never called, never tracked, and nothing looped. Only an uncached date --
+   * exactly the case that needs the fetch -- reached the read, subscribed the
+   * effect to its own output, and spun. Both the loop and the empty frame table
+   * followed from that: each rerun reset state to `seeded`, which was built before
+   * the in-flight fetch could resolve, so the arriving frames were overwritten by
+   * the next pass and never landed.
+   *
+   * Dependencies are therefore the inputs only: the filter toggle, the selected
+   * dates, the page's cache, and the target.
+   */
   createEffect(() => {
     if (!qualityFilterOn()) return;
+    const have = untrack(qualitySessions);
     const seeded: Record<string, SessionDetail> = {};
     const missing: string[] = [];
     for (const date of props.selectedDates) {
-      const cached = props.sessionCache[date] ?? qualitySessions()[date];
+      const cached = props.sessionCache[date] ?? have[date];
       if (cached) seeded[date] = cached;
       else missing.push(date);
     }
@@ -236,49 +267,76 @@ const WbppExportModal: Component<Props> = (props) => {
       ? computeVerdicts(
           qualitySessions(),
           props.selectedDates,
-          filterMode(),
-          qualityBaseline(),
-          scoreThreshold(),
-          rawConstraints(),
+          qualityConfig().mode,
+          qualityConfig().baseline,
+          qualityConfig().scoreThreshold,
+          qualityConfig().rawConstraints,
         )
       : [],
   );
   const excludedSet = createMemo<string[]>(() => excludedSourceRelatives(verdicts()));
   const qTotals = createMemo(() => qualityTotals(verdicts()));
-  // Per-frame verdict lookup by fits-root-relative path, for the preview table.
-  const verdictByPath = createMemo(() => {
-    const m = new Map<string, FrameVerdict>();
-    for (const v of verdicts()) m.set(v.frame.source_relative, v);
-    return m;
-  });
 
-  const addConstraint = () => {
-    const used = new Set(rawConstraints().map((c) => c.metric));
-    const next = RAW_METRICS.find((m) => !used.has(m)) ?? RAW_METRICS[0];
-    setRawConstraints([...rawConstraints(), { metric: next, value: 0 }]);
-  };
-  const updateConstraint = (i: number, patch: Partial<RawConstraint>) => {
-    setRawConstraints(rawConstraints().map((c, idx) => (idx === i ? { ...c, ...patch } : c)));
-  };
-  const removeConstraint = (i: number) => {
-    setRawConstraints(rawConstraints().filter((_, idx) => idx !== i));
-  };
-
-  // Signed robust z for a frame metric against the active baseline, mirroring
-  // SessionAccordionCard row coloring. Signal (detected_stars) is session-scoped.
-  const cellZ = (detail: SessionDetail, frame: FrameRecord, metric: RawMetric): number | null => {
-    const eq = equipmentForFrame(detail, frame);
-    const active = baselineFor(detail, frame, eq.telescope, eq.camera, qualityBaseline());
-    const sess = baselineFor(detail, frame, eq.telescope, eq.camera, "session");
-    switch (metric) {
-      case "median_hfr": return madZ(frame.median_hfr, active?.median_hfr);
-      case "fwhm": return madZ(frame.fwhm, active?.fwhm);
-      case "eccentricity": return madZ(frame.eccentricity, active?.eccentricity);
-      case "detected_stars": return madZ(frame.detected_stars, sess?.detected_stars, true);
-      case "guiding_rms_arcsec": return null;
-      case "adu_median": return madZ(frame.adu_median, sess?.adu_median);
+  /**
+   * Write the quality config back so it survives the modal closing.
+   *
+   * Silent on failure by design. PUT /settings/general requires admin, while the
+   * export itself does not, so a non-admin would otherwise get an error banner
+   * over a modal that is working perfectly -- for a convenience they never asked
+   * for. They lose the persistence, not the export.
+   */
+  const persistQuality = async (on: boolean, cfg: QualityConfig) => {
+    const current = general();
+    if (!current) return;
+    try {
+      await ctx.saveGeneral({ ...current, ...qualityConfigToSettings(on, cfg) });
+    } catch {
+      /* see above: persistence is best-effort */
     }
   };
+
+  let saveTimer: ReturnType<typeof setTimeout> | undefined;
+  let pendingSave: { on: boolean; cfg: QualityConfig } | null = null;
+  let hydrated = false;
+
+  /**
+   * Send the pending config now.
+   *
+   * Cleanup FLUSHES rather than cancels. Cancelling would lose every edit made
+   * in the last debounce window before the modal closed -- and closing the modal
+   * right after the final tweak is the normal way to use it, so a plain
+   * clearTimeout would drop exactly the save this feature exists to make. The
+   * write reads only module-level stores, so it is safe once the modal is gone.
+   */
+  const flushQualitySave = () => {
+    clearTimeout(saveTimer);
+    saveTimer = undefined;
+    const p = pendingSave;
+    pendingSave = null;
+    if (p) void persistQuality(p.on, p.cfg);
+  };
+
+  /**
+   * Debounced write-back of the filter toggle and config.
+   *
+   * The first run is skipped: an effect fires once on mount, and at that point
+   * the signals still hold exactly what they were just hydrated FROM, so writing
+   * them back would be a PUT that changes nothing -- on every open of the modal,
+   * for every user, including the ones who never touch the filter.
+   */
+  createEffect(() => {
+    const on = qualityFilterOn();
+    const cfg = qualityConfig();
+    if (!hydrated) {
+      hydrated = true;
+      return;
+    }
+    pendingSave = { on, cfg };
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(flushQualitySave, QUALITY_SAVE_DEBOUNCE_MS);
+  });
+
+  onCleanup(flushQualitySave);
 
   onMount(async () => {
     if (!canBrowserCopy) return;
@@ -294,8 +352,13 @@ const WbppExportModal: Component<Props> = (props) => {
     }
   });
 
-  const effectiveOs = (): "windows" | "posix" =>
-    osChoice() === "auto" ? detectOs(libraryRoot()) : (osChoice() as "windows" | "posix");
+  // The pinned preference wins over detection; the script menu only reports which
+  // of the two produced the default, it does not resolve it.
+  const effectiveOs = (): ScriptOs =>
+    osChoice() === "auto" ? detectOs(libraryRoot()) : (osChoice() as ScriptOs);
+  const defaultReason = (): "detected" | "preference" =>
+    osChoice() === "auto" ? "detected" : "preference";
+  const osLabel = (os: ScriptOs) => (os === "windows" ? "Windows" : "Linux / macOS");
 
   const targetOsParam = (): string | null => (osChoice() === "auto" ? null : osChoice());
 
@@ -314,20 +377,28 @@ const WbppExportModal: Component<Props> = (props) => {
     return `${lib}${sep()}_WBPP_staging${sep()}${props.targetName.replace(/ /g, "_")}`;
   };
 
-  const settingsSummary = (): string => {
-    if (!libraryRoot().trim()) return "no library root set";
-    return `${libraryRoot()} · ${effectiveOs() === "windows" ? "Windows" : "Linux / macOS"}`;
-  };
+  // The one place a session's selected level is resolved. Everything downstream
+  // (the copy plan, the frame count, the byte total) reads this.
+  const selections = createMemo<{ date: string; level: WbppFolderLevel }[]>(() => {
+    const out: { date: string; level: WbppFolderLevel }[] = [];
+    for (const s of sessions()) {
+      if (!s.levels.length) continue;
+      const idx = Math.max(
+        0,
+        Math.min(chosenLevels()[s.session_date] ?? s.default_level_index, s.levels.length - 1),
+      );
+      out.push({ date: s.session_date, level: s.levels[idx] });
+    }
+    return out;
+  });
+
+  const chosenIndexFor = (s: WbppSessionPreview): number =>
+    Math.max(0, Math.min(chosenLevels()[s.session_date] ?? s.default_level_index, s.levels.length - 1));
 
   // The copy plan is derived purely from the previewed sessions + chosen levels,
   // so it is available without generating the script.
   const plan = createMemo<WbppCopyOperation[]>(() => {
-    const chosen: { date: string; level: WbppFolderLevel }[] = [];
-    for (const s of sessions()) {
-      if (!s.levels.length) continue;
-      const idx = Math.max(0, Math.min(chosenLevels()[s.session_date] ?? s.default_level_index, s.levels.length - 1));
-      chosen.push({ date: s.session_date, level: s.levels[idx] });
-    }
+    const chosen = selections();
     const basenames = chosen.map((c) => lastSegment(c.level.path));
     const counts: Record<string, number> = {};
     for (const b of basenames) counts[b] = (counts[b] ?? 0) + 1;
@@ -344,6 +415,148 @@ const WbppExportModal: Component<Props> = (props) => {
       };
     });
   });
+
+  /**
+   * The destination folder name for a session, but only when it differs from the
+   * source folder's own name -- i.e. only when plan() disambiguated a collision
+   * between two sessions that chose the same basename.
+   *
+   * Null the rest of the time, so the rename surfaces on the rows it actually
+   * happens to rather than echoing a destination path onto every row.
+   */
+  const renamedEntryFor = (date: string): string | null => {
+    const op = plan().find((o) => o.session_date === date);
+    if (!op) return null;
+    return op.dest_entry === lastSegment(op.source) ? null : op.dest_entry;
+  };
+
+  /**
+   * The excluded frames that are actually inside the selected levels.
+   *
+   * `qTotals()` counts every failing light across the selected DATES, but
+   * `level.frame_count` / `level.frame_bytes` describe one FOLDER subtree, which
+   * may be narrower than the session. Subtracting the former from the latter mixes
+   * two domains: a session split across .../Ha and .../OIII, with only Ha selected,
+   * would have OIII's failures deducted from Ha's count and bytes -- understating
+   * the size and, with enough failures, driving the count below zero.
+   *
+   * Scoping by source_relative membership puts both sides in the same domain, and
+   * is how the backend and wbppBrowserCopy each decide what a level contains. The
+   * result cannot go negative: a session's excluded frames under its level are a
+   * subset of the lights that level's frame_count counted (both come from the same
+   * LIGHT rows for that target and date).
+   */
+  const excludedInSelection = createMemo<FrameVerdict[]>(() =>
+    qualityFilterOn()
+      ? excludedUnderSelectedLevels(
+          verdicts(),
+          new Map(selections().map((s) => [s.date, s.level.relative_path])),
+        )
+      : [],
+  );
+
+  // Frames the copy will actually write: the selected levels' frames, less the
+  // lights the quality filter drops from inside those levels.
+  const frameCount = () =>
+    selections().reduce((a, c) => a + c.level.frame_count, 0) - excludedInSelection().length;
+
+  /**
+   * The filter has emptied the export: the selected folders hold frames, and the
+   * filter excludes every one of them.
+   *
+   * The panel warns about the SESSION-wide wipeout; this is the narrower and more
+   * consequential one -- what the copy would actually write. They can disagree:
+   * a filter that keeps frames elsewhere in the session can still take every
+   * frame under the selected level. The guard requires the levels to hold frames
+   * at all, so an empty folder is not blamed on the filter.
+   *
+   * Stated up here at the top of the body because the filter's own controls are
+   * further down inside Options, and the one thing a user must not do is find
+   * this out by opening an empty staging folder.
+   */
+  const filterEmptiedExport = () =>
+    qualityFilterOn() &&
+    selections().reduce((a, c) => a + c.level.frame_count, 0) > 0 &&
+    frameCount() === 0;
+
+  /**
+   * Bytes the copy will actually write, or null when that is genuinely unknown.
+   *
+   * `frame_bytes` is null (not a partial sum) whenever any contributing frame has
+   * an unrecorded size -- the backend makes that choice deliberately so the UI
+   * never presents an undercount as fact. The same rule governs the filter's
+   * subtraction: an excluded frame with a null `file_size` makes the remainder
+   * unknowable. So: never coalesce, never sum around a null. One null anywhere
+   * and the whole total is null, which WbppFooter renders as "—".
+   *
+   * Only frames inside the selected levels are subtracted -- see
+   * `excludedInSelection`. A frame outside them contributed nothing to
+   * `frame_bytes`, so deducting its size would understate the total.
+   */
+  const sizeBytes = createMemo<number | null>(() => {
+    let total = 0;
+    for (const c of selections()) {
+      const b = c.level.frame_bytes;
+      if (b == null) return null;
+      total += b;
+    }
+    for (const v of excludedInSelection()) {
+      const fs = v.frame.file_size;
+      if (fs == null) return null;
+      total -= fs;
+    }
+    return total;
+  });
+
+  // Frames across the selection, for the header subline. Before a preview there
+  // are no level counts, so fall back to whatever the page already cached.
+  const headerFrameCount = () =>
+    sessions().length
+      ? sessions().reduce((a, s) => a + s.total_frame_count, 0)
+      : props.selectedDates.reduce((a, d) => a + (props.sessionCache[d]?.frames.length ?? 0), 0);
+
+  /**
+   * Where the in-browser copy writes. The File System Access API exposes no path
+   * for a handle, only its name. Null when the API is unavailable (there is no
+   * browser copy to describe) or no destination has been picked yet.
+   *
+   * Deliberately NOT falling back to stagingRoot(): that is where a *script*
+   * writes, which is a different place reached by a different route. Presenting
+   * one under the other's label is what made the footer's "→" ambiguous.
+   */
+  const copyDestination = (): string | null => {
+    if (!canBrowserCopy) return null;
+    const h = destHandle();
+    return h ? h.name : null;
+  };
+
+  // Where a generated script writes. Always knowable (it is derived from the
+  // library root and the staging override), so it is always shown -- on Chromium
+  // too, where it used to be invisible behind the handle name.
+  const scriptDestination = (): string | null => stagingRoot().trim() || null;
+
+  const permissionGranted = () => srcPerm() === "granted" && destPerm() === "granted";
+
+  /**
+   * What stops a copy, or null when one can proceed.
+   *
+   * Null exactly when the pre-rewrite gate was open (`srcHandle && destHandle &&
+   * srcPerm !== "denied" && destPerm !== "denied"`), so the primary is disabled in
+   * precisely the states it was before -- this reports the reason, it does not
+   * change the verdict. Without the gate the primary is enabled for users with no
+   * source folder, or a denied permission, and the click can only fail into the
+   * error banner.
+   *
+   * Ordered the way the user must resolve them: the destination is the first thing
+   * zone 1 asks for, so a run with nothing chosen at all reports "destination"
+   * rather than naming a later step.
+   */
+  const copyBlockedBy = (): CopyBlocker | null => {
+    if (!destHandle()) return "destination";
+    if (!srcHandle()) return "source";
+    if (srcPerm() === "denied" || destPerm() === "denied") return "permission";
+    return null;
+  };
 
   const runCommand = (): string => {
     const g = generated();
@@ -378,7 +591,6 @@ const WbppExportModal: Component<Props> = (props) => {
         })
         .then(unwrap);
       setSessions(resp.sessions);
-      setLevelsOpen(true);
       setGenerated(null);
       const init: Record<string, number> = {};
       for (const s of resp.sessions) {
@@ -398,7 +610,16 @@ const WbppExportModal: Component<Props> = (props) => {
     setGenerated(null);
   };
 
-  const generate = async () => {
+  const toggleEditing = (date: string) =>
+    setEditingDates((prev) => (prev.includes(date) ? prev.filter((d) => d !== date) : [...prev, date]));
+
+  /**
+   * The OS is an argument, not a signal read: the script menu decides which
+   * flavour this click produces, so passing it through is what makes the menu
+   * mean anything. Detection still happens in exactly one place (effectiveOs);
+   * this only carries the answer.
+   */
+  const generate = async (os: ScriptOs) => {
     if (!libraryRoot().trim()) {
       setError("Enter your astrophotography library root path first.");
       return;
@@ -406,7 +627,6 @@ const WbppExportModal: Component<Props> = (props) => {
     setError(null);
     setGenerating(true);
     setShowScript(false);
-    setCopyOpen(true);
     try {
       const resp = await apiClient
         .POST("/api/wbpp/generate", {
@@ -416,7 +636,7 @@ const WbppExportModal: Component<Props> = (props) => {
             session_dates: props.selectedDates,
             chosen_levels: chosenLevels(),
             library_root: libraryRoot().trim(),
-            target_os: targetOsParam(),
+            target_os: os,
             staging_path: stagingPath().trim() || null,
             exclusions: parsedExclusions(),
             excluded_source_relatives: excludedSet(),
@@ -425,6 +645,9 @@ const WbppExportModal: Component<Props> = (props) => {
         .then(unwrap);
       setGenerated(resp);
       setShowScript(true);
+      // The trigger lives in the footer while the output lands in the body, so
+      // bring it into view rather than leaving the click with no visible effect.
+      queueMicrotask(() => scriptRef?.scrollIntoView?.({ block: "nearest" }));
     } catch (e: unknown) {
       setError(getErrorMessage(e, "Failed to generate script"));
     } finally {
@@ -436,12 +659,17 @@ const WbppExportModal: Component<Props> = (props) => {
     const current = general();
     if (!current) return;
     try {
+      // The quality config rides along from the live signals rather than from
+      // `current`. A debounced write may still be in flight, which would make
+      // `current` a stale snapshot of the filter and quietly revert the user's
+      // last edit as a side effect of saving unrelated defaults.
       await ctx.saveGeneral({
         ...current,
         wbpp_library_root: libraryRoot().trim() || null,
         wbpp_default_os: osChoice() === "auto" ? null : osChoice(),
         wbpp_staging_path: stagingPath().trim() || null,
         wbpp_exclusions: parsedExclusions(),
+        ...qualityConfigToSettings(qualityFilterOn(), qualityConfig()),
       });
       setSavedDefaults(true);
       showToast("Saved as defaults");
@@ -505,18 +733,11 @@ const WbppExportModal: Component<Props> = (props) => {
     }
   };
 
-  const grantSource = async () => {
-    const h = srcHandle();
-    if (!h) return;
-    try { setSrcPerm(await requestHandlePermission(h, "read")); } catch { /* ignore */ }
-  };
-
-  const grantDest = async () => {
-    const h = destHandle();
-    if (!h) return;
-    try { setDestPerm(await requestHandlePermission(h, "readwrite")); } catch { /* ignore */ }
-  };
-
+  /**
+   * Grant-then-copy in one click: runBrowserCopy requests both permissions itself
+   * as its first act, still inside this click's user gesture, then copies. There
+   * is no separate "Grant access" step to forget.
+   */
   const startBrowserCopy = async () => {
     if (!srcHandle() || !destHandle()) {
       setError("Choose a library folder and a destination folder first.");
@@ -543,11 +764,16 @@ const WbppExportModal: Component<Props> = (props) => {
           setCopyTotal(total);
           setCopyLabel(label);
         },
+        // Take the permission state from what the request actually returned, on
+        // the failing path as much as the succeeding one. Hardcoding "granted"
+        // after a successful copy left a denial unable to reach "denied": the row
+        // kept saying "needs permission" and the primary kept offering to grant
+        // access that had just been refused, click after click.
+        onPermission: (which, state) =>
+          which === "source" ? setSrcPerm(state) : setDestPerm(state),
         signal: abortController.signal,
       });
       setCopyFinished(result.copied);
-      setSrcPerm("granted");
-      setDestPerm("granted");
       showToast(`Copied ${result.copied} file${result.copied !== 1 ? "s" : ""} to ${result.destinationName}`);
     } catch (e: unknown) {
       if (!(e instanceof CopyCancelledError)) setError(getErrorMessage(e, "Browser copy failed."));
@@ -559,18 +785,24 @@ const WbppExportModal: Component<Props> = (props) => {
 
   const stopCopy = () => abortController?.abort();
 
-  const copyReady = () => !!srcHandle() && !!destHandle() && srcPerm() !== "denied" && destPerm() !== "denied";
-
   return (
-    <Dialog open aria-labelledby="wbpp-export-title" onClose={props.onClose}>
+    <Dialog open aria-labelledby="wbpp-modal-title" class="p-4" onClose={props.onClose}>
       <div
-        class="modal-surface border border-theme-border-em rounded-[var(--radius-md)] shadow-[0_24px_64px_rgba(0,0,0,0.7)] ring-1 ring-white/10 max-w-4xl w-full mx-4 max-h-[85vh] overflow-y-auto"
+        class="modal-surface border border-theme-border-em rounded-[var(--radius-md)] shadow-[var(--shadow-lg)] max-w-4xl w-full max-h-[85vh] flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
-        <div class="p-4 border-b border-theme-border flex items-center justify-between">
-          <h2 id="wbpp-export-title" class="text-sm font-medium text-theme-text-primary">
-            Export to WBPP - {props.targetName}
-          </h2>
+        {/* Header: fixed. The target name is subject matter, not the action, so
+            it sits in the subline and the title states only what this does. */}
+        <div class="shrink-0 px-4 py-3 border-b border-theme-border flex items-start justify-between gap-4">
+          <div class="min-w-0">
+            <h2 id="wbpp-modal-title" class="text-sm font-medium text-theme-text-primary">
+              Export to WBPP
+            </h2>
+            <p class="text-tiny text-theme-text-secondary truncate">
+              {props.targetName} · {props.selectedDates.length} session
+              {props.selectedDates.length !== 1 ? "s" : ""} · {headerFrameCount()} frames
+            </p>
+          </div>
           <IconButton onClick={props.onClose} aria-label="Close">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
               <line x1="6" y1="6" x2="18" y2="18" /><line x1="6" y1="18" x2="18" y2="6" />
@@ -578,589 +810,408 @@ const WbppExportModal: Component<Props> = (props) => {
           </IconButton>
         </div>
 
-        <div class="p-4 space-y-4">
-          <p class="text-xs text-theme-text-secondary">
-            Stages the selected session folders for PixInsight WBPP. Copy directly in your
-            browser, or download a script to run on the machine where PixInsight is installed.
-          </p>
-
-          {/* Settings */}
-          <SectionCard
-            title="Settings"
-            subtitle={settingsSummary()}
-            open={settingsOpen()}
-            onToggle={() => setSettingsOpen(!settingsOpen())}
-          >
-            <p class="text-tiny text-theme-text-tertiary">
-              These default to your Settings &gt; External Tools &gt; PixInsight Export values.
-              Changes here apply to this export only unless you save them as defaults.
-            </p>
-
-            <div>
-              <label class="text-xs font-medium text-theme-text-secondary uppercase tracking-wide block mb-1">
-                Library root (on your machine)
-              </label>
-              <input
-                type="text"
-                class="w-full text-xs px-2 py-1.5 bg-theme-elevated border border-theme-border rounded text-theme-text-primary focus:outline-none focus:border-theme-accent"
-                placeholder="e.g. Z:\Astro or /mnt/astro"
-                value={libraryRoot()}
-                onInput={(e) => setLibraryRoot(e.currentTarget.value)}
-              />
-            </div>
-
-            <div>
-              <label class="text-xs font-medium text-theme-text-secondary uppercase tracking-wide block mb-1">
-                Script type
-              </label>
-              <select
-                class="text-xs px-2 py-1.5 bg-theme-elevated border border-theme-border rounded text-theme-text-primary focus:outline-none focus:border-theme-accent"
-                value={osChoice()}
-                onChange={(e) => setOsChoice(e.currentTarget.value as OsChoice)}
-              >
-                <option value="auto">Auto-detect</option>
-                <option value="windows">Windows (PowerShell .ps1)</option>
-                <option value="posix">Linux / macOS (shell .sh)</option>
-              </select>
-              <Show when={osChoice() === "auto" && libraryRoot().trim()}>
-                <span class="text-tiny text-theme-text-tertiary ml-2">
-                  Detected: {effectiveOs() === "windows" ? "Windows" : "Linux / macOS"}
-                </span>
-              </Show>
-            </div>
-
-            <div>
-              <label class="text-xs font-medium text-theme-text-secondary uppercase tracking-wide block mb-1">
-                Staging path (optional)
-              </label>
-              <input
-                type="text"
-                class="w-full text-xs px-2 py-1.5 bg-theme-elevated border border-theme-border rounded text-theme-text-primary focus:outline-none focus:border-theme-accent"
-                placeholder="Default: <library root>/_WBPP_staging/<target>"
-                value={stagingPath()}
-                onInput={(e) => setStagingPath(e.currentTarget.value)}
-              />
-            </div>
-
-            <div>
-              <label class="text-xs font-medium text-theme-text-secondary uppercase tracking-wide block mb-1">
-                Excluded folder patterns (one per line)
-              </label>
-              <textarea
-                class="w-full text-xs px-2 py-1.5 bg-theme-elevated border border-theme-border rounded text-theme-text-primary font-mono focus:outline-none focus:border-theme-accent"
-                rows={4}
-                value={exclusionsText()}
-                onInput={(e) => setExclusionsText(e.currentTarget.value)}
-              />
-            </div>
-
-            <button
-              class="text-tiny text-theme-accent hover:text-theme-accent-hover transition-colors disabled:opacity-50"
-              onClick={saveAsDefaults}
-              disabled={!libraryRoot().trim()}
-            >
-              {savedDefaults() ? "Saved!" : "Save as defaults"}
-            </button>
-          </SectionCard>
-
-          {/* Error */}
+        {/* Body: the ONLY scroll container. */}
+        <div data-testid="wbpp-modal-body" class="flex-1 min-h-0 overflow-y-auto px-4 py-4 space-y-4">
           <Show when={error()}>
-            <div class="text-xs text-theme-error bg-theme-error/10 border border-theme-error/30 rounded px-3 py-2">
+            <div class="text-xs text-theme-error bg-theme-error/10 border border-theme-error/30 rounded-[var(--radius-sm)] px-3 py-2">
               {error()}
             </div>
           </Show>
 
-          {/* Folder levels */}
-          <SectionCard
-            title="Folder levels"
-            subtitle={sessions().length ? `${sessions().length} session${sessions().length !== 1 ? "s" : ""}` : undefined}
-            open={levelsOpen()}
-            onToggle={() => setLevelsOpen(!levelsOpen())}
-          >
-            <div>
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={loadPreview}
-                disabled={previewing() || !libraryRoot().trim()}
+          {/* Never ship zero frames silently. The filter's controls live further
+              down inside Options, so the fact that they have emptied the export
+              has to be stated where the user is already looking. */}
+          <Show when={filterEmptiedExport()}>
+            <div
+              data-testid="wbpp-empty-export"
+              class="text-xs text-theme-warning bg-theme-warning/10 border border-theme-warning/30 rounded-[var(--radius-sm)] px-3 py-2"
+            >
+              The quality filter excludes every frame in the selected folders, so this export
+              would copy nothing. Loosen it under Options below, or switch it off to copy
+              everything.
+            </div>
+          </Show>
+
+          {/* Zone 1: Destination. Two routes write to two different places, so each
+              is stated under its own label rather than one standing in for the other. */}
+          <div class={CARD_CLASS}>
+            <Show when={canBrowserCopy}>
+              <div class="flex items-center gap-3">
+                <span class={`${ZONE_TITLE_CLASS} shrink-0 w-20`}>Copy to</span>
+                <span
+                  class={`font-mono text-xs truncate flex-1 min-w-0 ${
+                    copyDestination() ? "text-theme-text-primary" : "text-theme-text-tertiary"
+                  }`}
+                  title={copyDestination() ?? undefined}
+                >
+                  {copyDestination() ?? "Not set"}
+                </span>
+                <span class={`text-tiny shrink-0 ${permClass(destPerm())}`}>{permText(destPerm())}</span>
+                <Button variant="secondary" size="sm" onClick={chooseDest}>
+                  {destHandle() ? "Change..." : "Choose..."}
+                </Button>
+              </div>
+
+              <div class="flex items-center gap-3 mt-2">
+                <span class={`${ZONE_TITLE_CLASS} shrink-0 w-20`}>Copy from</span>
+                <span
+                  class={`font-mono text-xs truncate flex-1 min-w-0 ${
+                    srcHandle() ? "text-theme-text-primary" : "text-theme-text-tertiary"
+                  }`}
+                >
+                  {srcHandle() ? srcHandle().name : "Not set"}
+                </span>
+                <span class={`text-tiny shrink-0 ${permClass(srcPerm())}`}>{permText(srcPerm())}</span>
+                <Button variant="secondary" size="sm" onClick={chooseSource}>
+                  {srcHandle() ? "Change..." : "Choose..."}
+                </Button>
+              </div>
+            </Show>
+
+            {/* The script's destination, shown on every browser. It used to be
+                displaced by the handle name on Chromium, leaving script users
+                unable to see where their script would write. */}
+            <div class={`flex items-center gap-3 ${canBrowserCopy ? "mt-2" : ""}`}>
+              <span class={`${ZONE_TITLE_CLASS} shrink-0 w-20`}>Script to</span>
+              <span
+                class={`font-mono text-xs truncate flex-1 min-w-0 ${
+                  scriptDestination() ? "text-theme-text-primary" : "text-theme-text-tertiary"
+                }`}
+                title={scriptDestination() ?? undefined}
               >
-                {previewing() ? "Loading..." : sessions().length ? "Refresh folder levels" : "Preview folder levels"}
-              </Button>
+                {scriptDestination() ?? "Not set"}
+              </span>
+            </div>
+
+            <Show
+              when={canBrowserCopy}
+              fallback={
+                <p class="text-tiny text-theme-text-tertiary mt-2">
+                  In-browser copy needs a Chromium browser (Chrome/Edge) over HTTPS or localhost.
+                  Generate a script instead; it copies into the "Script to" path above.
+                </p>
+              }
+            >
+              <p class="text-tiny text-theme-text-tertiary mt-2">
+                Two ways to move the files, each with its own destination: the in-browser copy
+                writes into "Copy to", while a generated script writes into "Script to". Pick your
+                library root (the folder that mirrors the server's FITS data root) as "Copy from";
+                folders are remembered for next time.
+              </p>
+            </Show>
+
+            <Show when={copying() || copyFinished() !== null}>
+              <div class="space-y-1 mt-3">
+                <div class="h-1.5 bg-theme-elevated rounded-[var(--radius-sm)] overflow-hidden">
+                  <div
+                    class="h-full bg-theme-accent transition-all"
+                    style={{
+                      width: `${copyTotal() > 0 ? Math.round((copyDone() / copyTotal()) * 100) : (copyFinished() !== null ? 100 : 0)}%`,
+                    }}
+                  />
+                </div>
+                <Show when={copyFinished() !== null}>
+                  <p class="text-tiny text-theme-text-tertiary">
+                    Done. Copied {copyFinished()} file{copyFinished() !== 1 ? "s" : ""}. Open WBPP and use Add Directory on the destination.
+                  </p>
+                </Show>
+              </div>
+            </Show>
+          </div>
+
+          {/* Zone 2: Folders to copy */}
+          <div class={CARD_CLASS}>
+            <div class="flex items-center gap-2">
+              <h3 class={ZONE_TITLE_CLASS}>Folders to copy</h3>
+              <Show when={sessions().length > 0}>
+                <span class="text-micro tabular-nums px-1.5 py-0.5 rounded-[var(--radius-sm)] text-theme-text-secondary bg-theme-elevated border border-theme-border">
+                  {sessions().length}
+                </span>
+                {/* Rescanning a large library takes a while. A dimmed icon alone
+                    reads as "broken", so the icon spins beside a word -- the
+                    in-progress state the old "Loading..." text button carried. */}
+                <div class="ml-auto flex items-center gap-1.5">
+                  <Show when={previewing()}>
+                    <span class="text-tiny text-theme-text-tertiary">Rescanning...</span>
+                  </Show>
+                  <IconButton
+                    class="disabled:opacity-50"
+                    onClick={loadPreview}
+                    disabled={previewing() || !libraryRoot().trim()}
+                    aria-label={previewing() ? "Rescanning folders" : "Rescan folders"}
+                    title={previewing() ? "Rescanning..." : "Rescan folders"}
+                  >
+                    <svg
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      aria-hidden="true"
+                      class={previewing() ? "animate-spin" : undefined}
+                    >
+                      <path d="M21 12a9 9 0 1 1-2.64-6.36" /><polyline points="21 3 21 9 15 9" />
+                    </svg>
+                  </IconButton>
+                </div>
+              </Show>
             </div>
 
             <Show
               when={sessions().length > 0}
               fallback={
-                <p class="text-tiny text-theme-text-tertiary">
-                  Click "Preview folder levels" to choose which folder to copy for each session.
-                </p>
-              }
-            >
-              <p class="text-tiny text-theme-text-tertiary">
-                Pick which folder to copy for each session, from shallowest (closest to the
-                library root) to deepest. A marked level (!) also contains other targets or
-                dates and would be copied along with this session.
-              </p>
-              <For each={sessions()}>
-                {(session) => (
-                  <div class="bg-theme-elevated rounded p-3">
-                    <div class="flex items-center justify-between mb-2">
-                      <span class="text-xs font-medium text-theme-text-primary">
-                        {session.session_date}
-                      </span>
-                      <span class="text-tiny text-theme-text-tertiary">
-                        {session.total_frame_count} frames
-                      </span>
-                    </div>
-                    <Show
-                      when={session.levels.length > 0}
-                      fallback={
-                        <span class="text-tiny text-theme-text-tertiary">
-                          No frames found for this session.
-                        </span>
-                      }
-                    >
-                      <div class="flex flex-wrap items-center gap-1">
-                        <For each={session.levels}>
-                          {(level: WbppFolderLevel, i) => (
-                            <>
-                              <Show when={i() > 0}>
-                                <span class="text-theme-text-tertiary text-xs">/</span>
-                              </Show>
-                              <button
-                                class={`text-tiny px-2 py-0.5 rounded border transition-colors ${
-                                  chosenLevels()[session.session_date] === i()
-                                    ? "bg-theme-accent/15 text-theme-accent border-theme-accent/30"
-                                    : "bg-theme-surface text-theme-text-secondary border-theme-border hover:text-theme-text-primary"
-                                }`}
-                                title={
-                                  level.is_contaminated
-                                    ? `Also contains${
-                                        level.other_targets?.length
-                                          ? ` other targets: ${level.other_targets.join(", ")}`
-                                          : ""
-                                      }${
-                                        level.other_dates?.length
-                                          ? ` other dates: ${level.other_dates.join(", ")}`
-                                          : ""
-                                      }`
-                                    : level.path
-                                }
-                                onClick={() => selectLevel(session.session_date, i())}
-                              >
-                                {lastSegment(level.path)}
-                                <Show when={level.is_contaminated}>
-                                  <span class="text-theme-error ml-1">!</span>
-                                </Show>
-                              </button>
-                            </>
-                          )}
-                        </For>
-                      </div>
-                      <Show when={chosenLevels()[session.session_date] != null}>
-                        <p class="text-tiny text-theme-text-tertiary mt-1 font-mono break-all">
-                          {session.levels[chosenLevels()[session.session_date]]?.path}
-                        </p>
-                      </Show>
-                    </Show>
-                  </div>
-                )}
-              </For>
-            </Show>
-          </SectionCard>
-
-          {/* Quality filter (optional; excludes low-quality LIGHT subs) */}
-          <Show when={sessions().length > 0}>
-            <SectionCard
-              title="Quality filter"
-              subtitle={
-                qualityFilterOn()
-                  ? `${qTotals().copy} copy / ${qTotals().fail + qTotals().unmeasured} exclude`
-                  : "off"
-              }
-              open={qualityOpen()}
-              onToggle={() => setQualityOpen(!qualityOpen())}
-            >
-              <label class="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="checkbox"
-                  class="w-3.5 h-3.5 rounded border-theme-border cursor-pointer"
-                  checked={qualityFilterOn()}
-                  onChange={(e) => setQualityFilterOn(e.currentTarget.checked)}
-                />
-                <span class="text-xs text-theme-text-primary">
-                  Exclude low-quality light frames from the copy
-                </span>
-              </label>
-              <p class="text-tiny text-theme-text-tertiary">
-                Copies the same folder tree, minus the light frames that fail the threshold or
-                are unmeasured. All calibration files and folder structure are always kept.
-              </p>
-
-              <Show when={qualityFilterOn()}>
-                <Show when={qualityLoading()}>
-                  <p class="text-tiny text-theme-text-tertiary">Loading session frames…</p>
-                </Show>
-
-                {/* Mode select */}
-                <div class="flex items-center gap-2">
-                  <span class="text-tiny text-theme-text-tertiary w-20">Mode</span>
-                  <select
-                    class="text-xs px-2 py-1.5 bg-theme-elevated border border-theme-border rounded text-theme-text-primary focus:outline-none focus:border-theme-accent"
-                    value={filterMode()}
-                    onChange={(e) => setFilterMode(e.currentTarget.value as FilterMode)}
+                <div class="mt-3">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={loadPreview}
+                    disabled={previewing() || !libraryRoot().trim()}
                   >
-                    <option value="score">Composite score</option>
-                    <option value="raw">Raw metrics (AND)</option>
-                  </select>
-                </div>
-
-                {/* Score mode: threshold slider */}
-                <Show when={filterMode() === "score"}>
-                  <div class="flex items-center gap-3">
-                    <span class="text-tiny text-theme-text-tertiary w-20">Keep ≥</span>
-                    <input
-                      type="range"
-                      min="0"
-                      max="100"
-                      step="1"
-                      value={scoreThreshold()}
-                      onInput={(e) => setScoreThreshold(Number(e.currentTarget.value))}
-                      class="flex-1"
-                    />
-                    <span class="text-xs font-mono text-theme-text-primary w-8 text-right">{scoreThreshold()}</span>
-                  </div>
-                  <p class="text-tiny text-theme-text-tertiary">
-                    Default 60 matches the green row cutoff on the session table.
+                    {previewing() ? "Loading..." : "Preview folder levels"}
+                  </Button>
+                  <p class="text-tiny text-theme-text-tertiary mt-2">
+                    Click "Preview folder levels" to choose which folder to copy for each session.
                   </p>
-                </Show>
-
-                {/* Raw mode: constraint rows */}
-                <Show when={filterMode() === "raw"}>
-                  <div class="space-y-2">
-                    <For each={rawConstraints()}>
-                      {(c, i) => (
-                        <div class="flex items-center gap-2">
-                          <select
-                            class="text-xs px-2 py-1.5 bg-theme-elevated border border-theme-border rounded text-theme-text-primary focus:outline-none focus:border-theme-accent"
-                            value={c.metric}
-                            onChange={(e) => updateConstraint(i(), { metric: e.currentTarget.value as RawMetric })}
-                          >
-                            <For each={RAW_METRICS}>
-                              {(m) => <option value={m}>{RAW_METRIC_LABELS[m]}</option>}
-                            </For>
-                          </select>
-                          <span class="text-tiny text-theme-text-tertiary">
-                            {HIGHER_IS_BETTER[c.metric] ? "≥" : "≤"}
+                </div>
+              }
+            >
+              <div class="mt-2 divide-y divide-theme-border">
+                <For each={sessions()}>
+                  {(session) => {
+                    const editing = () => editingDates().includes(session.session_date);
+                    const level = () => session.levels[chosenIndexFor(session)];
+                    return (
+                      <div class="py-2">
+                        {/* Collapsed, the full source path is hover detail only: the
+                            row states the leaf, which is the part that differs. */}
+                        <div
+                          class="flex items-center gap-3 text-xs"
+                          title={editing() ? undefined : level()?.path}
+                        >
+                          <span class="text-theme-text-primary tabular-nums shrink-0">
+                            {session.session_date}
                           </span>
-                          <input
-                            type="number"
-                            step="any"
-                            class="w-24 text-xs px-2 py-1.5 bg-theme-elevated border border-theme-border rounded text-theme-text-primary focus:outline-none focus:border-theme-accent"
-                            value={c.value}
-                            onInput={(e) => updateConstraint(i(), { value: Number(e.currentTarget.value) })}
-                          />
-                          <button
-                            class="text-tiny text-theme-error hover:text-theme-error/80"
-                            onClick={() => removeConstraint(i())}
+                          <span class="text-tiny text-theme-text-tertiary tabular-nums shrink-0">
+                            {session.total_frame_count} frames
+                          </span>
+                          <Show
+                            when={level()}
+                            fallback={
+                              <span class="text-tiny text-theme-text-tertiary flex-1">
+                                No frames found for this session.
+                              </span>
+                            }
                           >
-                            Remove
+                            <span class="flex-1 min-w-0 font-mono flex items-baseline">
+                              <span class="text-theme-text-tertiary truncate">
+                                {parentContext(level()!.path)}
+                              </span>
+                              <span class="text-theme-text-secondary shrink-0">
+                                {lastSegment(level()!.path)}
+                              </span>
+                            </span>
+                          </Show>
+                          {/* Only when this row's folder is being renamed to avoid
+                              colliding with another session's identically-named
+                              folder. Silence here meant the user learned their
+                              LIGHT folder had become 2024-11-03_LIGHT by finding it. */}
+                          <Show when={renamedEntryFor(session.session_date)}>
+                            {(entry) => (
+                              <span
+                                class="text-tiny font-mono text-theme-text-tertiary shrink-0"
+                                title={`Another selected session's folder has the same name, so this one is copied as "${entry()}".`}
+                              >
+                                → {entry()}
+                              </span>
+                            )}
+                          </Show>
+                          <button
+                            type="button"
+                            class="text-tiny text-theme-accent hover:text-theme-accent-hover transition-colors cursor-pointer shrink-0"
+                            onClick={() => toggleEditing(session.session_date)}
+                          >
+                            {editing() ? "Done" : "Edit"}
                           </button>
                         </div>
-                      )}
-                    </For>
-                    <button
-                      class="text-tiny text-theme-accent hover:text-theme-accent-hover"
-                      onClick={addConstraint}
-                      disabled={rawConstraints().length >= RAW_METRICS.length}
-                    >
-                      + Add constraint
-                    </button>
-                    <Show when={rawConstraints().length === 0}>
-                      <p class="text-tiny text-theme-text-tertiary">
-                        Add one or more constraints. A frame is kept only if every metric it has
-                        data for passes. Frames with none of the constrained metrics are unmeasured.
-                      </p>
-                    </Show>
-                  </div>
-                </Show>
-
-                {/* Baseline toggle */}
-                <div class="flex items-center gap-2">
-                  <span class="text-tiny text-theme-text-tertiary w-20">Baseline</span>
-                  <div class="flex gap-1">
-                    <For each={["session", "rig"] as BaselineMode[]}>
-                      {(m) => (
-                        <button
-                          class={`text-tiny px-2 py-0.5 rounded border transition-colors ${
-                            qualityBaseline() === m
-                              ? "bg-theme-accent/15 text-theme-accent border-theme-accent/30"
-                              : "bg-theme-surface text-theme-text-secondary border-theme-border hover:text-theme-text-primary"
-                          }`}
-                          onClick={() => setQualityBaseline(m)}
-                        >
-                          {m === "session" ? "This session" : "Rig (catalog)"}
-                        </button>
-                      )}
-                    </For>
-                  </div>
-                </div>
-                <p class="text-tiny text-theme-text-tertiary">
-                  Baseline affects the composite-score mode and the preview colors only. Raw-metric
-                  thresholds compare each frame's literal value, not the baseline.
-                </p>
-
-                {/* Totals */}
-                <div class="text-tiny text-theme-text-secondary bg-theme-base border border-theme-border rounded px-3 py-2">
-                  Lights: <span class="font-medium text-theme-text-primary">{qTotals().copy}</span> copy /{" "}
-                  <span class="font-medium text-theme-text-primary">{qTotals().fail + qTotals().unmeasured}</span> exclude
-                  {" "}({qTotals().fail} fail, {qTotals().unmeasured} unmeasured) · Calibration: always copied
-                </div>
-
-                {/* Live per-session preview */}
-                <div class="space-y-3">
-                  <For each={props.selectedDates}>
-                    {(date) => {
-                      const detail = () => qualitySessions()[date];
-                      const cols = () => METRIC_COLUMNS.filter((c) => isFieldVisible(ctx.displaySettings(), c.group, c.field));
-                      return (
-                        <Show when={detail()}>
-                          <div class="bg-theme-elevated rounded p-2">
-                            <div class="text-xs font-medium text-theme-text-primary mb-1">{date}</div>
-                            <div class="overflow-x-auto">
-                              <table class="w-full text-tiny">
-                                <thead>
-                                  <tr class="text-theme-text-tertiary border-b border-theme-border">
-                                    <th class="text-left py-1 px-1.5 font-normal">File</th>
-                                    <th class="text-center py-1 px-1.5 font-normal">Filter</th>
-                                    <For each={cols()}>
-                                      {(c) => <th class="text-right py-1 px-1.5 font-normal">{c.label}</th>}
-                                    </For>
-                                    <th class="text-right py-1 px-1.5 font-normal">Score</th>
-                                    <th class="text-right py-1 px-1.5 font-normal">Verdict</th>
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  <For each={detail()!.frames}>
-                                    {(frame) => {
-                                      const v = () => verdictByPath().get(frame.source_relative);
-                                      return (
-                                        <tr class="border-b border-theme-border/30">
-                                          <td class="py-0.5 px-1.5 text-theme-text-secondary font-mono truncate max-w-[14rem]">{frame.file_name}</td>
-                                          <td class="py-0.5 px-1.5 text-theme-text-primary text-center">{frame.filter_used ?? "—"}</td>
-                                          <For each={cols()}>
-                                            {(c) => {
-                                              const raw = frame[c.metric];
-                                              const z = () => (filterMode() === "score" ? cellZ(detail()!, frame, c.metric) : null);
-                                              return (
-                                                <td class={`py-0.5 px-1.5 text-right tabular-nums ${filterMode() === "score" ? bandToCellClass(bandForZ(z())) : "text-theme-text-primary"}`}>
-                                                  {raw != null ? c.format(raw) : "—"}
-                                                </td>
-                                              );
-                                            }}
-                                          </For>
-                                          <td class="py-0.5 px-1.5 text-right tabular-nums text-theme-text-secondary">
-                                            {v()?.score != null ? v()!.score!.toFixed(0) : "—"}
-                                          </td>
-                                          <td class="py-0.5 px-1.5 text-right">
-                                            <span
-                                              class={`px-1.5 py-0.5 rounded text-tiny font-medium ${
-                                                v()?.keep
-                                                  ? "bg-theme-success/15 text-theme-success"
-                                                  : v()?.reason === "unmeasured"
-                                                    ? "bg-theme-warning/15 text-theme-warning"
-                                                    : "bg-theme-error/15 text-theme-error"
-                                              }`}
-                                            >
-                                              {v()?.keep ? "Copy" : v()?.reason === "unmeasured" ? "Unmeasured" : "Exclude"}
-                                            </span>
-                                          </td>
-                                        </tr>
-                                      );
-                                    }}
-                                  </For>
-                                </tbody>
-                              </table>
-                            </div>
+                        <Show when={editing()}>
+                          <div class="mt-2 pl-1">
+                            {/* The separator comes from effectiveOs(), which honors
+                                the pinned wbpp_default_os. Deriving it from the
+                                root's shape instead makes the editor disagree with
+                                the generated script for a pinned OS whose root does
+                                not look the part (e.g. windows + /mnt/astro). */}
+                            <WbppLevelEditor
+                              session={session}
+                              chosenIndex={chosenIndexFor(session)}
+                              onSelect={(i) => selectLevel(session.session_date, i)}
+                              libraryRoot={libraryRoot()}
+                              separator={sep()}
+                            />
                           </div>
                         </Show>
-                      );
-                    }}
-                  </For>
-                </div>
-              </Show>
-            </SectionCard>
-          </Show>
-
-          {/* Copy plan + copy controls */}
-          <Show when={plan().length > 0}>
-            <SectionCard
-              title="Copy"
-              subtitle={`${plan().length} folder${plan().length !== 1 ? "s" : ""}`}
-              open={copyOpen()}
-              onToggle={() => setCopyOpen(!copyOpen())}
-            >
-              <div class="text-tiny text-theme-text-tertiary">
-                {plan().length} folder{plan().length !== 1 ? "s" : ""} →{" "}
-                <span class="font-mono text-theme-text-secondary break-all">{stagingRoot()}</span>
-              </div>
-              <div class="space-y-2">
-                <For each={plan()}>
-                  {(op) => (
-                    <div class="text-tiny">
-                      <div class="text-theme-text-tertiary">{op.session_date}</div>
-                      <div class="font-mono text-theme-text-secondary break-all">
-                        <span class="text-theme-text-tertiary">src </span>{op.source}
                       </div>
-                      <div class="font-mono text-theme-text-primary break-all">
-                        <span class="text-theme-text-tertiary">dst </span>{op.destination}
-                      </div>
-                    </div>
-                  )}
+                    );
+                  }}
                 </For>
               </div>
+            </Show>
+          </div>
 
-              {/* Browser copy */}
-              <Show
-                when={canBrowserCopy}
-                fallback={
+          {/* Zone 3: Options */}
+          <div class={CARD_CLASS}>
+            <h3 class={ZONE_TITLE_CLASS}>Options</h3>
+
+            <div class="mt-3">
+              <WbppQualityPanel
+                enabled={qualityFilterOn()}
+                onEnabledChange={setQualityFilterOn}
+                config={qualityConfig()}
+                onConfigChange={setQualityConfig}
+                verdicts={verdicts()}
+                totals={qTotals()}
+                loading={qualityLoading()}
+                sessionDetails={qualitySessions()}
+                displaySettings={ctx.displaySettings()}
+              />
+            </div>
+
+            {/* App config, not a peer step: one muted line, opened on demand. */}
+            <div class="mt-4 pt-3 border-t border-theme-border">
+              <div class="flex items-center gap-2 text-tiny text-theme-text-tertiary">
+                <span class="truncate min-w-0">
+                  Library: <span class="font-mono">{libraryRoot().trim() || "not set"}</span> (
+                  {osLabel(effectiveOs())})
+                </span>
+                <button
+                  type="button"
+                  class="text-tiny text-theme-accent hover:text-theme-accent-hover transition-colors cursor-pointer shrink-0"
+                  onClick={() => setSettingsOpen(!settingsOpen())}
+                >
+                  {settingsOpen() ? "Done" : "Change"}
+                </button>
+              </div>
+
+              <Show when={settingsOpen()}>
+                <div class="mt-3 space-y-3">
                   <p class="text-tiny text-theme-text-tertiary">
-                    In-browser copy needs a Chromium browser (Chrome/Edge) over HTTPS or localhost.
-                    Use "Generate script" below to download a copy script instead.
-                  </p>
-                }
-              >
-                <div class="space-y-2 bg-theme-base border border-theme-border rounded p-3">
-                  <div class="text-xs font-medium text-theme-text-secondary uppercase tracking-wide">
-                    Copy in browser
-                  </div>
-
-                  <div class="flex items-center gap-2 flex-wrap">
-                    <span class="text-tiny text-theme-text-tertiary w-24">Library folder</span>
-                    <Button variant="secondary" size="sm" onClick={chooseSource}>
-                      {srcHandle() ? "Change..." : "Choose..."}
-                    </Button>
-                    <Show when={srcHandle()}>
-                      <span class="text-tiny font-mono text-theme-text-secondary truncate max-w-[12rem]">{srcHandle().name}</span>
-                    </Show>
-                    <span class={`text-tiny ${permClass(srcPerm())}`}>{permText(srcPerm())}</span>
-                    <Show when={srcHandle() && srcPerm() === "prompt"}>
-                      <button class="text-tiny text-theme-accent hover:text-theme-accent-hover" onClick={grantSource}>Grant access</button>
-                    </Show>
-                  </div>
-
-                  <div class="flex items-center gap-2 flex-wrap">
-                    <span class="text-tiny text-theme-text-tertiary w-24">Destination</span>
-                    <Button variant="secondary" size="sm" onClick={chooseDest}>
-                      {destHandle() ? "Change..." : "Choose..."}
-                    </Button>
-                    <Show when={destHandle()}>
-                      <span class="text-tiny font-mono text-theme-text-secondary truncate max-w-[12rem]">{destHandle().name}</span>
-                    </Show>
-                    <span class={`text-tiny ${permClass(destPerm())}`}>{permText(destPerm())}</span>
-                    <Show when={destHandle() && destPerm() === "prompt"}>
-                      <button class="text-tiny text-theme-accent hover:text-theme-accent-hover" onClick={grantDest}>Grant access</button>
-                    </Show>
-                  </div>
-                  <p class="text-tiny text-theme-text-tertiary">
-                    Pick your library root (the folder that mirrors the server's FITS data root) and a destination.
-                    Folders are remembered for next time.
+                    These default to your Settings &gt; External Tools &gt; PixInsight Export values.
+                    Changes here apply to this export only unless you save them as defaults.
                   </p>
 
-                  <div class="flex items-center gap-2">
-                    <Button
-                      variant="primary"
-                      size="sm"
-                      onClick={startBrowserCopy}
-                      disabled={copying() || !copyReady()}
-                    >
-                      {copying() ? "Copying..." : "Copy files now"}
-                    </Button>
-                    <Show when={copying()}>
-                      <Button variant="secondary" size="sm" onClick={stopCopy}>
-                        Stop
-                      </Button>
-                    </Show>
+                  <div>
+                    <label class="text-xs font-medium text-theme-text-secondary uppercase tracking-wide block mb-1">
+                      Library root (on your machine)
+                    </label>
+                    <input
+                      type="text"
+                      class={FIELD_CLASS}
+                      placeholder="e.g. Z:\Astro or /mnt/astro"
+                      value={libraryRoot()}
+                      onInput={(e) => setLibraryRoot(e.currentTarget.value)}
+                    />
                   </div>
 
-                  <Show when={copying() || copyFinished() !== null}>
-                    <div class="space-y-1">
-                      <div class="h-1.5 bg-theme-elevated rounded overflow-hidden">
-                        <div
-                          class="h-full bg-theme-accent transition-all"
-                          style={{
-                            width: `${copyTotal() > 0 ? Math.round((copyDone() / copyTotal()) * 100) : (copyFinished() !== null ? 100 : 0)}%`,
-                          }}
-                        />
-                      </div>
-                      <Show
-                        when={copyFinished() === null}
-                        fallback={
-                          <p class="text-tiny text-theme-text-tertiary">
-                            Done. Copied {copyFinished()} file{copyFinished() !== 1 ? "s" : ""}. Open WBPP and use Add Directory on the destination.
-                          </p>
-                        }
-                      >
-                        <p class="text-tiny text-theme-text-tertiary truncate">
-                          {copyTotal() > 0 ? `${copyDone()} / ${copyTotal()} - ` : "Scanning... "}
-                          <span class="font-mono">{copyLabel()}</span>
-                        </p>
-                      </Show>
-                    </div>
-                  </Show>
+                  <div>
+                    <label class="text-xs font-medium text-theme-text-secondary uppercase tracking-wide block mb-1">
+                      Staging path (optional)
+                    </label>
+                    <input
+                      type="text"
+                      class={FIELD_CLASS}
+                      placeholder="Default: <library root>/_WBPP_staging/<target>"
+                      value={stagingPath()}
+                      onInput={(e) => setStagingPath(e.currentTarget.value)}
+                    />
+                  </div>
+
+                  <div>
+                    <label class="text-xs font-medium text-theme-text-secondary uppercase tracking-wide block mb-1">
+                      Excluded folder patterns (one per line)
+                    </label>
+                    <textarea
+                      class={`${FIELD_CLASS} font-mono`}
+                      rows={4}
+                      value={exclusionsText()}
+                      onInput={(e) => setExclusionsText(e.currentTarget.value)}
+                    />
+                  </div>
+
+                  <button
+                    type="button"
+                    class="text-tiny text-theme-accent hover:text-theme-accent-hover transition-colors cursor-pointer disabled:opacity-50"
+                    onClick={saveAsDefaults}
+                    disabled={!libraryRoot().trim()}
+                  >
+                    {savedDefaults() ? "Saved!" : "Save as defaults"}
+                  </button>
                 </div>
               </Show>
+            </div>
+          </div>
 
-              {/* Script output (after Generate script) */}
-              <Show when={generated()}>
-                {(g) => (
-                  <div class="space-y-2 bg-theme-base border border-theme-border rounded p-3">
-                    <div class="text-xs font-medium text-theme-text-secondary uppercase tracking-wide">
-                      Script
-                    </div>
-                    <div class="flex items-center gap-2 flex-wrap">
-                      <Button variant="secondary" size="sm" onClick={downloadScript}>
-                        Download {g().filename}
-                      </Button>
-                      <Button variant="secondary" size="sm" onClick={copyScript}>
-                        {copied() ? "Copied!" : "Copy script"}
-                      </Button>
-                    </div>
-                    <div class="text-tiny">
-                      <span class="text-theme-text-tertiary">Then run: </span>
-                      <code class="font-mono text-theme-text-secondary break-all">{runCommand()}</code>
-                    </div>
-                    <div>
-                      <button
-                        class="text-tiny text-theme-accent hover:text-theme-accent-hover transition-colors"
-                        onClick={() => setShowScript(!showScript())}
-                      >
-                        {showScript() ? "Hide script" : "Show script"}
-                      </button>
-                      <Show when={showScript()}>
-                        <pre class="mt-1 text-tiny font-mono bg-theme-surface border border-theme-border rounded p-2 max-h-72 overflow-auto text-theme-text-secondary whitespace-pre">{g().script}</pre>
-                      </Show>
-                    </div>
-                  </div>
-                )}
-              </Show>
-            </SectionCard>
+          {/* Script output. Generated from the footer menu; lands here. */}
+          <Show when={generated()}>
+            {(g) => (
+              <div ref={scriptRef} class={CARD_CLASS}>
+                <h3 class={ZONE_TITLE_CLASS}>Script</h3>
+                <div class="flex items-center gap-2 flex-wrap mt-3">
+                  <Button variant="secondary" size="sm" onClick={downloadScript}>
+                    Download {g().filename}
+                  </Button>
+                  <Button variant="secondary" size="sm" onClick={copyScript}>
+                    {copied() ? "Copied!" : "Copy script"}
+                  </Button>
+                </div>
+                <div class="text-tiny mt-2">
+                  <span class="text-theme-text-tertiary">Then run: </span>
+                  <code class="font-mono text-theme-text-secondary break-all">{runCommand()}</code>
+                </div>
+                <div class="mt-2">
+                  <button
+                    type="button"
+                    class="text-tiny text-theme-accent hover:text-theme-accent-hover transition-colors cursor-pointer"
+                    onClick={() => setShowScript(!showScript())}
+                  >
+                    {showScript() ? "Hide script" : "Show script"}
+                  </button>
+                  <Show when={showScript()}>
+                    <pre class="mt-1 text-tiny font-mono bg-theme-surface border border-theme-border rounded-[var(--radius-sm)] p-2 max-h-72 overflow-auto text-theme-text-secondary whitespace-pre">{g().script}</pre>
+                  </Show>
+                </div>
+              </div>
+            )}
           </Show>
         </div>
 
-        <div class="p-4 border-t border-theme-border flex gap-2 justify-end">
-          <Button variant="secondary" size="sm" onClick={props.onClose}>
-            Close
-          </Button>
-          <Button
-            variant="primary"
-            size="sm"
-            onClick={generate}
-            disabled={generating() || !libraryRoot().trim()}
-          >
-            {generating() ? "Generating..." : generated() ? "Regenerate script" : "Generate script"}
-          </Button>
-        </div>
+        <WbppFooter
+          frameCount={frameCount()}
+          folderCount={plan().length}
+          sizeBytes={sizeBytes()}
+          destination={copyDestination()}
+          scriptDestination={scriptDestination()}
+          permissionGranted={permissionGranted()}
+          blockedBy={copyBlockedBy()}
+          canBrowserCopy={canBrowserCopy}
+          copying={copying()}
+          copyProgress={
+            copying() ? { done: copyDone(), total: copyTotal(), label: copyLabel() } : null
+          }
+          onCopy={startBrowserCopy}
+          onStop={stopCopy}
+          scriptMenu={
+            <WbppScriptMenu
+              defaultOs={effectiveOs()}
+              defaultReason={defaultReason()}
+              generating={generating()}
+              disabled={!libraryRoot().trim()}
+              hasScript={generated() !== null}
+              onGenerate={generate}
+            />
+          }
+        />
       </div>
     </Dialog>
   );

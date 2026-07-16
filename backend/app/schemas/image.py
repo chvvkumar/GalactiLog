@@ -19,6 +19,13 @@ class ImageBase(BaseModel):
     camera: str | None = None
     median_hfr: float | None = None
     eccentricity: float | None = None
+    # Origin of `eccentricity`: "header" | "ellipticity" | "csv", or None when
+    # unknown (pre-migration rows whose provenance was unrecoverable). Values
+    # from different sources are not comparable measurements.
+    eccentricity_source: str | None = None
+    # Frame-centre altitude in degrees; eccentricity cannot be read fairly
+    # without it, since atmospheric dispersion scales with tan(zenith distance).
+    altitude_deg: float | None = None
 
 
 class ImageRead(ImageBase):

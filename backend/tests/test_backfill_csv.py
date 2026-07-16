@@ -7,6 +7,7 @@ import sys
 import types
 from contextlib import asynccontextmanager
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
@@ -57,12 +58,47 @@ _tasks = _bootstrap_tasks_module()
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def _make_row(id_="img-001", file_name="Light_001.fits"):
-    """Create a mock DB row with id and file_name attributes."""
-    row = MagicMock()
-    row.id = id_
-    row.file_name = file_name
-    return row
+def _make_row(id_="img-001", file_name="Light_001.fits", **existing):
+    """Create a fake DB row carrying the current value of every mergeable column.
+
+    A SimpleNamespace, not a MagicMock, on purpose: the task reads the row's
+    pre-existing column values to decide what a CSV blank may overwrite, and a
+    MagicMock would hand back a truthy auto-attribute for every column, which
+    would make a "None must not erase a real value" test pass for the wrong
+    reason. Unspecified columns default to None (the DB's own default).
+    """
+    values = {col: None for col in _tasks.CSV_MERGE_COLUMNS}
+    values["eccentricity_source"] = None
+    values.update(existing)
+    return SimpleNamespace(id=id_, file_name=file_name, **values)
+
+
+def _blank_csv_entry(**real_values):
+    """A parsed CSV row where every mapped column is blank (None).
+
+    _parse_image_csv emits a key for EVERY mapped column, so this is the shape
+    the task actually receives for a CSV whose cells are empty -- the shape
+    that used to null out real header-derived values on backfill.
+    """
+    entry = {col: None for col in _tasks.CSV_MERGE_COLUMNS}
+    entry.update(real_values)
+    return entry
+
+
+def _captured_updates(mock_conn):
+    """Extract the .values() payload of every UPDATE passed to conn.execute."""
+    from sqlalchemy.sql.dml import Update
+    from sqlalchemy.sql.elements import BindParameter
+
+    payloads = []
+    for call in mock_conn.execute.call_args_list:
+        stmt = call.args[0]
+        if isinstance(stmt, Update):
+            payloads.append({
+                col.name: (val.value if isinstance(val, BindParameter) else val)
+                for col, val in stmt._values.items()
+            })
+    return payloads
 
 
 # ── Task tests ────────────────────────────────────────────────────────────────
@@ -244,6 +280,143 @@ def test_backfill_csv_metrics_no_file_name_match(tmp_path):
 
     assert result["updated"] == 0
     assert result["dirs"] == 1
+
+
+# ── Merge semantics on the UPDATE path ────────────────────────────────────────
+# The backfill writes over rows that already hold header-derived values, so the
+# merge rules differ from ingest: there, a key the header never set is
+# legitimately written as None onto a fresh row; here, writing None over a
+# stored value destroys it. These pin that distinction.
+
+def _run_backfill(tmp_path, image_data, weather_data, rows):
+    """Drive backfill_csv_metrics over one CSV dir, returning (result, conn)."""
+    csv_dir = tmp_path / "session1"
+    csv_dir.mkdir()
+    (csv_dir / "ImageMetaData.csv").write_text("FilePath,HFR\n")
+
+    import redis as _redis_module
+
+    mock_conn = MagicMock()
+    mock_conn.__enter__ = MagicMock(return_value=mock_conn)
+    mock_conn.__exit__ = MagicMock(return_value=False)
+    mock_conn.execute.return_value.fetchall.return_value = rows
+
+    with patch.object(_redis_module, "from_url") as mock_from_url, \
+         patch.object(_tasks, "settings") as mock_settings, \
+         patch.object(_tasks, "_sync_engine") as mock_engine, \
+         patch.object(_tasks, "set_idle_sync"), \
+         patch.object(_tasks, "set_ingesting_sync"), \
+         patch.object(_tasks, "increment_completed_sync"), \
+         patch.object(_tasks, "parse_image_metadata_csv") as mock_image_csv, \
+         patch.object(_tasks, "parse_weather_csv") as mock_weather_csv:
+
+        mock_settings.fits_data_path = str(tmp_path)
+        mock_settings.redis_url = "redis://localhost:6379/1"
+        mock_from_url.return_value = MagicMock()
+        mock_image_csv.return_value = image_data
+        mock_weather_csv.return_value = weather_data
+        mock_engine.connect.return_value = mock_conn
+
+        result = _tasks.backfill_csv_metrics()
+
+    return result, mock_conn
+
+
+def test_backfill_blank_csv_cell_does_not_erase_header_value(tmp_path):
+    """A blank CSV cell must not null a real header-derived value on UPDATE.
+
+    The row already carries a header eccentricity and HFR; the CSV has those
+    cells empty but does supply a star count. The UPDATE must write the star
+    count without touching the two values the CSV is silent about.
+    """
+    row = _make_row(eccentricity=0.42, median_hfr=2.1, eccentricity_source="header")
+    entry = _blank_csv_entry(detected_stars=1234)
+    entry["_exposure_start_utc"] = "2024-01-01T00:00:00"
+
+    result, conn = _run_backfill(
+        tmp_path, {"Light_001.fits": entry}, {}, [row]
+    )
+
+    updates = _captured_updates(conn)
+    assert len(updates) == 1
+    values = updates[0]
+    assert values["detected_stars"] == 1234
+    # The destructive writes: either absent from the UPDATE, or unchanged.
+    assert values.get("eccentricity", 0.42) == 0.42
+    assert values.get("median_hfr", 2.1) == 2.1
+    assert values.get("eccentricity_source", "header") == "header"
+    assert result["updated"] == 1
+
+
+def test_backfill_real_csv_value_still_wins_over_stored_value(tmp_path):
+    """A real CSV value must still overwrite the stored header value.
+
+    The N.I.N.A. plugin measures the frame itself, so where both exist the CSV
+    is the better number. Not erasing must not become never updating.
+    """
+    row = _make_row(eccentricity=0.42, median_hfr=2.1, eccentricity_source="header")
+    entry = _blank_csv_entry(median_hfr=1.5)
+
+    _, conn = _run_backfill(tmp_path, {"Light_001.fits": entry}, {}, [row])
+
+    values = _captured_updates(conn)[0]
+    assert values["median_hfr"] == 1.5
+
+
+def test_backfill_stamps_eccentricity_source_when_csv_supplies_it(tmp_path):
+    """Writing a CSV eccentricity must re-stamp provenance to "csv".
+
+    Leaving the stored "header" source in place would label a CSV-measured
+    number as header-derived, and the two are not comparable.
+    """
+    row = _make_row(eccentricity=0.42, eccentricity_source="header")
+    entry = _blank_csv_entry(eccentricity=0.31)
+
+    _, conn = _run_backfill(tmp_path, {"Light_001.fits": entry}, {}, [row])
+
+    values = _captured_updates(conn)[0]
+    assert values["eccentricity"] == 0.31
+    assert values["eccentricity_source"] == "csv"
+
+
+def test_backfill_leaves_source_alone_when_csv_has_no_eccentricity(tmp_path):
+    """A CSV that says nothing about eccentricity must not touch provenance."""
+    row = _make_row(eccentricity=0.42, eccentricity_source="header")
+    entry = _blank_csv_entry(detected_stars=900)
+
+    _, conn = _run_backfill(tmp_path, {"Light_001.fits": entry}, {}, [row])
+
+    values = _captured_updates(conn)[0]
+    assert values.get("eccentricity_source", "header") == "header"
+
+
+def test_backfill_issues_no_update_when_csv_changes_nothing(tmp_path):
+    """An all-blank CSV row must produce no UPDATE at all.
+
+    Every column the CSV could write is already either equal or unmentioned,
+    so there is nothing to write and nothing to count as updated.
+    """
+    row = _make_row(median_hfr=2.1, detected_stars=1234)
+    entry = _blank_csv_entry(median_hfr=2.1)
+
+    result, conn = _run_backfill(tmp_path, {"Light_001.fits": entry}, {}, [row])
+
+    assert _captured_updates(conn) == []
+    assert result["updated"] == 0
+
+
+def test_backfill_merges_weather_without_erasing_stored_weather(tmp_path):
+    """Weather joins in, and a blank weather cell does not erase a stored one."""
+    row = _make_row(ambient_temp=-3.0, humidity=55.0)
+    entry = _blank_csv_entry(detected_stars=10)
+    entry["_exposure_start_utc"] = "2024-01-01T00:00:00"
+    weather = {"2024-01-01T00:00:00": {"ambient_temp": -5.0, "humidity": None}}
+
+    _, conn = _run_backfill(tmp_path, {"Light_001.fits": entry}, weather, [row])
+
+    values = _captured_updates(conn)[0]
+    assert values["ambient_temp"] == -5.0          # real CSV value wins
+    assert values.get("humidity", 55.0) == 55.0    # blank must not erase
 
 
 # ── API endpoint tests ────────────────────────────────────────────────────────

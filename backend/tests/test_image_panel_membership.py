@@ -287,7 +287,12 @@ def test_upgrade_rerun_on_existing_schema_is_safe(db):
         image_id, panel_id = image.id, panel.id
 
         _run(["stamp", "0017"])
-        _run(["upgrade", "head"])
+        # Upgrade to 0018 by name, not to "head": this test is about 0018's
+        # re-run safety, and every later migration is beside that point. Naming
+        # "head" here silently re-aimed the test at whatever revision was newest
+        # and made the `== "0018"` assertion below fail the moment anyone added
+        # one, which is a fact about the test, not about 0018.
+        _run(["upgrade", "0018"])
         with engine.connect() as connection:
             version = connection.execute(
                 text("SELECT version_num FROM alembic_version")

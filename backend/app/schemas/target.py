@@ -1,4 +1,5 @@
 import uuid
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -103,8 +104,27 @@ class RigDetail(BaseModel):
     thumbnail_url: str | None = None
 
 
+# Severity of an insight. This is the whole domain the backend has ever
+# emitted; the frontend keys its colour/icon maps off it, so an unconstrained
+# `str` here silently rendered an undefined class for any typo.
+InsightLevel = Literal["info", "good", "warning"]
+
+# What the insight is *about*. Previously this existed only as free text inside
+# `message`, so nothing downstream could filter, count, or test a category
+# without matching on English prose.
+InsightKind = Literal[
+    "session_duration",
+    "hfr_vs_target",
+    "sensor_temp",
+    "hfr_outliers",
+    "eccentricity_outliers",
+    "eccentricity_vs_rig",
+]
+
+
 class SessionInsight(BaseModel):
-    level: str
+    level: InsightLevel
+    kind: InsightKind
     message: str
 
 
@@ -119,6 +139,7 @@ class FrameRecord(BaseModel):
     file_name: str
     image_id: str
     file_path: str
+    file_size: int | None = None  # bytes; None for older ingests that predate the column
     source_relative: str = ""
     thumbnail_url: str | None = None
     hfr_stdev: float | None = None

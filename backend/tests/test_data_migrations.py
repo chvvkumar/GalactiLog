@@ -17,9 +17,11 @@ from app.services.data_migrations import (
     DATA_VERSION,
     MIGRATIONS,
     get_pending_migrations,
+    _classify_eccentricity_source,
     _migrate_v11_hyperleda_galaxies,
     _migrate_v12_exposure_and_metric_split,
     _migrate_v13_enrich_created_targets,
+    _migrate_v14_eccentricity_provenance,
 )
 
 
@@ -69,7 +71,13 @@ class TestGetPendingMigrations:
         desc, func = MIGRATIONS[13]
         assert func is _migrate_v13_enrich_created_targets
         assert "enrichment" in desc.lower()
-        assert DATA_VERSION == 13
+
+    def test_v14_is_eccentricity_provenance(self):
+        assert 14 in MIGRATIONS
+        desc, func = MIGRATIONS[14]
+        assert func is _migrate_v14_eccentricity_provenance
+        assert "eccentricity" in desc.lower()
+        assert DATA_VERSION == 14
 
 
 def _sync_session_factory():
@@ -235,6 +243,133 @@ class TestV12ExposureAndMetricSplit:
         finally:
             session.rollback()
             for fp in (p_exposure, p_fwhm, p_real_hfr, p_exptime):
+                session.execute(
+                    text("DELETE FROM images WHERE file_path = :fp"), {"fp": fp}
+                )
+            session.commit()
+            session.close()
+            engine.dispose()
+
+
+class TestClassifyEccentricitySource:
+    """Pure inference from raw_headers -- no DB needed.
+
+    raw_headers is the ground truth for which keyword produced the stored
+    eccentricity. Header and ellipticity origins are recoverable by replaying
+    the scanner's transform and comparing; a CSV-sourced value never appears in
+    raw_headers at all, so it stays unknown (NULL).
+    """
+
+    def test_native_eccentricity_header(self):
+        assert _classify_eccentricity_source({"ECCENTRICITY": 0.45}, 0.45) == "header"
+
+    def test_native_eccentricity_as_string(self):
+        # XISF FITSKeyword values land in raw_headers as strings.
+        assert _classify_eccentricity_source({"ECCENTRICITY": "0.45"}, 0.45) == "header"
+
+    def test_ellipticity_derived(self):
+        import math
+        stored = math.sqrt(1 - 0.7 ** 2)
+        assert _classify_eccentricity_source({"ELLIPTICITY": 0.3}, stored) == "ellipticity"
+
+    def test_ellipticity_present_but_value_disagrees_is_unknown(self):
+        # A CSV value overwrote the derived one -- not recoverable.
+        assert _classify_eccentricity_source({"ELLIPTICITY": 0.3}, 0.32) is None
+
+    def test_eccentricity_present_but_value_disagrees_is_unknown(self):
+        assert _classify_eccentricity_source({"ECCENTRICITY": 0.45}, 0.32) is None
+
+    def test_eccentricity_wins_over_ellipticity(self):
+        # Mirrors the scanner's precedence: a native ECCENTRICITY is used
+        # directly and ELLIPTICITY is never consulted.
+        headers = {"ECCENTRICITY": 0.45, "ELLIPTICITY": 0.3}
+        assert _classify_eccentricity_source(headers, 0.45) == "header"
+
+    def test_no_relevant_headers_is_unknown(self):
+        assert _classify_eccentricity_source({"OBJECT": "M31"}, 0.32) is None
+
+    def test_unparseable_header_is_unknown(self):
+        assert _classify_eccentricity_source({"ECCENTRICITY": "n/a"}, 0.45) is None
+
+
+class TestV14EccentricityProvenance:
+    """End-to-end backfill of eccentricity_source and altitude_deg."""
+
+    def test_backfills_source_and_altitude(self):
+        import math
+        from sqlalchemy import text
+        from app.models import Image
+
+        Session, engine = _sync_session_factory()
+        session = Session()
+
+        tag = uuid.uuid4().hex[:8]
+        p_header = f"/fits/{tag}/native_ecc.fits"
+        p_ellip = f"/fits/{tag}/from_ellipticity.fits"
+        p_csv = f"/fits/{tag}/from_csv.fits"
+        p_alt = f"/fits/{tag}/centalt_only.fits"
+        derived = math.sqrt(1 - 0.7 ** 2)
+        ids = {}
+        try:
+            # Row 1: native ECCENTRICITY header, plus OBJCTALT to backfill.
+            r1 = Image(
+                file_path=p_header, file_name="native_ecc.fits",
+                eccentricity=0.45, eccentricity_source=None, altitude_deg=None,
+                raw_headers={"ECCENTRICITY": 0.45, "OBJCTALT": 61.2, "OBJECT": "M31"},
+            )
+            # Row 2: derived from ELLIPTICITY (no ECCENTRICITY header).
+            r2 = Image(
+                file_path=p_ellip, file_name="from_ellipticity.fits",
+                eccentricity=derived, eccentricity_source=None, altitude_deg=None,
+                raw_headers={"ELLIPTICITY": 0.3, "OBJECT": "M31"},
+            )
+            # Row 3: CSV-sourced -- headers carry ECCENTRICITY but the stored
+            # value came from the CSV, so provenance is unrecoverable (NULL).
+            r3 = Image(
+                file_path=p_csv, file_name="from_csv.fits",
+                eccentricity=0.32, eccentricity_source=None, altitude_deg=None,
+                raw_headers={"ECCENTRICITY": 0.45, "OBJECT": "M31"},
+            )
+            # Row 4: no eccentricity at all, CENTALT fallback for altitude.
+            r4 = Image(
+                file_path=p_alt, file_name="centalt_only.fits",
+                eccentricity=None, eccentricity_source=None, altitude_deg=None,
+                raw_headers={"CENTALT": 33.7, "OBJECT": "M31"},
+            )
+            session.add_all([r1, r2, r3, r4])
+            session.commit()
+            for r in (r1, r2, r3, r4):
+                ids[r.file_path] = r.id
+
+            summary = _migrate_v14_eccentricity_provenance(session)
+            session.commit()
+
+            got1 = session.get(Image, ids[p_header])
+            assert got1.eccentricity_source == "header"
+            assert got1.altitude_deg == pytest.approx(61.2)
+
+            got2 = session.get(Image, ids[p_ellip])
+            assert got2.eccentricity_source == "ellipticity"
+
+            got3 = session.get(Image, ids[p_csv])
+            assert got3.eccentricity_source is None
+
+            got4 = session.get(Image, ids[p_alt])
+            assert got4.eccentricity_source is None
+            assert got4.altitude_deg == pytest.approx(33.7)
+
+            assert "eccentricity sources" in summary
+            assert "altitudes" in summary
+
+            # Replaying the migration must not change anything (idempotent).
+            session.expire_all()
+            _migrate_v14_eccentricity_provenance(session)
+            session.commit()
+            assert session.get(Image, ids[p_header]).eccentricity_source == "header"
+            assert session.get(Image, ids[p_csv]).eccentricity_source is None
+        finally:
+            session.rollback()
+            for fp in (p_header, p_ellip, p_csv, p_alt):
                 session.execute(
                     text("DELETE FROM images WHERE file_path = :fp"), {"fp": fp}
                 )

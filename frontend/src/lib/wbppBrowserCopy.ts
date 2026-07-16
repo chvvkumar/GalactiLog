@@ -195,6 +195,13 @@ export interface BrowserCopyOptions {
   // omit from the copy. Empty when the filter is off (whole-folder copy).
   excludedSourceRelatives: string[];
   onProgress: (done: number, total: number, label: string) => void;
+  /**
+   * Reports what each permission request actually returned, as it returns -- including
+   * the "denied" that then throws. Without it the caller can only infer permission
+   * state from success, so a denial leaves its UI showing the stale prior state with
+   * no way to reach "denied".
+   */
+  onPermission?: (which: "source" | "dest", state: PermState) => void;
   signal?: AbortSignal;
 }
 
@@ -207,10 +214,17 @@ export async function runBrowserCopy(
   destHandle: DirHandle,
   opts: BrowserCopyOptions,
 ): Promise<BrowserCopyResult> {
-  if ((await requestHandlePermission(rootHandle, "read")) === "denied") {
+  // These two requests stay the first awaits after the caller's synchronous click
+  // setup: the API only honours a permission prompt inside the user gesture that
+  // triggered it, so nothing may be awaited before them.
+  const srcPerm = await requestHandlePermission(rootHandle, "read");
+  opts.onPermission?.("source", srcPerm);
+  if (srcPerm === "denied") {
     throw new Error("Read permission for the library folder was denied.");
   }
-  if ((await requestHandlePermission(destHandle, "readwrite")) === "denied") {
+  const destPerm = await requestHandlePermission(destHandle, "readwrite");
+  opts.onPermission?.("dest", destPerm);
+  if (destPerm === "denied") {
     throw new Error("Write permission for the destination folder was denied.");
   }
 

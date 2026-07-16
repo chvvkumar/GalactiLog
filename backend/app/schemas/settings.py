@@ -1,4 +1,31 @@
+from typing import Literal
+
 from pydantic import BaseModel, Field
+
+
+# The six metrics a WBPP raw quality constraint can target. Mirrors RAW_METRICS
+# in frontend/src/lib/wbppQualityFilter.ts; the names are FrameRecord fields, so
+# a constraint indexes a frame directly on the client.
+WbppRawMetric = Literal[
+    "median_hfr",
+    "fwhm",
+    "eccentricity",
+    "detected_stars",
+    "guiding_rms_arcsec",
+    "adu_median",
+]
+
+
+class WbppRawConstraint(BaseModel):
+    """One raw-metric threshold in the WBPP export's quality filter.
+
+    Direction is not stored: it is a property of the metric (only detected_stars
+    is higher-is-better) and is derived on the client from HIGHER_IS_BETTER. A
+    stored direction could contradict the metric.
+    """
+
+    metric: WbppRawMetric
+    value: float
 
 
 class GeneralSettings(BaseModel):
@@ -42,6 +69,16 @@ class GeneralSettings(BaseModel):
             "masters", "Masters", "MASTERS", "*CALIBRATED", "CALIBRATED",
         ]
     )
+    # WBPP export quality filter. Persisted so tuning survives a modal close and
+    # a reload, rather than being redone by hand on every export. The defaults
+    # below are the modal's own starting state, so a user who has never touched
+    # the filter reads back exactly what they would have seen before it was
+    # stored.
+    wbpp_quality_enabled: bool = False
+    wbpp_quality_mode: str = Field(default="score", pattern="^(score|raw)$")
+    wbpp_quality_score_threshold: int = Field(default=60, ge=0, le=100)
+    wbpp_quality_baseline: str = Field(default="session", pattern="^(session|rig)$")
+    wbpp_quality_raw_constraints: list[WbppRawConstraint] = Field(default_factory=list)
 
 
 class ActivitySettingsResponse(BaseModel):

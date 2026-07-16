@@ -5,7 +5,7 @@ import { Component, Show, For, createSignal, createEffect, createMemo } from "so
 // numeric baseline fields to `number | null | undefined` and would cascade
 // into this component's frame-quality math, utils/frameQuality.ts's
 // `GroupBaseline`/`MetricBaseline`).
-import type { SessionOverview, SessionDetail, FrameRecord, IntegrationInstance } from "../api/types";
+import type { SessionOverview, SessionDetail, FrameRecord, IntegrationInstance, InsightLevel } from "../api/types";
 import { apiClient } from "../api/generated/client";
 import { unwrap } from "../api/unwrap";
 import ReferenceThumbnail from "./ReferenceThumbnail";
@@ -32,13 +32,17 @@ import {
   type QualityBand,
 } from "../utils/frameQuality";
 
-const INSIGHT_STYLES: Record<string, string> = {
+// Keyed by InsightLevel, not string: as Record<string, string> a level the UI
+// had no entry for looked up undefined and rendered `class="text-xs undefined"`
+// -- an insight with no color, visible only if you noticed the missing tint.
+// Keying by the union makes a missing level a compile error instead.
+const INSIGHT_STYLES: Record<InsightLevel, string> = {
   good: "text-theme-success",
   warning: "text-theme-warning",
   info: "text-theme-text-secondary",
 };
 
-const INSIGHT_ICONS: Record<string, string> = {
+const INSIGHT_ICONS: Record<InsightLevel, string> = {
   good: "✓",
   warning: "⚠",
   info: "•",
@@ -1174,7 +1178,8 @@ const SessionAccordionCard: Component<{
                           <HelpPopover title="Per-Frame Data grading" label="About per-frame grading">
                             <p>Each frame is graded by how far its metrics deviate from a typical baseline, not against a fixed threshold.</p>
                             <p><strong>Compare to</strong> picks the baseline. <em>This session</em> compares each frame to the other frames captured the same night. <em>This rig overall</em> compares each frame to all frames captured with the same telescope, camera, and filter across your whole catalog, regardless of target.</p>
-                            <p>Deviation is measured in robust sigma units (median absolute deviation from the median), the same approach PixInsight SubframeSelector uses. It stays reliable on small sessions.</p>
+                            <p>Deviation is measured in MAD units: how many median-absolute-deviations a frame sits from its group's median. These are raw MAD, not sigma, so they run smaller than a standard-deviation score (1 MAD is about 0.67 sigma). Median and MAD both ignore outliers, so a handful of bad frames cannot drag the baseline they are judged against. PixInsight SubframeSelector grades on a similar robust idea, but measures average deviation from the median, so its numbers sit on a different scale.</p>
+                            <p>A group needs at least 8 frames before it is graded at all. Below that there is no trustworthy spread to measure against, so frames are left uncolored rather than guessed at.</p>
                             <p>Color shows the verdict, in both directions: green means clearly better than typical, no color means normal, amber means moderately worse (watch), red means far worse (likely reject).</p>
                             <p>Signal-related metrics (star count, background ADU, guiding) are always compared within the same night because they drift with sky conditions, regardless of the toggle.</p>
                             <p>Grading is advisory only. No frames are deleted or hidden.</p>
