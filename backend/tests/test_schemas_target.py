@@ -37,8 +37,9 @@ def test_filter_detail():
 
 
 def test_session_insight():
-    si = SessionInsight(level="good", message="Best HFR session")
+    si = SessionInsight(level="good", kind="hfr_vs_target", message="Best HFR session")
     assert si.level == "good"
+    assert si.kind == "hfr_vs_target"
 
 
 def test_frame_record():

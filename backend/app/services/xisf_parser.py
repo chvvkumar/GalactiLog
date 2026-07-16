@@ -19,7 +19,7 @@ from typing import Any
 import numpy as np
 from PIL import Image as PILImage
 
-from app.services.csv_metadata import get_csv_metrics
+from app.services.csv_metadata import get_csv_metrics, merge_csv_metrics
 from app.services.stretch import normalize_to_unit, resize_array, stretch_channel
 
 logger = logging.getLogger(__name__)
@@ -112,24 +112,25 @@ def _parse_capture_date(date_str: str | None, path: Path | None = None) -> datet
         return None
 
 
-def _eccentricity_from_values(ecc_raw, ellip_raw) -> float | None:
-    """Return eccentricity, reading ECCENTRICITY directly or deriving from ELLIPTICITY.
+def _eccentricity_from_values(ecc_raw, ellip_raw) -> tuple[float | None, str | None]:
+    """Return (eccentricity, source), reading ECCENTRICITY or deriving from ELLIPTICITY.
 
     Mirrors scanner._eccentricity_from_header: ellipticity (1 - b/a) is a
     different quantity from eccentricity (e). Convert only when eccentricity is
-    absent, via e = sqrt(1 - (1 - ellipticity)^2).
+    absent, via e = sqrt(1 - (1 - ellipticity)^2). The source rides along so the
+    two non-comparable origins stay distinguishable after ingest.
     """
     ecc = _first_float(ecc_raw)
     if ecc is not None:
-        return ecc
+        return ecc, "header"
     ellip = _first_float(ellip_raw)
     if ellip is None:
-        return None
+        return None, None
     axis_ratio = 1.0 - ellip
     val = 1.0 - axis_ratio * axis_ratio
     if val < 0:
-        return None
-    return math.sqrt(val)
+        return None, None
+    return math.sqrt(val), "ellipticity"
 
 
 def extract_xisf_metadata(xisf_path: Path) -> dict[str, Any]:
@@ -190,6 +191,10 @@ def extract_xisf_metadata(xisf_path: Path) -> dict[str, Any]:
 
     fwhm = _first_float(merged.get("MEANFWHM"), merged.get("FWHM"))
 
+    eccentricity, eccentricity_source = _eccentricity_from_values(
+        merged.get("ECCENTRICITY"), merged.get("ELLIPTICITY")
+    )
+
     metadata = {
         "file_path": str(xisf_path),
         "file_name": xisf_path.name,
@@ -203,17 +208,20 @@ def extract_xisf_metadata(xisf_path: Path) -> dict[str, Any]:
         "camera": merged.get("INSTRUME"),
         "median_hfr": hfr,
         "median_fwhm": fwhm,
-        "eccentricity": _eccentricity_from_values(
-            merged.get("ECCENTRICITY"), merged.get("ELLIPTICITY")
-        ),
+        "eccentricity": eccentricity,
+        "eccentricity_source": eccentricity_source,
+        # Frame-centre altitude, for the same atmospheric-dispersion reason as
+        # the FITS path (see scanner.extract_metadata).
+        "altitude_deg": _first_float(merged.get("OBJCTALT"), merged.get("CENTALT")),
         "capture_date": _parse_capture_date(merged.get("DATE-OBS"), xisf_path),
         "raw_headers": raw_headers,
     }
 
-    # Merge CSV metrics (same as FITS path)
+    # Merge CSV metrics (same as FITS path): a real CSV value wins, a blank
+    # cell must not erase the header value.
     csv_metrics = get_csv_metrics(xisf_path)
     if csv_metrics:
-        metadata.update(csv_metrics)
+        merge_csv_metrics(metadata, csv_metrics)
 
     return metadata
 

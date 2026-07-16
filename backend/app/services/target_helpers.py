@@ -11,6 +11,7 @@ from collections import defaultdict
 from datetime import datetime
 
 from app.config import settings
+from app.services import frame_quality
 from app.services.normalization import normalize_filter, normalize_equipment
 from app.services.wbpp_export import fits_relative_path
 from app.schemas.target import FilterDetail, FrameRecord, RigDetail, SessionInsight
@@ -237,18 +238,131 @@ def sort_clause(sort_by: str, sort_dir: str) -> str:
     return f"{col} {direction} {nulls}"
 
 
+# A "the whole night was bad" claim compares one session median against the rig's
+# history. The dispersion in that comparison comes from the rig baseline, which
+# carries its own n >= MIN_GROUP gate inside mad_z; this floor only asks that the
+# session median itself rest on more than one or two frames.
+MIN_SESSION_MEDIAN_FRAMES = 3
+
+
+def _group_label(key: str) -> str:
+    """Turn a ``"telescope|camera|filter"`` baseline key into readable prose."""
+    return " / ".join(part for part in key.split("|") if part) or "Unknown rig"
+
+
+def hfr_outlier_insight(median_hfr, hfr_values, prefix="") -> SessionInsight | None:
+    """Frames whose HFR exceeds 1.5x the session median.
+
+    HFR is unbounded, so `median * 1.5` is always exceedable and the rule has no
+    reachability flaw. Its scale-invariance (a soft night tolerates more spread)
+    is a calibration opinion, not a bug, and is left as-is.
+    """
+    if median_hfr is None or len(hfr_values) <= 2:
+        return None
+    threshold = median_hfr * 1.5
+    count = sum(1 for v in hfr_values if v > threshold)
+    if count == 0:
+        return None
+    plural = "s" if count > 1 else ""
+    return SessionInsight(
+        level="warning",
+        kind="hfr_outliers",
+        message=f"{prefix}{count} frame{plural} with HFR outlier{plural} (> {threshold:.1f})",
+    )
+
+
+def ecc_outlier_insight(frames, baselines, prefix="") -> SessionInsight | None:
+    """Frames whose eccentricity is >= Z_REJECT MAD worse than their own group.
+
+    This replaces a `median_ecc * 1.5` rule that could not work: eccentricity is
+    bounded [0, 1] by definition, so the threshold scaled with the median's
+    absolute value rather than with dispersion. At median 0.2 a frame tripped at
+    0.3; at median 0.5 it needed 0.75; at median >= 0.667 the threshold was >= 1.0
+    and nothing could ever trip it. The rule desensitized exactly as frames got
+    worse and went fully dark at the extreme, and a night of uniformly bad frames
+    flagged nothing.
+
+    A MAD z-score keys off dispersion instead, uses the same baselines the
+    per-frame grading table uses, and fires at the same threshold as the
+    frontend's "reject" band -- so the sentence and the red cells beside it
+    always agree. When no baseline is usable (sparse group, uniform group,
+    missing metric) no insight is emitted rather than a wrong one.
+    """
+    count, graded = frame_quality.count_outliers(frames, baselines, "eccentricity")
+    if graded == 0 or count == 0:
+        return None
+    plural = "s" if count > 1 else ""
+    return SessionInsight(
+        level="warning",
+        kind="eccentricity_outliers",
+        message=(
+            f"{prefix}{count} frame{plural} with eccentricity outlier{plural} "
+            f"(≥ {frame_quality.Z_REJECT:.0f} MAD above the group median)"
+        ),
+    )
+
+
+def session_ecc_vs_rig_insights(session_baselines, rig_baselines) -> list[SessionInsight]:
+    """Whole-night check: this session's median eccentricity vs the rig's history.
+
+    The per-frame z-score genuinely cannot see a night where *every* frame is
+    elongated, because the session median moves with the frames it is measuring.
+    Comparing the session median against a baseline built from a different,
+    larger sample is the only way to catch systematic failure (bad collimation,
+    tilt, a sagging focuser, poor polar alignment for the night).
+
+    Two honest caveats:
+
+    1. `rig_baselines` is built from every LIGHT frame in the catalog for this
+       train+filter, which INCLUDES the frames of the session being viewed. That
+       is mild self-contamination: the session drags the baseline slightly
+       towards itself and shrinks z. The effect is conservative (it can only
+       hide a warning, never invent one) and shrinks as the catalog grows, so it
+       is noted rather than fixed here.
+    2. z compares a median against a per-frame MAD. The sampling distribution of
+       a median is narrower than that of a single frame, so Z_REJECT is a
+       conservative bar for this comparison too.
+    """
+    insights: list[SessionInsight] = []
+    for key, metrics in sorted((session_baselines or {}).items()):
+        session_ecc = (metrics or {}).get("eccentricity") or {}
+        session_median = session_ecc.get("median")
+        if session_median is None or (session_ecc.get("n") or 0) < MIN_SESSION_MEDIAN_FRAMES:
+            continue
+        rig_ecc = ((rig_baselines or {}).get(key) or {}).get("eccentricity")
+        z = frame_quality.mad_z(session_median, rig_ecc)
+        if z is None or z < frame_quality.Z_REJECT:
+            continue
+        insights.append(SessionInsight(
+            level="warning",
+            kind="eccentricity_vs_rig",
+            message=(
+                f"[{_group_label(key)}] Whole session is elongated: median eccentricity "
+                f"{session_median:.2f} vs {rig_ecc['median']:.2f} typical for this rig "
+                f"({z:.1f} MAD above normal)"
+            ),
+        ))
+    return insights
+
+
 def compute_insights(
     *,
     median_hfr: float | None,
-    median_ecc: float | None,
     hfr_values: list[float],
-    ecc_values: list[float],
     temp_values: list[float],
     target_avg_hfr: float | None,
     is_best_hfr: bool,
     first_frame,
     last_frame,
+    frames: list | None = None,
+    baselines: dict | None = None,
 ) -> list[SessionInsight]:
+    """Session-level insights.
+
+    `frames` and `baselines` are the same normalized frame dicts and
+    MAD baselines the per-frame grading table is built from, passed in rather
+    than re-derived here so the two never drift apart.
+    """
     insights = []
 
     if first_frame.capture_date and last_frame.capture_date:
@@ -257,6 +371,7 @@ def compute_insights(
         minutes = (duration.total_seconds() % 3600) / 60
         insights.append(SessionInsight(
             level="info",
+            kind="session_duration",
             message=f"Session duration: {int(hours)}h {int(minutes)}m ({first_frame.capture_date.strftime('%H:%M')} → {last_frame.capture_date.strftime('%H:%M')})",
         ))
 
@@ -264,11 +379,13 @@ def compute_insights(
         if is_best_hfr:
             insights.append(SessionInsight(
                 level="good",
+                kind="hfr_vs_target",
                 message=f"Best HFR session for this target (median {median_hfr:.2f} vs target avg {target_avg_hfr:.2f})",
             ))
         elif median_hfr > target_avg_hfr * 1.3:
             insights.append(SessionInsight(
                 level="warning",
+                kind="hfr_vs_target",
                 message=f"Poor HFR session (median {median_hfr:.2f} vs target avg {target_avg_hfr:.2f})",
             ))
 
@@ -277,30 +394,22 @@ def compute_insights(
         if temp_range < 1.0:
             insights.append(SessionInsight(
                 level="good",
+                kind="sensor_temp",
                 message=f"Stable sensor temperature ({min(temp_values):.0f}°C ± {temp_range:.1f}°C)",
             ))
         elif temp_range >= 3.0:
             insights.append(SessionInsight(
                 level="warning",
+                kind="sensor_temp",
                 message=f"Unstable sensor temperature (range: {min(temp_values):.0f}°C to {max(temp_values):.0f}°C)",
             ))
 
-    if median_hfr is not None and len(hfr_values) > 2:
-        threshold = median_hfr * 1.5
-        outlier_count = sum(1 for v in hfr_values if v > threshold)
-        if outlier_count > 0:
-            insights.append(SessionInsight(
-                level="warning",
-                message=f"{outlier_count} frame{'s' if outlier_count > 1 else ''} with HFR outlier{'s' if outlier_count > 1 else ''} (> {threshold:.1f})",
-            ))
+    hfr_insight = hfr_outlier_insight(median_hfr, hfr_values)
+    if hfr_insight:
+        insights.append(hfr_insight)
 
-    if median_ecc is not None and len(ecc_values) > 2:
-        threshold = median_ecc * 1.5
-        outlier_count = sum(1 for v in ecc_values if v > threshold)
-        if outlier_count > 0:
-            insights.append(SessionInsight(
-                level="warning",
-                message=f"{outlier_count} frame{'s' if outlier_count > 1 else ''} with eccentricity outlier{'s' if outlier_count > 1 else ''} (> {threshold:.2f})",
-            ))
+    ecc_insight = ecc_outlier_insight(frames, baselines)
+    if ecc_insight:
+        insights.append(ecc_insight)
 
     return insights

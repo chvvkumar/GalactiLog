@@ -5,6 +5,7 @@ a summary string. Register new migrations in MIGRATIONS with the next version nu
 """
 
 import logging
+import math
 from typing import Callable
 
 from celery.exceptions import SoftTimeLimitExceeded
@@ -22,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 # Current data version - bump this and add a migration function when
 # code changes affect how stored target data is derived.
-DATA_VERSION = 13
+DATA_VERSION = 14
 
 # Migrations whose per-target loops make external network calls (VizieR, Gaia,
 # SAC, HyperLEDA) with pacing sleeps commit their work every this many queried
@@ -682,6 +683,135 @@ def _migrate_v13_enrich_created_targets(session: Session) -> str:
     return "; ".join(parts) if parts else "No changes needed"
 
 
+def _header_float(headers: dict, key: str) -> float | None:
+    """Read a header value out of raw_headers as a float, or None."""
+    if not headers:
+        return None
+    val = headers.get(key)
+    if val is None:
+        return None
+    try:
+        return float(val)
+    except (ValueError, TypeError):
+        return None
+
+
+def _classify_eccentricity_source(headers: dict, stored: float) -> str | None:
+    """Infer which origin produced a stored eccentricity, from raw_headers.
+
+    raw_headers captures every header verbatim, so it is the ground truth for
+    what the scanner had to work with -- the same principle the AUD-007
+    reclassification relies on. Replay the scanner's precedence and compare:
+
+    - A native ECCENTRICITY equal to the stored value means the value came
+      straight from the header ("header"). ECCENTRICITY wins outright in the
+      scanner, so ELLIPTICITY is not even consulted when it is present.
+    - Otherwise, an ELLIPTICITY whose transform reproduces the stored value
+      means the value was derived ("ellipticity").
+    - Anything else is unknown (None). Most importantly, a CSV-sourced
+      eccentricity never enters raw_headers, so it is simply not recoverable;
+      a mismatch against a present header is exactly what a CSV override looks
+      like. NULL is informative here -- it means "unknown/pre-migration", not
+      "no source".
+    """
+    ecc = _header_float(headers, "ECCENTRICITY")
+    if ecc is not None:
+        return "header" if abs(stored - ecc) <= 1e-6 else None
+
+    ellip = _header_float(headers, "ELLIPTICITY")
+    if ellip is None:
+        return None
+    axis_ratio = 1.0 - ellip
+    val = 1.0 - axis_ratio * axis_ratio
+    if val < 0:
+        return None
+    derived = math.sqrt(val)
+    return "ellipticity" if abs(stored - derived) <= 1e-6 else None
+
+
+def _migrate_v14_eccentricity_provenance(session: Session) -> str:
+    """Backfill eccentricity_source and altitude_deg from raw_headers.
+
+    Re-derives image-level values from raw_headers after two scanner changes,
+    exactly as v12 did for exposure_time/median_fwhm:
+
+    eccentricity_source: `eccentricity` collapsed three non-comparable origins
+    (native ECCENTRICITY, a value converted from ELLIPTICITY, and the N.I.N.A.
+    CSV) into one column. Provenance is recovered by replaying the scanner's
+    transform against raw_headers and comparing to the stored value; see
+    _classify_eccentricity_source. CSV-sourced values are not recoverable and
+    stay NULL.
+
+    altitude_deg: the frame-centre altitude (OBJCTALT, else CENTALT) was never
+    read into a column, though existing rows carry it in raw_headers. Without
+    it an eccentricity cannot be separated from atmospheric dispersion, which
+    scales with tan(zenith distance). Backfilled here rather than left to wait
+    on a full re-ingest, for the same reason v12 backfilled exposure_time: the
+    data is already on hand and the column is useless empty.
+
+    Idempotent: only rows still NULL in the respective column are selected, and
+    the inference is a pure function of raw_headers, so replaying is a no-op.
+    """
+    from app.models import Image
+
+    # --- eccentricity provenance ---
+    ecc_rows = session.execute(
+        select(Image.id, Image.eccentricity, Image.raw_headers).where(
+            Image.eccentricity.isnot(None),
+            Image.eccentricity_source.is_(None),
+            or_(
+                Image.raw_headers.has_key("ECCENTRICITY"),  # noqa: W601 (JSONB ?)
+                Image.raw_headers.has_key("ELLIPTICITY"),   # noqa: W601
+            ),
+        )
+    ).all()
+
+    source_updates: list[dict] = []
+    for img_id, stored, headers in ecc_rows:
+        if not headers or stored is None:
+            continue
+        source = _classify_eccentricity_source(headers, stored)
+        if source is not None:
+            source_updates.append({"id": img_id, "eccentricity_source": source})
+
+    if source_updates:
+        session.bulk_update_mappings(Image, source_updates)
+        session.flush()
+
+    # --- altitude ---
+    alt_rows = session.execute(
+        select(Image.id, Image.raw_headers).where(
+            Image.altitude_deg.is_(None),
+            or_(
+                Image.raw_headers.has_key("OBJCTALT"),  # noqa: W601
+                Image.raw_headers.has_key("CENTALT"),   # noqa: W601
+            ),
+        )
+    ).all()
+
+    altitude_updates: list[dict] = []
+    for img_id, headers in alt_rows:
+        if not headers:
+            continue
+        # Mirror the scanner's precedence: OBJCTALT first, then CENTALT.
+        alt = _header_float(headers, "OBJCTALT")
+        if alt is None:
+            alt = _header_float(headers, "CENTALT")
+        if alt is not None:
+            altitude_updates.append({"id": img_id, "altitude_deg": alt})
+
+    if altitude_updates:
+        session.bulk_update_mappings(Image, altitude_updates)
+        session.flush()
+
+    parts = []
+    if source_updates:
+        parts.append(f"{len(source_updates)} eccentricity sources recovered from raw_headers")
+    if altitude_updates:
+        parts.append(f"{len(altitude_updates)} altitudes backfilled from raw_headers")
+    return "; ".join(parts) if parts else "No changes needed"
+
+
 def reference_catalogs_are_empty(session: Session) -> bool:
     """Return True if the static OpenNGC catalog table has no rows.
 
@@ -748,6 +878,7 @@ MIGRATIONS: dict[int, tuple[str, Callable[[Session], str]]] = {
     11: ("Backfill HyperLEDA morphological type and inclination for galaxies", _migrate_v11_hyperleda_galaxies),
     12: ("Backfill exposure_time from EXPOSURE keyword and split FWHM out of median_hfr", _migrate_v12_exposure_and_metric_split),
     13: ("Backfill per-target enrichment (constellation, memberships, Gaia, HyperLEDA) for targets created since v11", _migrate_v13_enrich_created_targets),
+    14: ("Recover eccentricity provenance and backfill frame altitude from raw_headers", _migrate_v14_eccentricity_provenance),
 }
 
 

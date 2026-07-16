@@ -50,6 +50,25 @@ class Image(Base):
     # scales, and separate from the CSV-sourced `fwhm` column below.
     median_fwhm: Mapped[float | None] = mapped_column(Float, nullable=True)
     eccentricity: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Which of three non-comparable origins produced `eccentricity`:
+    #   "header"      -- native ECCENTRICITY keyword
+    #   "ellipticity" -- derived from ELLIPTICITY via e = sqrt(1 - (1 - E)^2)
+    #   "csv"         -- N.I.N.A. Session Metadata CSV
+    # Each application measures eccentricity by its own method, so values from
+    # different sources are not interchangeable and must not be pooled blindly.
+    # NULL means unknown: rows ingested before this column existed whose
+    # provenance could not be recovered from raw_headers (see data migration
+    # v14). No index -- three values plus NULL is too low-cardinality for a
+    # btree to help, and nothing filters on it yet.
+    eccentricity_source: Mapped[str | None] = mapped_column(String(20), nullable=True)
+
+    # Altitude of the frame centre in degrees (OBJCTALT, else CENTALT).
+    # Eccentricity is contaminated by atmospheric dispersion, which scales with
+    # tan(zenith distance), so altitude is needed to read an eccentricity
+    # fairly: the same rig measures a markedly rounder star field near zenith
+    # than near the horizon. NULL when neither keyword is present; it is NOT
+    # derived from RA/Dec + time + site.
+    altitude_deg: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     # --- CSV metrics (N.I.N.A. ImageMetaData) ---
     # Quality

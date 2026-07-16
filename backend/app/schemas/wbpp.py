@@ -11,6 +11,10 @@ class WbppFolderLevel(BaseModel):
     other_dates: list[str] = Field(default_factory=list)
     is_contaminated: bool
     relative_path: str = ""
+    # Bytes of exactly the frames frame_count counts. None when any contributing
+    # frame's size is unknown (older ingests have a NULL file_size) -- callers must
+    # render "unknown" rather than treat None as 0 or show a partial sum.
+    frame_bytes: int | None = None
 
 
 class WbppSessionPreview(BaseModel):

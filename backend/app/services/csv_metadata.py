@@ -174,6 +174,38 @@ def parse_weather_csv(directory: Path) -> dict[str, dict]:
     return _cached_parse(csv_path, _parse_weather_csv)
 
 
+def merge_csv_metrics(metadata: dict, csv_metrics: dict) -> dict:
+    """Merge CSV metrics into header-derived metadata, in place.
+
+    A real CSV value still takes priority over the header-derived value: the
+    N.I.N.A. Session Metadata plugin measures the frame itself, so where both
+    exist the CSV is the better number.
+
+    What a CSV value must NOT do is erase one. _parse_image_csv emits a key for
+    EVERY mapped column, and blank/NaN cells convert to None, so a plain
+    dict.update() let a present-but-empty cell overwrite a real header
+    eccentricity or HFR with None -- silent data loss on any install whose CSV
+    has gaps. A None from the CSV means "the CSV says nothing here", never
+    "the value is nothing", so it is skipped when the header already produced
+    one. Keys the header never set are still written as None, keeping the
+    resulting dict the same shape as before.
+
+    Eccentricity carries provenance: a CSV-sourced eccentricity is not
+    comparable with a header-derived one, so winning the merge also means
+    owning `eccentricity_source`. That is decided here because this is where
+    the merge outcome is known.
+    """
+    for key, value in csv_metrics.items():
+        if value is None and metadata.get(key) is not None:
+            continue
+        metadata[key] = value
+
+    if csv_metrics.get("eccentricity") is not None:
+        metadata["eccentricity_source"] = "csv"
+
+    return metadata
+
+
 def get_csv_metrics(fits_path: Path) -> dict:
     """Look up CSV metrics for a single FITS file.
 

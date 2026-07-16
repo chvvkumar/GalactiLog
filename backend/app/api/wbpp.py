@@ -25,20 +25,27 @@ router = APIRouter(prefix="/wbpp", tags=["wbpp"])
 
 
 async def _fetch_session_paths(target_id, session_dates, db):
+    """Return ({session_date: [container path]}, {container path: byte size or None}).
+
+    The size map is deliberately raw: a NULL file_size stays None rather than
+    collapsing to 0, so downstream can tell "unknown" from "empty".
+    """
     parsed = [date_type.fromisoformat(d) for d in session_dates]
-    q = select(Image.file_path, Image.session_date).where(
+    q = select(Image.file_path, Image.session_date, Image.file_size).where(
         Image.resolved_target_id == target_id,
         Image.image_type == "LIGHT",
         Image.session_date.in_(parsed),
     )
     rows = (await db.execute(q)).all()
     result = {d: [] for d in session_dates}
+    sizes: dict[str, int | None] = {}
     for row in rows:
-        file_path, session_date = row[0], row[1]
+        file_path, session_date, file_size = row[0], row[1], row[2]
         key = str(session_date)
         if key in result:
             result[key].append(file_path)
-    return result
+            sizes[file_path] = file_size
+    return result, sizes
 
 
 async def _fetch_all_paths_for_contamination(db):
@@ -67,7 +74,7 @@ async def wbpp_preview(
 
     target_os = payload.target_os or detect_os(payload.library_root)
     fits_root = settings.fits_data_path
-    session_paths = await _fetch_session_paths(target_id, payload.session_dates, db)
+    session_paths, sizes_by_path = await _fetch_session_paths(target_id, payload.session_dates, db)
     all_paths = await _fetch_all_paths_for_contamination(db)
 
     excluded_set = set(payload.excluded_source_relatives)
@@ -75,7 +82,10 @@ async def wbpp_preview(
     previews = []
     for d in payload.session_dates:
         fps = session_paths.get(d, [])
-        levels = compute_session_levels(d, fps, all_paths, fits_root, payload.library_root, target_os)
+        levels = compute_session_levels(
+            d, fps, all_paths, fits_root, payload.library_root, target_os,
+            sizes_by_path=sizes_by_path,
+        )
         excluded_count = sum(1 for fp in fps if fits_relative_path(fp, fits_root) in excluded_set)
         previews.append(WbppSessionPreview(
             session_date=d,
@@ -101,7 +111,7 @@ async def wbpp_generate(
     target_os = payload.target_os or detect_os(payload.library_root)
     sep = "\\" if target_os == "windows" else "/"
     fits_root = settings.fits_data_path
-    session_paths = await _fetch_session_paths(target_id, payload.session_dates, db)
+    session_paths, _sizes = await _fetch_session_paths(target_id, payload.session_dates, db)
     all_paths = await _fetch_all_paths_for_contamination(db)
 
     staging_root = payload.staging_path
