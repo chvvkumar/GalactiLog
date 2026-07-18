@@ -8,6 +8,7 @@
 
 import {
   METRIC_DEFS,
+  type ConstraintSeed,
   type MetricKey,
   type QualityConfig,
   type RawConstraint,
@@ -47,7 +48,45 @@ function parseConstraint(raw: unknown): RawConstraint | null {
   if (c.op !== "lte" && c.op !== "gte") return null;
   if (typeof c.value !== "number" || !Number.isFinite(c.value)) return null;
   if (typeof c.enabled !== "boolean") return null;
-  return { metric: c.metric, op: c.op, value: c.value, enabled: c.enabled };
+  const out: RawConstraint = { metric: c.metric, op: c.op, value: c.value, enabled: c.enabled };
+  // The seeding/scope extensions are best-effort: a malformed piece is dropped
+  // on its own (the constraint degrades to a plain absolute gate) rather than
+  // discarding the whole constraint.
+  if (c.scope === "global" || c.scope === "session") out.scope = c.scope;
+  if (typeof c.k === "number" && Number.isFinite(c.k) && c.k > 0) out.k = c.k;
+  const gv = parseGroupValues(c.groupValues);
+  if (gv) out.groupValues = gv;
+  const seed = parseSeed(c.seed);
+  if (seed) out.seed = seed;
+  return out;
+}
+
+function parseGroupValues(raw: unknown): Record<string, number> | null {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
+  const out: Record<string, number> = {};
+  let any = false;
+  for (const [key, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof v !== "number" || !Number.isFinite(v)) continue;
+    out[key] = v;
+    any = true;
+  }
+  return any ? out : null;
+}
+
+function parseSeed(raw: unknown): ConstraintSeed | null {
+  if (typeof raw !== "object" || raw === null) return null;
+  const s = raw as Record<string, unknown>;
+  if (typeof s.groupKey !== "string" || typeof s.filter !== "string") return null;
+  if (s.date !== null && typeof s.date !== "string") return null;
+  if (typeof s.n !== "number" || !Number.isFinite(s.n)) return null;
+  if (!Array.isArray(s.pooledFilters)) return null;
+  return {
+    groupKey: s.groupKey,
+    filter: s.filter,
+    date: s.date,
+    n: s.n,
+    pooledFilters: s.pooledFilters.filter((f): f is string => typeof f === "string"),
+  };
 }
 
 export function loadWbppQualityState(rig: string | null): WbppQualityState {

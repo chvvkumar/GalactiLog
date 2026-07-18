@@ -4,6 +4,10 @@ import {
   evaluateRawDetailed,
   computeVerdicts,
   defaultConstraintFor,
+  derivedSessionThreshold,
+  effectiveThreshold,
+  bandForThreshold,
+  sessionThresholdRows,
   excludedSourceRelatives,
   excludedUnderSelectedLevels,
   isUnderRelativePath,
@@ -100,7 +104,14 @@ const rigBaselines: Baselines = {
   },
 };
 
-function detail(frames: FrameRecord[]): SessionDetail {
+function detail(
+  frames: FrameRecord[],
+  over: Partial<{
+    session_date: string;
+    session_baselines: Baselines;
+    rig_baselines: Baselines;
+  }> = {},
+): SessionDetail {
   return {
     session_date: "2026-03-15",
     equipment: { telescope: "T", camera: "C" },
@@ -108,6 +119,7 @@ function detail(frames: FrameRecord[]): SessionDetail {
     frames,
     session_baselines: baselines,
     rig_baselines: rigBaselines,
+    ...over,
   } as unknown as SessionDetail;
 }
 
@@ -273,19 +285,70 @@ describe("defaultConstraintFor", () => {
   // uses: ecc 0.4 + 1.5 * 1.4826 * 0.05 = 0.511... -> 0.51 at two decimals.
   it("derives a lower-is-better threshold from the session baseline", () => {
     const c = defaultConstraintFor("ecc", details, dates, sessionCfg);
-    expect(c).toEqual({ metric: "ecc", op: "lte", value: 0.51, enabled: true });
+    expect(c).toMatchObject({ metric: "ecc", op: "lte", value: 0.51, enabled: true });
+    expect(c.groupValues).toEqual({ "T|C|Ha": 0.51 });
+    expect(c.seed).toEqual({
+      groupKey: "T|C|Ha",
+      filter: "Ha",
+      date: "2026-03-15",
+      n: 20,
+      pooledFilters: [],
+    });
   });
 
   // stars 100 - 1.5 * 1.4826 * 10 = 77.76 -> 78 at zero decimals, op gte.
   it("derives a higher-is-better threshold with op gte and integer rounding", () => {
     const c = defaultConstraintFor("stars", details, dates, sessionCfg);
-    expect(c).toEqual({ metric: "stars", op: "gte", value: 78, enabled: true });
+    expect(c).toMatchObject({ metric: "stars", op: "gte", value: 78, enabled: true });
+    expect(c.groupValues).toEqual({ "T|C|Ha": 78 });
   });
 
   // Rig baseline for ecc: 0.5 + 1.5 * 1.4826 * 0.02 = 0.544... -> 0.54.
+  // A rig-catalog baseline aggregates every night, so the seed names no night.
   it("respects config.baseline = rig for sharpness/roundness", () => {
     const c = defaultConstraintFor("ecc", details, dates, config([], "rig"));
     expect(c.value).toBe(0.54);
+    expect(c.seed!.date).toBeNull();
+    expect(c.seed!.n).toBe(40);
+  });
+
+  // The per-filter seeding fix: each filter's threshold comes from ITS OWN
+  // group's baseline, not from the largest-n group's applied cross-filter.
+  it("seeds each filter group from its own baseline", () => {
+    const twoFilterBaselines: Baselines = {
+      "T|C|Ha": { median_hfr: { median: 2.0, mad: 0.3, n: 30 } },
+      "T|C|L": { median_hfr: { median: 1.4, mad: 0.2, n: 20 } },
+    };
+    const frames = [
+      frame({ filter_used: "Ha" }),
+      frame({ filter_used: "L", source_relative: "l.fits" }),
+    ];
+    const d = detail(frames, { session_baselines: twoFilterBaselines });
+    const c = defaultConstraintFor("hfr", { "2026-03-15": d }, dates, sessionCfg);
+    // Ha: 2.0 + 1.5*1.4826*0.3 = 2.667 -> 2.67. L: 1.4 + 1.5*1.4826*0.2 = 1.845 -> 1.84/1.85.
+    expect(c.groupValues!["T|C|Ha"]).toBeCloseTo(2.67, 2);
+    expect(c.groupValues!["T|C|L"]).toBeCloseTo(1.84, 1);
+    // Pooled value comes from the largest-n group (Ha, n=30).
+    expect(c.value).toBe(c.groupValues!["T|C|Ha"]);
+    expect(c.seed!.filter).toBe("Ha");
+    expect(c.seed!.pooledFilters).toEqual([]);
+  });
+
+  // A group under MIN_GROUP cannot produce a stable MAD: it inherits the
+  // pooled seed and is named in seed.pooledFilters so the UI can mark it.
+  it("falls back to the pooled seed for groups below MIN_GROUP and marks them", () => {
+    const mixedBaselines: Baselines = {
+      "T|C|Ha": { median_hfr: { median: 2.0, mad: 0.3, n: 30 } },
+      "T|C|SII": { median_hfr: { median: 3.0, mad: 0.4, n: 4 } }, // too small
+    };
+    const frames = [
+      frame({ filter_used: "Ha" }),
+      frame({ filter_used: "SII", source_relative: "s.fits" }),
+    ];
+    const d = detail(frames, { session_baselines: mixedBaselines });
+    const c = defaultConstraintFor("hfr", { "2026-03-15": d }, dates, sessionCfg);
+    expect(c.groupValues!["T|C|SII"]).toBe(c.value);
+    expect(c.seed!.pooledFilters).toEqual(["SII"]);
   });
 
   // Signal is ALWAYS session-scoped, exactly as the cell coloring computes it:
@@ -311,6 +374,209 @@ describe("defaultConstraintFor", () => {
     for (const m of METRIC_KEYS) {
       expect(defaultConstraintFor(m, details, dates, sessionCfg).enabled).toBe(true);
     }
+  });
+});
+
+describe("per-filter thresholds in evaluation", () => {
+  // One constraint, two filters: each frame is judged against ITS OWN group's
+  // threshold, so the same HFR passes for the looser Ha gate and fails the
+  // tighter L gate.
+  const c: RawConstraint = {
+    metric: "hfr",
+    op: "lte",
+    value: 2.67,
+    enabled: true,
+    groupValues: { "T|C|Ha": 2.67, "T|C|L": 1.85 },
+  };
+
+  it("judges each frame against its own group's threshold", () => {
+    const frames = [
+      frame({ filter_used: "Ha", source_relative: "ha.fits", median_hfr: 2.2 }),
+      frame({ filter_used: "L", source_relative: "l.fits", median_hfr: 2.2 }),
+    ];
+    const verdicts = computeVerdicts({ "2026-03-15": detail(frames) }, dates, config([c]));
+    const ha = verdicts.find((v) => v.frame.source_relative === "ha.fits")!;
+    const l = verdicts.find((v) => v.frame.source_relative === "l.fits")!;
+    expect(ha.keep).toBe(true);
+    expect(l.keep).toBe(false);
+    // The failure names the group's OWN threshold, not the pooled one.
+    expect(l.failedBy).toBe("HFR 2.20 > 1.85");
+    expect(l.groupKey).toBe("T|C|L");
+  });
+
+  it("falls back to the pooled value for a group without a seeded entry", () => {
+    const f = frame({ filter_used: "OIII", source_relative: "o.fits", median_hfr: 2.5 });
+    const verdicts = computeVerdicts({ "2026-03-15": detail([f]) }, dates, config([c]));
+    expect(verdicts[0].keep).toBe(true); // 2.5 <= pooled 2.67
+  });
+
+  it("uses the bare value when no context is supplied (manual absolute gate)", () => {
+    expect(evaluateRaw(frame({ median_hfr: 2.5 }), [c])).toBe("pass");
+  });
+});
+
+describe("bandForThreshold (threshold-relative cell coloring)", () => {
+  const c: RawConstraint = { metric: "hfr", op: "lte", value: 2.0, enabled: true };
+
+  it("rejects a value the gate would exclude", () => {
+    expect(bandForThreshold(c, 2.01)).toBe("reject");
+  });
+
+  it("marks a passing value near the threshold as watch, including AT it", () => {
+    // A frame exactly at the threshold PASSES (<=), so it must not color red
+    // beside a green Copy badge -- that was the MAD-scaling mismatch.
+    expect(bandForThreshold(c, 2.0)).toBe("watch");
+    expect(bandForThreshold(c, 1.85)).toBe("watch"); // within 8% below
+  });
+
+  it("marks a comfortably passing value ok", () => {
+    expect(bandForThreshold(c, 1.5)).toBe("ok");
+  });
+
+  it("honors gte polarity", () => {
+    const s: RawConstraint = { metric: "stars", op: "gte", value: 100, enabled: true };
+    expect(bandForThreshold(s, 90)).toBe("reject");
+    expect(bandForThreshold(s, 105)).toBe("watch"); // within 8% above
+    expect(bandForThreshold(s, 150)).toBe("ok");
+  });
+
+  it("bands against the group threshold when context is given", () => {
+    const g: RawConstraint = {
+      metric: "hfr",
+      op: "lte",
+      value: 2.67,
+      enabled: true,
+      groupValues: { "T|C|L": 1.85 },
+    };
+    expect(bandForThreshold(g, 2.2, { groupKey: "T|C|L" })).toBe("reject");
+    expect(bandForThreshold(g, 2.2, { groupKey: "T|C|Ha" })).toBe("ok");
+  });
+});
+
+describe("per-session scope", () => {
+  // Two nights with different seeing: the same k derives a different absolute
+  // threshold for each night. Night A: hfr median 2.0 mad 0.3 -> 2.0 + 1.5*1.4826*0.3 = 2.67.
+  // Night B: median 3.0 mad 0.2 -> 3.0 + 1.5*1.4826*0.2 = 3.44.
+  const nightA = detail([frame({ source_relative: "a.fits", median_hfr: 2.9 })], {
+    session_date: "2026-03-15",
+    session_baselines: { "T|C|Ha": { median_hfr: { median: 2.0, mad: 0.3, n: 20 } } },
+  });
+  const nightB = detail([frame({ source_relative: "b.fits", median_hfr: 2.9 })], {
+    session_date: "2026-03-16",
+    session_baselines: { "T|C|Ha": { median_hfr: { median: 3.0, mad: 0.2, n: 20 } } },
+  });
+  const details = { "2026-03-15": nightA, "2026-03-16": nightB };
+  const twoDates = ["2026-03-15", "2026-03-16"];
+  const c: RawConstraint = {
+    metric: "hfr",
+    op: "lte",
+    value: 2.67,
+    enabled: true,
+    scope: "session",
+    k: 1.5,
+  };
+
+  it("derives each night's threshold from that night's own baseline", () => {
+    expect(derivedSessionThreshold(c, nightA, "T|C|Ha")).toBe(2.67);
+    expect(derivedSessionThreshold(c, nightB, "T|C|Ha")).toBe(3.44);
+  });
+
+  it("judges a frame against its OWN session's threshold", () => {
+    const verdicts = computeVerdicts(details, twoDates, config([c]));
+    const a = verdicts.find((v) => v.sessionDate === "2026-03-15")!;
+    const b = verdicts.find((v) => v.sessionDate === "2026-03-16")!;
+    // Same HFR 2.9: cut on the good night (gate 2.67), kept on the soft one (gate 3.44).
+    expect(a.keep).toBe(false);
+    expect(a.failedBy).toBe("HFR 2.90 > 2.67");
+    expect(b.keep).toBe(true);
+  });
+
+  it("re-derives thresholds when k changes", () => {
+    const tighter = { ...c, k: 0.5 }; // night B: 3.0 + 0.5*1.4826*0.2 = 3.15
+    expect(derivedSessionThreshold(tighter, nightB, "T|C|Ha")).toBe(3.15);
+  });
+
+  it("falls back to the pooled threshold, flagged, when a night's group is under MIN_GROUP", () => {
+    const sparse = detail([frame({ source_relative: "s.fits", median_hfr: 2.9 })], {
+      session_date: "2026-03-17",
+      session_baselines: { "T|C|Ha": { median_hfr: { median: 3.0, mad: 0.2, n: 4 } } },
+    });
+    const t = effectiveThreshold(c, { detail: sparse, groupKey: "T|C|Ha" });
+    expect(t).toEqual({ value: 2.67, fallback: true });
+    // And the pooled gate governs the verdict: 2.9 > 2.67 -> cut.
+    const verdicts = computeVerdicts({ "2026-03-17": sparse }, ["2026-03-17"], config([c]));
+    expect(verdicts[0].keep).toBe(false);
+  });
+
+  it("prefers the per-filter pooled seed over the bare value in the fallback", () => {
+    const seeded = { ...c, groupValues: { "T|C|Ha": 3.0 } };
+    const sparse = detail([], {
+      session_baselines: { "T|C|Ha": { median_hfr: { median: 3.0, mad: 0.2, n: 4 } } },
+    });
+    expect(effectiveThreshold(seeded, { detail: sparse, groupKey: "T|C|Ha" })).toEqual({
+      value: 3.0,
+      fallback: true,
+    });
+  });
+
+  it("bands cells against the active per-session threshold", () => {
+    // 2.9 fails night A's 2.67 gate (reject) but clears night B's 3.44 within
+    // the watch margin (3.44 * 0.92 = 3.16 < 2.9 -> ok).
+    expect(bandForThreshold(c, 2.9, { detail: nightA, groupKey: "T|C|Ha" })).toBe("reject");
+    expect(bandForThreshold(c, 2.9, { detail: nightB, groupKey: "T|C|Ha" })).toBe("ok");
+  });
+});
+
+describe("sessionThresholdRows", () => {
+  const nightA = detail(
+    [
+      frame({ source_relative: "a1.fits", median_hfr: 2.0 }),
+      frame({ source_relative: "a2.fits", median_hfr: 2.9 }),
+      frame({ source_relative: "a3.fits" }), // unmeasured: not counted
+    ],
+    {
+      session_date: "2026-03-15",
+      session_baselines: { "T|C|Ha": { median_hfr: { median: 2.0, mad: 0.3, n: 20 } } },
+    },
+  );
+  const nightB = detail([frame({ source_relative: "b1.fits", median_hfr: 2.9 })], {
+    session_date: "2026-03-16",
+    session_baselines: { "T|C|Ha": { median_hfr: { median: 3.0, mad: 0.2, n: 4 } } },
+  });
+  const c: RawConstraint = {
+    metric: "hfr",
+    op: "lte",
+    value: 2.67,
+    enabled: true,
+    scope: "session",
+    k: 1.5,
+  };
+
+  it("emits one row per night+group with threshold, n, and keep/cut counts", () => {
+    const rows = sessionThresholdRows(
+      c,
+      { "2026-03-15": nightA, "2026-03-16": nightB },
+      ["2026-03-15", "2026-03-16"],
+    );
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toMatchObject({
+      date: "2026-03-15",
+      filter: "Ha",
+      threshold: 2.67,
+      fallback: false,
+      n: 2,
+      keep: 1,
+      cut: 1,
+    });
+    // Night B is under MIN_GROUP: pooled fallback, flagged.
+    expect(rows[1]).toMatchObject({
+      date: "2026-03-16",
+      threshold: 2.67,
+      fallback: true,
+      n: 1,
+      keep: 0,
+      cut: 1,
+    });
   });
 });
 
@@ -444,7 +710,7 @@ describe("isUnderRelativePath", () => {
 
 describe("excludedUnderSelectedLevels", () => {
   const verdict = (sessionDate: string, source_relative: string, keep: boolean): FrameVerdict =>
-    ({ frame: frame({ source_relative }), sessionDate, keep, reason: keep ? "pass" : "fail", failedBy: null });
+    ({ frame: frame({ source_relative }), sessionDate, groupKey: "T|C|Ha", keep, reason: keep ? "pass" : "fail", failedBy: null });
 
   it("drops excluded frames that sit outside the session's selected level", () => {
     const verdicts = [
