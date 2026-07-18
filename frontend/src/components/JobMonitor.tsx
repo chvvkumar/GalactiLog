@@ -98,6 +98,7 @@ const JobMonitor: Component = () => {
   // started elsewhere (auto-scan schedule, another tab). While a job runs,
   // the existing 2s pollers own freshness and this tick does nothing.
   const idleTimer = setInterval(() => {
+    if (document.visibilityState !== "visible") return;
     const s = scanStatus().state;
     if (s !== "scanning" && s !== "ingesting") void refreshScanStatus();
     if (rebuildStatus().state !== "running") void refreshRebuildStatus();
