@@ -41,14 +41,7 @@ function verdict(
   over: Partial<FrameRecord> = {},
   failedBy: string | null = null,
 ): FrameVerdict {
-  return {
-    frame: frame(name, over),
-    sessionDate: DATE,
-    groupKey: "TS|Cam|L",
-    keep,
-    reason,
-    failedBy,
-  };
+  return { frame: frame(name, over), sessionDate: DATE, keep, reason, failedBy };
 }
 
 const VERDICTS: FrameVerdict[] = [
@@ -437,123 +430,6 @@ describe("WbppQualityPanel cell banding", () => {
     expect(cells[3].className).toContain("text-theme-text-primary");
     expect(cells[3].className).not.toContain("text-theme-warning");
     expect(cells[3].textContent).toBe("2.80");
-  });
-});
-
-describe("WbppQualityPanel threshold-relative coloring", () => {
-  // With an active HFR gate at 2.0, cells color against THAT gate, not the
-  // baseline MAD bands: above it -> error, at/near it -> warning, clear -> plain.
-  const gated = config([{ metric: "hfr", op: "lte", value: 2.0, enabled: true }]);
-
-  it("colors constrained cells relative to the active threshold", () => {
-    const { container } = setup({
-      config: gated,
-      verdicts: [
-        verdict("over.fits", false, "fail", { timestamp: "2026-07-01T01:00:00", median_hfr: 2.5 }),
-        verdict("at.fits", true, "pass", { timestamp: "2026-07-01T02:00:00", median_hfr: 2.0 }),
-        verdict("clear.fits", true, "pass", { timestamp: "2026-07-01T03:00:00", median_hfr: 1.5 }),
-      ],
-    });
-    const rows = container.querySelectorAll("tbody tr");
-    const hfrCell = (row: number) => rows[row].querySelectorAll("td")[3];
-    expect(hfrCell(0).className).toContain("text-theme-error");
-    // Exactly at the threshold the frame PASSES, so it must read watch, not red.
-    expect(hfrCell(1).className).toContain("text-theme-warning");
-    expect(hfrCell(2).className).toContain("text-theme-text-primary");
-  });
-
-  it("keeps baseline banding for metrics without an active constraint", () => {
-    // Same rows, no constraints: HFR 2.5 vs baseline 2.1/0.37 -> z 1.08 -> neutral.
-    const { container } = setup({
-      verdicts: [verdict("over.fits", true, "pass", { median_hfr: 2.5 })],
-    });
-    expect(container.querySelectorAll("tbody tr td")[3].className).toContain(
-      "text-theme-text-primary",
-    );
-  });
-});
-
-describe("WbppQualityPanel scope control", () => {
-  const seeded: RawConstraint = {
-    metric: "hfr",
-    op: "lte",
-    value: 2.67,
-    enabled: true,
-    groupValues: { "TS|Cam|L": 2.67 },
-    seed: { groupKey: "TS|Cam|L", filter: "L", date: DATE, n: 20, pooledFilters: [] },
-  };
-
-  it("defaults the scope select to Global", () => {
-    const { getByLabelText } = setup({ config: config([seeded]) });
-    expect((getByLabelText("HFR threshold scope") as HTMLSelectElement).value).toBe("global");
-  });
-
-  it("switching to Per-session emits scope, default k, and the polarity op", () => {
-    const { getByLabelText, calls } = setup({ config: config([seeded]) });
-    fireEvent.change(getByLabelText("HFR threshold scope"), { target: { value: "session" } });
-    expect(calls.config[0].constraints[0]).toMatchObject({
-      metric: "hfr",
-      scope: "session",
-      k: 1.5,
-      op: "lte",
-    });
-  });
-
-  it("shows the k input instead of op/value in per-session mode", () => {
-    const perSession: RawConstraint = { ...seeded, scope: "session", k: 1.5 };
-    const { getByLabelText, queryByLabelText } = setup({ config: config([perSession]) });
-    expect((getByLabelText("HFR sigma multiplier") as HTMLInputElement).value).toBe("1.5");
-    expect(queryByLabelText("HFR threshold")).toBe(null);
-    expect(queryByLabelText("HFR comparison")).toBe(null);
-  });
-
-  it("editing a Global value clears the per-filter seeds (manual override)", () => {
-    const { getByLabelText, calls } = setup({ config: config([seeded]) });
-    fireEvent.input(getByLabelText("HFR threshold"), { target: { value: "2.2" } });
-    const emitted = calls.config[0].constraints[0];
-    expect(emitted.value).toBe(2.2);
-    expect(emitted.groupValues).toBeUndefined();
-    expect(emitted.seed).toBeUndefined();
-  });
-
-  it("shows the seed provenance badge for an auto-seeded Global chip", () => {
-    const { container } = setup({ config: config([seeded]) });
-    const text = container.textContent!.replace(/\s+/g, " ");
-    expect(text).toContain("HFR seeded from L");
-    expect(text).toContain(DATE);
-    expect(text).toContain("n=20");
-  });
-
-  it("lists pooled-fallback filters on the badge", () => {
-    const pooled: RawConstraint = {
-      ...seeded,
-      seed: { ...seeded.seed!, pooledFilters: ["OIII", "SII"] },
-    };
-    const { container } = setup({ config: config([pooled]) });
-    expect(container.textContent!.replace(/\s+/g, " ")).toContain("pooled: OIII, SII");
-  });
-
-  it("renders per-session rows with derived threshold and keep/cut counts", () => {
-    const perSession: RawConstraint = { ...seeded, scope: "session", k: 1.5 };
-    // Baseline hfr 2.1/0.37 -> 2.1 + 1.5*1.4826*0.37 = 2.92; frames 2.5 keep, 3.5 cut.
-    const details = {
-      [DATE]: sessionDetail({
-        frames: [
-          frame("k.fits", { median_hfr: 2.5 }),
-          frame("c.fits", { median_hfr: 3.5 }),
-        ],
-      } as Partial<SessionDetail>),
-    };
-    const { container } = setup({
-      config: config([perSession]),
-      sessionDetails: details,
-      verdicts: [verdict("k.fits", true, "pass", { median_hfr: 2.5 })],
-    });
-    const text = container.textContent!.replace(/\s+/g, " ");
-    expect(text).toContain("HFR per session");
-    expect(text).toContain("07-01 L ≤2.92");
-    expect(text).toContain("n=2");
-    expect(text).toContain("keep 1 / cut 1");
   });
 });
 

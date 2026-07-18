@@ -17,55 +17,12 @@ import { madZ, type GroupBaseline, type MetricBaseline, MIN_GROUP } from "../uti
 export type MetricKey = "hfr" | "ecc" | "fwhm" | "stars" | "rms";
 export type ConstraintOp = "lte" | "gte";
 export type BaselineMode = "session" | "rig";
-export type ThresholdScope = "global" | "session";
-
-// The k in `median +/- k * 1.4826 * MAD`: both the seeding default and the
-// per-session multiplier start here. 1.4826 * MAD is the robust sigma estimate,
-// so k reads as "sigmas of slack around the group's own typical frame".
-export const DEFAULT_SESSION_K = 1.5;
-const MAD_SIGMA = 1.4826;
-
-/**
- * Provenance of an auto-seeded constraint: which train+filter group's baseline
- * supplied the pooled `value`, from which night (null when the rig catalog
- * baseline seeded it, which is not tied to a night), and which filters were too
- * small to self-seed and therefore inherited the pooled value.
- */
-export interface ConstraintSeed {
-  groupKey: string;
-  filter: string;
-  date: string | null;
-  n: number;
-  pooledFilters: string[];
-}
 
 export interface RawConstraint {
   metric: MetricKey;
   op: ConstraintOp;
-  /** Pooled/global threshold; the fallback whenever nothing narrower applies. */
   value: number;
   enabled: boolean;
-  /**
-   * "global" (default): one absolute threshold (per filter group while
-   * auto-seeded, see groupValues). "session": each night derives its own
-   * threshold from its own frame distribution via `k`.
-   */
-  scope?: ThresholdScope;
-  /** Per-session multiplier (scope "session"): median +/- k * 1.4826 * MAD. */
-  k?: number;
-  /**
-   * Per-filter-group thresholds keyed by "telescope|camera|filter", present
-   * while the constraint is auto-seeded. A frame is judged against its OWN
-   * group's entry; a group without one falls back to `value`. Cleared when the
-   * user types a value: a manual number is an absolute, cross-filter gate.
-   */
-  groupValues?: Record<string, number>;
-  seed?: ConstraintSeed;
-}
-
-/** The filter component of a "telescope|camera|filter" group key, for labels. */
-export function filterOfGroupKey(groupKey: string): string {
-  return groupKey.split("|")[2] || "—";
 }
 
 export interface QualityConfig {
@@ -134,8 +91,6 @@ export type Verdict = "pass" | "fail" | "unmeasured";
 export interface FrameVerdict {
   frame: FrameRecord;
   sessionDate: string;
-  /** "telescope|camera|filter" group the frame was judged (and colored) under. */
-  groupKey: string;
   keep: boolean;
   reason: Verdict;
   /**
@@ -211,110 +166,14 @@ export function cellZ(
   }
 }
 
-export function passesThreshold(op: ConstraintOp, threshold: number, value: number): boolean {
-  return op === "gte" ? value >= threshold : value <= threshold;
-}
-
 export function constraintPasses(c: RawConstraint, value: number): boolean {
-  return passesThreshold(c.op, c.value, value);
-}
-
-/**
- * Where a frame's verdict is being computed: its session detail and its
- * train+filter group key. Optional throughout -- without it, resolution falls
- * back to the pooled `value`, which is also the correct answer for callers that
- * genuinely have no group (e.g. relaxation math over a whole selection).
- */
-export interface EvalContext {
-  detail: SessionDetail;
-  groupKey: string;
-}
-
-/**
- * A night's own threshold for a session-scoped constraint: that session's
- * per-group baseline, widened by the constraint's k. Null when the group's
- * baseline is missing or too small (n < MIN_GROUP) for a stable MAD -- the
- * caller falls back to the pooled per-filter value and flags it.
- */
-export function derivedSessionThreshold(
-  c: RawConstraint,
-  detail: SessionDetail,
-  groupKey: string,
-): number | null {
-  const b = detail.session_baselines[groupKey]?.[METRIC_DEFS[c.metric].field as string];
-  if (!b) return null;
-  return thresholdFromBaseline(c.metric, b, c.k ?? DEFAULT_SESSION_K);
-}
-
-/** median +/- k * 1.4826 * MAD, rounded to the metric's display decimals. */
-function thresholdFromBaseline(metric: MetricKey, b: MetricBaseline, k: number): number | null {
-  if (b.median == null || b.mad == null || b.n < MIN_GROUP) return null;
-  const def = METRIC_DEFS[metric];
-  const spread = k * MAD_SIGMA * b.mad;
-  const raw = def.betterWhen === "high" ? b.median - spread : b.median + spread;
-  return Math.max(0, Number(raw.toFixed(def.decimals)));
-}
-
-/**
- * The one threshold that judges a given frame, resolved through the whole
- * chain: session-derived (scope "session") -> per-filter-group seed ->
- * pooled `value`. `fallback` is true exactly when a session-scoped constraint
- * could NOT derive a threshold for this night+group (too few frames) and the
- * pooled per-filter number stepped in -- the UI marks those rows.
- */
-export function effectiveThreshold(
-  c: RawConstraint,
-  ctx?: Partial<EvalContext>,
-): { value: number; fallback: boolean } {
-  const grouped = (ctx?.groupKey != null ? c.groupValues?.[ctx.groupKey] : undefined) ?? c.value;
-  if ((c.scope ?? "global") === "session" && ctx?.detail && ctx.groupKey != null) {
-    const t = derivedSessionThreshold(c, ctx.detail, ctx.groupKey);
-    if (t != null) return { value: t, fallback: false };
-    return { value: grouped, fallback: true };
-  }
-  return { value: grouped, fallback: false };
-}
-
-export type ThresholdBand = "ok" | "watch" | "reject";
-
-// The "watch" margin under a threshold, as a fraction of the threshold itself.
-// Threshold-relative by design: the WBPP grid colors a cell by its distance to
-// the gate that would exclude it, so chip and grid speak one language (the raw
-// 3.0-MAD bands of frameQuality.ts grade against a baseline the chip may not
-// even be using).
-export const THRESHOLD_WATCH_MARGIN = 0.08;
-
-/**
- * Cell band relative to the ACTIVE threshold for this frame's context:
- * fails the gate -> "reject"; passes but within the margin of the threshold
- * -> "watch"; comfortably clear -> "ok". A frame sitting exactly at the
- * threshold passes the gate (<=/>=), so it colors "watch", never a red cell
- * beside a green Copy badge.
- */
-export function bandForThreshold(
-  c: RawConstraint,
-  value: number,
-  ctx?: Partial<EvalContext>,
-): ThresholdBand {
-  const t = effectiveThreshold(c, ctx).value;
-  if (!passesThreshold(c.op, t, value)) return "reject";
-  const margin = Math.abs(t) * THRESHOLD_WATCH_MARGIN;
-  const nearGate = c.op === "gte" ? value <= t + margin : value >= t - margin;
-  return nearGate ? "watch" : "ok";
-}
-
-export function thresholdBandToCellClass(band: ThresholdBand): string {
-  switch (band) {
-    case "reject": return "text-theme-error";
-    case "watch":  return "text-theme-warning";
-    default:       return "text-theme-text-primary";
-  }
+  return c.op === "gte" ? value >= c.value : value <= c.value;
 }
 
 /** The failure sentence for a constraint a frame's `actual` violated. */
-function rawFailureText(c: RawConstraint, actual: number, threshold: number): string {
+function rawFailureText(c: RawConstraint, actual: number): string {
   const op = c.op === "gte" ? "<" : ">";
-  return `${METRIC_SHORT[c.metric]} ${formatMetric(c.metric, actual)} ${op} ${formatMetric(c.metric, threshold)}`;
+  return `${METRIC_SHORT[c.metric]} ${formatMetric(c.metric, actual)} ${op} ${formatMetric(c.metric, c.value)}`;
 }
 
 /**
@@ -340,7 +199,6 @@ function rawFailureText(c: RawConstraint, actual: number, threshold: number): st
 export function evaluateRawDetailed(
   frame: FrameRecord,
   constraints: RawConstraint[],
-  ctx?: Partial<EvalContext>,
 ): { verdict: Verdict; failedBy: string | null } {
   const enabled = constraints.filter((c) => c.enabled);
   if (enabled.length === 0) return { verdict: "pass", failedBy: null };
@@ -349,26 +207,17 @@ export function evaluateRawDetailed(
     const v = metricValue(frame, c.metric);
     if (v == null) continue;
     present += 1;
-    const t = effectiveThreshold(c, ctx).value;
-    if (!passesThreshold(c.op, t, v)) {
-      return { verdict: "fail", failedBy: rawFailureText(c, v, t) };
-    }
+    if (!constraintPasses(c, v)) return { verdict: "fail", failedBy: rawFailureText(c, v) };
   }
   return { verdict: present === 0 ? "unmeasured" : "pass", failedBy: null };
 }
 
-export function evaluateRaw(
-  frame: FrameRecord,
-  constraints: RawConstraint[],
-  ctx?: Partial<EvalContext>,
-): Verdict {
-  return evaluateRawDetailed(frame, constraints, ctx).verdict;
+export function evaluateRaw(frame: FrameRecord, constraints: RawConstraint[]): Verdict {
+  return evaluateRawDetailed(frame, constraints).verdict;
 }
 
 // Verdict for every LIGHT frame across the selected dates: evaluateRawDetailed
-// (partial-metric AND over the enabled constraints), each frame judged against
-// its OWN train+filter group's threshold -- and, for session-scoped
-// constraints, its own night's.
+// (partial-metric AND over the enabled constraints).
 export function computeVerdicts(
   sessionDetails: Record<string, SessionDetail>,
   dates: string[],
@@ -379,20 +228,8 @@ export function computeVerdicts(
     const detail = sessionDetails[date];
     if (!detail) continue;
     for (const frame of detail.frames) {
-      const eq = equipmentForFrame(detail, frame);
-      const groupKey = frameGroupKey(frame, eq.telescope, eq.camera);
-      const { verdict, failedBy } = evaluateRawDetailed(frame, config.constraints, {
-        detail,
-        groupKey,
-      });
-      out.push({
-        frame,
-        sessionDate: date,
-        groupKey,
-        keep: verdict === "pass",
-        reason: verdict,
-        failedBy,
-      });
+      const { verdict, failedBy } = evaluateRawDetailed(frame, config.constraints);
+      out.push({ frame, sessionDate: date, keep: verdict === "pass", reason: verdict, failedBy });
     }
   }
   return out;
@@ -411,18 +248,12 @@ export function computeVerdicts(
  * selection's own typical frame -- the user's data supplies the number, not a
  * shipped constant.
  *
- * Seeded PER TRAIN+FILTER GROUP ("telescope|camera|filter"), matching the
- * grading engine's grouping: each group's threshold comes from its OWN
- * baseline (largest-n qualifying night for that group in session mode), stored
- * in `groupValues`, so an Ha-derived number never judges LRGB frames. The
- * pooled `value` -- the single largest-n group across the whole selection --
- * remains the fallback for groups too small to self-seed (n < MIN_GROUP);
- * those filters are listed in `seed.pooledFilters` so the UI can mark them.
- *
- * Guiding RMS has no baseline (as in cellZ), and a selection may have no
- * qualifying baseline at all; both start at 0 with no seeding metadata and the
- * user supplies the value their data implies. Always enabled: enabling is the
- * whole point of asking for a default.
+ * Sessions can span several train+filter groups, each with its own baseline;
+ * a constraint is one number, so the largest-n qualifying group decides (most
+ * evidence wins). Guiding RMS has no baseline (as in cellZ), and a selection
+ * may have no qualifying baseline at all; both start at 0 and the user supplies
+ * the value their data implies. Always enabled: enabling is the whole point of
+ * asking for a default.
  */
 export function defaultConstraintFor(
   metric: MetricKey,
@@ -434,126 +265,30 @@ export function defaultConstraintFor(
   const op: ConstraintOp = def.betterWhen === "high" ? "gte" : "lte";
   const mode: BaselineMode = metric === "stars" ? "session" : config.baseline;
 
-  // Best qualifying baseline PER GROUP (most evidence for that group), plus
-  // every group that appears in the selection at all -- the ones with no
-  // qualifying baseline are the pooled-fallback set.
-  const perGroup = new Map<string, { b: MetricBaseline; date: string }>();
-  const groupsSeen = new Set<string>();
-  const visited = new Set<string>();
+  let best: MetricBaseline | null = null;
+  const seen = new Set<string>();
   for (const date of dates) {
     const detail = sessionDetails[date];
     if (!detail) continue;
     for (const frame of detail.frames) {
       const eq = equipmentForFrame(detail, frame);
-      const key = frameGroupKey(frame, eq.telescope, eq.camera);
-      groupsSeen.add(key);
-      const dateKey = `${date}::${key}`;
-      if (visited.has(dateKey)) continue;
-      visited.add(dateKey);
+      const key = `${date}::${frameGroupKey(frame, eq.telescope, eq.camera)}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
       const group = baselineFor(detail, frame, eq.telescope, eq.camera, mode);
       const b = group?.[def.field as string];
       if (!b || b.median == null || b.mad == null || b.n < MIN_GROUP) continue;
-      const cur = perGroup.get(key);
-      if (!cur || b.n > cur.b.n) perGroup.set(key, { b, date });
+      if (!best || b.n > best.n) best = b;
     }
   }
 
-  // Pooled seed: the single largest-n qualifying group across the selection.
-  let pooledKey: string | null = null;
-  let pooled: { b: MetricBaseline; date: string } | null = null;
-  for (const [key, cand] of perGroup) {
-    if (!pooled || cand.b.n > pooled.b.n) {
-      pooled = cand;
-      pooledKey = key;
-    }
-  }
-  if (!pooled || pooledKey == null) {
+  if (!best || best.median == null || best.mad == null) {
     return { metric, op, value: 0, enabled: true };
   }
-
-  const value = thresholdFromBaseline(metric, pooled.b, DEFAULT_SESSION_K)!;
-  const groupValues: Record<string, number> = {};
-  const pooledFilters: string[] = [];
-  for (const key of groupsSeen) {
-    const cand = perGroup.get(key);
-    const own = cand ? thresholdFromBaseline(metric, cand.b, DEFAULT_SESSION_K) : null;
-    if (own != null) {
-      groupValues[key] = own;
-    } else {
-      groupValues[key] = value;
-      pooledFilters.push(filterOfGroupKey(key));
-    }
-  }
-  const seed: ConstraintSeed = {
-    groupKey: pooledKey,
-    filter: filterOfGroupKey(pooledKey),
-    // Rig-catalog baselines aggregate every night, so no single night seeded them.
-    date: mode === "rig" ? null : pooled.date,
-    n: pooled.b.n,
-    pooledFilters: [...new Set(pooledFilters)].sort(),
-  };
-  return { metric, op, value, enabled: true, groupValues, seed };
-}
-
-/**
- * One row per (night, train+filter group) for the per-session threshold list:
- * the derived (or fallen-back) threshold, how many measured frames it keeps
- * and cuts, and whether the pooled fallback stepped in (n < MIN_GROUP).
- * Counts cover only frames that carry the metric -- unmeasured frames are the
- * verdict table's "Unmeasured" business, not this row's.
- */
-export interface SessionThresholdRow {
-  date: string;
-  groupKey: string;
-  filter: string;
-  threshold: number;
-  fallback: boolean;
-  n: number;
-  keep: number;
-  cut: number;
-}
-
-export function sessionThresholdRows(
-  c: RawConstraint,
-  sessionDetails: Record<string, SessionDetail>,
-  dates: string[],
-): SessionThresholdRow[] {
-  const rows: SessionThresholdRow[] = [];
-  for (const date of dates) {
-    const detail = sessionDetails[date];
-    if (!detail) continue;
-    const byGroup = new Map<string, number[]>();
-    for (const frame of detail.frames) {
-      const v = metricValue(frame, c.metric);
-      if (v == null) continue;
-      const eq = equipmentForFrame(detail, frame);
-      const key = frameGroupKey(frame, eq.telescope, eq.camera);
-      let vals = byGroup.get(key);
-      if (!vals) {
-        vals = [];
-        byGroup.set(key, vals);
-      }
-      vals.push(v);
-    }
-    for (const [groupKey, vals] of byGroup) {
-      const { value: threshold, fallback } = effectiveThreshold(c, { detail, groupKey });
-      const keep = vals.filter((v) => passesThreshold(c.op, threshold, v)).length;
-      rows.push({
-        date,
-        groupKey,
-        filter: filterOfGroupKey(groupKey),
-        threshold,
-        fallback,
-        n: vals.length,
-        keep,
-        cut: vals.length - keep,
-      });
-    }
-  }
-  rows.sort((a, b) =>
-    a.date === b.date ? a.filter.localeCompare(b.filter) : a.date.localeCompare(b.date),
-  );
-  return rows;
+  const spread = 1.5 * 1.4826 * best.mad;
+  const raw = def.betterWhen === "high" ? best.median - spread : best.median + spread;
+  const value = Math.max(0, Number(raw.toFixed(def.decimals)));
+  return { metric, op, value, enabled: true };
 }
 
 // Fits-root-relative paths of every excluded (not-kept) frame. Same domain as
@@ -680,14 +415,7 @@ export function suggestRelaxation(
       floorward,
     );
     if (relaxed === c.value) continue;
-    // The relaxed gate is a manual absolute: per-filter seeds and per-session
-    // derivation are cleared, otherwise the narrower thresholds would keep
-    // excluding frames the offer just promised to free.
-    const next = constraints.map((o) =>
-      o.metric === c.metric
-        ? { ...o, value: relaxed, scope: "global" as const, groupValues: undefined, seed: undefined }
-        : o,
-    );
+    const next = constraints.map((o) => (o.metric === c.metric ? { ...o, value: relaxed } : o));
     const keeps = verdicts.filter((v) => evaluateRaw(v.frame, next) === "pass").length;
     if (keeps === 0) continue;
     if (!best || keeps > best.keeps) {

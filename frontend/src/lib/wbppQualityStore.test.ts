@@ -30,62 +30,6 @@ describe("round trip", () => {
     expect(loadWbppQualityState("Redcat 51")).toEqual(DEFAULT);
   });
 
-  it("round-trips scope, k, per-filter seeds, and provenance", () => {
-    const state: WbppQualityState = {
-      enabled: true,
-      config: {
-        baseline: "session",
-        constraints: [
-          {
-            metric: "hfr",
-            op: "lte",
-            value: 2.67,
-            enabled: true,
-            scope: "session",
-            k: 1.2,
-            groupValues: { "T|C|Ha": 2.67, "T|C|L": 1.85 },
-            seed: {
-              groupKey: "T|C|Ha",
-              filter: "Ha",
-              date: "2026-03-15",
-              n: 30,
-              pooledFilters: ["SII"],
-            },
-          },
-        ],
-      },
-    };
-    saveWbppQualityState("rigA", state);
-    expect(loadWbppQualityState("rigA")).toEqual(state);
-  });
-
-  it("drops malformed extension fields without losing the constraint", () => {
-    localStorage.setItem(
-      KEY("rigA"),
-      JSON.stringify({
-        enabled: true,
-        config: {
-          baseline: "session",
-          constraints: [
-            {
-              metric: "hfr",
-              op: "lte",
-              value: 2.5,
-              enabled: true,
-              scope: "nightly", // unknown scope
-              k: -1, // non-positive
-              groupValues: { "T|C|Ha": "high" }, // non-numeric
-              seed: { filter: "Ha" }, // missing fields
-            },
-          ],
-        },
-      }),
-    );
-    expect(loadWbppQualityState("rigA").config.constraints).toEqual([
-      { metric: "hfr", op: "lte", value: 2.5, enabled: true },
-    ]);
-  });
-
   it("keys null and empty rig under 'default'", () => {
     const state: WbppQualityState = {
       enabled: true,

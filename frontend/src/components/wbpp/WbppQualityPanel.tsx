@@ -12,20 +12,15 @@
 
 import { For, Show, createMemo, createSignal, type JSX } from "solid-js";
 import {
-  DEFAULT_SESSION_K,
   METRIC_DEFS,
-  bandForThreshold,
   cellZ,
   defaultConstraintFor,
   formatMetric,
-  sessionThresholdRows,
-  thresholdBandToCellClass,
   type ConstraintOp,
   type FrameVerdict,
   type MetricKey,
   type QualityConfig,
   type RawConstraint,
-  type ThresholdScope,
 } from "../../lib/wbppQualityFilter";
 import { bandForZ, bandToCellClass } from "../../utils/frameQuality";
 import type { FrameRecord, SessionDetail } from "../../api/types";
@@ -139,41 +134,6 @@ export default function WbppQualityPanel(props: WbppQualityPanelProps): JSX.Elem
   // that still shows its value, and re-clicking re-enables without resetting.
   const disableConstraint = (metric: MetricKey) => patchConstraint(metric, { enabled: false });
 
-  // A typed value is a manual absolute: the per-filter seeds and their
-  // provenance stop applying, or the narrower group thresholds would silently
-  // keep overruling the number the user just entered. Same for a flipped op.
-  const overrideValue = (metric: MetricKey, value: number) =>
-    patchConstraint(metric, { value, groupValues: undefined, seed: undefined });
-  const overrideOp = (metric: MetricKey, op: ConstraintOp) =>
-    patchConstraint(metric, { op, groupValues: undefined, seed: undefined });
-
-  // Switching to per-session locks the comparison to the metric's polarity
-  // (the derived median +/- k*MAD threshold is only meaningful in that
-  // direction) and gives k its default; switching back restores the chip's
-  // absolute-value behavior with whatever value/seeds it still holds.
-  const setScope = (metric: MetricKey, scope: ThresholdScope) => {
-    if (scope === "session") {
-      const op: ConstraintOp = METRIC_DEFS[metric].betterWhen === "high" ? "gte" : "lte";
-      patchConstraint(metric, {
-        scope,
-        op,
-        k: constraintFor(metric)?.k ?? DEFAULT_SESSION_K,
-      });
-    } else {
-      patchConstraint(metric, { scope });
-    }
-  };
-
-  // Global-mode auto-seeded constraints, for the provenance badges.
-  const seededConstraints = () =>
-    props.config.constraints.filter(
-      (c) => c.enabled && (c.scope ?? "global") === "global" && c.seed,
-    );
-
-  // Per-session constraints, for the per-night threshold rows.
-  const sessionScopedConstraints = () =>
-    props.config.constraints.filter((c) => c.enabled && c.scope === "session");
-
   // With the master toggle off every frame copies, so the table and the tally
   // must say so rather than keep grading against a filter that is not running.
   const effectiveKeep = (v: FrameVerdict): boolean => !props.enabled || v.keep;
@@ -224,24 +184,8 @@ export default function WbppQualityPanel(props: WbppQualityPanelProps): JSX.Elem
     });
   });
 
-  /**
-   * Cell color speaks the chip's language: a metric with an ACTIVE constraint
-   * is colored relative to the threshold that actually judges this frame
-   * (its own group's, and in per-session mode its own night's) -- red exactly
-   * when that gate excludes it, amber when it passes within the watch margin.
-   * Metrics without an active constraint keep the baseline MAD-band coloring
-   * the session table uses; there is no gate to disagree with.
-   */
   const cellClass = (v: FrameVerdict, metric: MetricKey): string => {
     const detail = props.sessionDetails[v.sessionDate];
-    const c = constraintFor(metric);
-    if (props.enabled && c?.enabled) {
-      const raw = metricValue(v.frame, metric);
-      if (raw == null) return "text-theme-text-primary";
-      return thresholdBandToCellClass(
-        bandForThreshold(c, raw, { detail, groupKey: v.groupKey }),
-      );
-    }
     if (!detail) return "text-theme-text-primary";
     return bandToCellClass(bandForZ(cellZ(detail, v.frame, metric, props.config.baseline)));
   };
@@ -305,75 +249,32 @@ export default function WbppQualityPanel(props: WbppQualityPanelProps): JSX.Elem
                           {SHORT_LABEL[metric]}
                         </span>
                         <select
-                          aria-label={`${SHORT_LABEL[metric]} threshold scope`}
-                          title="Global: one absolute threshold. Per-session: each night derives its own threshold from its own frames (median + k·1.4826·MAD, per filter)."
+                          aria-label={`${SHORT_LABEL[metric]} comparison`}
                           class="h-5 text-tiny bg-theme-input border border-theme-border rounded-[var(--radius-sm)] text-theme-text-secondary cursor-pointer"
-                          value={active().scope ?? "global"}
+                          value={active().op}
                           onChange={(e) =>
-                            setScope(metric, e.currentTarget.value as ThresholdScope)
+                            patchConstraint(metric, { op: e.currentTarget.value as ConstraintOp })
                           }
                         >
-                          <option value="global">Global</option>
-                          <option value="session">Per-session</option>
+                          <option value="lte">≤</option>
+                          <option value="gte">≥</option>
                         </select>
-                        <Show
-                          when={(active().scope ?? "global") === "global"}
-                          fallback={
-                            <>
-                              {/* Per-session: the one control is k, the sigma
-                                  multiplier every night's threshold derives
-                                  from. The absolute values live in the rows
-                                  under the toolbar. */}
-                              <span class="text-theme-text-tertiary">k</span>
-                              <input
-                                type="number"
-                                aria-label={`${SHORT_LABEL[metric]} sigma multiplier`}
-                                title="Each session's threshold = its own median + k · 1.4826 · MAD (per filter). Lower k cuts harder."
-                                class={`${CHIP_INPUT_CLASS} w-12`}
-                                step={0.1}
-                                min={0.1}
-                                value={active().k ?? DEFAULT_SESSION_K}
-                                onInput={(e) => {
-                                  const n = parseFloat(e.currentTarget.value);
-                                  if (Number.isFinite(n) && n > 0 && n !== active().k)
-                                    patchConstraint(metric, { k: n });
-                                }}
-                                onChange={(e) => {
-                                  if (!Number.isFinite(parseFloat(e.currentTarget.value)))
-                                    e.currentTarget.value = String(active().k ?? DEFAULT_SESSION_K);
-                                }}
-                              />
-                            </>
-                          }
-                        >
-                          <select
-                            aria-label={`${SHORT_LABEL[metric]} comparison`}
-                            class="h-5 text-tiny bg-theme-input border border-theme-border rounded-[var(--radius-sm)] text-theme-text-secondary cursor-pointer"
-                            value={active().op}
-                            onChange={(e) =>
-                              overrideOp(metric, e.currentTarget.value as ConstraintOp)
-                            }
-                          >
-                            <option value="lte">≤</option>
-                            <option value="gte">≥</option>
-                          </select>
-                          <input
-                            type="number"
-                            aria-label={`${SHORT_LABEL[metric]} threshold`}
-                            class={`${CHIP_INPUT_CLASS} w-16`}
-                            step={10 ** -METRIC_DEFS[metric].decimals}
-                            value={active().value}
-                            onInput={(e) => {
-                              const n = parseFloat(e.currentTarget.value);
-                              if (Number.isFinite(n) && n !== active().value)
-                                overrideValue(metric, n);
-                            }}
-                            onChange={(e) => {
-                              if (!Number.isFinite(parseFloat(e.currentTarget.value)))
-                                e.currentTarget.value = String(active().value);
-                            }}
-                          />
-                        </Show>
+                        <input
+                          type="number"
+                          aria-label={`${SHORT_LABEL[metric]} threshold`}
+                          class={`${CHIP_INPUT_CLASS} w-16`}
+                          step={10 ** -METRIC_DEFS[metric].decimals}
+                          value={active().value}
+                          onInput={(e) => {
+                            const n = parseFloat(e.currentTarget.value);
+                            if (Number.isFinite(n) && n !== active().value)
+                              patchConstraint(metric, { value: n });
+                          }}
+                          onChange={(e) => {
+                            if (!Number.isFinite(parseFloat(e.currentTarget.value)))
+                              e.currentTarget.value = String(active().value);
+                          }}
+                        />
                         <button
                           type="button"
                           aria-label={`Disable ${SHORT_LABEL[metric]} constraint`}
@@ -428,69 +329,6 @@ export default function WbppQualityPanel(props: WbppQualityPanelProps): JSX.Elem
             </div>
           </div>
         </div>
-
-        {/* Disclosure strip, fused between toolbar and table: seed provenance
-            for auto-seeded global chips (which filter/night supplied the
-            number), and one row per night+filter for per-session chips. */}
-        <Show
-          when={
-            props.enabled && (seededConstraints().length > 0 || sessionScopedConstraints().length > 0)
-          }
-        >
-          <div class="border border-t-0 border-theme-border bg-theme-elevated px-2.5 py-1.5 space-y-1">
-            <For each={seededConstraints()}>
-              {(c) => (
-                <p class="text-tiny text-theme-text-tertiary">
-                  <span class="font-medium text-theme-text-secondary">{SHORT_LABEL[c.metric]}</span>
-                  {" seeded from "}
-                  <span class="text-theme-text-secondary">{c.seed!.filter}</span>
-                  {" · "}
-                  <span class="tabular-nums">{c.seed!.date ?? "rig catalog"}</span>
-                  {" · n="}
-                  <span class="tabular-nums">{c.seed!.n}</span>
-                  <Show when={c.seed!.pooledFilters.length > 0}>
-                    <span
-                      class="text-theme-warning"
-                      title="These filters have fewer than 8 baseline frames, so they use the pooled threshold instead of their own."
-                    >
-                      {" · pooled: "}
-                      {c.seed!.pooledFilters.join(", ")}
-                    </span>
-                  </Show>
-                </p>
-              )}
-            </For>
-            <For each={sessionScopedConstraints()}>
-              {(c) => (
-                <div class="flex items-baseline flex-wrap gap-x-3 gap-y-0.5 text-tiny">
-                  <span class="font-medium text-theme-text-secondary">
-                    {SHORT_LABEL[c.metric]} per session
-                  </span>
-                  <For each={sessionThresholdRows(c, props.sessionDetails, selectedDates())}>
-                    {(row) => (
-                      <span
-                        class="tabular-nums whitespace-nowrap"
-                        classList={{
-                          "text-theme-warning": row.fallback,
-                          "text-theme-text-tertiary": !row.fallback,
-                        }}
-                        title={
-                          row.fallback
-                            ? `${row.date} ${row.filter}: fewer than 8 measured frames in this group, so the pooled global threshold applies.`
-                            : `${row.date} ${row.filter}: threshold derived from this night's own frames.`
-                        }
-                      >
-                        {row.date.slice(5)} {row.filter} {OP_GLYPH[c.op]}
-                        {formatMetric(c.metric, row.threshold)}
-                        {row.fallback ? "*" : ""} · n={row.n} · keep {row.keep} / cut {row.cut}
-                      </span>
-                    )}
-                  </For>
-                </div>
-              )}
-            </For>
-          </div>
-        </Show>
 
         {/* Preview table, fused under the toolbar. The wrap is the scroller so
             the sticky header pins inside it; the thead cells carry a solid
