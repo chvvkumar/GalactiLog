@@ -93,16 +93,58 @@ describe("wbppCopyJob lifecycle", () => {
     expect(vi.mocked(showToast)).toHaveBeenCalled();
   });
 
-  it("ignores a second start while a copy is running", async () => {
+  it("ignores a second start while a copy is running, but toasts instead of failing silently", async () => {
     let resolveCopy!: (r: { copied: number; destinationName: string }) => void;
     vi.mocked(runBrowserCopy).mockImplementation(
       () => new Promise((res) => { resolveCopy = res; }),
     );
     const p = startWbppCopy(args);
-    await startWbppCopy(args);
+    const doneBefore = wbppCopyDone();
+    const totalBefore = wbppCopyTotal();
+
+    await startWbppCopy({ ...args, targetName: "Different Target" });
+
     expect(vi.mocked(runBrowserCopy)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(showToast)).toHaveBeenCalledWith(
+      expect.stringContaining("already running"),
+      "error",
+      0,
+    );
+    // State from the in-flight copy must survive the rejected second call, not
+    // be reset by it.
+    expect(wbppCopyRunning()).toBe(true);
+    expect(wbppCopyDone()).toBe(doneBefore);
+    expect(wbppCopyTotal()).toBe(totalBefore);
+    expect(wbppCopyActiveJob()?.label).toBe("WBPP copy: M31");
+
     resolveCopy({ copied: 0, destinationName: "d" });
     await p;
+  });
+
+  it("keeps state alive independent of any component: reattach reads the same live store", async () => {
+    // Simulates the modal unmounting mid-copy and a later remount (or the job
+    // monitor, which never mounts the modal at all) reading the same
+    // module-level store -- there is nothing component-local to lose.
+    let resolveCopy!: (r: { copied: number; destinationName: string }) => void;
+    vi.mocked(runBrowserCopy).mockImplementation((_root, _dest, opts) => {
+      opts.onProgress(3, 9, "in progress");
+      return new Promise((res) => { resolveCopy = res; });
+    });
+
+    const p = startWbppCopy(args);
+    expect(wbppCopyRunning()).toBe(true);
+
+    // "Unmount": nothing in the store references a component, so there is
+    // nothing to tear down. A later "reattach" is just reading the same
+    // accessors again.
+    expect(wbppCopyRunning()).toBe(true);
+    expect(wbppCopyDone()).toBe(3);
+    expect(wbppCopyTotal()).toBe(9);
+    expect(wbppCopyActiveJob()).not.toBeNull();
+
+    resolveCopy({ copied: 9, destinationName: "d" });
+    await p;
+    expect(wbppCopyRunning()).toBe(false);
   });
 
   it("stopWbppCopy aborts the in-flight signal", async () => {

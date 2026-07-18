@@ -855,6 +855,51 @@ describe("WbppExportModal settings", () => {
   });
 });
 
+describe("WbppExportModal reattach to a live copy", () => {
+  // The copy lives in the module-level wbppCopyJob store precisely so it
+  // survives the modal closing; a later remount (e.g. reopening the export
+  // dialog) must render the store's live state rather than starting fresh.
+  it("renders progress from the store immediately on mount, without the modal itself starting the copy", async () => {
+    let resolveCopy!: (r: { copied: number; destinationName: string }) => void;
+    postMock.mockClear();
+    const wbppBrowserCopy = await import("../lib/wbppBrowserCopy");
+    vi.spyOn(wbppBrowserCopy, "runBrowserCopy").mockImplementation(
+      ((_root: any, _dest: any, opts: any) => {
+        opts.onProgress(4, 8, "reattach.fits");
+        return new Promise((res) => {
+          resolveCopy = res;
+        });
+      }) as any,
+    );
+    const { startWbppCopy, stopWbppCopy } = await import("../store/wbppCopyJob");
+
+    // Drive the store to "running" the same way a previous, now-unmounted
+    // instance of this modal would have, via startWbppCopy directly rather
+    // than through any component.
+    const copyPromise = startWbppCopy({
+      rootHandle: {},
+      destHandle: {},
+      operations: [],
+      exclusions: [],
+      excludedSourceRelatives: [],
+      targetName: "M31",
+    });
+
+    // A fresh mount of the modal -- simulating "reopen" -- must reflect the
+    // in-flight copy immediately, with no click of its own required.
+    renderModal();
+    expect(bodyText()).toMatch(/4|8/);
+    const bar = document.body.querySelector(".bg-theme-accent.transition-all") as HTMLElement;
+    expect(bar).not.toBe(null);
+    expect(bar.style.width).toBe("50%");
+
+    // Cleanup: stop the copy so it does not leak into later tests.
+    stopWbppCopy();
+    resolveCopy({ copied: 4, destinationName: "d" });
+    await copyPromise;
+  });
+});
+
 describe("WbppExportModal folder rows", () => {
   it("offers a manual preview only while no library root allows the auto-preview", () => {
     // With a root set the modal previews on mount; without one it must not fire

@@ -41,7 +41,12 @@ export interface StartWbppCopyArgs {
 }
 
 export async function startWbppCopy(args: StartWbppCopyArgs): Promise<void> {
-  if (running()) return;
+  if (running()) {
+    // The modal has its own pre-check, but future callers (e.g. the job
+    // monitor) have no such guard, so a second start must not fail silently.
+    showToast("A WBPP copy is already running. Stop it first.", "error", 0);
+    return;
+  }
   setError(null);
   setFinished(null);
   setDone(0);
