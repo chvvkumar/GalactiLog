@@ -154,6 +154,20 @@
         "title": "ActivityItem",
         "type": "object"
       },
+      "ActivitySeenResponse": {
+        "properties": {
+          "activity_seen_at": {
+            "format": "date-time",
+            "title": "Activity Seen At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "activity_seen_at"
+        ],
+        "title": "ActivitySeenResponse",
+        "type": "object"
+      },
       "ActivitySettingsResponse": {
         "properties": {
           "activity_retention_days": {
@@ -921,11 +935,38 @@
       },
       "CompareResponse": {
         "properties": {
+          "comparable": {
+            "default": true,
+            "title": "Comparable",
+            "type": "boolean"
+          },
           "group_a": {
             "$ref": "#/components/schemas/CompareGroupStats"
           },
           "group_b": {
             "$ref": "#/components/schemas/CompareGroupStats"
+          },
+          "median_hfr_arcsec_a": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Median Hfr Arcsec A"
+          },
+          "median_hfr_arcsec_b": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Median Hfr Arcsec B"
           },
           "metric": {
             "title": "Metric",
@@ -1416,6 +1457,17 @@
             ],
             "title": "Avg Hfr"
           },
+          "avg_hfr_arcsec": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Hfr Arcsec"
+          },
           "best_hfr": {
             "anyOf": [
               {
@@ -1427,12 +1479,53 @@
             ],
             "title": "Best Hfr"
           },
+          "best_hfr_arcsec": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Best Hfr Arcsec"
+          },
+          "ecc_excluded_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ecc Excluded Count"
+          },
+          "hfr_arcsec_hist": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/HfrBucket"
+            },
+            "title": "Hfr Arcsec Hist",
+            "type": "array"
+          },
           "hfr_distribution": {
             "items": {
               "$ref": "#/components/schemas/HfrBucket"
             },
             "title": "Hfr Distribution",
             "type": "array"
+          },
+          "unscaled_frame_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unscaled Frame Count"
           }
         },
         "required": [
@@ -1979,6 +2072,17 @@
               }
             ],
             "title": "Median Fwhm"
+          },
+          "median_fwhm_arcsec": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Median Fwhm Arcsec"
           },
           "median_guiding_rms": {
             "anyOf": [
@@ -3483,6 +3587,18 @@
       },
       "MeResponse": {
         "properties": {
+          "activity_seen_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Activity Seen At"
+          },
           "id": {
             "format": "uuid",
             "title": "Id",
@@ -6159,6 +6275,17 @@
             "title": "Frames",
             "type": "array"
           },
+          "fwhm_arcsec": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fwhm Arcsec"
+          },
           "gain": {
             "anyOf": [
               {
@@ -6169,6 +6296,17 @@
               }
             ],
             "title": "Gain"
+          },
+          "hfr_arcsec": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hfr Arcsec"
           },
           "insights": {
             "default": [],
@@ -6595,10 +6733,32 @@
             "title": "Frame Count",
             "type": "integer"
           },
+          "fwhm_arcsec": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fwhm Arcsec"
+          },
           "has_notes": {
             "default": false,
             "title": "Has Notes",
             "type": "boolean"
+          },
+          "hfr_arcsec": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hfr Arcsec"
           },
           "integration_seconds": {
             "title": "Integration Seconds",
@@ -7469,6 +7629,17 @@
             ],
             "title": "Avg Hfr"
           },
+          "avg_hfr_arcsec": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Hfr Arcsec"
+          },
           "catalog_memberships": {
             "default": [],
             "items": {
@@ -7509,6 +7680,17 @@
               }
             ],
             "title": "Distance Pc"
+          },
+          "ecc_excluded_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ecc Excluded Count"
           },
           "equipment": {
             "items": {
@@ -8963,6 +9145,56 @@
           }
         },
         "summary": "List Activity",
+        "tags": [
+          "activity"
+        ]
+      }
+    },
+    "/api/activity/seen": {
+      "post": {
+        "description": "Record that the current user has seen the activity error feed.\n\nAny authenticated role may call this: it mutates only the caller's own\nrow. get_current_user and this endpoint share the request's get_session\ndependency (FastAPI caches per-request), so mutating the loaded user and\ncommitting persists it, the same pattern change_password uses in auth.py.",
+        "operationId": "mark_activity_seen_api_activity_seen_post",
+        "parameters": [
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActivitySeenResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Mark Activity Seen",
         "tags": [
           "activity"
         ]

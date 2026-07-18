@@ -31,6 +31,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/activity/seen": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mark Activity Seen
+         * @description Record that the current user has seen the activity error feed.
+         *
+         *     Any authenticated role may call this: it mutates only the caller's own
+         *     row. get_current_user and this endpoint share the request's get_session
+         *     dependency (FastAPI caches per-request), so mutating the loaded user and
+         *     committing persists it, the same pattern change_password uses in auth.py.
+         */
+        post: operations["mark_activity_seen_api_activity_seen_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/analysis/boxplot": {
         parameters: {
             query?: never;
@@ -2262,6 +2287,14 @@ export interface components {
              */
             timestamp: string;
         };
+        /** ActivitySeenResponse */
+        ActivitySeenResponse: {
+            /**
+             * Activity Seen At
+             * Format: date-time
+             */
+            activity_seen_at: string;
+        };
         /** ActivitySettingsResponse */
         ActivitySettingsResponse: {
             /** Activity Retention Days */
@@ -2569,8 +2602,17 @@ export interface components {
         };
         /** CompareResponse */
         CompareResponse: {
+            /**
+             * Comparable
+             * @default true
+             */
+            comparable: boolean;
             group_a: components["schemas"]["CompareGroupStats"];
             group_b: components["schemas"]["CompareGroupStats"];
+            /** Median Hfr Arcsec A */
+            median_hfr_arcsec_a?: number | null;
+            /** Median Hfr Arcsec B */
+            median_hfr_arcsec_b?: number | null;
             /** Metric */
             metric: string;
             /** Mode */
@@ -2735,10 +2777,23 @@ export interface components {
             avg_eccentricity: number | null;
             /** Avg Hfr */
             avg_hfr: number | null;
+            /** Avg Hfr Arcsec */
+            avg_hfr_arcsec?: number | null;
             /** Best Hfr */
             best_hfr: number | null;
+            /** Best Hfr Arcsec */
+            best_hfr_arcsec?: number | null;
+            /** Ecc Excluded Count */
+            ecc_excluded_count?: number | null;
+            /**
+             * Hfr Arcsec Hist
+             * @default []
+             */
+            hfr_arcsec_hist: components["schemas"]["HfrBucket"][];
             /** Hfr Distribution */
             hfr_distribution: components["schemas"]["HfrBucket"][];
+            /** Unscaled Frame Count */
+            unscaled_frame_count?: number | null;
         };
         /** DbSummaryResponse */
         DbSummaryResponse: {
@@ -2926,6 +2981,8 @@ export interface components {
             integration_seconds: number;
             /** Median Fwhm */
             median_fwhm?: number | null;
+            /** Median Fwhm Arcsec */
+            median_fwhm_arcsec?: number | null;
             /** Median Guiding Rms */
             median_guiding_rms?: number | null;
             /** Name */
@@ -3447,6 +3504,8 @@ export interface components {
         };
         /** MeResponse */
         MeResponse: {
+            /** Activity Seen At */
+            activity_seen_at?: string | null;
             /**
              * Id
              * Format: uuid
@@ -4368,8 +4427,12 @@ export interface components {
              * @default []
              */
             frames: components["schemas"]["FrameRecord"][];
+            /** Fwhm Arcsec */
+            fwhm_arcsec?: number | null;
             /** Gain */
             gain?: number | null;
+            /** Hfr Arcsec */
+            hfr_arcsec?: number | null;
             /**
              * Insights
              * @default []
@@ -4487,11 +4550,15 @@ export interface components {
             filters_used: string[];
             /** Frame Count */
             frame_count: number;
+            /** Fwhm Arcsec */
+            fwhm_arcsec?: number | null;
             /**
              * Has Notes
              * @default false
              */
             has_notes: boolean;
+            /** Hfr Arcsec */
+            hfr_arcsec?: number | null;
             /** Integration Seconds */
             integration_seconds: number;
             /** Median Detected Stars */
@@ -4769,6 +4836,8 @@ export interface components {
             avg_guiding_rms_arcsec?: number | null;
             /** Avg Hfr */
             avg_hfr?: number | null;
+            /** Avg Hfr Arcsec */
+            avg_hfr_arcsec?: number | null;
             /**
              * Catalog Memberships
              * @default []
@@ -4780,6 +4849,8 @@ export interface components {
             dec?: number | null;
             /** Distance Pc */
             distance_pc?: number | null;
+            /** Ecc Excluded Count */
+            ecc_excluded_count?: number | null;
             /** Equipment */
             equipment: string[];
             /** Filters Used */
@@ -5290,6 +5361,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["app__schemas__common__StatusResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    mark_activity_seen_api_activity_seen_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ActivitySeenResponse"];
                 };
             };
             /** @description Validation Error */
