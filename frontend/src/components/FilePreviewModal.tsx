@@ -1,12 +1,28 @@
-import { createSignal, Show, onCleanup, onMount, createEffect, createMemo } from "solid-js";
+import { createSignal, Show, For, onCleanup, onMount, createEffect, createMemo } from "solid-js";
 import { useSettingsContext } from "./SettingsProvider";
 import HelpPopover from "./HelpPopover";
 import Dialog from "./Dialog";
+
+// One pill in the optional per-file metadata strip. The modal renders whatever
+// it is handed and knows nothing about where the values came from; callers own
+// the semantics (and any color classes) entirely.
+export type PreviewMetaEntry = {
+  label: string;
+  value: string;
+  /** Color class for the value; defaults to the modal's neutral text. */
+  class?: string;
+  /** Renders a trailing ✕ after the value (e.g. a failed quality gate). */
+  marked?: boolean;
+  /** Tooltip on the pill. */
+  title?: string;
+};
 
 export type PreviewFile = {
   imageId: string;
   filePath: string;
   thumbnailUrl?: string | null;
+  /** Optional metadata strip shown under the file path; updates on navigation. */
+  meta?: PreviewMetaEntry[];
 };
 
 type Props = {
@@ -253,6 +269,27 @@ export function FilePreviewModal(props: Props) {
           <div id="file-preview-title" class="mb-2 pr-8 text-xs text-neutral-400 truncate" title={current().filePath}>
             {current().filePath}
           </div>
+
+          <Show when={(current().meta?.length ?? 0) > 0}>
+            <div class="mb-2 flex flex-wrap items-center gap-1.5 pr-8">
+              <For each={current().meta}>
+                {(m) => (
+                  <span
+                    class="inline-flex items-baseline gap-1 rounded-full bg-neutral-800 px-2 py-0.5 text-xs whitespace-nowrap cursor-default"
+                    title={m.title}
+                  >
+                    <span class="text-neutral-500">{m.label}</span>
+                    <span class={`tabular-nums ${m.class ?? "text-neutral-200"}`}>
+                      {m.value}
+                      <Show when={m.marked}>
+                        <span class="pl-0.5 text-[9px] align-middle">✕</span>
+                      </Show>
+                    </span>
+                  </span>
+                )}
+              </For>
+            </div>
+          </Show>
 
           <div
             ref={viewportEl}

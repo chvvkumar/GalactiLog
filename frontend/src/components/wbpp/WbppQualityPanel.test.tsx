@@ -1,5 +1,14 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { render, fireEvent } from "@solidjs/testing-library";
+
+// FilePreviewModal (opened from the file column) reads the preview resolution
+// from the settings context; stub it so tests need no provider tree.
+vi.mock("../SettingsProvider", () => ({
+  useSettingsContext: () => ({
+    settings: () => ({ general: { preview_resolution: 2400 } }),
+  }),
+}));
+
 import WbppQualityPanel from "./WbppQualityPanel";
 import {
   emptyConstraintFor,
@@ -21,6 +30,9 @@ function frame(name: string, over: Partial<FrameRecord> = {}): FrameRecord {
   return {
     file_name: name,
     filter_used: "L",
+    image_id: `id-${name}`,
+    file_path: `/data/lights/${name}`,
+    thumbnail_url: null,
     source_relative: `lights/${name}`,
     timestamp: "2026-07-01T00:00:00",
     median_hfr: null,
@@ -521,6 +533,60 @@ describe("WbppQualityPanel verdict column", () => {
     for (const td of Array.from(container.querySelectorAll("tbody td[title]"))) {
       expect((td as HTMLElement).title).not.toContain("HFR");
     }
+  });
+});
+
+describe("WbppQualityPanel file preview", () => {
+  const dialog = () => document.querySelector('[role="dialog"]') as HTMLElement | null;
+
+  function openRow(container: HTMLElement, name: string) {
+    const link = Array.from(container.querySelectorAll("tbody td button")).find(
+      (b) => b.textContent === name,
+    ) as HTMLButtonElement;
+    expect(link).toBeTruthy();
+    fireEvent.click(link);
+    return dialog()!;
+  }
+
+  it("renders the file name as a preview link", () => {
+    const { container } = setup();
+    const cells = container.querySelectorAll("tbody tr td:nth-last-child(2)");
+    for (const td of Array.from(cells)) {
+      expect(td.querySelector("button")).toBeTruthy();
+    }
+    expect(fileColumn(container)).toEqual(["a.fits", "b.fits", "c.fits"]);
+  });
+
+  it("opens the preview modal with the row's verdict and metric strip", () => {
+    const { container } = setup();
+    const d = openRow(container, "b.fits");
+    expect(d.textContent).toContain("/data/lights/b.fits");
+    // Verdict pill carries the failure detail in its tooltip.
+    expect(d.textContent).toContain("Exclude");
+    const verdictPill = Array.from(d.querySelectorAll("span[title]")).find((s) =>
+      (s as HTMLElement).title.startsWith("Exclude"),
+    ) as HTMLElement;
+    expect(verdictPill.title).toContain("HFR 2.80 > 2.00");
+    // Metric, filter and session pills mirror the table row.
+    expect(d.textContent).toContain("Filter");
+    expect(d.textContent).toContain("HFR");
+    expect(d.textContent).toContain(DATE);
+    fireEvent.click(d.querySelector('button[class*="absolute"]')!);
+    expect(dialog()).toBe(null);
+  });
+
+  it("navigates all rows in the current sort order from the clicked index", () => {
+    const { container } = setup();
+    const d = openRow(container, "b.fits");
+    // Chronological default order: a, b, c -> b.fits is 2 of 3.
+    expect(d.textContent).toContain("2 / 3");
+  });
+
+  it("shows Copy on every row's preview while the master toggle is off", () => {
+    const { container } = setup({ enabled: false });
+    const d = openRow(container, "b.fits");
+    expect(d.textContent).toContain("Copy");
+    expect(d.textContent).not.toContain("Exclude");
   });
 });
 
