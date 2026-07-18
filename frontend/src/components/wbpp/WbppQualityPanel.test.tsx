@@ -1,23 +1,28 @@
 import { describe, it, expect } from "vitest";
 import { render, fireEvent } from "@solidjs/testing-library";
-import WbppQualityPanel, { type QualityConfig } from "./WbppQualityPanel";
-import type { DisplaySettings, FrameRecord, SessionDetail } from "../../api/types";
-import type { FrameVerdict } from "../../lib/wbppQualityFilter";
-
-const DEFAULT_CONFIG: QualityConfig = {
-  mode: "score",
-  scoreThreshold: 60,
-  rawConstraints: [],
-  baseline: "session",
-};
+import WbppQualityPanel from "./WbppQualityPanel";
+import {
+  defaultConstraintFor,
+  type FrameVerdict,
+  type QualityConfig,
+  type RawConstraint,
+} from "../../lib/wbppQualityFilter";
+import type { FrameRecord, SessionDetail } from "../../api/types";
 
 const DATE = "2026-07-01";
+
+const DEFAULT_CONFIG: QualityConfig = { baseline: "session", constraints: [] };
+
+function config(constraints: RawConstraint[], over: Partial<QualityConfig> = {}): QualityConfig {
+  return { ...DEFAULT_CONFIG, constraints, ...over };
+}
 
 function frame(name: string, over: Partial<FrameRecord> = {}): FrameRecord {
   return {
     file_name: name,
     filter_used: "L",
     source_relative: `lights/${name}`,
+    timestamp: "2026-07-01T00:00:00",
     median_hfr: null,
     eccentricity: null,
     fwhm: null,
@@ -33,20 +38,17 @@ function verdict(
   name: string,
   keep: boolean,
   reason: FrameVerdict["reason"],
-  score: number | null,
   over: Partial<FrameRecord> = {},
   failedBy: string | null = null,
 ): FrameVerdict {
-  return { frame: frame(name, over), sessionDate: DATE, score, keep, reason, failedBy };
+  return { frame: frame(name, over), sessionDate: DATE, keep, reason, failedBy };
 }
 
 const VERDICTS: FrameVerdict[] = [
-  verdict("a.fits", true, "pass", 82),
-  verdict("b.fits", false, "fail", 31),
-  verdict("c.fits", false, "unmeasured", null),
+  verdict("a.fits", true, "pass", { timestamp: "2026-07-01T01:00:00" }),
+  verdict("b.fits", false, "fail", { timestamp: "2026-07-01T02:00:00" }, "HFR 2.80 > 2.00"),
+  verdict("c.fits", false, "unmeasured", { timestamp: "2026-07-01T03:00:00" }),
 ];
-
-const TOTALS = { total: 3, copy: 1, fail: 1, unmeasured: 1 };
 
 // A baseline group needs n >= MIN_GROUP (8) and a non-zero mad, else madZ
 // returns null and every cell bands to neutral.
@@ -55,18 +57,18 @@ function baseline(median: number, mad: number) {
 }
 
 // Key format is "telescope|camera|filter"; the frames above use filter "L".
+// One frame in the detail so defaultConstraintFor has a train to resolve.
 function sessionDetail(over: Partial<SessionDetail> = {}): SessionDetail {
   return {
     equipment: { telescope: "TS", camera: "Cam" },
     rigs: [],
-    frames: [],
+    frames: [frame("seed.fits")],
     session_baselines: {
       "TS|Cam|L": {
         median_hfr: baseline(2.1, 0.37),
         eccentricity: baseline(0.5, 0.05),
         fwhm: baseline(3.0, 0.4),
         detected_stars: baseline(100, 10),
-        adu_median: baseline(1000, 100),
       },
     },
     rig_baselines: {},
@@ -76,692 +78,402 @@ function sessionDetail(over: Partial<SessionDetail> = {}): SessionDetail {
 
 const DETAILS: Record<string, SessionDetail> = { [DATE]: sessionDetail() };
 
-// All six metric groups must be present; the override flips one group or field.
-function displaySettings(over: Record<string, unknown> = {}): DisplaySettings {
-  const group = (fields: Record<string, boolean>) => ({ enabled: true, fields });
-  return {
-    quality: group({ hfr: true, eccentricity: true, fwhm: true, detected_stars: true }),
-    guiding: group({ rms_total: true }),
-    adu: group({ median: true }),
-    focuser: group({}),
-    mount: group({}),
-    weather: group({}),
-    ...over,
-  } as DisplaySettings;
-}
-
 function setup(over: Partial<Parameters<typeof WbppQualityPanel>[0]> = {}) {
   const calls: { enabled: boolean[]; config: QualityConfig[] } = { enabled: [], config: [] };
   const result = render(() => (
     <WbppQualityPanel
-      enabled={over.enabled ?? false}
+      enabled={over.enabled ?? true}
       onEnabledChange={(on) => calls.enabled.push(on)}
       config={over.config ?? DEFAULT_CONFIG}
       onConfigChange={(next) => calls.config.push(next)}
       verdicts={over.verdicts ?? VERDICTS}
-      totals={over.totals ?? TOTALS}
       loading={over.loading ?? false}
       sessionDetails={over.sessionDetails ?? DETAILS}
-      displaySettings={"displaySettings" in over ? over.displaySettings : displaySettings()}
     />
   ));
   return { ...result, calls };
 }
 
 function headers(container: HTMLElement): string[] {
-  return Array.from(container.querySelectorAll("thead th")).map((th) => th.textContent!);
+  // Strip the sort arrow glyphs so the labels compare clean.
+  return Array.from(container.querySelectorAll("thead th")).map((th) =>
+    th.textContent!.replace(/[▲▼]/g, "").trim(),
+  );
 }
 
-describe("WbppQualityPanel collapsed", () => {
-  it("renders only the checkbox row when disabled", () => {
-    const { container, getByLabelText } = setup({ enabled: false });
-    expect(container.textContent).toContain("Skip low-quality light frames");
-    expect(container.querySelector("select")).toBe(null);
-    expect(container.querySelector("table")).toBe(null);
-    expect(container.textContent).not.toContain("Baseline");
-    expect(container.textContent).not.toContain("Keep ≥");
-    expect(container.textContent).not.toContain("Calibration frames are always copied");
-    const box = getByLabelText("Skip low-quality light frames") as HTMLInputElement;
+function headerFor(container: HTMLElement, label: string): HTMLElement {
+  return Array.from(container.querySelectorAll("thead th")).find((th) =>
+    th.textContent!.startsWith(label),
+  ) as HTMLElement;
+}
+
+function fileColumn(container: HTMLElement): string[] {
+  return Array.from(container.querySelectorAll("tbody tr td:first-child")).map(
+    (td) => td.textContent!,
+  );
+}
+
+// The dashed "+ <label>" chip for a metric with no (enabled) constraint.
+function ghostChip(container: HTMLElement, label: string): HTMLButtonElement {
+  return Array.from(container.querySelectorAll("button")).find(
+    (b) => b.textContent!.includes("+") && b.textContent!.includes(label),
+  ) as HTMLButtonElement;
+}
+
+describe("WbppQualityPanel enable checkbox", () => {
+  it("reflects the enabled prop and emits changes both ways", () => {
+    const off = setup({ enabled: false });
+    const box = off.getByLabelText("Enable filters") as HTMLInputElement;
     expect(box.checked).toBe(false);
-  });
-
-  it("calls onEnabledChange when the checkbox is ticked", () => {
-    const { getByLabelText, calls } = setup({ enabled: false });
-    fireEvent.click(getByLabelText("Skip low-quality light frames"));
-    expect(calls.enabled).toEqual([true]);
-  });
-
-  it("calls onEnabledChange with false when unticked", () => {
-    const { getByLabelText, calls } = setup({ enabled: true });
-    const box = getByLabelText("Skip low-quality light frames") as HTMLInputElement;
-    expect(box.checked).toBe(true);
     fireEvent.click(box);
-    expect(calls.enabled).toEqual([false]);
+    expect(off.calls.enabled).toEqual([true]);
+
+    const on = setup({ enabled: true });
+    const onBox = on.getByLabelText("Enable filters") as HTMLInputElement;
+    expect(onBox.checked).toBe(true);
+    fireEvent.click(onBox);
+    expect(on.calls.enabled).toEqual([false]);
+  });
+
+  it("keeps the checkbox live while the rest of the toolbar is inert", () => {
+    const { container, getByLabelText } = setup({ enabled: false });
+    const inert = container.querySelector(".pointer-events-none") as HTMLElement;
+    expect(inert).not.toBe(null);
+    expect(inert.className).toContain("opacity-50");
+    // The checkbox sits outside the inert wrapper; the chips sit inside it.
+    expect(inert.contains(getByLabelText("Enable filters"))).toBe(false);
+    expect(inert.contains(ghostChip(container, "HFR"))).toBe(true);
   });
 });
 
-describe("WbppQualityPanel expanded", () => {
-  it("renders the mode select with both modes", () => {
-    const { getByLabelText } = setup({ enabled: true });
-    const select = getByLabelText("Mode") as HTMLSelectElement;
-    expect(select.value).toBe("score");
-    expect(Array.from(select.options).map((o) => o.value)).toEqual(["score", "raw"]);
-    expect(select.textContent).toContain("Composite score");
-    expect(select.textContent).toContain("Raw metrics (AND)");
+describe("WbppQualityPanel chips toolbar", () => {
+  it("renders five ghost chips and none of the old controls", () => {
+    const { container, queryByText, queryByLabelText } = setup();
+    for (const label of ["HFR", "Ecc", "FWHM", "Stars", "RMS"]) {
+      expect(ghostChip(container, label)).toBeTruthy();
+    }
+    // No Mode dropdown, no score threshold, no "+ Add constraint" link.
+    expect(queryByLabelText("Mode")).toBe(null);
+    expect(queryByLabelText("Score threshold")).toBe(null);
+    expect(queryByText("+ Add constraint")).toBe(null);
   });
 
-  it("renders the threshold controls and the default-60 hint in score mode", () => {
-    const { container, getByLabelText } = setup({ enabled: true });
-    expect((getByLabelText("Score threshold") as HTMLInputElement).value).toBe("60");
-    const range = getByLabelText("Keep score at or above") as HTMLInputElement;
-    expect(range.type).toBe("range");
-    expect(range.value).toBe("60");
-    expect(container.textContent).toContain(
-      "Default 60 matches the green row cutoff on the session table.",
-    );
+  it("appends defaultConstraintFor's constraint when a ghost chip is clicked", () => {
+    const { container, calls } = setup();
+    fireEvent.click(ghostChip(container, "HFR"));
+    expect(calls.config.length).toBe(1);
+    // The chip must emit exactly what the lib derives from the same details,
+    // dates and config the panel was given -- not a hand-rolled default.
+    const expected = defaultConstraintFor("hfr", DETAILS, [DATE], DEFAULT_CONFIG);
+    expect(calls.config[0]).toEqual({ ...DEFAULT_CONFIG, constraints: [expected] });
+    expect(calls.config[0].constraints[0].enabled).toBe(true);
+    expect(calls.config[0].constraints[0].op).toBe("lte");
   });
 
-  it("renders the baseline toggles with the active one accented", () => {
-    const { getAllByRole } = setup({ enabled: true });
-    const labels = getAllByRole("button").map((b) => b.textContent);
-    expect(labels).toContain("This session");
-    expect(labels).toContain("Rig (catalog)");
-    const active = getAllByRole("button").find((b) => b.textContent === "This session")!;
-    expect(active.className).toContain("bg-theme-accent/20");
+  it("appends to the existing constraints rather than replacing them", () => {
+    const held: RawConstraint = { metric: "ecc", op: "lte", value: 0.55, enabled: true };
+    const { container, calls } = setup({ config: config([held]) });
+    fireEvent.click(ghostChip(container, "Stars"));
+    const expected = defaultConstraintFor("stars", DETAILS, [DATE], config([held]));
+    expect(calls.config[0].constraints).toEqual([held, expected]);
   });
 
-  it("renders the constraint builder in raw mode", () => {
-    const { container, getByText } = setup({
-      enabled: true,
-      config: { ...DEFAULT_CONFIG, mode: "raw", rawConstraints: [{ metric: "median_hfr", value: 3 }] },
+  it("renders an enabled constraint as an inline pill editor", () => {
+    const { container, getByLabelText, queryByText } = setup({
+      config: config([{ metric: "hfr", op: "lte", value: 1.65, enabled: true }]),
     });
-    expect(getByText("+ Add constraint")).toBeTruthy();
-    expect(getByText("Remove")).toBeTruthy();
-    expect(container.textContent).toContain("≤");
+    expect((getByLabelText("HFR threshold") as HTMLInputElement).value).toBe("1.65");
+    expect((getByLabelText("HFR comparison") as HTMLSelectElement).value).toBe("lte");
+    // The active metric no longer offers a ghost chip.
+    expect(ghostChip(container, "HFR")).toBe(undefined);
+    // The other metrics still do.
+    expect(ghostChip(container, "Ecc")).toBeTruthy();
+    expect(queryByText("Remove")).toBe(null);
   });
 
-  // The score popover has to describe scoreFrame/combinedScore/madZ as they are.
-  // These assertions pin the load-bearing claims, not the prose: the three axes
-  // and their weights, what the number is measured against, the 50/60 anchors,
-  // and MIN_GROUP. If the algorithm changes, this should fail.
-  it("explains the composite score next to the Mode selector", () => {
-    const { container, getByLabelText } = setup({ enabled: true });
-    fireEvent.click(getByLabelText("About the composite score"));
-    const text = container.textContent!.replace(/\s+/g, " ");
-
-    // Three weighted axes, and only three: scoreFrame feeds madZ exactly
-    // detected_stars, median_hfr and eccentricity into combinedScore.
-    expect(text).toContain("detected stars at weight 0.5");
-    expect(text).toContain("HFR at 0.25");
-    expect(text).toContain("eccentricity at 0.25");
-    expect(text).toContain("FWHM, guiding RMS and ADU median never affect it");
-
-    // Relative, not absolute: madZ grades against the group baseline median.
-    expect(text).toContain("baseline median");
-    expect(text).toContain("MAD");
-    // combinedScore: 50 - 16.7 * clamp(zc, -3, 3), so 50 is the median and the
-    // 0-100 range is 3 MAD either side.
-    expect(text).toContain("50 sits at the baseline median");
-    expect(text).toContain("0 to 100 across 3 MAD either side");
-    // Stays consistent with the existing "green row cutoff" hint.
-    expect(text).toContain("greens a row on the session table");
-
-    // madZ returns null below MIN_GROUP (8), which nulls the axis.
-    expect(text).toContain("8 frames sharing one telescope, camera and filter");
-    expect(text).toContain("read as unmeasured");
-  });
-
-  // The two popovers split one story and must not contradict: baseline owns
-  // session-vs-rig, and only HFR/eccentricity follow it because scoreFrame
-  // always looks detected_stars up in the session baselines.
-  it("agrees with the baseline popover about what the baseline governs", () => {
-    const { container, getByLabelText } = setup({ enabled: true });
-    fireEvent.click(getByLabelText("About the composite score"));
-    const text = container.textContent!.replace(/\s+/g, " ");
-    expect(text).toContain("Baseline sets what HFR and eccentricity compare against");
-    expect(text).toContain("Detected stars always compare within the session");
-  });
-
-  // FIX 3: with no constraints there is nothing to read off the rows, so the
-  // guidance must be on screen rather than behind the help icon.
-  it("explains constraints inline while there are none", () => {
-    const { container, queryByLabelText } = setup({
-      enabled: true,
-      config: { ...DEFAULT_CONFIG, mode: "raw", rawConstraints: [] },
+  it("emits the edited value as a number, other fields untouched", () => {
+    const { getByLabelText, calls } = setup({
+      config: config([{ metric: "hfr", op: "lte", value: 1.65, enabled: true }]),
     });
-    expect(container.textContent).toContain(
-      "Add one or more constraints. A frame is kept only if every metric it has data for passes.",
-    );
-    expect(container.textContent).toContain(
-      "Frames with none of the constrained metrics are unmeasured.",
-    );
-    // Inline instead of, not as well as: no duplicate copy behind the icon.
-    expect(queryByLabelText("About raw constraints")).toBe(null);
-  });
-
-  it("moves the constraint help behind the icon once a constraint exists", () => {
-    const { container, getByLabelText } = setup({
-      enabled: true,
-      config: { ...DEFAULT_CONFIG, mode: "raw", rawConstraints: [{ metric: "median_hfr", value: 3 }] },
-    });
-    expect(container.textContent).not.toContain("Add one or more constraints.");
-    fireEvent.click(getByLabelText("About raw constraints"));
-    expect(container.textContent).toContain("Add one or more constraints.");
-  });
-
-  it("renders the frame table with a row per verdict", () => {
-    const { container } = setup({ enabled: true });
-    expect(container.querySelector("table")).not.toBe(null);
-    expect(container.querySelectorAll("tbody tr").length).toBe(3);
-    expect(container.textContent).toContain("a.fits");
-    expect(container.textContent).toContain("c.fits");
-  });
-
-  it("puts the table in a bounded scroll container", () => {
-    const { container } = setup({ enabled: true });
-    const scroller = container.querySelector(".overflow-y-auto");
-    expect(scroller).not.toBe(null);
-    expect(scroller!.className).toContain("max-h-[");
-    expect(scroller!.querySelector("table")).not.toBe(null);
-  });
-
-  // The cap is pinned by intent, not by its exact value: it must stay bounded
-  // (the modal body is the scroller), and it must be rem-based and roomy enough
-  // to show a scannable run of rows. A px cap does not survive the root
-  // font-size presets, because the row height scales with them and it does not.
-  it("caps the table in rem so the visible row count survives the font presets", () => {
-    const { container } = setup({ enabled: true });
-    const scroller = container.querySelector(".overflow-y-auto") as HTMLElement;
-    const cap = /max-h-\[(\d+(?:\.\d+)?)rem\]/.exec(scroller.className);
-    expect(cap).not.toBe(null);
-    // ~1.2rem a row plus header and padding: 22rem is roughly 8-10 rows at any
-    // preset. The old 200px cap was ~14rem at the default and shrank from there.
-    expect(Number(cap![1])).toBeGreaterThanOrEqual(20);
-  });
-
-  // The session date is a fixed-width atom. Letting it break to "2026-" / "07-13"
-  // doubles every row's height and halves what the table can show.
-  it("never breaks a cell across lines, session date included", () => {
-    const { container } = setup({ enabled: true });
-    const table = container.querySelector("table") as HTMLElement;
-    expect(table.className).toContain("whitespace-nowrap");
-    // whitespace inherits, so the one class on the table covers every cell.
-    const sessionCell = container.querySelectorAll("tbody tr td")[1] as HTMLElement;
-    expect(sessionCell.textContent).toBe(DATE);
-    expect(sessionCell.closest("table")).toBe(table);
-  });
-
-  it("renders a badge per verdict kind", () => {
-    const { container } = setup({ enabled: true });
-    const badges = Array.from(container.querySelectorAll("tbody tr td:last-child span"));
-    expect(badges.map((b) => b.textContent)).toEqual(["Copy", "Exclude", "Unmeasured"]);
-    expect(badges[0].className).toContain("text-theme-success");
-    expect(badges[1].className).toContain("text-theme-error");
-    expect(badges[2].className).toContain("text-theme-warning");
-  });
-
-  it("shows an em dash for a null score and a null filter", () => {
-    const { container } = setup({
-      enabled: true,
-      verdicts: [verdict("d.fits", false, "unmeasured", null, { filter_used: null })],
-    });
-    const cells = container.querySelectorAll("tbody tr td");
-    expect(cells[2].textContent).toBe("—");
-    // Score sits after the six metric columns, before the verdict badge.
-    expect(cells[cells.length - 2].textContent).toBe("—");
-  });
-
-  it("shows the loading state only while loading", () => {
-    expect(setup({ enabled: true, loading: true }).container.textContent).toContain(
-      "Loading session frames…",
-    );
-    expect(setup({ enabled: true, loading: false }).container.textContent).not.toContain(
-      "Loading session frames…",
-    );
-  });
-});
-
-describe("WbppQualityPanel metric columns", () => {
-  it("renders every visible metric column header", () => {
-    const { container } = setup({ enabled: true });
-    expect(headers(container)).toEqual([
-      "File", "Session", "Filter", "HFR", "Ecc", "FWHM", "Stars", "RMS", "ADU", "Score", "Verdict",
+    fireEvent.input(getByLabelText("HFR threshold"), { target: { value: "2.5" } });
+    expect(calls.config[0].constraints).toEqual([
+      { metric: "hfr", op: "lte", value: 2.5, enabled: true },
     ]);
+  });
+
+  it("emits the flipped op when the comparison select changes", () => {
+    const { getByLabelText, calls } = setup({
+      config: config([{ metric: "stars", op: "gte", value: 100, enabled: true }]),
+    });
+    fireEvent.change(getByLabelText("Stars comparison"), { target: { value: "lte" } });
+    expect(calls.config[0].constraints).toEqual([
+      { metric: "stars", op: "lte", value: 100, enabled: true },
+    ]);
+  });
+
+  it("disables (never deletes) on x, keeping the value", () => {
+    const { getByLabelText, calls } = setup({
+      config: config([{ metric: "hfr", op: "lte", value: 1.65, enabled: true }]),
+    });
+    fireEvent.click(getByLabelText("Disable HFR constraint"));
+    expect(calls.config[0].constraints).toEqual([
+      { metric: "hfr", op: "lte", value: 1.65, enabled: false },
+    ]);
+  });
+
+  it("shows the held value on a disabled constraint's ghost chip", () => {
+    const { container } = setup({
+      config: config([{ metric: "hfr", op: "lte", value: 1.65, enabled: false }]),
+    });
+    const chip = ghostChip(container, "HFR");
+    expect(chip.textContent!.replace(/\s+/g, " ")).toContain("≤ 1.65");
+  });
+
+  it("re-enables a disabled constraint without resetting its value", () => {
+    const { container, calls } = setup({
+      config: config([{ metric: "hfr", op: "lte", value: 1.65, enabled: false }]),
+    });
+    fireEvent.click(ghostChip(container, "HFR"));
+    expect(calls.config[0].constraints).toEqual([
+      { metric: "hfr", op: "lte", value: 1.65, enabled: true },
+    ]);
+  });
+});
+
+describe("WbppQualityPanel stat pill", () => {
+  const pill = (container: HTMLElement) => container.querySelector("span.ml-auto") as HTMLElement;
+
+  it("counts kept and skipped from the verdicts", () => {
+    const { container } = setup();
+    const p = pill(container);
+    expect(p.querySelector(".text-theme-success")!.textContent).toBe("1");
+    expect(p.querySelector(".text-theme-error")!.textContent).toBe("2");
+    expect(p.textContent!.replace(/\s+/g, " ")).toContain("of 3");
+  });
+
+  it("reads everything kept while the master toggle is off", () => {
+    const { container } = setup({ enabled: false });
+    const p = pill(container);
+    expect(p.querySelector(".text-theme-success")!.textContent).toBe("3");
+    expect(p.querySelector(".text-theme-error")!.textContent).toBe("0");
+  });
+});
+
+describe("WbppQualityPanel baseline control", () => {
+  it("accents the active baseline and emits the other on click", () => {
+    const { getByText, calls } = setup();
+    expect(getByText("This session").className).toContain("bg-theme-accent/20");
+    expect(getByText("Rig (catalog)").className).not.toContain("bg-theme-accent/20");
+    fireEvent.click(getByText("Rig (catalog)"));
+    expect(calls.config).toEqual([{ ...DEFAULT_CONFIG, baseline: "rig" }]);
+  });
+});
+
+describe("WbppQualityPanel table columns", () => {
+  it("renders the fixed column set with no Score column", () => {
+    const { container } = setup();
+    expect(headers(container)).toEqual([
+      "File", "Session", "Filter", "HFR", "Ecc", "FWHM", "Stars", "RMS", "Verdict",
+    ]);
+  });
+
+  it("pins the header with a solid background so rows cannot bleed through", () => {
+    const { container } = setup();
+    const scroller = container.querySelector(".overflow-y-auto") as HTMLElement;
+    expect(scroller.className).toContain("max-h-[22rem]");
+    for (const th of Array.from(container.querySelectorAll("thead th"))) {
+      expect(th.className).toContain("sticky");
+      expect(th.className).toContain("top-0");
+      expect(th.className).toContain("bg-theme-elevated");
+      // z-20: above in-modal z-10 siblings, below the dialog chrome.
+      expect(th.className).toContain("z-20");
+    }
   });
 
   it("formats metric values per column and em-dashes the missing ones", () => {
     const { container } = setup({
-      enabled: true,
-      verdicts: [verdict("m.fits", true, "pass", 70, { median_hfr: 2.1, detected_stars: 100 })],
+      verdicts: [verdict("m.fits", true, "pass", { median_hfr: 2.1, detected_stars: 100 })],
     });
     const cells = Array.from(container.querySelectorAll("tbody tr td")).map((c) => c.textContent);
-    // File, Session, Filter, then HFR / Ecc / FWHM / Stars / RMS / ADU.
-    expect(cells.slice(3, 9)).toEqual(["2.10", "—", "—", "100", "—", "—"]);
+    // File, Session, Filter, then HFR / Ecc / FWHM / Stars / RMS.
+    expect(cells.slice(3, 8)).toEqual(["2.10", "—", "—", "100", "—"]);
   });
 
-  it("bands a metric cell against the baseline in score mode", () => {
+  it("shows an em dash for a null filter", () => {
+    const { container } = setup({
+      verdicts: [verdict("d.fits", false, "unmeasured", { filter_used: null })],
+    });
+    expect(container.querySelectorAll("tbody tr td")[2].textContent).toBe("—");
+  });
+});
+
+describe("WbppQualityPanel sorting", () => {
+  const SORTABLE: FrameVerdict[] = [
+    verdict("late-small-hfr.fits", true, "pass", {
+      timestamp: "2026-07-01T03:00:00",
+      median_hfr: 1.5,
+    }),
+    verdict("early-big-hfr.fits", false, "fail", {
+      timestamp: "2026-07-01T01:00:00",
+      median_hfr: 2.8,
+    }),
+    verdict("mid-no-hfr.fits", true, "pass", { timestamp: "2026-07-01T02:00:00" }),
+  ];
+
+  it("defaults to chronological order by frame timestamp", () => {
+    const { container } = setup({ verdicts: SORTABLE });
+    expect(fileColumn(container)).toEqual([
+      "early-big-hfr.fits",
+      "mid-no-hfr.fits",
+      "late-small-hfr.fits",
+    ]);
+  });
+
+  it("toggles a metric column asc then desc, sinking missing values", () => {
+    const { container } = setup({ verdicts: SORTABLE });
+    fireEvent.click(headerFor(container, "HFR"));
+    expect(fileColumn(container)).toEqual([
+      "late-small-hfr.fits", // 1.5
+      "early-big-hfr.fits", // 2.8
+      "mid-no-hfr.fits", // null sinks
+    ]);
+    expect(headerFor(container, "HFR").textContent).toContain("▲");
+
+    fireEvent.click(headerFor(container, "HFR"));
+    expect(fileColumn(container)).toEqual([
+      "early-big-hfr.fits", // 2.8
+      "late-small-hfr.fits", // 1.5
+      "mid-no-hfr.fits", // null still sinks
+    ]);
+    expect(headerFor(container, "HFR").textContent).toContain("▼");
+  });
+
+  it("sorts by file name when the File header is clicked", () => {
+    const { container } = setup({ verdicts: SORTABLE });
+    fireEvent.click(headerFor(container, "File"));
+    expect(fileColumn(container)).toEqual([
+      "early-big-hfr.fits",
+      "late-small-hfr.fits",
+      "mid-no-hfr.fits",
+    ]);
+  });
+
+  it("groups Exclude first on Verdict sort, chronological within each group", () => {
+    const verdicts: FrameVerdict[] = [
+      verdict("keep-early.fits", true, "pass", { timestamp: "2026-07-01T01:00:00" }),
+      verdict("drop-late.fits", false, "fail", { timestamp: "2026-07-01T04:00:00" }),
+      verdict("keep-late.fits", true, "pass", { timestamp: "2026-07-01T03:00:00" }),
+      verdict("drop-early.fits", false, "fail", { timestamp: "2026-07-01T02:00:00" }),
+    ];
+    const { container } = setup({ verdicts });
+    fireEvent.click(headerFor(container, "Verdict"));
+    expect(fileColumn(container)).toEqual([
+      "drop-early.fits",
+      "drop-late.fits",
+      "keep-early.fits",
+      "keep-late.fits",
+    ]);
+  });
+});
+
+describe("WbppQualityPanel cell banding", () => {
+  it("bands metric cells against the session baseline", () => {
     // HFR 2.8 vs median 2.1 / mad 0.37 -> z = 1.89 -> "watch" -> warning.
     // Stars 60 vs median 100 / mad 10 -> flipped z = +4 -> "reject" -> error.
     // HFR 1.5 vs median 2.1 / mad 0.37 -> z = -1.62 -> "better" -> success.
     const { container } = setup({
-      enabled: true,
       verdicts: [
-        verdict("watch.fits", false, "fail", 40, { median_hfr: 2.8 }),
-        verdict("reject.fits", false, "fail", 10, { detected_stars: 60 }),
-        verdict("better.fits", true, "pass", 90, { median_hfr: 1.5 }),
+        verdict("watch.fits", false, "fail", {
+          timestamp: "2026-07-01T01:00:00",
+          median_hfr: 2.8,
+        }),
+        verdict("reject.fits", false, "fail", {
+          timestamp: "2026-07-01T02:00:00",
+          detected_stars: 60,
+        }),
+        verdict("better.fits", true, "pass", {
+          timestamp: "2026-07-01T03:00:00",
+          median_hfr: 1.5,
+        }),
       ],
     });
     const rows = container.querySelectorAll("tbody tr");
     const cell = (row: number, col: number) => rows[row].querySelectorAll("td")[col];
     expect(cell(0, 3).className).toContain("text-theme-warning"); // HFR watch
-    expect(cell(1, 6).className).toContain("text-theme-error"); // Stars reject
+    expect(cell(1, 6).className).toContain("text-theme-error"); // Stars reject (sign flipped)
     expect(cell(2, 3).className).toContain("text-theme-success"); // HFR better
   });
 
-  it("does not band cells in raw mode", () => {
-    const { container } = setup({
-      enabled: true,
-      config: { ...DEFAULT_CONFIG, mode: "raw" },
-      verdicts: [verdict("watch.fits", false, "fail", 40, { median_hfr: 2.8 })],
-    });
-    const hfr = container.querySelectorAll("tbody tr td")[3];
-    expect(hfr.className).toContain("text-theme-text-primary");
-    expect(hfr.className).not.toContain("text-theme-warning");
-    expect(hfr.textContent).toBe("2.80");
-  });
-
-  it("hides a column switched off in displaySettings", () => {
-    const { container } = setup({
-      enabled: true,
-      displaySettings: displaySettings({
-        quality: {
-          enabled: true,
-          fields: { hfr: false, eccentricity: true, fwhm: true, detected_stars: true },
-        },
-      }),
-    });
-    const h = headers(container);
-    expect(h).not.toContain("HFR");
-    expect(h).toContain("Ecc");
-    expect(h).toContain("ADU");
-  });
-
-  it("hides every column in a group switched off in displaySettings", () => {
-    const { container } = setup({
-      enabled: true,
-      displaySettings: displaySettings({ adu: { enabled: false, fields: { median: true } } }),
-    });
-    const h = headers(container);
-    expect(h).not.toContain("ADU");
-    expect(h).toContain("HFR");
-  });
-
-  it("falls back to quality + guiding columns when displaySettings is undefined", () => {
-    // isFieldVisible's undefined branch: quality and guiding on, adu off.
-    const { container } = setup({ enabled: true, displaySettings: undefined });
-    const h = headers(container);
-    expect(h).toContain("HFR");
-    expect(h).toContain("RMS");
-    expect(h).not.toContain("ADU");
-  });
-});
-
-describe("WbppQualityPanel sparse session cache", () => {
-  it("renders a verdict whose session is missing without throwing", () => {
-    const v: FrameVerdict = {
-      ...verdict("orphan.fits", true, "pass", 70, { median_hfr: 2.8 }),
-      sessionDate: "2099-01-01",
-    };
-    const { container } = setup({ enabled: true, verdicts: [v], sessionDetails: {} });
-    expect(container.querySelectorAll("tbody tr").length).toBe(1);
-    const cells = container.querySelectorAll("tbody tr td");
-    // No baseline to grade against, so the cell is unbanded rather than colored.
-    expect(cells[3].className).toContain("text-theme-text-primary");
-    expect(cells[3].className).not.toContain("text-theme-warning");
-    // Values the frame carries still render; genuinely null metrics em-dash.
-    expect(cells[3].textContent).toBe("2.80");
-    expect(cells[4].textContent).toBe("—");
-    expect(container.textContent).toContain("orphan.fits");
-  });
-
-  it("renders an em dash for every metric when the session is missing and the frame is bare", () => {
-    const v: FrameVerdict = {
-      ...verdict("bare.fits", false, "unmeasured", null),
-      sessionDate: "2099-01-01",
-    };
-    const { container } = setup({ enabled: true, verdicts: [v], sessionDetails: {} });
-    const cells = Array.from(container.querySelectorAll("tbody tr td")).map((c) => c.textContent);
-    expect(cells.slice(3, 9)).toEqual(["—", "—", "—", "—", "—", "—"]);
-  });
-
-  it("leaves a cell unbanded when the baseline group is too sparse", () => {
-    // n < MIN_GROUP (8) -> madZ returns null -> neutral.
-    const detail = sessionDetail({
-      session_baselines: { "TS|Cam|L": { median_hfr: { median: 2.1, mad: 0.37, n: 3 } } },
-    } as Partial<SessionDetail>);
-    const { container } = setup({
-      enabled: true,
-      verdicts: [verdict("sparse.fits", false, "fail", 40, { median_hfr: 2.8 })],
-      sessionDetails: { [DATE]: detail },
-    });
-    expect(container.querySelectorAll("tbody tr td")[3].className).toContain(
-      "text-theme-text-primary",
-    );
-  });
-
-  it("grades against the rig baseline when the baseline mode is rig", () => {
+  it("grades against the rig baseline when config.baseline is rig", () => {
     // HFR 2.8 equals the rig median -> z = 0 -> neutral, where the session
     // baseline (median 2.1) would have banded the same value "watch".
     const detail = sessionDetail({
       rig_baselines: { "TS|Cam|L": { median_hfr: baseline(2.8, 0.37) } },
     } as Partial<SessionDetail>);
     const { container } = setup({
-      enabled: true,
-      config: { ...DEFAULT_CONFIG, baseline: "rig" },
-      verdicts: [verdict("r.fits", true, "pass", 60, { median_hfr: 2.8 })],
+      config: config([], { baseline: "rig" }),
+      verdicts: [verdict("r.fits", true, "pass", { median_hfr: 2.8 })],
       sessionDetails: { [DATE]: detail },
     });
     expect(container.querySelectorAll("tbody tr td")[3].className).toContain(
       "text-theme-text-primary",
     );
   });
-});
 
-describe("WbppQualityPanel live count line", () => {
-  it("reflects props.totals with exclude = fail + unmeasured", () => {
-    const { container } = setup({
-      enabled: true,
-      totals: { total: 40, copy: 31, fail: 7, unmeasured: 2 },
-    });
-    expect(container.textContent!.replace(/\s+/g, " ")).toContain(
-      "Skips 9 of 40 lights in the selected sessions (7 below threshold, 2 unmeasured). " +
-        "Calibration frames are always copied.",
-    );
-  });
-
-  it("reads zero when nothing is excluded", () => {
-    const { container } = setup({
-      enabled: true,
-      totals: { total: 5, copy: 5, fail: 0, unmeasured: 0 },
-    });
-    expect(container.textContent!.replace(/\s+/g, " ")).toContain(
-      "Skips 0 of 5 lights in the selected sessions (0 below threshold, 0 unmeasured).",
-    );
-  });
-
-  // The panel counts every light in the selected sessions; the footer counts
-  // only what lies under the selected folder levels. Both are right for their
-  // own scope, so the panel's figures have to name theirs or the two totals
-  // read as a contradiction.
-  it("names the domain its counts cover, next to the counts", () => {
-    const { container } = setup({
-      enabled: true,
-      totals: { total: 30, copy: 25, fail: 3, unmeasured: 2 },
-    });
-    const text = container.textContent!.replace(/\s+/g, " ");
-    // The scope sits on the counted noun, not in a sentence after it.
-    expect(text).toContain("of 30 lights in the selected sessions");
-    expect(text).not.toContain("of 30 lights (");
+  it("renders a verdict whose session detail is missing, unbanded", () => {
+    const v: FrameVerdict = {
+      ...verdict("orphan.fits", true, "pass", { median_hfr: 2.8 }),
+      sessionDate: "2099-01-01",
+    };
+    const { container } = setup({ verdicts: [v], sessionDetails: {} });
+    const cells = container.querySelectorAll("tbody tr td");
+    expect(cells[3].className).toContain("text-theme-text-primary");
+    expect(cells[3].className).not.toContain("text-theme-warning");
+    expect(cells[3].textContent).toBe("2.80");
   });
 });
 
-describe("WbppQualityPanel failure reasons", () => {
-  // "Exclude" alone is a black box: the user whose rig floors above the default
-  // cannot tell an eccentricity gate from a score gate, nor by how much they
-  // missed. The numbers are the whole point.
-  it("names the gate and the numbers beside an excluded frame", () => {
-    const { container } = setup({
-      enabled: true,
-      config: { ...DEFAULT_CONFIG, mode: "raw", rawConstraints: [{ metric: "eccentricity", value: 0.55 }] },
-      verdicts: [verdict("e.fits", false, "fail", null, { eccentricity: 0.62 }, "ecc 0.62 > 0.55")],
-    });
-    const cell = container.querySelector("tbody tr td:last-child")!;
-    expect(cell.textContent).toContain("Exclude");
-    expect(cell.textContent).toContain("ecc 0.62 > 0.55");
-  });
-
-  it("shows the score gate's arithmetic in score mode", () => {
-    const { container } = setup({
-      enabled: true,
-      verdicts: [verdict("s.fits", false, "fail", 41, {}, "score 41 < 60")],
-    });
-    expect(container.querySelector("tbody tr td:last-child")!.textContent).toContain(
-      "score 41 < 60",
-    );
-  });
-
-  it("adds nothing beside a passing or unmeasured frame", () => {
-    const { container } = setup({ enabled: true });
+describe("WbppQualityPanel verdict column", () => {
+  it("renders a pill per verdict kind with the failure reason beside Exclude", () => {
+    const { container } = setup();
     const cells = Array.from(container.querySelectorAll("tbody tr td:last-child"));
     expect(cells[0].textContent!.trim()).toBe("Copy");
+    expect(cells[1].textContent).toContain("HFR 2.80 > 2.00");
+    expect(cells[1].textContent).toContain("Exclude");
     expect(cells[2].textContent!.trim()).toBe("Unmeasured");
+    const pillOf = (cell: Element) => cell.querySelector("span:last-child")!;
+    expect(pillOf(cells[0]).className).toContain("text-theme-success");
+    expect(pillOf(cells[1]).className).toContain("text-theme-error");
+    expect(pillOf(cells[2]).className).toContain("text-theme-warning");
+  });
+
+  it("shows every row as Copy with no reasons while the master toggle is off", () => {
+    const { container } = setup({ enabled: false });
+    const cells = Array.from(container.querySelectorAll("tbody tr td:last-child"));
+    expect(cells.map((c) => c.textContent!.trim())).toEqual(["Copy", "Copy", "Copy"]);
+    expect(container.textContent).not.toContain("HFR 2.80 > 2.00");
   });
 });
 
-describe("WbppQualityPanel empty-export guard", () => {
-  // A default eccentricity can sit under a rig's achievable floor and exclude
-  // 100% of frames. Shipping an empty staging folder with no explanation is the
-  // failure this guards.
-  const setupEmpty = (over: Partial<Parameters<typeof WbppQualityPanel>[0]> = {}) =>
-    setup({
-      enabled: true,
-      config: { ...DEFAULT_CONFIG, mode: "raw", rawConstraints: [{ metric: "eccentricity", value: 0.5 }] },
-      totals: { total: 3, copy: 0, fail: 3, unmeasured: 0 },
-      verdicts: [
-        verdict("a.fits", false, "fail", null, { eccentricity: 0.5519 }, "ecc 0.55 > 0.50"),
-        verdict("b.fits", false, "fail", null, { eccentricity: 0.58 }, "ecc 0.58 > 0.50"),
-        verdict("c.fits", false, "fail", null, { eccentricity: 0.61 }, "ecc 0.61 > 0.50"),
-      ],
-      ...over,
-    });
-
-  it("says plainly that the export would copy nothing", () => {
-    const { container } = setupEmpty();
-    const text = container.textContent!.replace(/\s+/g, " ");
-    expect(text).toContain("copy no light frames");
-    expect(text).toContain("all 3 are excluded");
+describe("WbppQualityPanel empty and loading states", () => {
+  it("shows the loading line in place of the table while loading", () => {
+    const { container } = setup({ loading: true, verdicts: [] });
+    expect(container.textContent).toContain("Loading session frames…");
+    expect(container.querySelector("table")).toBe(null);
   });
 
-  it("offers a relaxation drawn from the user's own best frame", () => {
-    const { container, getByText } = setupEmpty();
-    const text = container.textContent!.replace(/\s+/g, " ");
-    // 0.5519 rounded outward to 0.56 -- what this rig can actually reach, not a
-    // number from a table of conventions.
-    expect(text).toContain("Eccentricity ≤ 0.56");
-    expect(text).toContain("keeps 1 of 3");
-    expect(getByText("Relax to Eccentricity ≤ 0.56")).toBeTruthy();
+  it("says there are no lights when loaded and empty", () => {
+    const { container } = setup({ loading: false, verdicts: [] });
+    expect(container.textContent).toContain("No light frames in the selected sessions.");
+    expect(container.querySelector("table")).toBe(null);
   });
 
-  it("applies the relaxation to the constraint it names", () => {
-    const { getByText, calls } = setupEmpty();
-    fireEvent.click(getByText("Relax to Eccentricity ≤ 0.56"));
-    expect(calls.config[0].rawConstraints).toEqual([{ metric: "eccentricity", value: 0.56 }]);
-  });
-
-  it("relaxes the threshold itself in score mode", () => {
-    const { getByText, calls } = setupEmpty({
-      config: DEFAULT_CONFIG,
-      verdicts: [
-        verdict("a.fits", false, "fail", 41, {}, "score 41 < 60"),
-        verdict("b.fits", false, "fail", 30, {}, "score 30 < 60"),
-      ],
-      totals: { total: 2, copy: 0, fail: 2, unmeasured: 0 },
-    });
-    fireEvent.click(getByText("Relax to score ≥ 41"));
-    expect(calls.config[0]).toEqual({ ...DEFAULT_CONFIG, scoreThreshold: 41 });
-  });
-
-  // Nothing was measured, so no threshold change can help. Offering one would
-  // be offering a fix that cannot work.
-  it("explains an all-unmeasured wipeout instead of offering a relaxation", () => {
-    const { container, queryByText } = setupEmpty({
-      config: DEFAULT_CONFIG,
-      verdicts: [verdict("a.fits", false, "unmeasured", null), verdict("b.fits", false, "unmeasured", null)],
-      totals: { total: 2, copy: 0, fail: 0, unmeasured: 2 },
-    });
-    const text = container.textContent!.replace(/\s+/g, " ");
-    expect(text).toContain("None of these frames could be measured");
-    expect(queryByText(/^Relax to/)).toBe(null);
-  });
-
-  it("stays quiet when at least one frame is copied", () => {
-    const { container } = setup({ enabled: true, totals: { total: 3, copy: 1, fail: 2, unmeasured: 0 } });
-    expect(container.textContent).not.toContain("copy no light frames");
-  });
-
-  it("stays quiet when there are no lights at all to judge", () => {
-    // Nothing selected yet is not a wipeout; there is nothing to warn about.
-    const { container } = setup({
-      enabled: true,
-      verdicts: [],
-      totals: { total: 0, copy: 0, fail: 0, unmeasured: 0 },
-    });
-    expect(container.textContent).not.toContain("copy no light frames");
-  });
-});
-
-describe("WbppQualityPanel eccentricity guidance", () => {
-  const eccConfig = {
-    ...DEFAULT_CONFIG,
-    mode: "raw" as const,
-    rawConstraints: [{ metric: "eccentricity" as const, value: 0.6 }],
-  };
-
-  it("offers the landmarks behind the icon on the eccentricity row", () => {
-    const { container, getByLabelText } = setup({ enabled: true, config: eccConfig });
-    fireEvent.click(getByLabelText("About eccentricity thresholds"));
-    const text = container.textContent!.replace(/\s+/g, " ");
-    expect(text).toContain("0.42");
-    expect(text).toContain("0.5 to 0.6");
-    expect(text).toContain("0.6");
-  });
-
-  // The provenance is the point. 0.42 is PixInsight's PERCEPTION threshold --
-  // their own docs reject nothing at it and both default expressions ship blank
-  // -- and every other number in circulation is third-party convention. Copy
-  // that dressed any of them as an authority would be the bug.
-  it("states each landmark's provenance honestly and claims no authority", () => {
-    const { container, getByLabelText } = setup({ enabled: true, config: eccConfig });
-    fireEvent.click(getByLabelText("About eccentricity thresholds"));
-    const text = container.textContent!.replace(/\s+/g, " ");
-    // 0.42 is about visibility, not rejection.
-    expect(text).toContain("visible");
-    expect(text).toContain("not a recommendation to reject");
-    // The rest is convention, and says so.
-    expect(text).toContain("convention");
-    // Never dressed as a standard.
-    expect(text).not.toContain("the PixInsight standard");
-    expect(text).not.toContain("recommended value");
-    // The choice is the user's, and depends on their gear and their tolerance.
-    expect(text).toContain("optics");
-    expect(text).toContain("discard");
-    // The floor is why a default can wipe an export out.
-    expect(text).toContain("floor");
-  });
-
-  it("keeps the guidance off rows for other metrics", () => {
-    const { queryByLabelText } = setup({
-      enabled: true,
-      config: { ...DEFAULT_CONFIG, mode: "raw", rawConstraints: [{ metric: "median_hfr", value: 3 }] },
-    });
-    expect(queryByLabelText("About eccentricity thresholds")).toBe(null);
-  });
-});
-
-describe("WbppQualityPanel is controlled", () => {
-  it("emits the full config when the threshold changes", () => {
-    const { getByLabelText, calls } = setup({ enabled: true });
-    fireEvent.input(getByLabelText("Score threshold"), { target: { value: "75" } });
-    expect(calls.config.length).toBe(1);
-    expect(calls.config[0]).toEqual({
-      mode: "score",
-      scoreThreshold: 75,
-      rawConstraints: [],
-      baseline: "session",
-    });
-  });
-
-  it("emits the full config when the mode changes", () => {
-    const { getByLabelText, calls } = setup({ enabled: true });
-    fireEvent.change(getByLabelText("Mode"), { target: { value: "raw" } });
-    expect(calls.config[0]).toEqual({ ...DEFAULT_CONFIG, mode: "raw" });
-  });
-
-  it("emits the full config when the baseline changes", () => {
-    const { getAllByRole, calls } = setup({ enabled: true });
-    fireEvent.click(getAllByRole("button").find((b) => b.textContent === "Rig (catalog)")!);
-    expect(calls.config[0]).toEqual({ ...DEFAULT_CONFIG, baseline: "rig" });
-  });
-
-  it("adds the first unused metric at value 0", () => {
-    const { getByText, calls } = setup({
-      enabled: true,
-      config: { ...DEFAULT_CONFIG, mode: "raw", rawConstraints: [{ metric: "median_hfr", value: 3 }] },
-    });
-    fireEvent.click(getByText("+ Add constraint"));
-    expect(calls.config[0].rawConstraints).toEqual([
-      { metric: "median_hfr", value: 3 },
-      { metric: "fwhm", value: 0 },
-    ]);
-  });
-
-  // Eccentricity is the one metric that can carry a default: dimensionless and
-  // bounded 0..1, so the number means the same on every rig. It arrives at 0.6
-  // rather than 0, which would have excluded every frame the moment it was added.
-  it("adds eccentricity at its default rather than at 0", () => {
-    const { getByText, calls } = setup({
-      enabled: true,
-      config: {
-        ...DEFAULT_CONFIG,
-        mode: "raw",
-        rawConstraints: [{ metric: "median_hfr", value: 3 }, { metric: "fwhm", value: 4 }],
-      },
-    });
-    fireEvent.click(getByText("+ Add constraint"));
-    expect(calls.config[0].rawConstraints[2]).toEqual({ metric: "eccentricity", value: 0.6 });
-  });
-
-  it("removes the clicked constraint", () => {
-    const { getAllByText, calls } = setup({
-      enabled: true,
-      config: {
-        ...DEFAULT_CONFIG,
-        mode: "raw",
-        rawConstraints: [
-          { metric: "median_hfr", value: 3 },
-          { metric: "fwhm", value: 4 },
-        ],
-      },
-    });
-    fireEvent.click(getAllByText("Remove")[0]);
-    expect(calls.config[0].rawConstraints).toEqual([{ metric: "fwhm", value: 4 }]);
-  });
-
-  it("disables + Add constraint once every metric is used", () => {
-    const { getByText } = setup({
-      enabled: true,
-      config: {
-        ...DEFAULT_CONFIG,
-        mode: "raw",
-        rawConstraints: [
-          { metric: "median_hfr", value: 1 },
-          { metric: "fwhm", value: 1 },
-          { metric: "eccentricity", value: 1 },
-          { metric: "detected_stars", value: 1 },
-          { metric: "guiding_rms_arcsec", value: 1 },
-          { metric: "adu_median", value: 1 },
-        ],
-      },
-    });
-    expect((getByText("+ Add constraint") as HTMLButtonElement).disabled).toBe(true);
-  });
-
-  it("emits the constraint value as a number", () => {
-    const { getByLabelText, calls } = setup({
-      enabled: true,
-      config: { ...DEFAULT_CONFIG, mode: "raw", rawConstraints: [{ metric: "median_hfr", value: 3 }] },
-    });
-    fireEvent.input(getByLabelText("HFR value"), { target: { value: "2.5" } });
-    expect(calls.config[0].rawConstraints).toEqual([{ metric: "median_hfr", value: 2.5 }]);
+  it("states the scope: lights only, everything else copied unchanged", () => {
+    const { container } = setup();
+    expect(container.textContent).toContain(
+      "Filters apply to light frames only. All other files are copied unchanged.",
+    );
+    // The old claim was wrong and must not come back.
+    expect(container.textContent).not.toContain("Calibration frames are always copied");
   });
 });

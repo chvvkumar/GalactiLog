@@ -3,15 +3,16 @@ import {
   evaluateRaw,
   evaluateRawDetailed,
   computeVerdicts,
-  defaultConstraintValue,
+  defaultConstraintFor,
   excludedSourceRelatives,
   excludedUnderSelectedLevels,
   isUnderRelativePath,
-  scoreFrame,
   suggestRelaxation,
-  RAW_METRIC_DEFAULTS,
-  RAW_METRICS,
+  qualityTotals,
+  METRIC_DEFS,
+  METRIC_KEYS,
   type FrameVerdict,
+  type QualityConfig,
   type RawConstraint,
 } from "./wbppQualityFilter";
 import type { SessionDetail, FrameRecord } from "../api/types";
@@ -63,6 +64,20 @@ function frame(overrides: Partial<FrameRecord>): FrameRecord {
   };
 }
 
+// Constraint factory: enabled by default so tests read as "an active gate".
+function con(
+  metric: RawConstraint["metric"],
+  op: RawConstraint["op"],
+  value: number,
+  enabled = true,
+): RawConstraint {
+  return { metric, op, value, enabled };
+}
+
+function config(constraints: RawConstraint[], baseline: QualityConfig["baseline"] = "session"): QualityConfig {
+  return { baseline, constraints };
+}
+
 // Baseline group for "T|C|Ha" with n >= MIN_GROUP and non-zero MAD.
 const baselines: Baselines = {
   "T|C|Ha": {
@@ -74,6 +89,17 @@ const baselines: Baselines = {
   },
 };
 
+// Rig-scoped baselines deliberately different from session, so a test can
+// prove defaultConstraintFor honored config.baseline.
+const rigBaselines: Baselines = {
+  "T|C|Ha": {
+    median_hfr: { median: 3.0, mad: 0.1, n: 40 },
+    eccentricity: { median: 0.5, mad: 0.02, n: 40 },
+    detected_stars: { median: 200, mad: 20, n: 40 },
+    fwhm: { median: 3.5, mad: 0.1, n: 40 },
+  },
+};
+
 function detail(frames: FrameRecord[]): SessionDetail {
   return {
     session_date: "2026-03-15",
@@ -81,98 +107,43 @@ function detail(frames: FrameRecord[]): SessionDetail {
     rigs: [],
     frames,
     session_baselines: baselines,
-    rig_baselines: baselines,
+    rig_baselines: rigBaselines,
   } as unknown as SessionDetail;
 }
 
-// A frame clearly better than baseline on all three axes -> high score.
 const goodFrame = frame({
   source_relative: "good.fits",
   median_hfr: 1.7,
   eccentricity: 0.35,
   detected_stars: 130,
 });
-// A frame clearly worse than baseline on all three axes -> low score.
 const badFrame = frame({
   source_relative: "bad.fits",
   median_hfr: 2.6,
   eccentricity: 0.5,
   detected_stars: 80,
 });
-// A frame whose filter has no baseline -> all axes null -> null score.
-const unscorableFrame = frame({
-  source_relative: "unscorable.fits",
-  filter_used: "OIII",
-  median_hfr: 2.0,
-  eccentricity: 0.4,
-  detected_stars: 100,
-});
+// A frame carrying none of the constrained metrics.
+const blankFrame = frame({ source_relative: "blank.fits" });
 
-describe("scoreFrame (composite)", () => {
-  it("scores a better-than-baseline frame above 60", () => {
-    const s = scoreFrame(detail([goodFrame]), goodFrame, "session");
-    expect(s).not.toBeNull();
-    expect(s!).toBeGreaterThanOrEqual(60);
-  });
+const dates = ["2026-03-15"];
+const verdictsFor = (frames: FrameRecord[], constraints: RawConstraint[]) =>
+  computeVerdicts({ "2026-03-15": detail(frames) }, dates, config(constraints));
 
-  it("scores a worse-than-baseline frame below 60", () => {
-    const s = scoreFrame(detail([badFrame]), badFrame, "session");
-    expect(s).not.toBeNull();
-    expect(s!).toBeLessThan(60);
-  });
-
-  it("returns null when no baseline group matches (unmeasured)", () => {
-    expect(scoreFrame(detail([unscorableFrame]), unscorableFrame, "session")).toBeNull();
-  });
-});
-
-describe("computeVerdicts composite mode", () => {
-  const dates = ["2026-03-15"];
-  it("keeps frames at/above threshold 60 and excludes below", () => {
-    const d = detail([goodFrame, badFrame]);
-    const verdicts = computeVerdicts({ "2026-03-15": d }, dates, "score", "session", 60, []);
-    const good = verdicts.find((v) => v.frame.source_relative === "good.fits")!;
-    const bad = verdicts.find((v) => v.frame.source_relative === "bad.fits")!;
-    expect(good.reason).toBe("pass");
-    expect(good.keep).toBe(true);
-    expect(bad.reason).toBe("fail");
-    expect(bad.keep).toBe(false);
-  });
-
-  it("marks a null composite score as unmeasured (excluded)", () => {
-    const d = detail([unscorableFrame]);
-    const verdicts = computeVerdicts({ "2026-03-15": d }, dates, "score", "session", 60, []);
-    expect(verdicts[0].reason).toBe("unmeasured");
-    expect(verdicts[0].keep).toBe(false);
-  });
-});
-
-describe("evaluateRaw (partial-metric AND)", () => {
+describe("evaluateRaw (partial-metric AND over enabled constraints)", () => {
   it("passes when all present metrics satisfy their constraints", () => {
     const f = frame({ median_hfr: 2.0, detected_stars: 100 });
-    const cons: RawConstraint[] = [
-      { metric: "median_hfr", value: 3.0 },
-      { metric: "detected_stars", value: 50 },
-    ];
-    expect(evaluateRaw(f, cons)).toBe("pass");
+    expect(evaluateRaw(f, [con("hfr", "lte", 3.0), con("stars", "gte", 50)])).toBe("pass");
   });
 
   it("fails when one present metric violates its constraint", () => {
     const f = frame({ median_hfr: 2.0, detected_stars: 100 });
-    const cons: RawConstraint[] = [
-      { metric: "median_hfr", value: 1.5 }, // 2.0 > 1.5 -> fail (lower-is-better)
-      { metric: "detected_stars", value: 50 },
-    ];
-    expect(evaluateRaw(f, cons)).toBe("fail");
+    expect(evaluateRaw(f, [con("hfr", "lte", 1.5), con("stars", "gte", 50)])).toBe("fail");
   });
 
   it("judges only on present metrics (missing metric skipped)", () => {
     const f = frame({ median_hfr: 2.0 }); // guiding_rms_arcsec is null
-    const cons: RawConstraint[] = [
-      { metric: "median_hfr", value: 3.0 }, // present, passes
-      { metric: "guiding_rms_arcsec", value: 1.0 }, // missing, skipped
-    ];
-    expect(evaluateRaw(f, cons)).toBe("pass");
+    expect(evaluateRaw(f, [con("hfr", "lte", 3.0), con("rms", "lte", 1.0)])).toBe("pass");
   });
 
   // The skip is a decision, not an accident. A constraint on a metric the
@@ -184,111 +155,176 @@ describe("evaluateRaw (partial-metric AND)", () => {
     const unguided = frame({ median_hfr: 2.0, eccentricity: 0.4 });
     // An impossible guiding constraint: if a missing metric auto-failed, this
     // would exclude the frame outright.
-    const cons: RawConstraint[] = [{ metric: "guiding_rms_arcsec", value: 0.0001 }];
+    const cons = [con("rms", "lte", 0.0001)];
     expect(evaluateRaw(unguided, cons)).toBe("unmeasured");
-    expect(evaluateRaw(unguided, [...cons, { metric: "median_hfr", value: 3.0 }])).toBe("pass");
+    expect(evaluateRaw(unguided, [...cons, con("hfr", "lte", 3.0)])).toBe("pass");
     // ...while a frame that DOES carry the metric is still judged on it.
     expect(evaluateRaw(frame({ guiding_rms_arcsec: 0.8 }), cons)).toBe("fail");
   });
 
   it("fails on a present metric even when another is missing", () => {
     const f = frame({ median_hfr: 5.0 }); // fails; guiding missing
-    const cons: RawConstraint[] = [
-      { metric: "median_hfr", value: 3.0 },
-      { metric: "guiding_rms_arcsec", value: 1.0 },
-    ];
-    expect(evaluateRaw(f, cons)).toBe("fail");
+    expect(evaluateRaw(f, [con("hfr", "lte", 3.0), con("rms", "lte", 1.0)])).toBe("fail");
   });
 
-  it("is unmeasured when none of the constrained metrics are present", () => {
+  it("is unmeasured when none of the enabled constrained metrics are present", () => {
     const f = frame({ median_hfr: 2.0 }); // constraint only on a missing metric
-    const cons: RawConstraint[] = [{ metric: "guiding_rms_arcsec", value: 1.0 }];
-    expect(evaluateRaw(f, cons)).toBe("unmeasured");
+    expect(evaluateRaw(f, [con("rms", "lte", 1.0)])).toBe("unmeasured");
   });
 
-  it("is unmeasured when there are zero active constraints", () => {
-    expect(evaluateRaw(frame({ median_hfr: 2.0 }), [])).toBe("unmeasured");
-  });
-
-  it("honors higher-is-better direction for detected_stars", () => {
-    const cons: RawConstraint[] = [{ metric: "detected_stars", value: 100 }];
+  it("honors op direction for detected_stars (gte)", () => {
+    const cons = [con("stars", "gte", 100)];
     expect(evaluateRaw(frame({ detected_stars: 120 }), cons)).toBe("pass");
     expect(evaluateRaw(frame({ detected_stars: 80 }), cons)).toBe("fail");
   });
 });
 
-describe("defaultConstraintValue", () => {
-  // 0.6 is a starting point, not a standard. It sits at the top of the range
-  // practitioners quote precisely so it does not reject rigs whose achievable
-  // floor is genuinely high (a well-sampled short refractor can median above
-  // 0.55), which a 0.42 or 0.5 default would do on their first export.
-  it("starts eccentricity at 0.6", () => {
-    expect(defaultConstraintValue("eccentricity")).toBe(0.6);
-    expect(RAW_METRIC_DEFAULTS.eccentricity).toBe(0.6);
+describe("enabled flag", () => {
+  it("passes every frame when zero constraints are enabled", () => {
+    // An empty filter is no filter -- not a filter that quarantines the whole
+    // library as unmeasured.
+    expect(evaluateRaw(frame({ median_hfr: 2.0 }), [])).toBe("pass");
+    expect(evaluateRaw(blankFrame, [])).toBe("pass");
+    expect(evaluateRaw(frame({ median_hfr: 99 }), [con("hfr", "lte", 1.0, false)])).toBe("pass");
   });
 
-  // Only eccentricity is dimensionless and rig-independent enough to carry a
-  // constant. HFR/FWHM/RMS/ADU scale with pixel scale, focal length and
-  // exposure, so shipping a number for them would be an invention.
-  it("leaves every scale-dependent metric at 0", () => {
-    for (const m of RAW_METRICS) {
-      if (m === "eccentricity") continue;
-      expect(defaultConstraintValue(m)).toBe(0);
-      expect(RAW_METRIC_DEFAULTS[m]).toBe(undefined);
-    }
+  it("treats a disabled constraint exactly like a deleted one", () => {
+    const f = frame({ median_hfr: 5.0, eccentricity: 0.4 });
+    // Enabled: the HFR gate fails the frame.
+    expect(evaluateRaw(f, [con("hfr", "lte", 3.0), con("ecc", "lte", 0.6)])).toBe("fail");
+    // Disabled: only the ecc gate judges, and it passes.
+    expect(evaluateRaw(f, [con("hfr", "lte", 3.0, false), con("ecc", "lte", 0.6)])).toBe("pass");
+  });
+
+  it("does not count a disabled constraint's metric toward 'present'", () => {
+    // The frame carries HFR, but the only ENABLED gate is on a missing metric,
+    // so the frame is unmeasured -- the disabled gate must not smuggle it in.
+    const f = frame({ median_hfr: 2.0 });
+    expect(evaluateRaw(f, [con("hfr", "lte", 3.0, false), con("rms", "lte", 1.0)])).toBe("unmeasured");
+  });
+});
+
+describe("computeVerdicts", () => {
+  it("keeps passing frames and excludes failing ones", () => {
+    const verdicts = verdictsFor([goodFrame, badFrame], [con("ecc", "lte", 0.45)]);
+    const good = verdicts.find((v) => v.frame.source_relative === "good.fits")!;
+    const bad = verdicts.find((v) => v.frame.source_relative === "bad.fits")!;
+    expect(good.reason).toBe("pass");
+    expect(good.keep).toBe(true);
+    expect(bad.reason).toBe("fail");
+    expect(bad.keep).toBe(false);
+  });
+
+  it("marks a frame with none of the constrained metrics as unmeasured (excluded)", () => {
+    const verdicts = verdictsFor([blankFrame], [con("ecc", "lte", 0.45)]);
+    expect(verdicts[0].reason).toBe("unmeasured");
+    expect(verdicts[0].keep).toBe(false);
+  });
+
+  it("passes everything when the config has no enabled constraints", () => {
+    const verdicts = verdictsFor([goodFrame, badFrame, blankFrame], []);
+    expect(verdicts.every((v) => v.keep && v.reason === "pass")).toBe(true);
   });
 });
 
 describe("verdict failedBy", () => {
-  const dates = ["2026-03-15"];
-
-  it("names the score gate and both numbers", () => {
-    const verdicts = computeVerdicts({ "2026-03-15": detail([badFrame]) }, dates, "score", "session", 60, []);
-    // badFrame scores well under 60; the reason must carry the arithmetic.
-    expect(verdicts[0].failedBy).toMatch(/^score \d+ < 60$/);
-  });
-
-  it("names which raw constraint fired, with the frame's value and the limit", () => {
+  it("names which constraint fired, with the frame's value and the limit", () => {
     const f = frame({ source_relative: "e.fits", eccentricity: 0.62 });
-    const verdicts = computeVerdicts({ "2026-03-15": detail([f]) }, dates, "raw", "session", 60, [
-      { metric: "eccentricity", value: 0.55 },
-    ]);
+    const verdicts = verdictsFor([f], [con("ecc", "lte", 0.55)]);
     expect(verdicts[0].reason).toBe("fail");
     expect(verdicts[0].failedBy).toBe("ecc 0.62 > 0.55");
   });
 
-  it("flips the comparison for a higher-is-better metric", () => {
-    const f = frame({ detected_stars: 80 });
-    const verdicts = computeVerdicts({ "2026-03-15": detail([f]) }, dates, "raw", "session", 60, [
-      { metric: "detected_stars", value: 100 },
-    ]);
+  it("flips the comparison for a gte constraint", () => {
+    const verdicts = verdictsFor([frame({ detected_stars: 80 })], [con("stars", "gte", 100)]);
     expect(verdicts[0].failedBy).toBe("stars 80 < 100");
   });
 
   it("leaves failedBy null for a passing or unmeasured frame", () => {
-    const verdicts = computeVerdicts(
-      { "2026-03-15": detail([goodFrame, unscorableFrame]) },
-      dates, "score", "session", 60, [],
-    );
+    const verdicts = verdictsFor([goodFrame, blankFrame], [con("ecc", "lte", 0.6)]);
     expect(verdicts.find((v) => v.reason === "pass")!.failedBy).toBeNull();
     expect(verdicts.find((v) => v.reason === "unmeasured")!.failedBy).toBeNull();
   });
 
-  it("reports the first failing constraint in the user's own order", () => {
+  it("reports the first failing enabled constraint in the user's own order", () => {
     const f = frame({ median_hfr: 5.0, eccentricity: 0.9 });
     const { failedBy } = evaluateRawDetailed(f, [
-      { metric: "eccentricity", value: 0.5 },
-      { metric: "median_hfr", value: 3.0 },
+      con("ecc", "lte", 0.5),
+      con("hfr", "lte", 3.0),
     ]);
     expect(failedBy).toBe("ecc 0.90 > 0.50");
+  });
+
+  it("never blames a disabled constraint", () => {
+    const f = frame({ median_hfr: 5.0, eccentricity: 0.9 });
+    const { failedBy } = evaluateRawDetailed(f, [
+      con("ecc", "lte", 0.5, false),
+      con("hfr", "lte", 3.0),
+    ]);
+    expect(failedBy).toBe("HFR 5.00 > 3.00");
+  });
+});
+
+describe("defaultConstraintFor", () => {
+  const details = { "2026-03-15": detail([goodFrame]) };
+  const sessionCfg = config([], "session");
+
+  // median + 1.5 * 1.4826 * mad from the SAME session baseline the coloring
+  // uses: ecc 0.4 + 1.5 * 1.4826 * 0.05 = 0.511... -> 0.51 at two decimals.
+  it("derives a lower-is-better threshold from the session baseline", () => {
+    const c = defaultConstraintFor("ecc", details, dates, sessionCfg);
+    expect(c).toEqual({ metric: "ecc", op: "lte", value: 0.51, enabled: true });
+  });
+
+  // stars 100 - 1.5 * 1.4826 * 10 = 77.76 -> 78 at zero decimals, op gte.
+  it("derives a higher-is-better threshold with op gte and integer rounding", () => {
+    const c = defaultConstraintFor("stars", details, dates, sessionCfg);
+    expect(c).toEqual({ metric: "stars", op: "gte", value: 78, enabled: true });
+  });
+
+  // Rig baseline for ecc: 0.5 + 1.5 * 1.4826 * 0.02 = 0.544... -> 0.54.
+  it("respects config.baseline = rig for sharpness/roundness", () => {
+    const c = defaultConstraintFor("ecc", details, dates, config([], "rig"));
+    expect(c.value).toBe(0.54);
+  });
+
+  // Signal is ALWAYS session-scoped, exactly as the cell coloring computes it:
+  // the rig stars baseline (median 200) must not leak into the default.
+  it("keeps stars session-scoped even under config.baseline = rig", () => {
+    const c = defaultConstraintFor("stars", details, dates, config([], "rig"));
+    expect(c.value).toBe(78);
+  });
+
+  it("falls back to 0 for rms, which has no baseline", () => {
+    const c = defaultConstraintFor("rms", details, dates, sessionCfg);
+    expect(c).toEqual({ metric: "rms", op: "lte", value: 0, enabled: true });
+  });
+
+  it("falls back to 0 when no group baseline qualifies", () => {
+    // OIII has no baseline group at all.
+    const f = frame({ filter_used: "OIII" });
+    const c = defaultConstraintFor("hfr", { "2026-03-15": detail([f]) }, dates, sessionCfg);
+    expect(c).toEqual({ metric: "hfr", op: "lte", value: 0, enabled: true });
+  });
+
+  it("returns enabled: true for every metric", () => {
+    for (const m of METRIC_KEYS) {
+      expect(defaultConstraintFor(m, details, dates, sessionCfg).enabled).toBe(true);
+    }
+  });
+});
+
+describe("METRIC_DEFS", () => {
+  it("maps the five metric keys to the contract's fields and polarity", () => {
+    expect(METRIC_DEFS.hfr).toMatchObject({ field: "median_hfr", decimals: 2, betterWhen: "low" });
+    expect(METRIC_DEFS.ecc).toMatchObject({ field: "eccentricity", decimals: 2, betterWhen: "low" });
+    expect(METRIC_DEFS.fwhm).toMatchObject({ field: "fwhm", decimals: 2, betterWhen: "low" });
+    expect(METRIC_DEFS.stars).toMatchObject({ field: "detected_stars", decimals: 0, betterWhen: "high" });
+    expect(METRIC_DEFS.rms).toMatchObject({ field: "guiding_rms_arcsec", decimals: 2, betterWhen: "low" });
   });
 });
 
 describe("suggestRelaxation", () => {
-  const dates = ["2026-03-15"];
-  const verdictsFor = (frames: FrameRecord[], cons: RawConstraint[]) =>
-    computeVerdicts({ "2026-03-15": detail(frames) }, dates, "raw", "session", 60, cons);
-
   // The 10Micron case: a rig whose eccentricity genuinely floors around 0.55
   // meets a 0.5 constraint and loses every frame. The offer must come from its
   // own data, not from a table of conventions.
@@ -298,10 +334,10 @@ describe("suggestRelaxation", () => {
       frame({ source_relative: "b.fits", eccentricity: 0.58 }),
       frame({ source_relative: "c.fits", eccentricity: 0.61 }),
     ];
-    const cons: RawConstraint[] = [{ metric: "eccentricity", value: 0.5 }];
-    const r = suggestRelaxation(verdictsFor(frames, cons), "raw", 60, cons)!;
+    const cons = [con("ecc", "lte", 0.5)];
+    const r = suggestRelaxation(verdictsFor(frames, cons), cons)!;
     expect(r).not.toBeNull();
-    expect(r.metric).toBe("eccentricity");
+    expect(r.metric).toBe("ecc");
     // Rounded outward so the best frame actually passes: 0.5519 -> 0.56.
     expect(r.value).toBe(0.56);
     expect(r.label).toBe("Eccentricity ≤ 0.56");
@@ -314,8 +350,8 @@ describe("suggestRelaxation", () => {
       frame({ source_relative: "b.fits", eccentricity: 0.55 }),
       frame({ source_relative: "c.fits", eccentricity: 0.9 }),
     ];
-    const cons: RawConstraint[] = [{ metric: "eccentricity", value: 0.5 }];
-    expect(suggestRelaxation(verdictsFor(frames, cons), "raw", 60, cons)!.keeps).toBe(2);
+    const cons = [con("ecc", "lte", 0.5)];
+    expect(suggestRelaxation(verdictsFor(frames, cons), cons)!.keeps).toBe(2);
   });
 
   // `keeps` is verified against the real evaluator, so a relaxation that another
@@ -326,12 +362,12 @@ describe("suggestRelaxation", () => {
       frame({ source_relative: "a.fits", eccentricity: 0.55, median_hfr: 2.0 }),
       frame({ source_relative: "b.fits", eccentricity: 0.9, median_hfr: 2.0 }),
     ];
-    const cons: RawConstraint[] = [
-      { metric: "median_hfr", value: 3.0 }, // both already pass this
-      { metric: "eccentricity", value: 0.5 }, // both fail this: the binding gate
+    const cons = [
+      con("hfr", "lte", 3.0), // both already pass this
+      con("ecc", "lte", 0.5), // both fail this: the binding gate
     ];
-    const r = suggestRelaxation(verdictsFor(frames, cons), "raw", 60, cons)!;
-    expect(r.metric).toBe("eccentricity");
+    const r = suggestRelaxation(verdictsFor(frames, cons), cons)!;
+    expect(r.metric).toBe("ecc");
     expect(r.value).toBe(0.55);
     expect(r.keeps).toBe(1);
   });
@@ -344,46 +380,38 @@ describe("suggestRelaxation", () => {
       frame({ source_relative: "a.fits", eccentricity: 0.55, median_hfr: 2.0 }),
       frame({ source_relative: "b.fits", eccentricity: 0.55, median_hfr: 2.0 }),
     ];
-    const cons: RawConstraint[] = [
-      { metric: "median_hfr", value: 1.0 },
-      { metric: "eccentricity", value: 0.5 },
-    ];
-    expect(suggestRelaxation(verdictsFor(frames, cons), "raw", 60, cons)).toBeNull();
-  });
-
-  it("offers the best achieved score in score mode", () => {
-    const verdicts = computeVerdicts(
-      { "2026-03-15": detail([badFrame]) }, dates, "score", "session", 90, [],
-    );
-    const r = suggestRelaxation(verdicts, "score", 90, [])!;
-    expect(r.metric).toBeNull();
-    expect(r.value).toBe(Math.floor(verdicts[0].score!));
-    expect(r.label).toBe(`score ≥ ${r.value}`);
-    expect(r.keeps).toBe(1);
-  });
-
-  // Nothing was measured, so no threshold lets anything in. Offering a button
-  // here would be offering a fix that cannot work.
-  it("returns null when every frame is unmeasured", () => {
-    const verdicts = computeVerdicts(
-      { "2026-03-15": detail([unscorableFrame]) }, dates, "score", "session", 60, [],
-    );
-    expect(suggestRelaxation(verdicts, "score", 60, [])).toBeNull();
+    const cons = [con("hfr", "lte", 1.0), con("ecc", "lte", 0.5)];
+    expect(suggestRelaxation(verdictsFor(frames, cons), cons)).toBeNull();
   });
 
   it("returns null when no frame carries the constrained metric", () => {
-    const cons: RawConstraint[] = [{ metric: "guiding_rms_arcsec", value: 0.1 }];
-    expect(suggestRelaxation(verdictsFor([goodFrame], cons), "raw", 60, cons)).toBeNull();
+    const cons = [con("rms", "lte", 0.1)];
+    expect(suggestRelaxation(verdictsFor([goodFrame], cons), cons)).toBeNull();
+  });
+
+  it("never offers to loosen a disabled constraint", () => {
+    // The enabled ecc gate excludes everything; the disabled hfr gate would be
+    // trivially loosenable but excludes nothing, so it must not be offered.
+    const frames = [frame({ source_relative: "a.fits", eccentricity: 0.9, median_hfr: 2.0 })];
+    const cons = [con("hfr", "lte", 1.0, false), con("ecc", "lte", 0.5)];
+    const r = suggestRelaxation(verdictsFor(frames, cons), cons)!;
+    expect(r.metric).toBe("ecc");
+  });
+});
+
+describe("qualityTotals", () => {
+  it("splits verdicts into copy/fail/unmeasured", () => {
+    const verdicts = verdictsFor([goodFrame, badFrame, blankFrame], [con("ecc", "lte", 0.45)]);
+    expect(qualityTotals(verdicts)).toEqual({ total: 3, copy: 1, fail: 1, unmeasured: 1 });
   });
 });
 
 describe("excludedSourceRelatives", () => {
   it("returns the source_relative of every non-kept frame", () => {
-    const d = detail([goodFrame, badFrame, unscorableFrame]);
-    const verdicts = computeVerdicts({ "2026-03-15": d }, ["2026-03-15"], "score", "session", 60, []);
+    const verdicts = verdictsFor([goodFrame, badFrame, blankFrame], [con("ecc", "lte", 0.45)]);
     const excluded = excludedSourceRelatives(verdicts);
     expect(excluded).toContain("bad.fits");
-    expect(excluded).toContain("unscorable.fits");
+    expect(excluded).toContain("blank.fits");
     expect(excluded).not.toContain("good.fits");
     expect(excluded).toHaveLength(2);
   });
@@ -416,7 +444,7 @@ describe("isUnderRelativePath", () => {
 
 describe("excludedUnderSelectedLevels", () => {
   const verdict = (sessionDate: string, source_relative: string, keep: boolean): FrameVerdict =>
-    ({ frame: frame({ source_relative }), sessionDate, score: null, keep, reason: keep ? "pass" : "fail", failedBy: null });
+    ({ frame: frame({ source_relative }), sessionDate, keep, reason: keep ? "pass" : "fail", failedBy: null });
 
   it("drops excluded frames that sit outside the session's selected level", () => {
     const verdicts = [

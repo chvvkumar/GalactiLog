@@ -5,111 +5,85 @@
 // paths for the excluded frames. This is the single source of truth for the
 // exclude set consumed by the browser copy and the backend generate/preview calls.
 //
-// The composite-score path mirrors SessionAccordionCard.tsx's frame scoring exactly
-// (frameScore/equipmentForFrame/baselineFor, utils/frameQuality.ts madZ +
-// combinedScore) so a frame's verdict in "score" mode matches its row coloring on
-// the target detail page.
+// The verdict path is raw metric constraints only: an AND over the ENABLED
+// constraints, judged per frame on the metrics that frame actually carries.
+// The old composite-score mode is gone; per-cell z coloring (cellZ) still mirrors
+// SessionAccordionCard.tsx so a frame's preview coloring matches its row on the
+// target detail page.
 
 import type { SessionDetail, FrameRecord } from "../api/types";
-import { madZ, combinedScore, type GroupBaseline } from "../utils/frameQuality";
+import { madZ, type GroupBaseline, type MetricBaseline, MIN_GROUP } from "../utils/frameQuality";
 
-export type FilterMode = "score" | "raw";
+export type MetricKey = "hfr" | "ecc" | "fwhm" | "stars" | "rms";
+export type ConstraintOp = "lte" | "gte";
 export type BaselineMode = "session" | "rig";
 
-// The six graded metrics a raw constraint can target. Field names match
-// FrameRecord exactly so a constraint indexes the frame directly.
-export const RAW_METRICS = [
-  "median_hfr",
-  "fwhm",
-  "eccentricity",
-  "detected_stars",
-  "guiding_rms_arcsec",
-  "adu_median",
-] as const;
+export interface RawConstraint {
+  metric: MetricKey;
+  op: ConstraintOp;
+  value: number;
+  enabled: boolean;
+}
 
-export type RawMetric = (typeof RAW_METRICS)[number];
+export interface QualityConfig {
+  baseline: BaselineMode;
+  constraints: RawConstraint[];
+}
 
-// Direction is automatic per metric: only detected_stars is higher-is-better.
-// All others (HFR, FWHM, eccentricity, guiding RMS, ADU median) are lower-is-better.
-export const HIGHER_IS_BETTER: Record<RawMetric, boolean> = {
-  median_hfr: false,
-  fwhm: false,
-  eccentricity: false,
-  detected_stars: true,
-  guiding_rms_arcsec: false,
-  adu_median: false,
+// The five constrained metrics: FrameRecord field, chip label, display decimals,
+// and polarity. Only detected_stars is higher-is-better; everything else
+// (HFR, FWHM, eccentricity, guiding RMS) is lower-is-better.
+export const METRIC_DEFS: Record<
+  MetricKey,
+  { field: keyof FrameRecord; label: string; decimals: number; betterWhen: "low" | "high" }
+> = {
+  hfr: { field: "median_hfr", label: "HFR", decimals: 2, betterWhen: "low" },
+  ecc: { field: "eccentricity", label: "Eccentricity", decimals: 2, betterWhen: "low" },
+  fwhm: { field: "fwhm", label: "FWHM", decimals: 2, betterWhen: "low" },
+  stars: { field: "detected_stars", label: "Detected stars", decimals: 0, betterWhen: "high" },
+  rms: { field: "guiding_rms_arcsec", label: "Guiding RMS", decimals: 2, betterWhen: "low" },
 };
 
-export const RAW_METRIC_LABELS: Record<RawMetric, string> = {
-  median_hfr: "HFR",
+export const METRIC_KEYS = Object.keys(METRIC_DEFS) as MetricKey[];
+
+// Short names for the one-line failure reason on a verdict ("ecc 0.62 > 0.55").
+// Deliberately terser than METRIC_DEFS labels: this string sits inside a table
+// cell beside the badge, where "Eccentricity" would not fit.
+const METRIC_SHORT: Record<MetricKey, string> = {
+  hfr: "HFR",
+  ecc: "ecc",
   fwhm: "FWHM",
-  eccentricity: "Eccentricity",
-  detected_stars: "Detected stars",
-  guiding_rms_arcsec: "Guiding RMS",
-  adu_median: "ADU median",
+  stars: "stars",
+  rms: "RMS",
 };
 
 // Preview columns mirroring the session frame table's toggled metric columns.
 // group/field feed isFieldVisible so the preview honors the user's display
 // settings. Lives here rather than in the panel because the column set is the
-// metric domain (same six metrics as RAW_METRICS), not a rendering choice.
+// metric domain (the same five metrics as METRIC_DEFS), not a rendering choice.
 export const METRIC_COLUMNS: {
-  metric: RawMetric;
+  metric: MetricKey;
   label: string;
-  group: "quality" | "guiding" | "adu";
+  group: "quality" | "guiding";
   field: string;
   format: (v: number) => string;
 }[] = [
-  { metric: "median_hfr", label: "HFR", group: "quality", field: "hfr", format: (v) => v.toFixed(2) },
-  { metric: "eccentricity", label: "Ecc", group: "quality", field: "eccentricity", format: (v) => v.toFixed(2) },
+  { metric: "hfr", label: "HFR", group: "quality", field: "hfr", format: (v) => v.toFixed(2) },
+  { metric: "ecc", label: "Ecc", group: "quality", field: "eccentricity", format: (v) => v.toFixed(2) },
   { metric: "fwhm", label: "FWHM", group: "quality", field: "fwhm", format: (v) => v.toFixed(2) },
-  { metric: "detected_stars", label: "Stars", group: "quality", field: "detected_stars", format: (v) => v.toFixed(0) },
-  { metric: "guiding_rms_arcsec", label: "RMS", group: "guiding", field: "rms_total", format: (v) => v.toFixed(2) },
-  { metric: "adu_median", label: "ADU", group: "adu", field: "median", format: (v) => v.toFixed(0) },
+  { metric: "stars", label: "Stars", group: "quality", field: "detected_stars", format: (v) => v.toFixed(0) },
+  { metric: "rms", label: "RMS", group: "guiding", field: "rms_total", format: (v) => v.toFixed(2) },
 ];
 
-export interface RawConstraint {
-  metric: RawMetric;
-  value: number;
+/** Format a metric value with its METRIC_DEFS decimals. */
+export function formatMetric(metric: MetricKey, value: number): string {
+  return value.toFixed(METRIC_DEFS[metric].decimals);
 }
 
-// Short names for the one-line failure reason on a verdict ("ecc 0.62 > 0.55").
-// Deliberately terser than RAW_METRIC_LABELS: this string sits inside a table
-// cell beside the badge, where "Eccentricity" would not fit.
-export const RAW_METRIC_SHORT: Record<RawMetric, string> = {
-  median_hfr: "HFR",
-  fwhm: "FWHM",
-  eccentricity: "ecc",
-  detected_stars: "stars",
-  guiding_rms_arcsec: "RMS",
-  adu_median: "ADU",
-};
-
-const METRIC_FORMAT: Record<RawMetric, (v: number) => string> = Object.fromEntries(
-  METRIC_COLUMNS.map((c) => [c.metric, c.format]),
-) as Record<RawMetric, (v: number) => string>;
-
-/** Format a metric value the way the preview table's column formats it. */
-export function formatMetric(metric: RawMetric, value: number): string {
-  return METRIC_FORMAT[metric](value);
-}
-
-/**
- * Starting value for a newly added raw constraint.
- *
- * Only eccentricity gets one, and that is a deliberate limit rather than an
- * unfinished table. Eccentricity is dimensionless and bounded 0..1, so a number
- * typed here means the same thing on every rig. HFR, FWHM, guiding RMS and ADU
- * median are not: they scale with pixel scale, focal length, seeing and exposure,
- * so any constant shipped for them would be a number invented to look helpful.
- * Those metrics start at 0 and the user supplies the value their own data implies.
- */
-export const RAW_METRIC_DEFAULTS: Partial<Record<RawMetric, number>> = {
-  eccentricity: 0.6,
-};
-
-export function defaultConstraintValue(metric: RawMetric): number {
-  return RAW_METRIC_DEFAULTS[metric] ?? 0;
+/** The frame's value for a constrained metric, or null when unmeasured. */
+export function metricValue(frame: FrameRecord, metric: MetricKey): number | null {
+  const v = frame[METRIC_DEFS[metric].field];
+  return typeof v === "number" ? v : null;
 }
 
 export type Verdict = "pass" | "fail" | "unmeasured";
@@ -117,13 +91,12 @@ export type Verdict = "pass" | "fail" | "unmeasured";
 export interface FrameVerdict {
   frame: FrameRecord;
   sessionDate: string;
-  score: number | null;
   keep: boolean;
   reason: Verdict;
   /**
-   * Which gate excluded this frame, and with what numbers -- "ecc 0.62 > 0.55",
-   * "score 41 < 60". Null when the frame passed or was unmeasured (there is no
-   * gate to name: nothing was measured to compare).
+   * Which gate excluded this frame, and with what numbers -- "ecc 0.62 > 0.55".
+   * Null when the frame passed or was unmeasured (there is no gate to name:
+   * nothing was measured to compare).
    *
    * `reason` stays a bare pass/fail/unmeasured because the badge and the exclude
    * set are keyed off it. This is the human sentence beside the badge, and it is
@@ -159,7 +132,7 @@ export function equipmentForFrame(
 
 // Active baseline group for a frame. The selected mode picks session vs rig for
 // the sharpness/roundness baselines; signal (detected_stars) is always session
-// scoped (see scoreFrame). Mirrors SessionAccordionCard.tsx baselineFor.
+// scoped (see cellZ). Mirrors SessionAccordionCard.tsx baselineFor.
 export function baselineFor(
   detail: SessionDetail,
   frame: FrameRecord,
@@ -171,80 +144,67 @@ export function baselineFor(
   return mode === "session" ? detail.session_baselines[key] : detail.rig_baselines[key];
 }
 
-// Per-frame combined 0-100 score from signal (stars, higher-is-better),
-// sharpness (HFR) and roundness (eccentricity) against the active baseline.
-// Signal is always session-scoped; sharpness/roundness follow `mode`.
-// Mirrors SessionAccordionCard.tsx frameScore exactly.
-export function scoreFrame(
-  detail: SessionDetail,
-  frame: FrameRecord,
-  mode: BaselineMode,
-): number | null {
-  const eq = equipmentForFrame(detail, frame);
-  const b = baselineFor(detail, frame, eq.telescope, eq.camera, mode);
-  const sb = baselineFor(detail, frame, eq.telescope, eq.camera, "session");
-  const zSignal = madZ(frame.detected_stars, sb?.detected_stars, true);
-  const zSharp = madZ(frame.median_hfr, b?.median_hfr);
-  const zRound = madZ(frame.eccentricity, b?.eccentricity);
-  return combinedScore(zSignal, zSharp, zRound);
-}
-
 // Signed robust z for ONE frame metric against the active baseline, mirroring
-// SessionAccordionCard row coloring. Same baseline lookup as scoreFrame, which is
-// why it lives beside it: signal (detected_stars) is always session-scoped, the
-// rest follow `baseline`. Guiding RMS has no baseline, hence null.
+// SessionAccordionCard row coloring. Signal (detected_stars) is always
+// session-scoped, the rest follow `baseline`. Guiding RMS has no baseline,
+// hence null.
 export function cellZ(
   detail: SessionDetail,
   frame: FrameRecord,
-  metric: RawMetric,
+  metric: MetricKey,
   baseline: BaselineMode,
 ): number | null {
   const eq = equipmentForFrame(detail, frame);
   const active = baselineFor(detail, frame, eq.telescope, eq.camera, baseline);
   const sess = baselineFor(detail, frame, eq.telescope, eq.camera, "session");
   switch (metric) {
-    case "median_hfr": return madZ(frame.median_hfr, active?.median_hfr);
+    case "hfr": return madZ(frame.median_hfr, active?.median_hfr);
     case "fwhm": return madZ(frame.fwhm, active?.fwhm);
-    case "eccentricity": return madZ(frame.eccentricity, active?.eccentricity);
-    case "detected_stars": return madZ(frame.detected_stars, sess?.detected_stars, true);
-    case "guiding_rms_arcsec": return null;
-    case "adu_median": return madZ(frame.adu_median, sess?.adu_median);
+    case "ecc": return madZ(frame.eccentricity, active?.eccentricity);
+    case "stars": return madZ(frame.detected_stars, sess?.detected_stars, true);
+    case "rms": return null;
   }
 }
 
 export function constraintPasses(c: RawConstraint, value: number): boolean {
-  return HIGHER_IS_BETTER[c.metric] ? value >= c.value : value <= c.value;
+  return c.op === "gte" ? value >= c.value : value <= c.value;
 }
 
 /** The failure sentence for a constraint a frame's `actual` violated. */
 function rawFailureText(c: RawConstraint, actual: number): string {
-  const op = HIGHER_IS_BETTER[c.metric] ? "<" : ">";
-  return `${RAW_METRIC_SHORT[c.metric]} ${formatMetric(c.metric, actual)} ${op} ${formatMetric(c.metric, c.value)}`;
+  const op = c.op === "gte" ? "<" : ">";
+  return `${METRIC_SHORT[c.metric]} ${formatMetric(c.metric, actual)} ${op} ${formatMetric(c.metric, c.value)}`;
 }
 
 /**
- * Raw multi-metric AND with the partial-metric rule (spec #5), reporting WHICH
- * constraint fired:
- *   - Judge a frame only on the active constraints it HAS data for.
+ * Multi-metric AND over the ENABLED constraints, with the partial-metric rule,
+ * reporting WHICH constraint fired:
+ *   - Disabled constraints do not exist for the verdict. Toggling a chip off
+ *     must behave exactly like deleting the constraint, without losing its value.
+ *   - Zero enabled constraints -> every frame passes. An empty filter is no
+ *     filter, not a filter that quarantines the whole library as "unmeasured".
+ *   - Judge a frame only on the enabled constraints it HAS data for.
  *   - A MISSING METRIC IS SKIPPED, NOT an auto-fail. This is deliberate, not an
  *     oversight: a constraint the user added for their guided nights must not
  *     silently delete every unguided frame, and coverage of the metrics is
  *     uneven across a library (a frame from before FWHM was recorded is not a
- *     bad frame). A frame with none of the constrained metrics lands in
+ *     bad frame). A frame with none of the enabled constrained metrics lands in
  *     "unmeasured", which the panel counts and labels separately, so the skip is
  *     visible rather than a quiet pass.
  *   - Of the metrics present, ALL must pass (AND) -> "pass"; any fails -> "fail".
- *   - Zero present active metrics (or zero constraints) -> "unmeasured".
  *
- * `failedBy` names the FIRST constraint that failed, in the user's own order.
+ * `failedBy` names the FIRST enabled constraint that failed, in the user's own
+ * order.
  */
 export function evaluateRawDetailed(
   frame: FrameRecord,
   constraints: RawConstraint[],
 ): { verdict: Verdict; failedBy: string | null } {
+  const enabled = constraints.filter((c) => c.enabled);
+  if (enabled.length === 0) return { verdict: "pass", failedBy: null };
   let present = 0;
-  for (const c of constraints) {
-    const v = frame[c.metric];
+  for (const c of enabled) {
+    const v = metricValue(frame, c.metric);
     if (v == null) continue;
     present += 1;
     if (!constraintPasses(c, v)) return { verdict: "fail", failedBy: rawFailureText(c, v) };
@@ -256,42 +216,79 @@ export function evaluateRaw(frame: FrameRecord, constraints: RawConstraint[]): V
   return evaluateRawDetailed(frame, constraints).verdict;
 }
 
-// Verdict for every LIGHT frame across the selected dates.
-//   - score mode: null combinedScore -> "unmeasured"; >= threshold -> "pass"; else "fail".
-//   - raw mode: evaluateRaw (partial-metric AND).
-// The score is always computed for preview coloring even in raw mode.
+// Verdict for every LIGHT frame across the selected dates: evaluateRawDetailed
+// (partial-metric AND over the enabled constraints).
 export function computeVerdicts(
   sessionDetails: Record<string, SessionDetail>,
   dates: string[],
-  mode: FilterMode,
-  baselineMode: BaselineMode,
-  scoreThreshold: number,
-  constraints: RawConstraint[],
+  config: QualityConfig,
 ): FrameVerdict[] {
   const out: FrameVerdict[] = [];
   for (const date of dates) {
     const detail = sessionDetails[date];
     if (!detail) continue;
     for (const frame of detail.frames) {
-      const score = scoreFrame(detail, frame, baselineMode);
-      let reason: Verdict;
-      let failedBy: string | null = null;
-      if (mode === "score") {
-        if (score == null) reason = "unmeasured";
-        else if (score >= scoreThreshold) reason = "pass";
-        else {
-          reason = "fail";
-          failedBy = `score ${score.toFixed(0)} < ${scoreThreshold}`;
-        }
-      } else {
-        const d = evaluateRawDetailed(frame, constraints);
-        reason = d.verdict;
-        failedBy = d.failedBy;
-      }
-      out.push({ frame, sessionDate: date, score, keep: reason === "pass", reason, failedBy });
+      const { verdict, failedBy } = evaluateRawDetailed(frame, config.constraints);
+      out.push({ frame, sessionDate: date, keep: verdict === "pass", reason: verdict, failedBy });
     }
   }
   return out;
+}
+
+/**
+ * Starting constraint for a newly enabled metric, derived from the SAME
+ * baseline stats (median + MAD) the cell coloring uses, respecting
+ * config.baseline (signal/detected_stars is always session-scoped, exactly as
+ * cellZ colors it).
+ *
+ * Threshold = median + 1.5 * 1.4826 * MAD for lower-is-better metrics (op
+ * "lte"), median - 1.5 * 1.4826 * MAD for detected_stars (op "gte", floored at
+ * 0), rounded to the metric's display decimals. 1.4826 * MAD is the robust
+ * sigma estimate, so the default admits everything within ~1.5 sigma of the
+ * selection's own typical frame -- the user's data supplies the number, not a
+ * shipped constant.
+ *
+ * Sessions can span several train+filter groups, each with its own baseline;
+ * a constraint is one number, so the largest-n qualifying group decides (most
+ * evidence wins). Guiding RMS has no baseline (as in cellZ), and a selection
+ * may have no qualifying baseline at all; both start at 0 and the user supplies
+ * the value their data implies. Always enabled: enabling is the whole point of
+ * asking for a default.
+ */
+export function defaultConstraintFor(
+  metric: MetricKey,
+  sessionDetails: Record<string, SessionDetail>,
+  dates: string[],
+  config: QualityConfig,
+): RawConstraint {
+  const def = METRIC_DEFS[metric];
+  const op: ConstraintOp = def.betterWhen === "high" ? "gte" : "lte";
+  const mode: BaselineMode = metric === "stars" ? "session" : config.baseline;
+
+  let best: MetricBaseline | null = null;
+  const seen = new Set<string>();
+  for (const date of dates) {
+    const detail = sessionDetails[date];
+    if (!detail) continue;
+    for (const frame of detail.frames) {
+      const eq = equipmentForFrame(detail, frame);
+      const key = `${date}::${frameGroupKey(frame, eq.telescope, eq.camera)}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const group = baselineFor(detail, frame, eq.telescope, eq.camera, mode);
+      const b = group?.[def.field as string];
+      if (!b || b.median == null || b.mad == null || b.n < MIN_GROUP) continue;
+      if (!best || b.n > best.n) best = b;
+    }
+  }
+
+  if (!best || best.median == null || best.mad == null) {
+    return { metric, op, value: 0, enabled: true };
+  }
+  const spread = 1.5 * 1.4826 * best.mad;
+  const raw = def.betterWhen === "high" ? best.median - spread : best.median + spread;
+  const value = Math.max(0, Number(raw.toFixed(def.decimals)));
+  return { metric, op, value, enabled: true };
 }
 
 // Fits-root-relative paths of every excluded (not-kept) frame. Same domain as
@@ -356,29 +353,29 @@ export interface QualityTotals {
  * A loosening of ONE gate that would let at least one frame through, derived
  * entirely from the user's own frames.
  *
- * `metric` is null in score mode, where the gate is the threshold itself.
  * `keeps` is counted by re-running the real evaluation with the relaxed value,
  * not estimated, so the offer cannot promise frames it will not deliver.
  */
 export interface Relaxation {
-  metric: RawMetric | null;
+  metric: MetricKey;
   value: number;
   label: string;
   keeps: number;
 }
 
 /**
- * Two decimals, rounded in the direction that keeps the best frame passing: out
- * for lower-is-better (0.5519 -> 0.56), down for higher-is-better.
+ * Rounded in the direction that keeps the best frame passing: out for
+ * lower-is-better (0.5519 -> 0.56 at two decimals), down for higher-is-better.
  *
  * The toFixed pass is not decoration. `0.55 * 100` is 55.00000000000001 in
  * binary floating point, so a bare Math.ceil turns an exactly-achievable 0.55
  * into 0.56 -- an offer one hundredth looser than the user's data warrants,
  * from a rounding artifact rather than from anything measured.
  */
-function roundOutward(value: number, higherIsBetter: boolean): number {
-  const scaled = Number((value * 100).toFixed(6));
-  return (higherIsBetter ? Math.floor(scaled) : Math.ceil(scaled)) / 100;
+function roundOutward(value: number, decimals: number, floorward: boolean): number {
+  const scale = Math.pow(10, decimals);
+  const scaled = Number((value * scale).toFixed(6));
+  return (floorward ? Math.floor(scaled) : Math.ceil(scaled)) / scale;
 }
 
 /**
@@ -395,36 +392,28 @@ function roundOutward(value: number, higherIsBetter: boolean): number {
  * each exclude every frame, no single change frees anything and this returns
  * null; the caller says so instead of offering a button that moves zero to zero.
  *
- * Null also when every frame is unmeasured (nothing was measured, so no
- * threshold lets anything in) or no constrained metric has a value anywhere.
+ * Only ENABLED constraints are candidates: a disabled gate excludes nothing, so
+ * loosening it frees nothing. Null also when no constrained metric has a value
+ * anywhere (nothing was measured, so no threshold lets anything in).
  */
 export function suggestRelaxation(
   verdicts: FrameVerdict[],
-  mode: FilterMode,
-  scoreThreshold: number,
   constraints: RawConstraint[],
 ): Relaxation | null {
-  if (mode === "score") {
-    const scores = verdicts.map((v) => v.score).filter((s): s is number => s != null);
-    if (!scores.length) return null;
-    const value = Math.floor(Math.max(...scores));
-    if (value >= scoreThreshold) return null;
-    return {
-      metric: null,
-      value,
-      label: `score ≥ ${value}`,
-      keeps: scores.filter((s) => s >= value).length,
-    };
-  }
-
   let best: Relaxation | null = null;
   for (const c of constraints) {
+    if (!c.enabled) continue;
     const values = verdicts
-      .map((v) => v.frame[c.metric])
+      .map((v) => metricValue(v.frame, c.metric))
       .filter((n): n is number => n != null);
     if (!values.length) continue;
-    const higher = HIGHER_IS_BETTER[c.metric];
-    const relaxed = roundOutward(higher ? Math.max(...values) : Math.min(...values), higher);
+    const floorward = c.op === "gte";
+    const decimals = METRIC_DEFS[c.metric].decimals;
+    const relaxed = roundOutward(
+      floorward ? Math.max(...values) : Math.min(...values),
+      decimals,
+      floorward,
+    );
     if (relaxed === c.value) continue;
     const next = constraints.map((o) => (o.metric === c.metric ? { ...o, value: relaxed } : o));
     const keeps = verdicts.filter((v) => evaluateRaw(v.frame, next) === "pass").length;
@@ -433,7 +422,7 @@ export function suggestRelaxation(
       best = {
         metric: c.metric,
         value: relaxed,
-        label: `${RAW_METRIC_LABELS[c.metric]} ${higher ? "≥" : "≤"} ${formatMetric(c.metric, relaxed)}`,
+        label: `${METRIC_DEFS[c.metric].label} ${floorward ? "≥" : "≤"} ${formatMetric(c.metric, relaxed)}`,
         keeps,
       };
     }

@@ -70,6 +70,7 @@ vi.mock("./SettingsProvider", () => ({
   useSettingsContext: () => ({
     settings: () => ({ general }),
     displaySettings: () => undefined,
+    contentWidth: () => "full",
     saveGeneral: (g: Record<string, unknown>) => saveGeneralMock(g),
   }),
 }));
@@ -168,9 +169,14 @@ function renderModal(cache: Record<string, SessionDetail> = { [DATE]: cacheDetai
   ));
 }
 
-/** Populates the Folders-to-copy zone by running the preview. */
+/**
+ * Settles the Folders-to-copy zone. The modal previews automatically on mount
+ * whenever a library root is set, so most tests only need to let that resolve;
+ * the manual button exists only when the auto-preview was skipped.
+ */
 async function preview() {
-  fireEvent.click(buttonsLabelled("Preview folder levels")[0]);
+  const btn = buttonsLabelled("Preview folder levels")[0];
+  if (btn) fireEvent.click(btn);
   await flush();
 }
 
@@ -186,8 +192,39 @@ async function pickBothFolders() {
   await flush();
 }
 
+// The quality panel's master toggle is the modal's only checkbox.
+const filterCheckbox = (): HTMLInputElement =>
+  document.body.querySelector('input[type="checkbox"]') as HTMLInputElement;
+
+/**
+ * Turns the filter on AND arms one gate. An empty constraint set is no filter
+ * (every frame passes), so the enable checkbox alone excludes nothing; the
+ * ghost "+ HFR" chip adds a constraint. With no qualifying baseline the default
+ * value is 0 (frames without HFR land in "unmeasured" and are excluded); tests
+ * with measured frames tighten the threshold explicitly via setHfrThreshold.
+ */
+async function enableFilterWithHfrGate() {
+  fireEvent.click(filterCheckbox());
+  await flush();
+  const chip = buttons().find((b) => b.textContent?.replace(/\s+/g, "") === "+HFR");
+  if (!chip) throw new Error(`No ghost HFR chip found. Body: ${bodyText()}`);
+  fireEvent.click(chip);
+  await flush();
+}
+
+async function setHfrThreshold(value: number) {
+  const input = document.body.querySelector(
+    'input[aria-label="HFR threshold"]',
+  ) as HTMLInputElement;
+  fireEvent.input(input, { target: { value: String(value) } });
+  await flush();
+}
+
 beforeEach(() => {
   document.body.innerHTML = "";
+  // The quality filter persists per rig in localStorage; leaking one test's
+  // enablement into the next modal's hydration would couple the suite.
+  localStorage.clear();
   previewSessions = [session()];
   general = {
     wbpp_library_root: "Z:\\Astro",
@@ -339,8 +376,9 @@ describe("WbppExportModal footer", () => {
     await preview();
     expect(bodyText()).toContain("1 KB");
 
-    fireEvent.click(document.body.querySelector('input[type="checkbox"]') as HTMLElement);
-    await flush();
+    // The HFR gate excludes both unmeasured cached lights; one of them has no
+    // recorded size, so the remaining byte total is unknowable.
+    await enableFilterWithHfrGate();
     expect(bodyText()).toContain("8 frames · 1 folder · —");
   });
 });
@@ -349,10 +387,9 @@ describe("WbppExportModal footer", () => {
  * A session split across two filter folders, as the reviewer traced it: 60 lights,
  * 30 under .../Ha and 30 under .../OIII.
  *
- * Pass/fail is deterministic via median_hfr alone: with a session baseline of
- * median 2.0 / mad 0.5, hfr 1.0 gives z=-2 -> score 83.4 (pass) and hfr 3.0 gives
- * z=+2 -> score 16.6 (fail, under the default threshold of 60). detected_stars and
- * eccentricity stay null so those axes drop out of combinedScore.
+ * Pass/fail is deterministic via median_hfr alone: every frame carries an hfr of
+ * either 1.0 or 3.0, so an HFR ≤ 2 constraint passes the former and fails the
+ * latter, with nothing landing in "unmeasured".
  */
 function splitSessionDetail(haFails: number, oiiiFails: number): SessionDetail {
   const frame = (folder: string, i: number, fails: boolean) => ({
@@ -443,13 +480,18 @@ describe("WbppExportModal quality frame fetch", () => {
   it("lands the fetched frames in state rather than overwriting them each pass", async () => {
     // The other half of the same bug: every rerun reset state to a snapshot taken
     // before the in-flight fetch resolved, so the arriving frames were discarded and
-    // the panel reported "0 of 0 lights" on a session that had plenty.
+    // the panel graded an empty table on a session that had plenty.
     renderUncached();
-    await enableFilter();
-    expect(bodyText()).not.toContain("0 of 0 lights");
-    // Real verdicts from the fetched frames: hfr 1.0 passes, hfr 3.0 fails.
-    expect(bodyText()).toContain("Skips 1 of 2 lights");
+    await enableFilterWithHfrGate();
+    // The chip's default derives from the session baseline (median 2.0, mad 0.5:
+    // 2.0 + 1.5 * 1.4826 * 0.5 = 3.11), which both frames clear. Tighten it so
+    // the verdicts split: hfr 1.0 passes, hfr 3.0 fails.
+    await setHfrThreshold(2);
+    expect(bodyText()).not.toContain("No light frames");
+    expect(bodyText()).toContain("fetched_good.fits");
     expect(bodyText()).toContain("fetched_bad.fits");
+    // Real verdicts from the fetched frames, gate named on the failing row.
+    expect(bodyText()).toContain("HFR 3.00 > 2.00");
   });
 });
 
@@ -464,8 +506,8 @@ describe("WbppExportModal quality filter", () => {
     await pickBothFolders();
     expect(primaryButton().textContent?.trim()).toBe("Copy 30 frames");
 
-    fireEvent.click(document.body.querySelector('input[type="checkbox"]') as HTMLElement);
-    await flush();
+    await enableFilterWithHfrGate();
+    await setHfrThreshold(2);
 
     // 30 - 5, NOT 30 - 25: subtracting all 25 failures across the session from a
     // level that only contains 5 of them mixed two different frame domains.
@@ -483,8 +525,8 @@ describe("WbppExportModal quality filter", () => {
     await preview();
     await pickBothFolders();
 
-    fireEvent.click(document.body.querySelector('input[type="checkbox"]') as HTMLElement);
-    await flush();
+    await enableFilterWithHfrGate();
+    await setHfrThreshold(2);
 
     expect(primaryButton().textContent?.trim()).toBe("Copy 25 frames");
     expect(bodyText()).not.toContain("-5 frames");
@@ -497,130 +539,145 @@ describe("WbppExportModal quality filter", () => {
     expect(primaryButton().textContent?.trim()).toBe("Copy 10 frames");
     expect(bodyText()).toContain("10 frames · 1 folder · 1 KB");
 
-    const checkbox = document.body.querySelector('input[type="checkbox"]') as HTMLInputElement;
-    fireEvent.click(checkbox);
-    await flush();
+    await enableFilterWithHfrGate();
 
-    // Both cached lights are unmeasured, so both are excluded: 10 - 2 = 8, and
-    // their 100 B each comes off the 1000 B level total.
+    // Both cached lights carry no HFR, so the gate lands them in "unmeasured"
+    // and excludes them: 10 - 2 = 8, and their 100 B each comes off the 1000 B
+    // level total.
     expect(primaryButton().textContent?.trim()).toBe("Copy 8 frames");
     expect(bodyText()).toContain("8 frames · 1 folder · 800 B");
   });
 });
 
 describe("WbppExportModal quality config persistence", () => {
-  const checkbox = () =>
-    document.body.querySelector('input[type="checkbox"]') as HTMLInputElement;
+  const KEY = "galactilog.wbppQuality.v1.default";
 
-  it("hydrates the filter from the saved settings instead of resetting it", async () => {
-    general.wbpp_quality_enabled = true;
-    general.wbpp_quality_mode = "raw";
-    general.wbpp_quality_baseline = "rig";
-    general.wbpp_quality_score_threshold = 72;
-    general.wbpp_quality_raw_constraints = [{ metric: "eccentricity", value: 0.55 }];
+  const stored = (over: Record<string, unknown> = {}) =>
+    JSON.stringify({
+      enabled: true,
+      config: {
+        baseline: "rig",
+        constraints: [{ metric: "ecc", op: "lte", value: 0.55, enabled: true }],
+      },
+      ...over,
+    });
+
+  it("hydrates the filter from the per-rig store instead of resetting it", async () => {
+    localStorage.setItem(KEY, stored());
     renderModal();
     await flush();
 
     // Opening the modal used to reset every one of these, so the same tuning was
     // redone by hand on every export.
-    expect(checkbox().checked).toBe(true);
-    const mode = document.body.querySelector('select[aria-label="Mode"]') as HTMLSelectElement;
-    expect(mode.value).toBe("raw");
+    expect(filterCheckbox().checked).toBe(true);
     const value = document.body.querySelector(
-      'input[aria-label="Eccentricity value"]',
+      'input[aria-label="Ecc threshold"]',
     ) as HTMLInputElement;
     expect(value.value).toBe("0.55");
-    expect(bodyText()).toContain("Rig (catalog)");
+    // The stored "rig" baseline is the active segment.
+    const rigSegment = buttonsLabelled("Rig (catalog)")[0];
+    expect(rigSegment.className).toContain("text-theme-accent");
   });
 
-  it("falls back to the modal's original defaults when nothing is stored", () => {
+  it("falls back to filter-off with no constraints when nothing is stored", () => {
     renderModal();
-    expect(checkbox().checked).toBe(false);
-    const mode = document.body.querySelector('select[aria-label="Mode"]');
-    // Filter off: the panel is collapsed to its checkbox row, as it always was.
-    expect(mode).toBe(null);
+    expect(filterCheckbox().checked).toBe(false);
+    // The panel toolbar is always present; no chip is active.
+    expect(bodyText()).toContain("Enable filters");
+    expect(document.body.querySelector('input[aria-label="HFR threshold"]')).toBe(null);
+    expect(document.body.querySelector('input[aria-label="Ecc threshold"]')).toBe(null);
   });
 
   // Stored config can predate this build. A metric it no longer evaluates must
   // be dropped, not carried into the filter as a gate that matches nothing.
   it("drops a stored constraint naming an unknown metric", async () => {
-    general.wbpp_quality_enabled = true;
-    general.wbpp_quality_mode = "raw";
-    general.wbpp_quality_raw_constraints = [
-      { metric: "snr", value: 5 },
-      { metric: "eccentricity", value: 0.55 },
-    ];
+    localStorage.setItem(
+      KEY,
+      stored({
+        config: {
+          baseline: "session",
+          constraints: [
+            { metric: "snr", op: "lte", value: 5, enabled: true },
+            { metric: "ecc", op: "lte", value: 0.55, enabled: true },
+          ],
+        },
+      }),
+    );
     renderModal();
     await flush();
-    expect(
-      document.body.querySelectorAll('select[aria-label="Metric"]').length,
-    ).toBe(1);
+    expect(document.body.querySelector('input[aria-label="Ecc threshold"]')).not.toBe(null);
     expect(bodyText()).not.toContain("snr");
   });
 
-  it("writes the config back, debounced, when it changes", async () => {
-    vi.useFakeTimers();
-    try {
-      renderModal();
-      fireEvent.click(checkbox());
-      // Nothing yet: a slider drag must not be one PUT per pixel.
-      expect(saveGeneralMock).not.toHaveBeenCalled();
-      vi.advanceTimersByTime(800);
-      expect(saveGeneralMock).toHaveBeenCalledTimes(1);
-      expect(saveGeneralMock.mock.calls[0][0]).toMatchObject({
-        wbpp_quality_enabled: true,
-        wbpp_quality_mode: "score",
-        wbpp_quality_score_threshold: 60,
-        wbpp_quality_baseline: "session",
-        wbpp_quality_raw_constraints: [],
-      });
-      // Unrelated settings survive the write.
-      expect(saveGeneralMock.mock.calls[0][0]).toMatchObject({ wbpp_library_root: "Z:\\Astro" });
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("does not write anything back when the filter is never touched", async () => {
-    vi.useFakeTimers();
-    try {
-      renderModal();
-      vi.advanceTimersByTime(5000);
-      // The effect's first run holds exactly what it hydrated FROM. Writing that
-      // back would be a PUT on every modal open, for every user.
-      expect(saveGeneralMock).not.toHaveBeenCalled();
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("flushes a pending write when the modal closes", () => {
-    vi.useFakeTimers();
-    try {
-      const { unmount } = renderModal();
-      fireEvent.click(checkbox());
-      expect(saveGeneralMock).not.toHaveBeenCalled();
-      // Closing right after the last tweak is the normal way to use this modal.
-      // Cancelling the timer on cleanup would drop exactly the save that matters.
-      unmount();
-      expect(saveGeneralMock).toHaveBeenCalledTimes(1);
-      expect(saveGeneralMock.mock.calls[0][0]).toMatchObject({ wbpp_quality_enabled: true });
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("keeps the export working when the settings write is refused", async () => {
-    // PUT /settings/general is admin-only; the export is not. A non-admin loses
-    // the persistence, never the export.
-    saveGeneralMock.mockImplementationOnce(() => Promise.reject(new Error("403")));
+  it("writes changes to localStorage and never to server settings", async () => {
     renderModal();
-    await preview();
-    fireEvent.click(checkbox());
+    fireEvent.click(filterCheckbox());
     await flush();
+
+    const raw = localStorage.getItem(KEY);
+    expect(raw).not.toBe(null);
+    expect(JSON.parse(raw!)).toMatchObject({ enabled: true });
+
+    // The old debounced PUT /settings/general is gone: the filter is a rig-shaped
+    // browser preference now, and a non-admin must not lose it to a 403.
     await new Promise((r) => setTimeout(r, 900));
-    expect(bodyText()).not.toContain("Could not save");
-    expect(bodyText()).toContain("Skips");
+    expect(saveGeneralMock).not.toHaveBeenCalled();
+  });
+
+  it("keys the store by the sessions' rig when the frames carry one", async () => {
+    const cache = cacheDetail();
+    for (const f of cache.frames) (f as any).rig = "RigA";
+    localStorage.setItem(
+      "galactilog.wbppQuality.v1.RigA",
+      stored({ config: { baseline: "session", constraints: [] } }),
+    );
+    renderModal({ [DATE]: cache });
+    await flush();
+
+    // Hydrated from RigA's slot, not from "default".
+    expect(filterCheckbox().checked).toBe(true);
+
+    fireEvent.click(filterCheckbox());
+    await flush();
+    expect(JSON.parse(localStorage.getItem("galactilog.wbppQuality.v1.RigA")!)).toMatchObject({
+      enabled: false,
+    });
+  });
+
+  it("keeps in-session edits when the rig resolves after a fetch", async () => {
+    // Uncached sessions: the rig starts null and only resolves once the fetched
+    // frames arrive -- after the user may already have tuned the filter. The
+    // resolved rig's stored state (filter off) must NOT clobber those edits;
+    // instead the edits move to the resolved rig's slot.
+    const detail = fetchedDetail();
+    for (const f of detail.frames) (f as any).rig = "RigX";
+    getMock.mockImplementation(() =>
+      Promise.resolve({ data: detail, response: { ok: true } }),
+    );
+    localStorage.setItem(
+      "galactilog.wbppQuality.v1.RigX",
+      JSON.stringify({ enabled: false, config: { baseline: "session", constraints: [] } }),
+    );
+    render(() => (
+      <WbppExportModal
+        targetId="t-1"
+        targetName="M31"
+        selectedDates={["2026-07-05"]}
+        sessionCache={{}}
+        onClose={() => {}}
+      />
+    ));
+
+    // The user's edit: enable the filter while the rig is still unresolved.
+    fireEvent.click(filterCheckbox());
+    await flush();
+
+    // The fetch has resolved and the frames carry RigX, yet the edit survives...
+    expect(filterCheckbox().checked).toBe(true);
+    // ...and has been written under the resolved rig's own key.
+    expect(JSON.parse(localStorage.getItem("galactilog.wbppQuality.v1.RigX")!)).toMatchObject({
+      enabled: true,
+    });
   });
 });
 
@@ -628,8 +685,9 @@ describe("WbppExportModal empty-export guard", () => {
   const emptied = () => document.body.querySelector('[data-testid="wbpp-empty-export"]');
 
   it("says so when the filter excludes every frame in the selected folders", async () => {
-    // The level holds exactly the two cached lights, both unmeasured, so the
-    // filter takes all of them: the copy would write an empty folder.
+    // The level holds exactly the two cached lights, both unmeasured under the
+    // HFR gate, so the filter takes all of them: the copy would write an empty
+    // folder.
     previewSessions = [
       session({ levels: [level({ frame_count: 2, frame_bytes: 200 })], total_frame_count: 2 }),
     ];
@@ -637,8 +695,7 @@ describe("WbppExportModal empty-export guard", () => {
     await preview();
     expect(emptied()).toBe(null);
 
-    fireEvent.click(document.body.querySelector('input[type="checkbox"]') as HTMLElement);
-    await flush();
+    await enableFilterWithHfrGate();
 
     expect(emptied()).not.toBe(null);
     expect(bodyText()).toContain("would copy nothing");
@@ -649,8 +706,7 @@ describe("WbppExportModal empty-export guard", () => {
   it("stays quiet while the filter still keeps frames", async () => {
     renderModal();
     await preview();
-    fireEvent.click(document.body.querySelector('input[type="checkbox"]') as HTMLElement);
-    await flush();
+    await enableFilterWithHfrGate();
     // 10 frames in the level, 2 excluded: 8 still copy.
     expect(emptied()).toBe(null);
   });
@@ -661,8 +717,7 @@ describe("WbppExportModal empty-export guard", () => {
     ];
     renderModal({});
     await preview();
-    fireEvent.click(document.body.querySelector('input[type="checkbox"]') as HTMLElement);
-    await flush();
+    await enableFilterWithHfrGate();
     // Nothing was there to exclude, so the filter is not the reason.
     expect(emptied()).toBe(null);
   });
@@ -795,9 +850,18 @@ describe("WbppExportModal settings", () => {
 });
 
 describe("WbppExportModal folder rows", () => {
-  it("keeps the preview empty state until a preview runs", () => {
+  it("offers a manual preview only while no library root allows the auto-preview", () => {
+    // With a root set the modal previews on mount; without one it must not fire
+    // a doomed request, and the manual entry waits (disabled) for the root.
+    general.wbpp_library_root = "";
     renderModal();
-    expect(bodyText()).toContain('Click "Preview folder levels" to choose which folder to copy');
+    expect(postMock).not.toHaveBeenCalled();
+    const btn = buttonsLabelled("Preview folder levels")[0];
+    expect(btn).not.toBe(undefined);
+    expect(btn.disabled).toBe(true);
+    expect(bodyText()).toContain(
+      "Preview the folder levels to choose which folder to copy for each session",
+    );
   });
 
   it("shows one row per session and hides the full path behind the title attribute", async () => {
@@ -812,13 +876,15 @@ describe("WbppExportModal folder rows", () => {
     expect(row!.textContent).toContain("10 frames");
   });
 
-  it("mounts the level editor in place when Edit is toggled", async () => {
+  it("mounts the level editor in place when a row is expanded", async () => {
     renderModal();
     await preview();
     expect(document.body.querySelector('[role="radiogroup"]')).toBe(null);
-    fireEvent.click(buttonsLabelled("Edit")[0]);
+    const row = buttons().find((b) => b.getAttribute("aria-expanded") === "false");
+    expect(row).not.toBe(undefined);
+    fireEvent.click(row!);
     expect(document.body.querySelector('[role="radiogroup"]')).not.toBe(null);
-    fireEvent.click(buttonsLabelled("Done")[0]);
+    fireEvent.click(row!);
     expect(document.body.querySelector('[role="radiogroup"]')).toBe(null);
   });
 
