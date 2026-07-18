@@ -87,9 +87,14 @@ const ACTIVE_CHIP_CLASS =
   "inline-flex items-center gap-1.5 h-6 pl-2.5 pr-1 rounded-full border border-theme-accent/40 " +
   "bg-theme-accent/15 text-tiny text-theme-text-primary whitespace-nowrap";
 
+// Spinner buttons are suppressed: at 20px tall they render as sub-10px click
+// targets, and thresholds are typed values, not stepped ones. Arrow keys and
+// scroll still step by the input's `step`.
 const CHIP_INPUT_CLASS =
   "h-5 px-1 text-tiny tabular-nums text-right bg-theme-input border border-theme-border " +
-  "rounded-[var(--radius-sm)] text-theme-text-primary outline-none focus:border-theme-accent";
+  "rounded-[var(--radius-sm)] text-theme-text-primary outline-none focus:border-theme-accent " +
+  "[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none " +
+  "[&::-webkit-inner-spin-button]:appearance-none";
 
 function metricValue(frame: FrameRecord, metric: MetricKey): number | null {
   const raw = frame[METRIC_DEFS[metric].field];
