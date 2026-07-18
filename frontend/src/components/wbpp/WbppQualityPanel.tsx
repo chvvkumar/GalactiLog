@@ -28,7 +28,6 @@ import {
   type ThresholdScope,
 } from "../../lib/wbppQualityFilter";
 import { bandForZ, bandToCellClass } from "../../utils/frameQuality";
-import WbppQualityHelp from "./WbppQualityHelp";
 import type { FrameRecord, SessionDetail } from "../../api/types";
 
 export interface WbppQualityPanelProps {
@@ -264,10 +263,6 @@ export default function WbppQualityPanel(props: WbppQualityPanelProps): JSX.Elem
             />
             <span class="text-xs text-theme-text-primary">Enable filters</span>
           </label>
-
-          {/* Help glyph sits with the header, outside the inert wrapper so the
-              guide stays reachable even while the filter is off. */}
-          <WbppQualityHelp />
 
           {/* Everything except the master checkbox goes inert while the filter
               is off; the checkbox stays live so it can turn things back on. */}

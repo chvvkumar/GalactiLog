@@ -6,41 +6,16 @@ interface HelpPopoverProps {
   children: JSX.Element;
   class?: string;
   align?: "left" | "right";
-  // Panel width class. Defaults to the narrow single-column popover; pass a
-  // wider class (e.g. "w-[min(44rem,90vw)]") for multi-column content.
-  width?: string;
 }
 
 const HelpPopover: Component<HelpPopoverProps> = (props) => {
   const [open, setOpen] = createSignal(false);
-  // Flip above the trigger when there is no room below, and clamp the panel
-  // body height to whatever space the chosen side offers so it never runs off
-  // the viewport (or the modal it sits in).
-  const [placeAbove, setPlaceAbove] = createSignal(false);
-  const [bodyMaxH, setBodyMaxH] = createSignal<number | null>(null);
   let wrapperRef: HTMLDivElement | undefined;
-
-  const measure = () => {
-    if (!wrapperRef) return;
-    const rect = wrapperRef.getBoundingClientRect();
-    const margin = 16;
-    const spaceBelow = window.innerHeight - rect.bottom - margin;
-    const spaceAbove = rect.top - margin;
-    const above = spaceBelow < 260 && spaceAbove > spaceBelow;
-    setPlaceAbove(above);
-    // Reserve room for the header/padding chrome (~72px) inside the panel.
-    const avail = (above ? spaceAbove : spaceBelow) - 72;
-    setBodyMaxH(Math.max(160, avail));
-  };
 
   const close = () => setOpen(false);
   const toggle = (e: MouseEvent) => {
     e.stopPropagation();
-    setOpen((v) => {
-      const next = !v;
-      if (next) measure();
-      return next;
-    });
+    setOpen((v) => !v);
   };
 
   const onDocClick = (e: MouseEvent) => {
@@ -50,21 +25,14 @@ const HelpPopover: Component<HelpPopoverProps> = (props) => {
   const onKey = (e: KeyboardEvent) => {
     if (e.key === "Escape") close();
   };
-  const onReflow = () => {
-    if (open()) measure();
-  };
 
   onMount(() => {
     document.addEventListener("click", onDocClick);
     document.addEventListener("keydown", onKey);
-    window.addEventListener("resize", onReflow);
-    window.addEventListener("scroll", onReflow, true);
   });
   onCleanup(() => {
     document.removeEventListener("click", onDocClick);
     document.removeEventListener("keydown", onKey);
-    window.removeEventListener("resize", onReflow);
-    window.removeEventListener("scroll", onReflow, true);
   });
 
   return (
@@ -89,9 +57,7 @@ const HelpPopover: Component<HelpPopoverProps> = (props) => {
           role="dialog"
           aria-modal="true"
           onClick={(e) => e.stopPropagation()}
-          class={`glass-popover absolute z-50 ${props.width ?? "w-[min(28rem,90vw)]"} ${
-            placeAbove() ? "bottom-full mb-2" : "top-full mt-2"
-          } ${
+          class={`glass-popover absolute top-full mt-2 z-50 w-[min(28rem,90vw)] ${
             props.align === "right" ? "right-0" : "left-0"
           } border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-lg)] p-4`}
         >
@@ -114,12 +80,7 @@ const HelpPopover: Component<HelpPopoverProps> = (props) => {
               </svg>
             </button>
           </div>
-          <div
-            class="space-y-2 text-sm text-theme-text-secondary overflow-y-auto pr-1"
-            style={{ "max-height": bodyMaxH() ? `${bodyMaxH()}px` : undefined }}
-          >
-            {props.children}
-          </div>
+          <div class="space-y-2 text-sm text-theme-text-secondary">{props.children}</div>
         </div>
       </Show>
     </div>
