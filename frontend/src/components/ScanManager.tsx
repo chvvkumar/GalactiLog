@@ -18,7 +18,7 @@ import ScanFiltersPanel from "./ScanFiltersPanel";
 import ScanFiltersOnboarding from "./ScanFiltersOnboarding";
 import { showToast } from "./Toast";
 import HelpPopover from "./HelpPopover";
-import { rebuildStatus, fetchRebuildStatus, startRebuildPolling } from "../store/rebuild";
+import { rebuildStatus, fetchRebuildStatus } from "../store/rebuild";
 
 type FrameFilter = "all" | "light_only";
 
