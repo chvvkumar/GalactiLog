@@ -26,6 +26,10 @@ class EquipmentItem(BaseModel):
     nights: int = 0
     target_count: int = 0
     median_fwhm: float | None = None
+    # median_fwhm converted to arcsec via each frame's plate scale
+    # (XPIXSZ/FOCALLEN headers), so values pooled across optical trains share a
+    # unit. None when no frame in the group is plate-scaled.
+    median_fwhm_arcsec: float | None = None
     median_guiding_rms: float | None = None
 
 
@@ -65,6 +69,19 @@ class DataQualityStats(BaseModel):
     avg_eccentricity: float | None
     best_hfr: float | None
     hfr_distribution: list[HfrBucket]
+    # Arcsec-domain equivalents, pooled only over frames whose raw headers
+    # yield a plate scale (XPIXSZ + FOCALLEN). The px figures above pool
+    # incompatible optical trains; these do not.
+    avg_hfr_arcsec: float | None = None
+    best_hfr_arcsec: float | None = None
+    # LIGHT frames with an HFR but no derivable plate scale (excluded from the
+    # arcsec aggregates above, so the UI can disclose the exclusion).
+    unscaled_frame_count: int | None = None
+    # HFR histogram in arcsec: 0 to 8 in 0.5 steps plus an 8.0+ overflow bucket.
+    hfr_arcsec_hist: list[HfrBucket] = []
+    # Frames excluded from avg_eccentricity because their eccentricity_source
+    # differs from the library's modal source (sources are not poolable).
+    ecc_excluded_count: int | None = None
 
 
 class StorageStats(BaseModel):

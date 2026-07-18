@@ -97,18 +97,14 @@ async def test_session_detail_returns_baselines():
     mock_img_result = MagicMock()
     mock_img_result.scalars.return_value.all.return_value = images
 
-    # avg_hfr_q -> scalar()
-    mock_avg_result = MagicMock()
-    mock_avg_result.scalar.return_value = 2.1
-
     # load_alias_maps -> scalar_one_or_none() None
     mock_alias_result = MagicMock()
     mock_alias_result.scalar_one_or_none.return_value = None
 
-    # all_hfr_q -> .all() rows of (session_date, median_hfr)
+    # all_hfr_q -> .all() rows of (session_date, median_hfr, xpixsz, focallen)
     mock_all_hfr_result = MagicMock()
     mock_all_hfr_result.all.return_value = [
-        ("2026-03-20", 2.0), ("2026-03-20", 2.4),
+        ("2026-03-20", 2.0, "3.76", "530"), ("2026-03-20", 2.4, "3.76", "530"),
     ]
 
     # note_q -> scalar_one_or_none()
@@ -139,7 +135,7 @@ async def test_session_detail_returns_baselines():
 
     mock_session.execute = AsyncMock(
         side_effect=[
-            mock_img_result, mock_avg_result, mock_alias_result,
+            mock_img_result, mock_alias_result,
             mock_all_hfr_result, mock_note_result, mock_cv_result,
             mock_catalog_frames_result,
         ]

@@ -3,30 +3,9 @@ import { Chart } from "chart.js";
 import "../../utils/chartRegistry";
 import type { CorrelationResponse } from "../../api/types";
 import { chartFontSize } from "../../utils/chartConfig";
-import { ARCSEC } from "../../utils/format";
-
-const METRIC_LABELS: Record<string, string> = {
-  humidity: "Humidity (%)",
-  wind_speed: "Wind Speed",
-  ambient_temp: "Ambient Temp (\u00b0C)",
-  dew_point: "Dew Point (\u00b0C)",
-  pressure: "Pressure (hPa)",
-  cloud_cover: "Cloud Cover (%)",
-  sky_quality: "Sky Quality (SQM)",
-  focuser_temp: "Focuser Temp (\u00b0C)",
-  airmass: "Airmass",
-  sensor_temp: "Sensor Temp (\u00b0C)",
-  hfr: "HFR (px)",
-  fwhm: "FWHM",
-  eccentricity: "Eccentricity",
-  guiding_rms: `Guiding RMS (${ARCSEC})`,
-  guiding_rms_ra: `Guiding RA RMS (${ARCSEC})`,
-  guiding_rms_dec: `Guiding DEC RMS (${ARCSEC})`,
-  detected_stars: "Detected Stars",
-  adu_mean: "ADU Mean",
-  adu_median: "ADU Median",
-  adu_stdev: "ADU StDev",
-};
+// Shared metric-label map (with units) so axis titles match select options
+// and stats-card labels everywhere.
+import { METRIC_LABELS } from "../../utils/metricLabels";
 
 const METRIC_SHORT: Record<string, string> = {
   humidity: "humidity",

@@ -8,7 +8,7 @@ preserved exactly.
 
 import statistics
 import uuid
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import date as date_type
 
 from fastapi import HTTPException
@@ -27,6 +27,7 @@ from app.schemas.target import (
 )
 from app.schemas.export import ExportResponse, ExportFilterRow, ExportEquipment, ExportCalibration
 from app.services import frame_quality
+from app.services.units import plate_scale_from_headers, to_arcsec
 from app.services.target_helpers import (
     parse_sexa_ra, parse_sexa_dec, categorize_object_type, build_rig_details, compute_insights,
     hfr_outlier_insight, ecc_outlier_insight, session_ecc_vs_rig_insights,
@@ -185,6 +186,50 @@ async def export_target(target_id, sessions: str | None, session: AsyncSession) 
     )
 
 
+def _median_arcsec(images, attr: str) -> float | None:
+    """Median of a pixel-domain metric converted per-frame to arcsec.
+
+    Frames without the metric or without a derivable plate scale
+    (XPIXSZ/FOCALLEN in raw_headers) are excluded. None when nothing converts.
+    """
+    vals = []
+    for img in images:
+        metric = getattr(img, attr, None)
+        if metric is None:
+            continue
+        scale = plate_scale_from_headers(getattr(img, "raw_headers", None))
+        if scale is None:
+            continue
+        try:
+            vals.append(float(metric) * scale)
+        except (TypeError, ValueError):
+            continue
+    return statistics.median(vals) if vals else None
+
+
+def _modal_source_ecc(pairs: list[tuple]) -> tuple[float | None, int | None]:
+    """Mean eccentricity restricted to the modal provenance source.
+
+    `pairs` is [(eccentricity_source, eccentricity), ...] for frames with a
+    non-None eccentricity. The three sources (header / ellipticity / csv)
+    measure eccentricity by different methods and must not be pooled; the mean
+    is taken over the most common source only. Returns (mean, excluded_count),
+    both None when there are no values.
+    """
+    if not pairs:
+        return None, None
+    counts = Counter(src for src, _ in pairs)
+    # Deterministic tie-break: highest count, then lexicographically smallest
+    # source name (None source sorts last), matching the library-level
+    # aggregation in api/stats.py so target and library averages agree.
+    modal_src, modal_n = min(
+        counts.items(),
+        key=lambda kv: (-kv[1], kv[0] is None, kv[0] or ""),
+    )
+    vals = [v for src, v in pairs if src == modal_src]
+    return statistics.mean(vals), len(pairs) - len(vals)
+
+
 async def get_target_detail(target_id: str, session: AsyncSession) -> TargetDetailResponse:
     """Return target identity with cumulative stats and session overviews."""
     # Column projection: only fetch the fields used for aggregation and
@@ -196,6 +241,7 @@ async def get_target_detail(target_id: str, session: AsyncSession) -> TargetDeta
         Image.exposure_time,
         Image.median_hfr,
         Image.eccentricity,
+        Image.eccentricity_source,
         Image.fwhm,
         Image.guiding_rms_arcsec,
         Image.detected_stars,
@@ -270,7 +316,8 @@ async def get_target_detail(target_id: str, session: AsyncSession) -> TargetDeta
 
     sessions_map: dict[str, list] = defaultdict(list)
     all_hfr = []
-    all_ecc = []
+    all_hfr_arcsec = []
+    all_ecc_pairs: list[tuple] = []  # (eccentricity_source, eccentricity)
     all_fwhm = []
     all_guiding_rms = []
     all_detected_stars = []
@@ -284,8 +331,15 @@ async def get_target_detail(target_id: str, session: AsyncSession) -> TargetDeta
         total_exp += img.exposure_time or 0
         if img.median_hfr is not None:
             all_hfr.append(img.median_hfr)
+            hfr_as = to_arcsec(
+                img.median_hfr,
+                (img.raw_headers or {}).get("XPIXSZ"),
+                (img.raw_headers or {}).get("FOCALLEN"),
+            )
+            if hfr_as is not None:
+                all_hfr_arcsec.append(hfr_as)
         if img.eccentricity is not None:
-            all_ecc.append(img.eccentricity)
+            all_ecc_pairs.append((img.eccentricity_source, img.eccentricity))
         if img.fwhm is not None:
             all_fwhm.append(img.fwhm)
         if img.guiding_rms_arcsec is not None:
@@ -391,6 +445,8 @@ async def get_target_detail(target_id: str, session: AsyncSession) -> TargetDeta
             median_fwhm=statistics.median(sess_fwhm) if sess_fwhm else None,
             median_detected_stars=statistics.median(sess_detected_stars) if sess_detected_stars else None,
             median_guiding_rms_arcsec=statistics.median(sess_guiding_rms) if sess_guiding_rms else None,
+            hfr_arcsec=_median_arcsec(sess_images, "median_hfr"),
+            fwhm_arcsec=_median_arcsec(sess_images, "fwhm"),
             filter_medians=sess_filter_medians,
             has_notes=date_type.fromisoformat(date_key) in note_dates if date_key != "unknown" else False,
             rig_count=sess_rig_count,
@@ -441,6 +497,8 @@ async def get_target_detail(target_id: str, session: AsyncSession) -> TargetDeta
             for m in memberships_result.scalars().all()
         ]
 
+    avg_ecc_modal, ecc_excluded = _modal_source_ecc(all_ecc_pairs)
+
     return TargetDetailResponse(
         target_id=target_id,
         primary_name=target_name,
@@ -457,7 +515,9 @@ async def get_target_detail(target_id: str, session: AsyncSession) -> TargetDeta
         total_integration_seconds=total_exp,
         total_frames=len(images),
         avg_hfr=statistics.mean(all_hfr) if all_hfr else None,
-        avg_eccentricity=statistics.mean(all_ecc) if all_ecc else None,
+        avg_hfr_arcsec=statistics.mean(all_hfr_arcsec) if all_hfr_arcsec else None,
+        avg_eccentricity=avg_ecc_modal,
+        ecc_excluded_count=ecc_excluded,
         filters_used=sorted(filters_set),
         equipment=sorted(equipment_set),
         first_session_date=sorted_dates[0] if sorted_dates else "",
@@ -504,11 +564,6 @@ async def get_session_detail(target_id: str, date: str, session: AsyncSession) -
             )
             .order_by(Image.capture_date)
         )
-        avg_hfr_q = select(func.avg(Image.median_hfr)).where(
-            Image.resolved_target_id.is_(None),
-            _no_object,
-            Image.median_hfr.isnot(None),
-        )
     elif target_id.startswith("obj:"):
         object_name = target_id[4:]
         target_name = object_name
@@ -521,11 +576,6 @@ async def get_session_detail(target_id: str, date: str, session: AsyncSession) -
                 Image.image_type == "LIGHT",
             )
             .order_by(Image.capture_date)
-        )
-        avg_hfr_q = select(func.avg(Image.median_hfr)).where(
-            Image.raw_headers["OBJECT"].astext == object_name,
-            Image.image_type == "LIGHT",
-            Image.median_hfr.isnot(None),
         )
     else:
         try:
@@ -545,19 +595,12 @@ async def get_session_detail(target_id: str, date: str, session: AsyncSession) -
             )
             .order_by(Image.capture_date)
         )
-        avg_hfr_q = select(func.avg(Image.median_hfr)).where(
-            Image.resolved_target_id == tid,
-            Image.image_type == "LIGHT",
-            Image.median_hfr.isnot(None),
-        )
 
     result = await session.execute(query)
     images = result.scalars().all()
 
     if not images:
         raise HTTPException(status_code=404, detail="No images found for this session")
-
-    target_avg_hfr = (await session.execute(avg_hfr_q)).scalar()
 
     filter_map, cam_map, tel_map = await load_alias_maps(session)
 
@@ -711,11 +754,29 @@ async def get_session_detail(target_id: str, date: str, session: AsyncSession) -
         label = f"{fd['telescope'] or 'Unknown'} / {fd['camera'] or 'Unknown'}"
         rig_frame_dicts[label].append(fd)
 
+    # --- Cross-session HFR verdicts, ranked in arcsec (AUD: cross-train) ---
+    # Sessions for one target can come from different optical trains, so
+    # ranking their pixel-domain HFR medians against each other is meaningless.
+    # Each frame is converted to arcsec via its own plate scale
+    # (XPIXSZ/FOCALLEN raw headers); frames/sessions without a derivable plate
+    # scale are EXCLUDED from the ranking rather than silently compared in
+    # pixels. When the current session itself has no plate scale, no
+    # best/poor-HFR verdict is emitted at all.
+    session_hfr_arcsec = _median_arcsec(images, "median_hfr")
+    session_fwhm_arcsec = _median_arcsec(images, "fwhm")
     is_best_hfr = False
+    target_avg_hfr_arcsec: float | None = None
     if median_hfr is not None:
-        # Query HFR data across all sessions for this target
+        # Query HFR data (plus plate-scale headers) across all sessions for
+        # this target.
+        _hfr_cols = (
+            Image.session_date,
+            Image.median_hfr,
+            Image.raw_headers["XPIXSZ"].astext,
+            Image.raw_headers["FOCALLEN"].astext,
+        )
         if target_id == "obj:__uncategorized__":
-            all_hfr_q = select(Image.session_date, Image.median_hfr).where(
+            all_hfr_q = select(*_hfr_cols).where(
                 Image.resolved_target_id.is_(None),
                 or_(
                     ~Image.raw_headers.has_key("OBJECT"),
@@ -725,31 +786,39 @@ async def get_session_detail(target_id: str, date: str, session: AsyncSession) -
                 Image.median_hfr.isnot(None),
             )
         elif target_id.startswith("obj:"):
-            all_hfr_q = select(Image.session_date, Image.median_hfr).where(
+            all_hfr_q = select(*_hfr_cols).where(
                 Image.raw_headers["OBJECT"].astext == target_id[4:],
                 Image.image_type == "LIGHT",
                 Image.median_hfr.isnot(None),
             )
         else:
-            all_hfr_q = select(Image.session_date, Image.median_hfr).where(
+            all_hfr_q = select(*_hfr_cols).where(
                 Image.resolved_target_id == tid,
                 Image.image_type == "LIGHT",
                 Image.median_hfr.isnot(None),
             )
         all_hfr_rows = (await session.execute(all_hfr_q)).all()
-        all_session_dates: dict[str, list[float]] = defaultdict(list)
-        for session_date_val, hfr_val in all_hfr_rows:
+        all_session_arcsec: dict[str, list[float]] = defaultdict(list)
+        all_arcsec_vals: list[float] = []
+        for session_date_val, hfr_val, xpixsz, focallen in all_hfr_rows:
+            hfr_as = to_arcsec(hfr_val, xpixsz, focallen)
+            if hfr_as is None:
+                continue
+            all_arcsec_vals.append(hfr_as)
             if session_date_val:
-                all_session_dates[str(session_date_val)].append(hfr_val)
-        all_session_medians = [statistics.median(v) for v in all_session_dates.values() if v]
-        if all_session_medians:
-            is_best_hfr = median_hfr <= min(all_session_medians)
+                all_session_arcsec[str(session_date_val)].append(hfr_as)
+        if all_arcsec_vals:
+            target_avg_hfr_arcsec = statistics.mean(all_arcsec_vals)
+        all_session_medians = [statistics.median(v) for v in all_session_arcsec.values() if v]
+        if all_session_medians and session_hfr_arcsec is not None:
+            is_best_hfr = session_hfr_arcsec <= min(all_session_medians)
 
     insights = compute_insights(
         median_hfr=median_hfr,
         hfr_values=hfr_values,
         temp_values=temp_values,
-        target_avg_hfr=target_avg_hfr,
+        median_hfr_arcsec=session_hfr_arcsec,
+        target_avg_hfr_arcsec=target_avg_hfr_arcsec,
         is_best_hfr=is_best_hfr,
         first_frame=images[0],
         last_frame=images[-1],
@@ -757,24 +826,40 @@ async def get_session_detail(target_id: str, date: str, session: AsyncSession) -
         baselines=session_baselines,
     )
 
-    # Per-rig insights for multi-rig sessions
+    # Per-rig insights for multi-rig sessions. The HFR-vs-target comparison is
+    # done in arcsec for the same cross-train reason as above; a rig whose
+    # frames carry no plate scale gets no hfr_vs_target verdict.
     if len(rig_details) > 1:
+        rig_images_by_label: dict[str, list] = defaultdict(list)
+        for img in images:
+            label = (
+                f"{normalize_equipment(img.telescope, tel_map) or 'Unknown'}"
+                f" / {normalize_equipment(img.camera, cam_map) or 'Unknown'}"
+            )
+            rig_images_by_label[label].append(img)
         for rd in rig_details:
             rig_hfr = [f.median_hfr for f in rd.frames if f.median_hfr is not None]
             rig_median_hfr = statistics.median(rig_hfr) if rig_hfr else None
+            rig_hfr_arcsec = _median_arcsec(rig_images_by_label.get(rd.rig_label, []), "median_hfr")
             prefix = f"[{rd.rig_label}] "
-            if rig_median_hfr is not None and target_avg_hfr is not None:
-                if rig_median_hfr <= target_avg_hfr:
+            if rig_hfr_arcsec is not None and target_avg_hfr_arcsec is not None:
+                if rig_hfr_arcsec <= target_avg_hfr_arcsec:
                     insights.append(SessionInsight(
                         level="good",
                         kind="hfr_vs_target",
-                        message=f"{prefix}Good HFR (median {rig_median_hfr:.2f} vs target avg {target_avg_hfr:.2f})",
+                        message=(
+                            f"{prefix}Good HFR (median {rig_hfr_arcsec:.2f}\" vs "
+                            f"target avg {target_avg_hfr_arcsec:.2f}\")"
+                        ),
                     ))
-                elif rig_median_hfr > target_avg_hfr * 1.3:
+                elif rig_hfr_arcsec > target_avg_hfr_arcsec * 1.3:
                     insights.append(SessionInsight(
                         level="warning",
                         kind="hfr_vs_target",
-                        message=f"{prefix}Poor HFR (median {rig_median_hfr:.2f} vs target avg {target_avg_hfr:.2f})",
+                        message=(
+                            f"{prefix}Poor HFR (median {rig_hfr_arcsec:.2f}\" vs "
+                            f"target avg {target_avg_hfr_arcsec:.2f}\")"
+                        ),
                     ))
             # Same two rules as the session-level block, same helpers: HFR keeps
             # its 1.5x-median rule, eccentricity is graded by MAD z.
@@ -892,6 +977,8 @@ async def get_session_detail(target_id: str, date: str, session: AsyncSession) -
         median_fwhm=statistics.median(fwhm_values) if fwhm_values else None,
         min_fwhm=min(fwhm_values) if fwhm_values else None,
         max_fwhm=max(fwhm_values) if fwhm_values else None,
+        hfr_arcsec=session_hfr_arcsec,
+        fwhm_arcsec=session_fwhm_arcsec,
         median_guiding_rms=statistics.median(guiding_rms_values) if guiding_rms_values else None,
         min_guiding_rms=min(guiding_rms_values) if guiding_rms_values else None,
         max_guiding_rms=max(guiding_rms_values) if guiding_rms_values else None,

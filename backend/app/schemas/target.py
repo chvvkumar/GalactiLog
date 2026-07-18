@@ -61,6 +61,10 @@ class SessionOverview(BaseModel):
     median_fwhm: float | None = None
     median_detected_stars: float | None = None
     median_guiding_rms_arcsec: float | None = None
+    # Plate-scale-converted quality metrics (arcsec). None when the session's
+    # frames carry no usable XPIXSZ/FOCALLEN headers.
+    hfr_arcsec: float | None = None
+    fwhm_arcsec: float | None = None
     filter_medians: list[FilterMedian] = []
     has_notes: bool = False
     rig_count: int = 1
@@ -230,7 +234,15 @@ class TargetDetailResponse(BaseModel):
     total_integration_seconds: float
     total_frames: int
     avg_hfr: float | None = None
+    # avg_hfr converted to arcsec, pooled only over frames whose headers yield
+    # a plate scale (XPIXSZ + FOCALLEN). None when no frame is plate-scaled.
+    avg_hfr_arcsec: float | None = None
     avg_eccentricity: float | None = None
+    # Frames excluded from avg_eccentricity because their eccentricity_source
+    # differs from the modal (most common) source for this target. The three
+    # provenance sources measure eccentricity by different methods and are not
+    # poolable. None when no eccentricity values exist.
+    ecc_excluded_count: int | None = None
     filters_used: list[str]
     equipment: list[str]
     first_session_date: str
@@ -301,6 +313,9 @@ class SessionDetailResponse(BaseModel):
     median_fwhm: float | None = None
     min_fwhm: float | None = None
     max_fwhm: float | None = None
+    # Plate-scale-converted session medians (arcsec); None without XPIXSZ/FOCALLEN.
+    hfr_arcsec: float | None = None
+    fwhm_arcsec: float | None = None
     median_guiding_rms: float | None = None
     min_guiding_rms: float | None = None
     max_guiding_rms: float | None = None

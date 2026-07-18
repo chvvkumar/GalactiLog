@@ -52,7 +52,14 @@ const EquipmentTable: Component<{ title: string; items: EquipmentItem[] }> = (pr
       key: "median_fwhm",
       label: "Med FWHM",
       align: "right",
-      render: (item) => (item.median_fwhm !== null ? formatArcsec(item.median_fwhm) : "—"),
+      // Arcsec (with the arcsecond glyph) only when the plate scale is known;
+      // the raw header FWHM has no guaranteed unit, so it renders unlabeled.
+      render: (item) =>
+        item.median_fwhm_arcsec != null
+          ? formatArcsec(item.median_fwhm_arcsec)
+          : item.median_fwhm != null
+            ? item.median_fwhm.toFixed(2)
+            : "—",
     },
     {
       key: "median_guiding_rms",

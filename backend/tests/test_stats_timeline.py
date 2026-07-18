@@ -45,8 +45,9 @@ def _make_bucket_result():
 
 def _make_quality_result():
     r = MagicMock()
-    # (avg_hfr, avg_eccentricity, best_hfr)
-    r.one.return_value = (None, None, None)
+    # (avg_hfr, avg_eccentricity, best_hfr,
+    #  avg_hfr_arcsec, best_hfr_arcsec, unscaled_frame_count)
+    r.one.return_value = (None, None, None, None, None, 0)
     r.all.return_value = []
     r.first.return_value = None
     r.scalar_one.return_value = 0
@@ -324,5 +325,123 @@ async def test_timeline_detail_entry_shape():
                 assert "period" in entry
                 assert "integration_seconds" in entry
                 assert "efficiency_pct" in entry
+    finally:
+        app.dependency_overrides.clear()
+
+
+def _make_populated_quality_result():
+    r = MagicMock()
+    # (avg_hfr, avg_eccentricity, best_hfr,
+    #  avg_hfr_arcsec, best_hfr_arcsec, unscaled_frame_count)
+    r.one.return_value = (2.0, 0.35, 1.5, 3.2, 2.4, 7)
+    r.all.return_value = []
+    r.first.return_value = None
+    r.scalar_one.return_value = 0
+    r.scalar_one_or_none.return_value = None
+    return r
+
+
+def _make_arcsec_bucket_result():
+    r = MagicMock()
+    # 16 half-arcsec buckets 0-8 plus one overflow bucket (17 counts)
+    counts = [0] * 17
+    counts[4] = 3   # 2.0-2.5
+    counts[16] = 1  # 8.0+
+    r.one.return_value = tuple(counts)
+    r.all.return_value = []
+    r.first.return_value = None
+    r.scalar_one.return_value = 0
+    r.scalar_one_or_none.return_value = None
+    return r
+
+
+def _make_ecc_source_result():
+    r = MagicMock()
+    # (eccentricity_source, count, avg) per source group
+    r.all.return_value = [("csv", 10, 0.31), ("header", 4, 0.55)]
+    r.one.return_value = (0,)
+    r.first.return_value = None
+    r.scalar_one.return_value = 0
+    r.scalar_one_or_none.return_value = None
+    return r
+
+
+def _make_async_session_cm_arcsec():
+    """cm factory with populated data-quality / arcsec-histogram / ecc-source results."""
+    _results = [
+        _make_overview_result(),          # 0 _query_overview
+        _make_default_result(),           # 1 _query_cameras
+        _make_default_result(),           # 2 _query_telescopes
+        _make_default_result(),           # 3 _query_equipment_perf
+        _make_default_result(),           # 4 _query_equipment_mad
+        _make_default_result(),           # 5 _query_filter_usage
+        _make_default_result(),           # 6 _query_timeline_monthly
+        _make_default_result(),           # 7 _query_site_coords
+        _make_default_result(),           # 8 _query_timeline_weekly
+        _make_default_result(),           # 9 _query_timeline_daily
+        _make_default_result(),           # 10 _query_top_targets
+        _make_populated_quality_result(), # 11 _query_data_quality
+        _make_bucket_result(),            # 12 _query_hfr_buckets
+        _make_default_result(),           # 13 _query_db_size
+        _make_default_result(),           # 14 _query_ingest_history
+        _make_default_result(),           # 15 _query_fits_bytes
+        _make_default_result(),           # 16 _query_all_frames
+        _make_arcsec_bucket_result(),     # 17 _query_hfr_arcsec_buckets
+        _make_ecc_source_result(),        # 18 _query_ecc_sources
+    ]
+    _call_count = [0]
+
+    @asynccontextmanager
+    async def _cm():
+        idx = _call_count[0]
+        _call_count[0] += 1
+        result = _results[idx] if idx < len(_results) else _make_default_result()
+        session = AsyncMock()
+        session.execute = AsyncMock(return_value=result)
+        yield session
+    return _cm
+
+
+@pytest.mark.asyncio
+async def test_data_quality_arcsec_fields():
+    """data_quality exposes arcsec aggregates, unscaled count, arcsec histogram,
+    and a modal-source-restricted eccentricity average with exclusion count."""
+    session = _make_mock_session_for_stats()
+    user = _make_admin_user()
+
+    async def override_session():
+        yield session
+
+    async def override_user():
+        return user
+
+    app.dependency_overrides[get_session] = override_session
+    app.dependency_overrides[get_current_user] = override_user
+
+    try:
+        with patch("app.api.stats.async_session", side_effect=_make_async_session_cm_arcsec()), \
+             patch("app.api.stats.async_redis", side_effect=_make_async_redis_cm()), \
+             patch("app.api.stats._extract_site_coords", new=AsyncMock(return_value=None)):
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://test") as client:
+                resp = await client.get("/api/stats")
+
+        assert resp.status_code == 200
+        dq = resp.json()["data_quality"]
+
+        assert dq["avg_hfr"] == 2.0
+        assert dq["best_hfr"] == 1.5
+        assert dq["avg_hfr_arcsec"] == 3.2
+        assert dq["best_hfr_arcsec"] == 2.4
+        assert dq["unscaled_frame_count"] == 7
+
+        # Arcsec histogram: only non-empty buckets are emitted
+        hist = {b["bucket"]: b["count"] for b in dq["hfr_arcsec_hist"]}
+        assert hist == {"2.0-2.5": 3, "8.0+": 1}
+
+        # Eccentricity restricted to the modal source ("csv", 10 frames,
+        # avg 0.31); the 4 "header" frames are excluded, not pooled.
+        assert dq["avg_eccentricity"] == 0.31
+        assert dq["ecc_excluded_count"] == 4
     finally:
         app.dependency_overrides.clear()
