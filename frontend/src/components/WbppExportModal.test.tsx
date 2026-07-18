@@ -860,53 +860,55 @@ describe("WbppExportModal reattach to a live copy", () => {
   // survives the modal closing; a later remount (e.g. reopening the export
   // dialog) must render the store's live state rather than starting fresh.
   it("renders progress from the store immediately on mount, without the modal itself starting the copy", async () => {
-    let resolveCopy!: (r: { copied: number; destinationName: string }) => void;
-    let rejectCopy!: (e: Error) => void;
     postMock.mockClear();
     const wbppBrowserCopy = await import("../lib/wbppBrowserCopy");
     const spy = vi.spyOn(wbppBrowserCopy, "runBrowserCopy").mockImplementation(
       ((_root: any, _dest: any, opts: any) => {
         opts.onProgress(4, 8, "reattach.fits");
-        return new Promise<{ copied: number; destinationName: string }>((res, rej) => {
-          resolveCopy = res;
-          rejectCopy = rej;
+        return new Promise<{ copied: number; destinationName: string }>((_res, rej) => {
           // Honor abort signal so stopWbppCopy() can actually stop the copy.
+          // Reject with the real CopyCancelledError, matching what
+          // runBrowserCopy itself throws on abort: the store's catch treats
+          // any other error class as a genuine failure and surfaces it as an
+          // error toast plus a persistent error banner.
           opts.signal?.addEventListener("abort", () => {
-            rej(new Error("Aborted"));
+            rej(new wbppBrowserCopy.CopyCancelledError());
           });
         });
       }) as any,
     );
-    const { startWbppCopy, stopWbppCopy } = await import("../store/wbppCopyJob");
 
-    // Drive the store to "running" the same way a previous, now-unmounted
-    // instance of this modal would have, via startWbppCopy directly rather
-    // than through any component.
-    const copyPromise = startWbppCopy({
-      rootHandle: {},
-      destHandle: {},
-      operations: [],
-      exclusions: [],
-      excludedSourceRelatives: [],
-      targetName: "M31",
-    });
-
-    // A fresh mount of the modal -- simulating "reopen" -- must reflect the
-    // in-flight copy immediately, with no click of its own required.
-    renderModal();
-    expect(bodyText()).toMatch(/4|8/);
-    const bar = document.body.querySelector(".bg-theme-accent.transition-all") as HTMLElement;
-    expect(bar).not.toBe(null);
-    expect(bar.style.width).toBe("50%");
-
-    // Cleanup: stop the copy so it does not leak into later tests.
-    stopWbppCopy();
     try {
+      const { startWbppCopy, stopWbppCopy } = await import("../store/wbppCopyJob");
+
+      // Drive the store to "running" the same way a previous, now-unmounted
+      // instance of this modal would have, via startWbppCopy directly rather
+      // than through any component.
+      const copyPromise = startWbppCopy({
+        rootHandle: {},
+        destHandle: {},
+        operations: [],
+        exclusions: [],
+        excludedSourceRelatives: [],
+        targetName: "M31",
+      });
+
+      // A fresh mount of the modal -- simulating "reopen" -- must reflect the
+      // in-flight copy immediately, with no click of its own required.
+      renderModal();
+      expect(bodyText()).toMatch(/4|8/);
+      const bar = document.body.querySelector(".bg-theme-accent.transition-all") as HTMLElement;
+      expect(bar).not.toBe(null);
+      expect(bar.style.width).toBe("50%");
+
+      // Cleanup: stop the copy so it does not leak into later tests.
+      // startWbppCopy() never rethrows (it catches internally and routes
+      // failures through wbppCopyError/toast), so this always resolves.
+      stopWbppCopy();
       await copyPromise;
-    } catch {
-      // Expected: abort was triggered, store is now clean.
+    } finally {
+      spy.mockRestore();
     }
-    spy.mockRestore();
   });
 });
 
