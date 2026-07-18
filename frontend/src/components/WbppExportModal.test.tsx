@@ -861,13 +861,19 @@ describe("WbppExportModal reattach to a live copy", () => {
   // dialog) must render the store's live state rather than starting fresh.
   it("renders progress from the store immediately on mount, without the modal itself starting the copy", async () => {
     let resolveCopy!: (r: { copied: number; destinationName: string }) => void;
+    let rejectCopy!: (e: Error) => void;
     postMock.mockClear();
     const wbppBrowserCopy = await import("../lib/wbppBrowserCopy");
-    vi.spyOn(wbppBrowserCopy, "runBrowserCopy").mockImplementation(
+    const spy = vi.spyOn(wbppBrowserCopy, "runBrowserCopy").mockImplementation(
       ((_root: any, _dest: any, opts: any) => {
         opts.onProgress(4, 8, "reattach.fits");
-        return new Promise((res) => {
+        return new Promise<{ copied: number; destinationName: string }>((res, rej) => {
           resolveCopy = res;
+          rejectCopy = rej;
+          // Honor abort signal so stopWbppCopy() can actually stop the copy.
+          opts.signal?.addEventListener("abort", () => {
+            rej(new Error("Aborted"));
+          });
         });
       }) as any,
     );
@@ -895,8 +901,12 @@ describe("WbppExportModal reattach to a live copy", () => {
 
     // Cleanup: stop the copy so it does not leak into later tests.
     stopWbppCopy();
-    resolveCopy({ copied: 4, destinationName: "d" });
-    await copyPromise;
+    try {
+      await copyPromise;
+    } catch {
+      // Expected: abort was triggered, store is now clean.
+    }
+    spy.mockRestore();
   });
 });
 
