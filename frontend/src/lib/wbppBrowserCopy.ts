@@ -152,13 +152,33 @@ async function countFiles(
   return n;
 }
 
-async function copyDir(
+// Concurrent file copies per run; benchmarked over SMB/2.5GbE, saturates the
+// link at 8.
+const POOL_SIZE = 8;
+
+// 16 MB slices cut FileSystemWritableFileStream IPC round trips; benchmarked
+// best vs pipeTo over SMB.
+const CHUNK_SIZE = 16 * 1024 * 1024;
+
+interface CopyWorkItem {
+  srcEntry: DirHandle; // file handle
+  destDir: DirHandle;
+  name: string;
+  label: string;
+}
+
+// Enumerates a source tree, creating each destination directory as it recurses
+// (so every file's parent exists before the pool writes it) and appending one
+// work item per file to `out`. The flat list lets a single pool span files
+// across directories and operations, so small folders don't serialize.
+async function collectCopyWork(
   src: DirHandle,
   dest: DirHandle,
   isExcluded: (n: string) => boolean,
   excludedFiles: Set<string>,
   relPath: string,
-  onFile: (name: string) => void,
+  label: string,
+  out: CopyWorkItem[],
   signal?: AbortSignal,
 ): Promise<void> {
   for await (const entry of src.values()) {
@@ -167,20 +187,80 @@ async function copyDir(
       if (isExcluded(entry.name)) continue;
       const childRel = relPath ? `${relPath}/${entry.name}` : entry.name;
       const child = await dest.getDirectoryHandle(entry.name, { create: true });
-      await copyDir(entry, child, isExcluded, excludedFiles, childRel, onFile, signal);
+      await collectCopyWork(entry, child, isExcluded, excludedFiles, childRel, label, out, signal);
     } else {
       const fileRel = relPath ? `${relPath}/${entry.name}` : entry.name;
       // Quality-filter exclusion: skip both the copy and the progress callback.
       if (excludedFiles.has(fileRel)) continue;
-      const file = await entry.getFile();
-      const fh = await dest.getFileHandle(entry.name, { create: true });
-      const writable = await fh.createWritable();
-      // Stream the file rather than buffering it, so large FITS frames don't
-      // load fully into memory.
-      await file.stream().pipeTo(writable);
-      onFile(entry.name);
+      out.push({ srcEntry: entry, destDir: dest, name: entry.name, label });
     }
   }
+}
+
+async function copyFile(item: CopyWorkItem, signal: AbortSignal): Promise<void> {
+  const file = await item.srcEntry.getFile();
+  const fh = await item.destDir.getFileHandle(item.name, { create: true });
+  const writable = await fh.createWritable();
+  // Read the file in CHUNK_SIZE slices rather than pipeTo: fewer, larger
+  // writes cut IPC round trips and benchmark faster over SMB. On abort or
+  // failure the writable is aborted so no half-written .crswap files linger.
+  try {
+    for (let off = 0; off < file.size; off += CHUNK_SIZE) {
+      if (signal.aborted) throw new CopyCancelledError();
+      const buf = await file.slice(off, off + CHUNK_SIZE).arrayBuffer();
+      await writable.write(buf);
+    }
+    await writable.close();
+  } catch (e) {
+    try {
+      await writable.abort();
+    } catch {
+      // Best-effort cleanup; surface the original error.
+    }
+    throw e;
+  }
+}
+
+// Runs the work items through a bounded pool of POOL_SIZE workers. Any file
+// failure (or the caller's signal) aborts the pool's own signal, which stops
+// new files from starting and aborts in-flight writables; the run only rejects
+// after every worker has settled.
+async function runCopyPool(
+  items: CopyWorkItem[],
+  onFile: (item: CopyWorkItem) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  const pool = new AbortController();
+  const onOuterAbort = () => pool.abort();
+  if (signal?.aborted) pool.abort();
+  signal?.addEventListener("abort", onOuterAbort);
+  let failed = false;
+  let firstError: unknown;
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    while (next < items.length) {
+      if (pool.signal.aborted) return;
+      const item = items[next++];
+      try {
+        await copyFile(item, pool.signal);
+      } catch (e) {
+        if (!failed && !pool.signal.aborted) {
+          failed = true;
+          firstError = e;
+        }
+        pool.abort();
+        return;
+      }
+      onFile(item);
+    }
+  };
+  try {
+    await Promise.all(Array.from({ length: Math.min(POOL_SIZE, items.length) }, worker));
+  } finally {
+    signal?.removeEventListener("abort", onOuterAbort);
+  }
+  if (signal?.aborted) throw new CopyCancelledError();
+  if (failed) throw firstError;
 }
 
 export interface BrowserCopyResult {
@@ -251,21 +331,22 @@ export async function runBrowserCopy(
   let total = 0;
   for (const r of resolved) total += await countFiles(r.src, isExcluded, excludedFiles, r.sourceRelative);
 
-  let done = 0;
+  // One flat work list across every operation, so the pool stays full even
+  // when individual session folders hold only a few files.
+  const work: CopyWorkItem[] = [];
   for (const r of resolved) {
-    await copyDir(
-      r.src,
-      r.destDir,
-      isExcluded,
-      excludedFiles,
-      r.sourceRelative,
-      (name) => {
-        done += 1;
-        opts.onProgress(done, total, `${r.label}: ${name}`);
-      },
-      opts.signal,
-    );
+    await collectCopyWork(r.src, r.destDir, isExcluded, excludedFiles, r.sourceRelative, r.label, work, opts.signal);
   }
+
+  let done = 0;
+  await runCopyPool(
+    work,
+    (item) => {
+      done += 1;
+      opts.onProgress(done, total, `${item.label}: ${item.name}`);
+    },
+    opts.signal,
+  );
 
   return { copied: done, destinationName: destHandle.name };
 }
