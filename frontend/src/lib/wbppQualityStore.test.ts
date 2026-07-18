@@ -101,7 +101,8 @@ describe("malformed storage degrades to the default", () => {
           constraints: [
             { metric: "hfr", op: "eq", value: 2, enabled: true },
             { metric: "hfr", op: "lte", value: "2", enabled: true },
-            { metric: "hfr", op: "lte", value: null, enabled: true },
+            // Null is LEGAL: a chip the user added but has not filled in yet.
+            { metric: "ecc", op: "lte", value: null, enabled: true },
             { metric: "hfr", op: "lte", value: 2, enabled: 1 },
             "garbage",
             { metric: "hfr", op: "lte", value: 2.5, enabled: false },
@@ -113,7 +114,10 @@ describe("malformed storage degrades to the default", () => {
       enabled: false,
       config: {
         baseline: "rig",
-        constraints: [{ metric: "hfr", op: "lte", value: 2.5, enabled: false }],
+        constraints: [
+          { metric: "ecc", op: "lte", value: null, enabled: true },
+          { metric: "hfr", op: "lte", value: 2.5, enabled: false },
+        ],
       },
     });
   });

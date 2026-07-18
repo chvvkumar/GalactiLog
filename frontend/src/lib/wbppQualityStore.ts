@@ -45,7 +45,9 @@ function parseConstraint(raw: unknown): RawConstraint | null {
   const c = raw as Record<string, unknown>;
   if (!isMetricKey(c.metric)) return null;
   if (c.op !== "lte" && c.op !== "gte") return null;
-  if (typeof c.value !== "number" || !Number.isFinite(c.value)) return null;
+  // Null is a legal stored value: a chip the user added but has not filled in
+  // yet. Anything else non-numeric (or non-finite) drops the constraint.
+  if (c.value !== null && (typeof c.value !== "number" || !Number.isFinite(c.value))) return null;
   if (typeof c.enabled !== "boolean") return null;
   return { metric: c.metric, op: c.op, value: c.value, enabled: c.enabled };
 }

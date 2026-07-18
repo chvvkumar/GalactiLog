@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { render, fireEvent } from "@solidjs/testing-library";
 import WbppQualityPanel from "./WbppQualityPanel";
 import {
-  defaultConstraintFor,
+  emptyConstraintFor,
   type FrameVerdict,
   type QualityConfig,
   type RawConstraint,
@@ -57,7 +57,7 @@ function baseline(median: number, mad: number) {
 }
 
 // Key format is "telescope|camera|filter"; the frames above use filter "L".
-// One frame in the detail so defaultConstraintFor has a train to resolve.
+// One frame in the detail so the cell coloring has a train to resolve.
 function sessionDetail(over: Partial<SessionDetail> = {}): SessionDetail {
   return {
     equipment: { telescope: "TS", camera: "Cam" },
@@ -158,15 +158,16 @@ describe("WbppQualityPanel chips toolbar", () => {
     expect(queryByText("+ Add constraint")).toBe(null);
   });
 
-  it("appends defaultConstraintFor's constraint when a ghost chip is clicked", () => {
+  it("appends an empty (valueless) constraint when a ghost chip is clicked", () => {
     const { container, calls } = setup();
     fireEvent.click(ghostChip(container, "HFR"));
     expect(calls.config.length).toBe(1);
-    // The chip must emit exactly what the lib derives from the same details,
-    // dates and config the panel was given -- not a hand-rolled default.
-    const expected = defaultConstraintFor("hfr", DETAILS, [DATE], DEFAULT_CONFIG);
+    // A new chip carries no number: it must not exclude anything until the
+    // user supplies a value.
+    const expected = emptyConstraintFor("hfr");
     expect(calls.config[0]).toEqual({ ...DEFAULT_CONFIG, constraints: [expected] });
     expect(calls.config[0].constraints[0].enabled).toBe(true);
+    expect(calls.config[0].constraints[0].value).toBeNull();
     expect(calls.config[0].constraints[0].op).toBe("lte");
   });
 
@@ -174,8 +175,27 @@ describe("WbppQualityPanel chips toolbar", () => {
     const held: RawConstraint = { metric: "ecc", op: "lte", value: 0.55, enabled: true };
     const { container, calls } = setup({ config: config([held]) });
     fireEvent.click(ghostChip(container, "Stars"));
-    const expected = defaultConstraintFor("stars", DETAILS, [DATE], config([held]));
-    expect(calls.config[0].constraints).toEqual([held, expected]);
+    expect(calls.config[0].constraints).toEqual([held, emptyConstraintFor("stars")]);
+  });
+
+  it("clearing the threshold input reverts the constraint to valueless", () => {
+    const { getByLabelText, calls } = setup({
+      config: config([{ metric: "hfr", op: "lte", value: 1.65, enabled: true }]),
+    });
+    fireEvent.input(getByLabelText("HFR threshold"), { target: { value: "" } });
+    expect(calls.config[0].constraints).toEqual([
+      { metric: "hfr", op: "lte", value: null, enabled: true },
+    ]);
+  });
+
+  it("offers ecc presets on the active Ecc chip and applies one on click", () => {
+    const { getByTitle, calls } = setup({
+      config: config([{ metric: "ecc", op: "lte", value: null, enabled: true }]),
+    });
+    fireEvent.click(getByTitle("Balanced: ecc ≤ 0.65"));
+    expect(calls.config[0].constraints).toEqual([
+      { metric: "ecc", op: "lte", value: 0.65, enabled: true },
+    ]);
   });
 
   it("renders an enabled constraint as an inline pill editor", () => {

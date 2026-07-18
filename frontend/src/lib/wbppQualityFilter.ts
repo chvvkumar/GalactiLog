@@ -12,7 +12,7 @@
 // target detail page.
 
 import type { SessionDetail, FrameRecord } from "../api/types";
-import { madZ, type GroupBaseline, type MetricBaseline, MIN_GROUP } from "../utils/frameQuality";
+import { madZ, type GroupBaseline } from "../utils/frameQuality";
 
 export type MetricKey = "hfr" | "ecc" | "fwhm" | "stars" | "rms";
 export type ConstraintOp = "lte" | "gte";
@@ -21,9 +21,28 @@ export type BaselineMode = "session" | "rig";
 export interface RawConstraint {
   metric: MetricKey;
   op: ConstraintOp;
-  value: number;
+  /**
+   * Absolute threshold. Null means the chip exists but has no number yet --
+   * a valueless constraint gates NOTHING (it is not a gate, it is an empty
+   * input waiting for one), so adding a chip never silently excludes frames.
+   */
+  value: number | null;
   enabled: boolean;
 }
+
+/**
+ * Quick-fill presets for the eccentricity chip. Eccentricity is the one
+ * constrained metric with rig-independent meaning (e = sqrt(1 - (b/a)^2)),
+ * so fixed constants are defensible: 0.55 is an axis ratio of 0.84 (stars
+ * read round), 0.65 is 0.76 (the edge of visible elongation), 0.75 is 0.66
+ * (clearly elongated; salvage bar for poor nights). Every other metric
+ * depends on the rig and the sky, so only ecc ships presets.
+ */
+export const ECC_PRESETS: { label: string; value: number }[] = [
+  { label: "Strict", value: 0.55 },
+  { label: "Balanced", value: 0.65 },
+  { label: "Relaxed", value: 0.75 },
+];
 
 export interface QualityConfig {
   baseline: BaselineMode;
@@ -166,12 +185,18 @@ export function cellZ(
   }
 }
 
+/** A constraint that can actually judge a frame: enabled AND holds a number. */
+export function isActiveConstraint(c: RawConstraint): c is RawConstraint & { value: number } {
+  return c.enabled && c.value != null;
+}
+
 export function constraintPasses(c: RawConstraint, value: number): boolean {
+  if (c.value == null) return true;
   return c.op === "gte" ? value >= c.value : value <= c.value;
 }
 
 /** The failure sentence for a constraint a frame's `actual` violated. */
-function rawFailureText(c: RawConstraint, actual: number): string {
+function rawFailureText(c: RawConstraint & { value: number }, actual: number): string {
   const op = c.op === "gte" ? "<" : ">";
   return `${METRIC_SHORT[c.metric]} ${formatMetric(c.metric, actual)} ${op} ${formatMetric(c.metric, c.value)}`;
 }
@@ -192,6 +217,9 @@ function rawFailureText(c: RawConstraint, actual: number): string {
  *     "unmeasured", which the panel counts and labels separately, so the skip is
  *     visible rather than a quiet pass.
  *   - Of the metrics present, ALL must pass (AND) -> "pass"; any fails -> "fail".
+ *   - A VALUELESS constraint (value null) is treated like a disabled one: an
+ *     empty input is not a gate, so a freshly added chip excludes nothing
+ *     until the user types a number or picks a preset.
  *
  * `failedBy` names the FIRST enabled constraint that failed, in the user's own
  * order.
@@ -200,7 +228,7 @@ export function evaluateRawDetailed(
   frame: FrameRecord,
   constraints: RawConstraint[],
 ): { verdict: Verdict; failedBy: string | null } {
-  const enabled = constraints.filter((c) => c.enabled);
+  const enabled = constraints.filter(isActiveConstraint);
   if (enabled.length === 0) return { verdict: "pass", failedBy: null };
   let present = 0;
   for (const c of enabled) {
@@ -236,59 +264,16 @@ export function computeVerdicts(
 }
 
 /**
- * Starting constraint for a newly enabled metric, derived from the SAME
- * baseline stats (median + MAD) the cell coloring uses, respecting
- * config.baseline (signal/detected_stars is always session-scoped, exactly as
- * cellZ colors it).
- *
- * Threshold = median + 1.5 * 1.4826 * MAD for lower-is-better metrics (op
- * "lte"), median - 1.5 * 1.4826 * MAD for detected_stars (op "gte", floored at
- * 0), rounded to the metric's display decimals. 1.4826 * MAD is the robust
- * sigma estimate, so the default admits everything within ~1.5 sigma of the
- * selection's own typical frame -- the user's data supplies the number, not a
- * shipped constant.
- *
- * Sessions can span several train+filter groups, each with its own baseline;
- * a constraint is one number, so the largest-n qualifying group decides (most
- * evidence wins). Guiding RMS has no baseline (as in cellZ), and a selection
- * may have no qualifying baseline at all; both start at 0 and the user supplies
- * the value their data implies. Always enabled: enabling is the whole point of
- * asking for a default.
+ * Starting constraint for a newly enabled metric: no value. The chip appears
+ * with an empty input (and, for ecc, the presets) and gates nothing until the
+ * user supplies a number. Deliberately NOT derived from the selection's own
+ * statistics: a threshold seeded from the data under judgment always passes
+ * most of that data, which reads as authority it does not have. The op follows
+ * the metric's polarity (only detected_stars is higher-is-better).
  */
-export function defaultConstraintFor(
-  metric: MetricKey,
-  sessionDetails: Record<string, SessionDetail>,
-  dates: string[],
-  config: QualityConfig,
-): RawConstraint {
-  const def = METRIC_DEFS[metric];
-  const op: ConstraintOp = def.betterWhen === "high" ? "gte" : "lte";
-  const mode: BaselineMode = metric === "stars" ? "session" : config.baseline;
-
-  let best: MetricBaseline | null = null;
-  const seen = new Set<string>();
-  for (const date of dates) {
-    const detail = sessionDetails[date];
-    if (!detail) continue;
-    for (const frame of detail.frames) {
-      const eq = equipmentForFrame(detail, frame);
-      const key = `${date}::${frameGroupKey(frame, eq.telescope, eq.camera)}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      const group = baselineFor(detail, frame, eq.telescope, eq.camera, mode);
-      const b = group?.[def.field as string];
-      if (!b || b.median == null || b.mad == null || b.n < MIN_GROUP) continue;
-      if (!best || b.n > best.n) best = b;
-    }
-  }
-
-  if (!best || best.median == null || best.mad == null) {
-    return { metric, op, value: 0, enabled: true };
-  }
-  const spread = 1.5 * 1.4826 * best.mad;
-  const raw = def.betterWhen === "high" ? best.median - spread : best.median + spread;
-  const value = Math.max(0, Number(raw.toFixed(def.decimals)));
-  return { metric, op, value, enabled: true };
+export function emptyConstraintFor(metric: MetricKey): RawConstraint {
+  const op: ConstraintOp = METRIC_DEFS[metric].betterWhen === "high" ? "gte" : "lte";
+  return { metric, op, value: null, enabled: true };
 }
 
 // Fits-root-relative paths of every excluded (not-kept) frame. Same domain as
@@ -402,7 +387,8 @@ export function suggestRelaxation(
 ): Relaxation | null {
   let best: Relaxation | null = null;
   for (const c of constraints) {
-    if (!c.enabled) continue;
+    // Valueless constraints exclude nothing, so loosening them frees nothing.
+    if (!isActiveConstraint(c)) continue;
     const values = verdicts
       .map((v) => metricValue(v.frame, c.metric))
       .filter((n): n is number => n != null);

@@ -3,7 +3,8 @@ import {
   evaluateRaw,
   evaluateRawDetailed,
   computeVerdicts,
-  defaultConstraintFor,
+  emptyConstraintFor,
+  ECC_PRESETS,
   excludedSourceRelatives,
   excludedUnderSelectedLevels,
   isUnderRelativePath,
@@ -265,52 +266,47 @@ describe("verdict failedBy", () => {
   });
 });
 
-describe("defaultConstraintFor", () => {
-  const details = { "2026-03-15": detail([goodFrame]) };
-  const sessionCfg = config([], "session");
-
-  // median + 1.5 * 1.4826 * mad from the SAME session baseline the coloring
-  // uses: ecc 0.4 + 1.5 * 1.4826 * 0.05 = 0.511... -> 0.51 at two decimals.
-  it("derives a lower-is-better threshold from the session baseline", () => {
-    const c = defaultConstraintFor("ecc", details, dates, sessionCfg);
-    expect(c).toEqual({ metric: "ecc", op: "lte", value: 0.51, enabled: true });
-  });
-
-  // stars 100 - 1.5 * 1.4826 * 10 = 77.76 -> 78 at zero decimals, op gte.
-  it("derives a higher-is-better threshold with op gte and integer rounding", () => {
-    const c = defaultConstraintFor("stars", details, dates, sessionCfg);
-    expect(c).toEqual({ metric: "stars", op: "gte", value: 78, enabled: true });
-  });
-
-  // Rig baseline for ecc: 0.5 + 1.5 * 1.4826 * 0.02 = 0.544... -> 0.54.
-  it("respects config.baseline = rig for sharpness/roundness", () => {
-    const c = defaultConstraintFor("ecc", details, dates, config([], "rig"));
-    expect(c.value).toBe(0.54);
-  });
-
-  // Signal is ALWAYS session-scoped, exactly as the cell coloring computes it:
-  // the rig stars baseline (median 200) must not leak into the default.
-  it("keeps stars session-scoped even under config.baseline = rig", () => {
-    const c = defaultConstraintFor("stars", details, dates, config([], "rig"));
-    expect(c.value).toBe(78);
-  });
-
-  it("falls back to 0 for rms, which has no baseline", () => {
-    const c = defaultConstraintFor("rms", details, dates, sessionCfg);
-    expect(c).toEqual({ metric: "rms", op: "lte", value: 0, enabled: true });
-  });
-
-  it("falls back to 0 when no group baseline qualifies", () => {
-    // OIII has no baseline group at all.
-    const f = frame({ filter_used: "OIII" });
-    const c = defaultConstraintFor("hfr", { "2026-03-15": detail([f]) }, dates, sessionCfg);
-    expect(c).toEqual({ metric: "hfr", op: "lte", value: 0, enabled: true });
-  });
-
-  it("returns enabled: true for every metric", () => {
+describe("emptyConstraintFor", () => {
+  it("starts every chip valueless and enabled, with polarity-correct op", () => {
     for (const m of METRIC_KEYS) {
-      expect(defaultConstraintFor(m, details, dates, sessionCfg).enabled).toBe(true);
+      const c = emptyConstraintFor(m);
+      expect(c.value).toBeNull();
+      expect(c.enabled).toBe(true);
+      expect(c.op).toBe(m === "stars" ? "gte" : "lte");
     }
+  });
+});
+
+describe("valueless constraints (value null)", () => {
+  const empty: RawConstraint = { metric: "ecc", op: "lte", value: null, enabled: true };
+
+  it("gates nothing: a freshly added chip must not exclude frames", () => {
+    expect(evaluateRaw(frame({ eccentricity: 0.99 }), [empty])).toBe("pass");
+  });
+
+  it("does not count its metric toward 'present'", () => {
+    // The frame carries ecc, but the only VALUED gate is on a missing metric,
+    // so the frame is unmeasured -- the valueless gate must not smuggle it in.
+    const f = frame({ eccentricity: 0.4 });
+    expect(evaluateRaw(f, [empty, con("rms", "lte", 1.0)])).toBe("unmeasured");
+  });
+
+  it("passes every frame when the only constraints are valueless", () => {
+    expect(evaluateRaw(blankFrame, [empty])).toBe("pass");
+  });
+
+  it("is never offered as a relaxation", () => {
+    const frames = [frame({ source_relative: "a.fits", eccentricity: 0.9, median_hfr: 5.0 })];
+    const cons: RawConstraint[] = [empty, con("hfr", "lte", 1.0)];
+    const r = suggestRelaxation(verdictsFor(frames, cons), cons)!;
+    expect(r.metric).toBe("hfr");
+  });
+});
+
+describe("ECC_PRESETS", () => {
+  it("ships the strict/balanced/relaxed ladder", () => {
+    expect(ECC_PRESETS.map((p) => p.value)).toEqual([0.55, 0.65, 0.75]);
+    expect(ECC_PRESETS.map((p) => p.label)).toEqual(["Strict", "Balanced", "Relaxed"]);
   });
 });
 

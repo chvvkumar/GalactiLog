@@ -199,9 +199,10 @@ const filterCheckbox = (): HTMLInputElement =>
 /**
  * Turns the filter on AND arms one gate. An empty constraint set is no filter
  * (every frame passes), so the enable checkbox alone excludes nothing; the
- * ghost "+ HFR" chip adds a constraint. With no qualifying baseline the default
- * value is 0 (frames without HFR land in "unmeasured" and are excluded); tests
- * with measured frames tighten the threshold explicitly via setHfrThreshold.
+ * ghost "+ HFR" chip adds a constraint, which starts VALUELESS and gates
+ * nothing until a number is typed. This helper types 0 (frames without HFR
+ * land in "unmeasured" and are excluded); tests with measured frames tighten
+ * the threshold explicitly via setHfrThreshold.
  */
 async function enableFilterWithHfrGate() {
   fireEvent.click(filterCheckbox());
@@ -210,6 +211,7 @@ async function enableFilterWithHfrGate() {
   if (!chip) throw new Error(`No ghost HFR chip found. Body: ${bodyText()}`);
   fireEvent.click(chip);
   await flush();
+  await setHfrThreshold(0);
 }
 
 async function setHfrThreshold(value: number) {

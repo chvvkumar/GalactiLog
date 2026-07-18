@@ -12,9 +12,10 @@
 
 import { For, Show, createMemo, createSignal, type JSX } from "solid-js";
 import {
+  ECC_PRESETS,
   METRIC_DEFS,
   cellZ,
-  defaultConstraintFor,
+  emptyConstraintFor,
   formatMetric,
   type ConstraintOp,
   type FrameVerdict,
@@ -23,6 +24,7 @@ import {
   type RawConstraint,
 } from "../../lib/wbppQualityFilter";
 import { bandForZ, bandToCellClass } from "../../utils/frameQuality";
+import HelpPopover from "../HelpPopover";
 import type { FrameRecord, SessionDetail } from "../../api/types";
 
 export interface WbppQualityPanelProps {
@@ -114,16 +116,8 @@ export default function WbppQualityPanel(props: WbppQualityPanelProps): JSX.Elem
   const setConstraints = (constraints: RawConstraint[]) =>
     props.onConfigChange({ ...props.config, constraints });
 
-  // The selected session dates, recovered from the verdicts the parent computed
-  // over exactly those dates. sessionDetails is a sparse cache that may hold
-  // more sessions than are selected, so it cannot be the source.
-  const selectedDates = createMemo(() => [...new Set(props.verdicts.map((v) => v.sessionDate))]);
-
   const addConstraint = (metric: MetricKey) =>
-    setConstraints([
-      ...props.config.constraints,
-      defaultConstraintFor(metric, props.sessionDetails, selectedDates(), props.config),
-    ]);
+    setConstraints([...props.config.constraints, emptyConstraintFor(metric)]);
 
   const patchConstraint = (metric: MetricKey, delta: Partial<RawConstraint>) =>
     setConstraints(
@@ -207,6 +201,23 @@ export default function WbppQualityPanel(props: WbppQualityPanelProps): JSX.Elem
             />
             <span class="text-xs text-theme-text-primary">Enable filters</span>
           </label>
+          <HelpPopover label="About quality filters" title="Quality filters">
+            <p>
+              Each chip is an absolute threshold. A frame is excluded when any enabled
+              chip with a value rejects it. A chip without a value filters nothing. A
+              frame missing a metric is not judged on that metric; a frame missing all
+              constrained metrics is counted as unmeasured, not excluded.
+            </p>
+            <p>
+              Eccentricity presets: 0.55 keeps stars that read round (axis ratio 0.84),
+              0.65 marks the edge of visible elongation (0.76), 0.75 admits clearly
+              elongated stars (0.66) and suits salvaging poor nights.
+            </p>
+            <p>
+              Cell colors compare each frame to the selected baseline (this session or
+              the rig catalog) and are informational; only the chips decide the verdict.
+            </p>
+          </HelpPopover>
 
           {/* Everything except the master checkbox goes inert while the filter
               is off; the checkbox stays live so it can turn things back on. */}
@@ -232,11 +243,12 @@ export default function WbppQualityPanel(props: WbppQualityPanelProps): JSX.Elem
                         <span>{SHORT_LABEL[metric]}</span>
                         {/* A disabled constraint keeps its value; showing it on
                             the ghost is what tells the user a click restores
-                            that value rather than starting over. */}
-                        <Show when={c()}>
+                            that value rather than starting over. A held chip
+                            with no value yet shows nothing extra. */}
+                        <Show when={c()?.value != null ? c() : undefined}>
                           {(held) => (
                             <span class="tabular-nums opacity-70">
-                              {OP_GLYPH[held().op]} {formatMetric(metric, held().value)}
+                              {OP_GLYPH[held().op]} {formatMetric(metric, held().value!)}
                             </span>
                           )}
                         </Show>
@@ -264,17 +276,51 @@ export default function WbppQualityPanel(props: WbppQualityPanelProps): JSX.Elem
                           aria-label={`${SHORT_LABEL[metric]} threshold`}
                           class={`${CHIP_INPUT_CLASS} w-16`}
                           step={10 ** -METRIC_DEFS[metric].decimals}
-                          value={active().value}
+                          placeholder="value"
+                          value={active().value ?? ""}
                           onInput={(e) => {
-                            const n = parseFloat(e.currentTarget.value);
+                            // An emptied input reverts the chip to valueless
+                            // (gates nothing) rather than pinning the last
+                            // number the user was trying to delete.
+                            const text = e.currentTarget.value.trim();
+                            if (text === "") {
+                              if (active().value != null) patchConstraint(metric, { value: null });
+                              return;
+                            }
+                            const n = parseFloat(text);
                             if (Number.isFinite(n) && n !== active().value)
                               patchConstraint(metric, { value: n });
                           }}
                           onChange={(e) => {
-                            if (!Number.isFinite(parseFloat(e.currentTarget.value)))
-                              e.currentTarget.value = String(active().value);
+                            const text = e.currentTarget.value.trim();
+                            if (text !== "" && !Number.isFinite(parseFloat(text)))
+                              e.currentTarget.value =
+                                active().value != null ? String(active().value) : "";
                           }}
                         />
+                        {/* Eccentricity is the one metric with absolute,
+                            rig-independent meaning, so it gets quick-fill
+                            presets; see ECC_PRESETS for the rationale. */}
+                        <Show when={metric === "ecc"}>
+                          <For each={ECC_PRESETS}>
+                            {(p) => (
+                              <button
+                                type="button"
+                                title={`${p.label}: ecc ≤ ${p.value}`}
+                                class="h-5 px-1.5 text-tiny tabular-nums rounded-[var(--radius-sm)] border cursor-pointer"
+                                classList={{
+                                  "border-theme-accent/60 bg-theme-accent/20 text-theme-accent":
+                                    active().value === p.value && active().op === "lte",
+                                  "border-theme-border bg-theme-input text-theme-text-tertiary hover:text-theme-text-primary":
+                                    !(active().value === p.value && active().op === "lte"),
+                                }}
+                                onClick={() => patchConstraint(metric, { value: p.value, op: "lte" })}
+                              >
+                                {p.value}
+                              </button>
+                            )}
+                          </For>
+                        </Show>
                         <button
                           type="button"
                           aria-label={`Disable ${SHORT_LABEL[metric]} constraint`}
