@@ -8,7 +8,7 @@
 // Default-collapsed: when the filter is off, only the checkbox row renders. The
 // common case (filter off) costs one row.
 
-import { For, Show, createMemo, type JSX } from "solid-js";
+import { For, Index, Show, createMemo, type JSX } from "solid-js";
 import {
   HIGHER_IS_BETTER,
   METRIC_COLUMNS,
@@ -256,7 +256,7 @@ export default function WbppQualityPanel(props: WbppQualityPanelProps): JSX.Elem
               onChange={(e) => patch({ mode: e.currentTarget.value as FilterMode })}
             >
               <option value="score">Composite score</option>
-              <option value="raw">Raw metrics (AND)</option>
+              <option value="raw">Raw metrics</option>
             </select>
             {/* Describes scoreFrame + combinedScore + madZ as they actually are:
                 three weighted axes, robust z against a per-train-and-filter
@@ -307,7 +307,15 @@ export default function WbppQualityPanel(props: WbppQualityPanelProps): JSX.Elem
                 max="100"
                 step="1"
                 value={props.config.scoreThreshold}
-                onInput={(e) => patch({ scoreThreshold: Number(e.currentTarget.value) })}
+                onInput={(e) => {
+                  const n = parseFloat(e.currentTarget.value);
+                  if (Number.isFinite(n) && n !== props.config.scoreThreshold)
+                    patch({ scoreThreshold: n });
+                }}
+                onChange={(e) => {
+                  if (!Number.isFinite(parseFloat(e.currentTarget.value)))
+                    e.currentTarget.value = String(props.config.scoreThreshold);
+                }}
                 class={`${INPUT_CLASS} w-16 text-right tabular-nums`}
               />
             </div>
@@ -327,15 +335,16 @@ export default function WbppQualityPanel(props: WbppQualityPanelProps): JSX.Elem
                   </HelpPopover>
                 </Show>
               </div>
-              <For each={props.config.rawConstraints}>
+              <Index each={props.config.rawConstraints}>
                 {(c, i) => (
+                  <>
                   <div class="flex items-center gap-2">
                     <select
                       aria-label="Metric"
                       class={INPUT_CLASS}
-                      value={c.metric}
+                      value={c().metric}
                       onChange={(e) =>
-                        updateConstraint(i(), { metric: e.currentTarget.value as RawMetric })
+                        updateConstraint(i, { metric: e.currentTarget.value as RawMetric })
                       }
                     >
                       <For each={RAW_METRICS}>
@@ -343,15 +352,22 @@ export default function WbppQualityPanel(props: WbppQualityPanelProps): JSX.Elem
                       </For>
                     </select>
                     <span class="text-tiny text-theme-text-tertiary">
-                      {HIGHER_IS_BETTER[c.metric] ? "≥" : "≤"}
+                      {HIGHER_IS_BETTER[c().metric] ? "≥" : "≤"}
                     </span>
                     <input
                       type="number"
-                      aria-label={`${RAW_METRIC_LABELS[c.metric]} value`}
+                      aria-label={`${RAW_METRIC_LABELS[c().metric]} value`}
                       step="any"
                       class={`${INPUT_CLASS} w-24 tabular-nums`}
-                      value={c.value}
-                      onInput={(e) => updateConstraint(i(), { value: Number(e.currentTarget.value) })}
+                      value={c().value}
+                      onInput={(e) => {
+                        const n = parseFloat(e.currentTarget.value);
+                        if (Number.isFinite(n) && n !== c().value) updateConstraint(i, { value: n });
+                      }}
+                      onChange={(e) => {
+                        if (!Number.isFinite(parseFloat(e.currentTarget.value)))
+                          e.currentTarget.value = String(c().value);
+                      }}
                     />
                     {/* Eccentricity is the only metric here with a default, so
                         it is the only one that needs its number accounted for.
@@ -361,7 +377,7 @@ export default function WbppQualityPanel(props: WbppQualityPanelProps): JSX.Elem
                         eccentricity is a ratio of rig error to seeing, so the
                         same rig reads differently on different nights. Dressing
                         any of these up as a standard would be the real bug. */}
-                    <Show when={c.metric === "eccentricity"}>
+                    <Show when={c().metric === "eccentricity"}>
                       <HelpPopover
                         label="About eccentricity thresholds"
                         title="Eccentricity thresholds"
@@ -392,13 +408,19 @@ export default function WbppQualityPanel(props: WbppQualityPanelProps): JSX.Elem
                     <button
                       type="button"
                       class="text-tiny text-theme-error hover:text-theme-error/80 cursor-pointer"
-                      onClick={() => removeConstraint(i())}
+                      onClick={() => removeConstraint(i)}
                     >
                       Remove
                     </button>
                   </div>
+                  <Show when={i < props.config.rawConstraints.length - 1}>
+                    <p class="text-tiny uppercase tracking-wide text-theme-text-tertiary pl-1">
+                      and
+                    </p>
+                  </Show>
+                  </>
                 )}
-              </For>
+              </Index>
               <button
                 type="button"
                 class="text-tiny text-theme-accent hover:text-theme-accent-hover cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"

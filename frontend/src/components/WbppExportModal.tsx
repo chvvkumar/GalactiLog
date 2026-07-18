@@ -171,9 +171,9 @@ const WbppExportModal: Component<Props> = (props) => {
   const [copied, setCopied] = createSignal(false);
   const [showScript, setShowScript] = createSignal(false);
 
-  // Which session rows have their level editor mounted. The parent owns this so
-  // an editor can be reopened without the row remounting its own state.
-  const [editingDates, setEditingDates] = createSignal<string[]>([]);
+  // Which session rows are expanded to show their level editor. The parent owns
+  // this so an editor can be reopened without the row remounting its own state.
+  const [expandedDates, setExpandedDates] = createSignal<string[]>([]);
   // The app-config fields inside Options. Open by default only when there is no
   // library root yet, because then it is the one thing blocking the export.
   const [settingsOpen, setSettingsOpen] = createSignal(!(general()?.wbpp_library_root ?? "").trim());
@@ -337,6 +337,14 @@ const WbppExportModal: Component<Props> = (props) => {
   });
 
   onCleanup(flushQualitySave);
+
+  // Preview needs nothing the async handle-loading above provides: it reads only
+  // the library root (seeded synchronously from settings) and the props. Skips
+  // silently when the root is unset -- the Options section already surfaces that.
+  onMount(() => {
+    if (previewing() || !libraryRoot().trim()) return;
+    void loadPreview();
+  });
 
   onMount(async () => {
     if (!canBrowserCopy) return;
@@ -610,8 +618,8 @@ const WbppExportModal: Component<Props> = (props) => {
     setGenerated(null);
   };
 
-  const toggleEditing = (date: string) =>
-    setEditingDates((prev) => (prev.includes(date) ? prev.filter((d) => d !== date) : [...prev, date]));
+  const toggleExpanded = (date: string) =>
+    setExpandedDates((prev) => (prev.includes(date) ? prev.filter((d) => d !== date) : [...prev, date]));
 
   /**
    * The OS is an argument, not a signal read: the script menu decides which
@@ -788,7 +796,7 @@ const WbppExportModal: Component<Props> = (props) => {
   return (
     <Dialog open aria-labelledby="wbpp-modal-title" class="p-4" onClose={props.onClose}>
       <div
-        class="modal-surface border border-theme-border-em rounded-[var(--radius-md)] shadow-[var(--shadow-lg)] max-w-4xl w-full max-h-[85vh] flex flex-col"
+        class="modal-surface border border-theme-border-em rounded-[var(--radius-md)] shadow-[var(--shadow-lg)] max-w-6xl w-full max-h-[85vh] flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header: fixed. The target name is subject matter, not the action, so
@@ -964,33 +972,61 @@ const WbppExportModal: Component<Props> = (props) => {
               when={sessions().length > 0}
               fallback={
                 <div class="mt-3">
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={loadPreview}
-                    disabled={previewing() || !libraryRoot().trim()}
+                  <Show
+                    when={previewing()}
+                    fallback={
+                      <>
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={loadPreview}
+                          disabled={!libraryRoot().trim()}
+                        >
+                          Preview folder levels
+                        </Button>
+                        <p class="text-tiny text-theme-text-tertiary mt-2">
+                          Preview the folder levels to choose which folder to copy for each session.
+                        </p>
+                      </>
+                    }
                   >
-                    {previewing() ? "Loading..." : "Preview folder levels"}
-                  </Button>
-                  <p class="text-tiny text-theme-text-tertiary mt-2">
-                    Click "Preview folder levels" to choose which folder to copy for each session.
-                  </p>
+                    <p class="text-tiny text-theme-text-tertiary">Scanning folder levels...</p>
+                  </Show>
                 </div>
               }
             >
               <div class="mt-2 divide-y divide-theme-border">
                 <For each={sessions()}>
                   {(session) => {
-                    const editing = () => editingDates().includes(session.session_date);
+                    const expanded = () => expandedDates().includes(session.session_date);
                     const level = () => session.levels[chosenIndexFor(session)];
                     return (
-                      <div class="py-2">
+                      <div class="py-1">
                         {/* Collapsed, the full source path is hover detail only: the
                             row states the leaf, which is the part that differs. */}
-                        <div
-                          class="flex items-center gap-3 text-xs"
-                          title={editing() ? undefined : level()?.path}
+                        <button
+                          type="button"
+                          class="w-full flex items-center gap-3 text-xs text-left px-1 py-1 rounded-[var(--radius-sm)] hover:bg-theme-hover transition-colors cursor-pointer"
+                          aria-expanded={expanded()}
+                          title={expanded() ? undefined : level()?.path}
+                          onClick={() => toggleExpanded(session.session_date)}
                         >
+                          <svg
+                            width="12"
+                            height="12"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                            aria-hidden="true"
+                            class={`shrink-0 text-theme-text-tertiary transition-transform ${
+                              expanded() ? "rotate-90" : ""
+                            }`}
+                          >
+                            <polyline points="9 6 15 12 9 18" />
+                          </svg>
                           <span class="text-theme-text-primary tabular-nums shrink-0">
                             {session.session_date}
                           </span>
@@ -1028,16 +1064,9 @@ const WbppExportModal: Component<Props> = (props) => {
                               </span>
                             )}
                           </Show>
-                          <button
-                            type="button"
-                            class="text-tiny text-theme-accent hover:text-theme-accent-hover transition-colors cursor-pointer shrink-0"
-                            onClick={() => toggleEditing(session.session_date)}
-                          >
-                            {editing() ? "Done" : "Edit"}
-                          </button>
-                        </div>
-                        <Show when={editing()}>
-                          <div class="mt-2 pl-1">
+                        </button>
+                        <Show when={expanded()}>
+                          <div class="mt-1 mb-1 pl-6">
                             {/* The separator comes from effectiveOs(), which honors
                                 the pinned wbpp_default_os. Deriving it from the
                                 root's shape instead makes the editor disagree with
@@ -1046,7 +1075,12 @@ const WbppExportModal: Component<Props> = (props) => {
                             <WbppLevelEditor
                               session={session}
                               chosenIndex={chosenIndexFor(session)}
-                              onSelect={(i) => selectLevel(session.session_date, i)}
+                              onSelect={(i) => {
+                                selectLevel(session.session_date, i);
+                                setExpandedDates((prev) =>
+                                  prev.filter((d) => d !== session.session_date),
+                                );
+                              }}
                               libraryRoot={libraryRoot()}
                               separator={sep()}
                             />
