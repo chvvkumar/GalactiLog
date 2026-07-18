@@ -92,17 +92,13 @@ async def test_session_detail_has_new_fields():
     mock_img_result = MagicMock()
     mock_img_result.scalars.return_value.all.return_value = images
 
-    # avg_hfr_q uses .scalar()
-    mock_avg_result = MagicMock()
-    mock_avg_result.scalar.return_value = 2.1
-
     # load_alias_maps makes an extra execute() for UserSettings; return None row
     mock_alias_result = MagicMock()
     mock_alias_result.scalar_one_or_none.return_value = None
 
-    # all_hfr_q fetches all HFR values for the target; .scalars().all()
+    # all_hfr_q fetches (session_date, hfr, xpixsz, focallen) rows; .all()
     mock_all_hfr_result = MagicMock()
-    mock_all_hfr_result.scalars.return_value.all.return_value = [1.8, 2.1, 2.4]
+    mock_all_hfr_result.all.return_value = []
 
     # note_q: session note for this date; scalar_one_or_none
     mock_note_result = MagicMock()
@@ -118,7 +114,7 @@ async def test_session_detail_has_new_fields():
 
     mock_session.execute = AsyncMock(
         side_effect=[
-            mock_img_result, mock_avg_result, mock_alias_result,
+            mock_img_result, mock_alias_result,
             mock_all_hfr_result, mock_note_result, mock_cv_result,
             mock_catalog_frames_result,
         ]
@@ -186,17 +182,13 @@ async def test_session_detail_hfr_outlier_insight():
     mock_img_result = MagicMock()
     mock_img_result.scalars.return_value.all.return_value = images
 
-    # avg_hfr_q uses .scalar()
-    mock_avg_result = MagicMock()
-    mock_avg_result.scalar.return_value = 2.0
-
     # load_alias_maps makes an extra execute() for UserSettings; return None row
     mock_alias_result = MagicMock()
     mock_alias_result.scalar_one_or_none.return_value = None
 
-    # all_hfr_q; .scalars().all()
+    # all_hfr_q fetches (session_date, hfr, xpixsz, focallen) rows; .all()
     mock_all_hfr_result = MagicMock()
-    mock_all_hfr_result.scalars.return_value.all.return_value = [2.0, 2.0, 2.0, 2.0, 3.5, 4.0]
+    mock_all_hfr_result.all.return_value = []
 
     # note_q: scalar_one_or_none
     mock_note_result = MagicMock()
@@ -212,7 +204,7 @@ async def test_session_detail_hfr_outlier_insight():
 
     mock_session.execute = AsyncMock(
         side_effect=[
-            mock_img_result, mock_avg_result, mock_alias_result,
+            mock_img_result, mock_alias_result,
             mock_all_hfr_result, mock_note_result, mock_cv_result,
             mock_catalog_frames_result,
         ]
@@ -260,14 +252,11 @@ async def _fetch_session(images, catalog_rows=None, avg_hfr=2.0, tid=None):
     mock_img_result = MagicMock()
     mock_img_result.scalars.return_value.all.return_value = images
 
-    mock_avg_result = MagicMock()
-    mock_avg_result.scalar.return_value = avg_hfr
-
     mock_alias_result = MagicMock()
     mock_alias_result.scalar_one_or_none.return_value = None
 
     mock_all_hfr_result = MagicMock()
-    mock_all_hfr_result.scalars.return_value.all.return_value = []
+    mock_all_hfr_result.all.return_value = []
 
     mock_note_result = MagicMock()
     mock_note_result.scalar_one_or_none.return_value = None
@@ -280,7 +269,7 @@ async def _fetch_session(images, catalog_rows=None, avg_hfr=2.0, tid=None):
 
     mock_session.execute = AsyncMock(
         side_effect=[
-            mock_img_result, mock_avg_result, mock_alias_result,
+            mock_img_result, mock_alias_result,
             mock_all_hfr_result, mock_note_result, mock_cv_result,
             mock_catalog_frames_result,
         ]

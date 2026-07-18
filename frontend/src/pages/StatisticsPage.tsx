@@ -55,7 +55,7 @@ const StatisticsPage: Component = () => {
                 <h2 class="text-sm font-semibold text-theme-text-primary">Equipment Performance</h2>
                 <HelpPopover>
                   <p class="text-sm text-theme-text-secondary">
-                    Metric summaries grouped by telescope, camera, and filter combination. Use this to compare how gear performs. Example: median HFR per telescope, frames captured per camera.
+                    Metric summaries grouped by telescope, camera, and filter combination. HFR is measured in pixels and is only comparable within a single optical train; use FWHM in arcseconds to compare performance across telescopes. Example: median FWHM per rig, frames captured per camera.
                   </p>
                 </HelpPopover>
               </div>

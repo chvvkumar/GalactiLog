@@ -7,42 +7,19 @@ import type { SharedFilters } from "../../pages/AnalysisPage";
 import HistogramChart from "./HistogramChart";
 import BoxPlotChart from "./BoxPlotChart";
 import StatsCard from "./StatsCard";
+import { metricOptions, METRIC_UNITS, PIXEL_METRIC_NOTE } from "../../utils/metricLabels";
 
-const ALL_METRICS = [
-  { value: "humidity", label: "Humidity" },
-  { value: "wind_speed", label: "Wind Speed" },
-  { value: "ambient_temp", label: "Ambient Temp" },
-  { value: "dew_point", label: "Dew Point" },
-  { value: "pressure", label: "Pressure" },
-  { value: "cloud_cover", label: "Cloud Cover" },
-  { value: "sky_quality", label: "Sky Quality" },
-  { value: "focuser_temp", label: "Focuser Temp" },
-  { value: "airmass", label: "Airmass" },
-  { value: "sensor_temp", label: "Sensor Temp" },
-  { value: "hfr", label: "HFR" },
-  { value: "fwhm", label: "FWHM" },
-  { value: "eccentricity", label: "Eccentricity" },
-  { value: "guiding_rms", label: "Guiding RMS" },
-  { value: "guiding_rms_ra", label: "Guiding RA RMS" },
-  { value: "guiding_rms_dec", label: "Guiding DEC RMS" },
-  { value: "detected_stars", label: "Detected Stars" },
-  { value: "adu_mean", label: "ADU Mean" },
-  { value: "adu_median", label: "ADU Median" },
-  { value: "adu_stdev", label: "ADU StDev" },
-];
+const ALL_METRICS = metricOptions([
+  "humidity", "wind_speed", "ambient_temp", "dew_point", "pressure",
+  "cloud_cover", "sky_quality", "focuser_temp", "airmass", "sensor_temp",
+  "hfr", "fwhm", "eccentricity", "guiding_rms", "guiding_rms_ra",
+  "guiding_rms_dec", "detected_stars", "adu_mean", "adu_median", "adu_stdev",
+]);
 
-const Y_METRICS = [
-  { value: "hfr", label: "HFR" },
-  { value: "fwhm", label: "FWHM" },
-  { value: "eccentricity", label: "Eccentricity" },
-  { value: "guiding_rms", label: "Guiding RMS" },
-  { value: "guiding_rms_ra", label: "Guiding RA RMS" },
-  { value: "guiding_rms_dec", label: "Guiding DEC RMS" },
-  { value: "detected_stars", label: "Detected Stars" },
-  { value: "adu_mean", label: "ADU Mean" },
-  { value: "adu_median", label: "ADU Median" },
-  { value: "adu_stdev", label: "ADU StDev" },
-];
+const Y_METRICS = metricOptions([
+  "hfr", "fwhm", "eccentricity", "guiding_rms", "guiding_rms_ra",
+  "guiding_rms_dec", "detected_stars", "adu_mean", "adu_median", "adu_stdev",
+]);
 
 const GROUP_OPTIONS = [
   { value: "filter", label: "By Filter" },
@@ -98,6 +75,17 @@ const DistributionsTab: Component<Props> = (props) => {
     placeholderData: keepPreviousData,
   }));
 
+  // Pixel-domain metrics mixed across optical trains are not cross-comparable.
+  // Shown whenever the current scope can span more than one train (no
+  // telescope/camera filter, or the box plot is explicitly grouped by
+  // equipment).
+  const crossTrainNote = (metric: string, groupedByEquipment: boolean): string | null => {
+    if (metric !== "hfr" && metric !== "fwhm") return null;
+    const singleTrain = props.filters.telescope !== undefined && props.filters.camera !== undefined;
+    if (singleTrain && !groupedByEquipment) return null;
+    return `Values are per-train pixel-domain units, not comparable across optical trains. ${PIXEL_METRIC_NOTE}`;
+  };
+
   const selectClass = "text-sm bg-theme-elevated border border-theme-border rounded px-2.5 py-1.5 text-theme-text-primary";
   const toggleClass = (active: boolean) =>
     `text-sm px-3 py-1.5 rounded-[var(--radius-sm)] transition-colors ${
@@ -123,16 +111,20 @@ const DistributionsTab: Component<Props> = (props) => {
             {ALL_METRICS.map((o) => <option value={o.value}>{o.label}</option>)}
           </select>
         </div>
+        <Show when={crossTrainNote(histMetric(), false)}>
+          <p class="text-xs text-theme-text-tertiary mb-2">{crossTrainNote(histMetric(), false)}</p>
+        </Show>
         <div style={{ height: "450px" }} class="relative">
           <HistogramChart
             data={histQuery.data}
             loading={histQuery.isFetching}
             baselineMedian={histQuery.data?.stats?.median ?? null}
+            metricLabel={ALL_METRICS.find((m) => m.value === histMetric())?.label}
           />
         </div>
         <Show when={histQuery.data?.stats}>
           <div class="mt-3">
-            <StatsCard stats={histQuery.data!.stats} label={`${ALL_METRICS.find((m) => m.value === histMetric())?.label} (skewness: ${histQuery.data!.skewness.toFixed(2)})`} />
+            <StatsCard stats={histQuery.data!.stats} label={`${ALL_METRICS.find((m) => m.value === histMetric())?.label} (skewness: ${histQuery.data!.skewness.toFixed(2)})`} unit={METRIC_UNITS[histMetric()]} />
           </div>
         </Show>
       </div>
@@ -148,6 +140,9 @@ const DistributionsTab: Component<Props> = (props) => {
             {GROUP_OPTIONS.map((o) => <option value={o.value}>{o.label}</option>)}
           </select>
         </div>
+        <Show when={crossTrainNote(boxMetric(), groupBy() === "equipment")}>
+          <p class="text-xs text-theme-text-tertiary mb-2">{crossTrainNote(boxMetric(), groupBy() === "equipment")}</p>
+        </Show>
         <div style={{ height: `${Math.max(200, (boxQuery.data?.groups?.length || 3) * 60)}px` }} class="relative">
           <BoxPlotChart
             groups={boxQuery.data?.groups || []}

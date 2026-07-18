@@ -274,7 +274,7 @@ const AnalysisPage: Component = () => {
                       Histogram of a single metric with optional grouping. Reveals the spread, central tendency, and outliers in your data.
                     </p>
                     <ul class="list-disc list-inside space-y-1">
-                      <li class="text-sm text-theme-text-secondary">HFR grouped by filter shows whether some filters consistently yield worse stars.</li>
+                      <li class="text-sm text-theme-text-secondary">HFR grouped by filter shows whether some filters consistently yield worse stars. HFR is in pixels, so restrict to one telescope and camera when grouping; it is not comparable across optical trains.</li>
                       <li class="text-sm text-theme-text-secondary">Exposure time distribution confirms how often you use each sub length.</li>
                     </ul>
                   </HelpPopover>
@@ -296,7 +296,7 @@ const AnalysisPage: Component = () => {
                     </p>
                     <ul class="list-disc list-inside space-y-1">
                       <li class="text-sm text-theme-text-secondary">Camera temperature across a single night to verify cooling stability.</li>
-                      <li class="text-sm text-theme-text-secondary">Median HFR per session across months to watch for focus or collimation drift.</li>
+                      <li class="text-sm text-theme-text-secondary">Median HFR per session across months (within one rig) to watch for focus or collimation drift.</li>
                     </ul>
                   </HelpPopover>
                 </div>
@@ -338,7 +338,7 @@ const AnalysisPage: Component = () => {
                       Side-by-side comparison of a metric's distribution across two or more groups. Quantifies how one setup differs from another.
                     </p>
                     <ul class="list-disc list-inside space-y-1">
-                      <li class="text-sm text-theme-text-secondary">Compare HFR between two telescopes on the same target to judge optical performance.</li>
+                      <li class="text-sm text-theme-text-secondary">Compare FWHM in arcseconds between two telescopes on the same target. HFR is measured in pixels and is only comparable within a single optical train, so cross-telescope HFR comparisons are not meaningful.</li>
                       <li class="text-sm text-theme-text-secondary">Compare eccentricity across filters to spot chromatic focus issues.</li>
                     </ul>
                   </HelpPopover>

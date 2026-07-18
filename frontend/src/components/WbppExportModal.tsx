@@ -5,7 +5,6 @@ import {
   createSignal,
   createMemo,
   createEffect,
-  onCleanup,
   onMount,
   untrack,
 } from "solid-js";
@@ -18,7 +17,7 @@ import Dialog from "./Dialog";
 import Button from "./ui/Button";
 import IconButton from "./ui/IconButton";
 import WbppLevelEditor from "./wbpp/WbppLevelEditor";
-import WbppQualityPanel, { type QualityConfig } from "./wbpp/WbppQualityPanel";
+import WbppQualityPanel from "./wbpp/WbppQualityPanel";
 import WbppScriptMenu, { type ScriptOs } from "./wbpp/WbppScriptMenu";
 import WbppFooter, { type CopyBlocker } from "./wbpp/WbppFooter";
 import { detectOs, lastSegment, parentContext } from "./wbpp/paths";
@@ -37,18 +36,17 @@ import {
   computeVerdicts,
   excludedSourceRelatives,
   excludedUnderSelectedLevels,
-  qualityTotals,
-  RAW_METRICS,
   type FrameVerdict,
-  type RawConstraint,
+  type QualityConfig,
 } from "../lib/wbppQualityFilter";
+import { loadWbppQualityState, saveWbppQualityState } from "../lib/wbppQualityStore";
+import { contentWidthClass } from "../utils/format";
 import type {
   WbppSessionPreview,
   WbppFolderLevel,
   WbppGenerateResponse,
   WbppCopyOperation,
   SessionDetail,
-  GeneralSettings,
 } from "../api/types";
 
 interface Props {
@@ -76,44 +74,6 @@ const FIELD_CLASS =
 
 const ZONE_TITLE_CLASS =
   "text-xs font-semibold uppercase tracking-wider text-theme-text-secondary";
-
-// How long a config edit sits still before it is written back. Long enough that
-// dragging the threshold slider is one PUT rather than one per pixel.
-const QUALITY_SAVE_DEBOUNCE_MS = 800;
-
-const RAW_METRIC_SET: ReadonlySet<string> = new Set<string>(RAW_METRICS);
-
-/**
- * The stored quality config, narrowed to what this build can actually evaluate.
- *
- * Everything here is defensive on purpose. The values arrive as loose wire types
- * and may have been written by an older build, so an unrecognised mode or
- * baseline falls back to the default rather than reaching the filter, and a
- * constraint naming a metric that no longer exists is dropped rather than kept
- * as a gate that silently matches nothing. The defaults are exactly the values
- * the modal used to hardcode, so an install with nothing stored behaves as it
- * did before the config was persisted.
- */
-function qualityConfigFromSettings(g: GeneralSettings | undefined): QualityConfig {
-  return {
-    mode: g?.wbpp_quality_mode === "raw" ? "raw" : "score",
-    scoreThreshold: g?.wbpp_quality_score_threshold ?? 60,
-    baseline: g?.wbpp_quality_baseline === "rig" ? "rig" : "session",
-    rawConstraints: (g?.wbpp_quality_raw_constraints ?? []).filter((c) =>
-      RAW_METRIC_SET.has(c.metric),
-    ) as RawConstraint[],
-  };
-}
-
-function qualityConfigToSettings(on: boolean, c: QualityConfig): Partial<GeneralSettings> {
-  return {
-    wbpp_quality_enabled: on,
-    wbpp_quality_mode: c.mode,
-    wbpp_quality_score_threshold: c.scoreThreshold,
-    wbpp_quality_baseline: c.baseline,
-    wbpp_quality_raw_constraints: c.rawConstraints,
-  };
-}
 
 function permText(p: PermOrNone): string {
   switch (p) {
@@ -194,18 +154,86 @@ const WbppExportModal: Component<Props> = (props) => {
   let abortController: AbortController | null = null;
   let scriptRef: HTMLDivElement | undefined;
 
-  // --- Quality filter state, seeded from the saved settings ---
-  // These used to reset on every modal open, so the same tuning was redone by
-  // hand for every export. They now hydrate from GeneralSettings and are written
-  // back (debounced) by the effect below.
-  const [qualityFilterOn, setQualityFilterOn] = createSignal(general()?.wbpp_quality_enabled ?? false);
-  const [qualityConfig, setQualityConfig] = createSignal<QualityConfig>(
-    qualityConfigFromSettings(general()),
-  );
+  // --- Quality filter state, persisted per rig ---
   // Session details keyed by date, seeded from props.sessionCache then filled in
   // for any selected date not already cached.
   const [qualitySessions, setQualitySessions] = createSignal<Record<string, SessionDetail>>({});
   const [qualityLoading, setQualityLoading] = createSignal(false);
+
+  /**
+   * The rig the selected sessions were shot on: the first non-null
+   * `FrameRecord.rig` across the selected dates, reading the page's cache first
+   * and any details this modal fetched itself second. Null until a frame with a
+   * rig is available (or when none of the frames carry one), in which case the
+   * store's rig-less fallback slot is used.
+   */
+  const rigId = createMemo<string | null>(() => {
+    const fetched = qualitySessions();
+    for (const date of props.selectedDates) {
+      const detail = props.sessionCache[date] ?? fetched[date];
+      for (const f of detail?.frames ?? []) {
+        if (f.rig != null) return f.rig;
+      }
+    }
+    return null;
+  });
+
+  // Hydrate the toggle and config from the per-rig store. The initial load uses
+  // whatever rig resolves synchronously (the page cache usually answers at
+  // once); the effect below re-hydrates if the rig resolves or changes later,
+  // e.g. once an uncached session's frames arrive.
+  let loadedForRig = rigId();
+  const initialQualityState = loadWbppQualityState(loadedForRig);
+  const [qualityFilterOn, setQualityFilterOn] = createSignal(initialQualityState.enabled);
+  const [qualityConfig, setQualityConfig] = createSignal<QualityConfig>(initialQualityState.config);
+
+  // Set by the panel's change handlers only, never by hydration. It decides who
+  // wins a rig transition: the user's in-session edits, or the resolved rig's
+  // stored state.
+  let userEdited = false;
+  const changeQualityEnabled = (on: boolean) => {
+    userEdited = true;
+    setQualityFilterOn(on);
+  };
+  const changeQualityConfig = (cfg: QualityConfig) => {
+    userEdited = true;
+    setQualityConfig(cfg);
+  };
+
+  /**
+   * Rig transitions. With uncached sessions the rig starts null and resolves
+   * only once a fetched session's frames arrive -- possibly after the user has
+   * already tuned the filter. Rehydrating at that point would overwrite their
+   * edits with the resolved rig's (likely empty) stored state, so edits win:
+   * the in-memory state is written under the resolved rig's key instead. Only
+   * an untouched modal hydrates from storage on a transition.
+   */
+  createEffect(() => {
+    const rig = rigId();
+    if (rig === loadedForRig) return;
+    loadedForRig = rig;
+    if (userEdited) {
+      saveWbppQualityState(rig, {
+        enabled: untrack(qualityFilterOn),
+        config: untrack(qualityConfig),
+      });
+      return;
+    }
+    const st = loadWbppQualityState(rig);
+    setQualityFilterOn(st.enabled);
+    setQualityConfig(st.config);
+  });
+
+  /**
+   * Write every change straight back to the per-rig store. The write is a cheap
+   * synchronous local one, so there is no debounce and no flush-on-close to get
+   * wrong. The mount run and the post-hydration runs write back exactly what was
+   * just loaded, which is an idempotent no-op and simpler than suppression flags.
+   */
+  createEffect(() => {
+    const state = { enabled: qualityFilterOn(), config: qualityConfig() };
+    saveWbppQualityState(untrack(rigId), state);
+  });
 
   /**
    * When the filter is switched on, seed from the page's cache and fetch the rest.
@@ -264,79 +292,10 @@ const WbppExportModal: Component<Props> = (props) => {
   // Verdicts, exclude set, and totals recompute reactively from the filter inputs.
   const verdicts = createMemo<FrameVerdict[]>(() =>
     qualityFilterOn()
-      ? computeVerdicts(
-          qualitySessions(),
-          props.selectedDates,
-          qualityConfig().mode,
-          qualityConfig().baseline,
-          qualityConfig().scoreThreshold,
-          qualityConfig().rawConstraints,
-        )
+      ? computeVerdicts(qualitySessions(), props.selectedDates, qualityConfig())
       : [],
   );
   const excludedSet = createMemo<string[]>(() => excludedSourceRelatives(verdicts()));
-  const qTotals = createMemo(() => qualityTotals(verdicts()));
-
-  /**
-   * Write the quality config back so it survives the modal closing.
-   *
-   * Silent on failure by design. PUT /settings/general requires admin, while the
-   * export itself does not, so a non-admin would otherwise get an error banner
-   * over a modal that is working perfectly -- for a convenience they never asked
-   * for. They lose the persistence, not the export.
-   */
-  const persistQuality = async (on: boolean, cfg: QualityConfig) => {
-    const current = general();
-    if (!current) return;
-    try {
-      await ctx.saveGeneral({ ...current, ...qualityConfigToSettings(on, cfg) });
-    } catch {
-      /* see above: persistence is best-effort */
-    }
-  };
-
-  let saveTimer: ReturnType<typeof setTimeout> | undefined;
-  let pendingSave: { on: boolean; cfg: QualityConfig } | null = null;
-  let hydrated = false;
-
-  /**
-   * Send the pending config now.
-   *
-   * Cleanup FLUSHES rather than cancels. Cancelling would lose every edit made
-   * in the last debounce window before the modal closed -- and closing the modal
-   * right after the final tweak is the normal way to use it, so a plain
-   * clearTimeout would drop exactly the save this feature exists to make. The
-   * write reads only module-level stores, so it is safe once the modal is gone.
-   */
-  const flushQualitySave = () => {
-    clearTimeout(saveTimer);
-    saveTimer = undefined;
-    const p = pendingSave;
-    pendingSave = null;
-    if (p) void persistQuality(p.on, p.cfg);
-  };
-
-  /**
-   * Debounced write-back of the filter toggle and config.
-   *
-   * The first run is skipped: an effect fires once on mount, and at that point
-   * the signals still hold exactly what they were just hydrated FROM, so writing
-   * them back would be a PUT that changes nothing -- on every open of the modal,
-   * for every user, including the ones who never touch the filter.
-   */
-  createEffect(() => {
-    const on = qualityFilterOn();
-    const cfg = qualityConfig();
-    if (!hydrated) {
-      hydrated = true;
-      return;
-    }
-    pendingSave = { on, cfg };
-    clearTimeout(saveTimer);
-    saveTimer = setTimeout(flushQualitySave, QUALITY_SAVE_DEBOUNCE_MS);
-  });
-
-  onCleanup(flushQualitySave);
 
   // Preview needs nothing the async handle-loading above provides: it reads only
   // the library root (seeded synchronously from settings) and the props. Skips
@@ -667,17 +626,14 @@ const WbppExportModal: Component<Props> = (props) => {
     const current = general();
     if (!current) return;
     try {
-      // The quality config rides along from the live signals rather than from
-      // `current`. A debounced write may still be in flight, which would make
-      // `current` a stale snapshot of the filter and quietly revert the user's
-      // last edit as a side effect of saving unrelated defaults.
+      // The quality filter is NOT part of these defaults: it persists itself
+      // per rig via the wbppQualityStore, not through GeneralSettings.
       await ctx.saveGeneral({
         ...current,
         wbpp_library_root: libraryRoot().trim() || null,
         wbpp_default_os: osChoice() === "auto" ? null : osChoice(),
         wbpp_staging_path: stagingPath().trim() || null,
         wbpp_exclusions: parsedExclusions(),
-        ...qualityConfigToSettings(qualityFilterOn(), qualityConfig()),
       });
       setSavedDefaults(true);
       showToast("Saved as defaults");
@@ -796,7 +752,7 @@ const WbppExportModal: Component<Props> = (props) => {
   return (
     <Dialog open aria-labelledby="wbpp-modal-title" class="p-4" onClose={props.onClose}>
       <div
-        class="modal-surface border border-theme-border-em rounded-[var(--radius-md)] shadow-[var(--shadow-lg)] max-w-6xl w-full max-h-[85vh] flex flex-col"
+        class={`modal-surface border border-theme-border-em rounded-[var(--radius-md)] shadow-[var(--shadow-lg)] w-full max-h-[85vh] flex flex-col ${contentWidthClass(ctx.contentWidth())}`}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header: fixed. The target name is subject matter, not the action, so
@@ -1101,14 +1057,12 @@ const WbppExportModal: Component<Props> = (props) => {
             <div class="mt-3">
               <WbppQualityPanel
                 enabled={qualityFilterOn()}
-                onEnabledChange={setQualityFilterOn}
+                onEnabledChange={changeQualityEnabled}
                 config={qualityConfig()}
-                onConfigChange={setQualityConfig}
+                onConfigChange={changeQualityConfig}
                 verdicts={verdicts()}
-                totals={qTotals()}
                 loading={qualityLoading()}
                 sessionDetails={qualitySessions()}
-                displaySettings={ctx.displaySettings()}
               />
             </div>
 

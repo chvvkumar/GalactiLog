@@ -15,6 +15,7 @@ from app.api.deps import get_current_user
 from app.models.user import User
 from app.models import Image, Target
 from app.services.normalization import load_alias_maps, normalize_filter, normalize_equipment
+from app.services.units import sql_arcsec_per_pixel
 
 from app.schemas.stats import (
     StatsResponse, OverviewStats, EquipmentStats, EquipmentItem,
@@ -32,6 +33,12 @@ router = APIRouter(prefix="/stats", tags=["stats"])
 
 _STATS_CACHE_KEY = "galactilog:stats:cache"
 _STATS_CACHE_TTL = 300  # 5 minutes
+
+# Arcsec HFR histogram buckets: 0 to 8 arcsec in 0.5 steps, then an overflow
+# bucket (8.0+). The final entry's high bound is None (unbounded).
+_HFR_ARCSEC_BUCKET_RANGES: list[tuple[float, float | None]] = [
+    (i * 0.5, (i + 1) * 0.5) for i in range(16)
+] + [(8.0, None)]
 
 
 def _should_cache_stats() -> bool:
@@ -271,6 +278,13 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
         async with async_session() as s:
             return (await s.execute(q)).one()
 
+    # Plate scale (arcsec/px) derived per row from the XPIXSZ/FOCALLEN raw
+    # headers; NULL when underivable, so multiplying a pixel metric by it
+    # yields NULL and percentile_cont skips the frame. This keeps the pooled
+    # arcsec medians unit-consistent across optical trains, unlike the raw
+    # pixel medians beside them.
+    _scale = sql_arcsec_per_pixel(Image.raw_headers)
+
     async def _query_cameras():
         q = select(
             Image.camera,
@@ -280,6 +294,7 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
             func.array_agg(func.distinct(Image.resolved_target_id)),
             func.percentile_cont(0.5).within_group(func.nullif(Image.fwhm, 0)).label("med_fwhm"),
             func.percentile_cont(0.5).within_group(func.nullif(Image.guiding_rms_arcsec, 0)).label("med_guide"),
+            func.percentile_cont(0.5).within_group(func.nullif(Image.fwhm, 0) * _scale).label("med_fwhm_arcsec"),
         ).where(
             Image.camera.isnot(None)
         ).group_by(Image.camera).order_by(func.count(Image.id).desc())
@@ -295,6 +310,7 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
             func.array_agg(func.distinct(Image.resolved_target_id)),
             func.percentile_cont(0.5).within_group(func.nullif(Image.fwhm, 0)).label("med_fwhm"),
             func.percentile_cont(0.5).within_group(func.nullif(Image.guiding_rms_arcsec, 0)).label("med_guide"),
+            func.percentile_cont(0.5).within_group(func.nullif(Image.fwhm, 0) * _scale).label("med_fwhm_arcsec"),
         ).where(
             Image.telescope.isnot(None)
         ).group_by(Image.telescope).order_by(func.count(Image.id).desc())
@@ -459,10 +475,20 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
             return (await s.execute(q)).all()
 
     async def _query_data_quality():
+        hfr_arcsec = Image.median_hfr * _scale
         q = select(
             func.avg(Image.median_hfr),
             func.avg(Image.eccentricity),
             func.min(Image.median_hfr),
+            # Arcsec equivalents pool only plate-scaled frames (NULL scale
+            # nulls the product and avg/min skip it).
+            func.avg(hfr_arcsec),
+            func.min(hfr_arcsec),
+            # Frames with an HFR but no derivable plate scale, excluded from
+            # the arcsec aggregates; surfaced so the UI can disclose it.
+            func.count(Image.id).filter(
+                Image.median_hfr.isnot(None), _scale.is_(None)
+            ),
         ).where(Image.image_type == "LIGHT")
         async with async_session() as s:
             return (await s.execute(q)).one()
@@ -478,6 +504,41 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
         q = select(*bucket_cases).where(Image.image_type == "LIGHT")
         async with async_session() as s:
             return (await s.execute(q)).one()
+
+    async def _query_hfr_arcsec_buckets():
+        """HFR histogram in arcsec over plate-scaled frames only."""
+        hfr_arcsec = Image.median_hfr * _scale
+        bucket_cases = [
+            func.count(Image.id).filter(
+                hfr_arcsec >= low, hfr_arcsec < high
+            ).label(f"a{i}")
+            for i, (low, high) in enumerate(_HFR_ARCSEC_BUCKET_RANGES[:-1])
+        ]
+        overflow_low = _HFR_ARCSEC_BUCKET_RANGES[-1][0]
+        bucket_cases.append(
+            func.count(Image.id).filter(hfr_arcsec >= overflow_low).label("a_overflow")
+        )
+        q = select(*bucket_cases).where(Image.image_type == "LIGHT")
+        async with async_session() as s:
+            return (await s.execute(q)).one()
+
+    async def _query_ecc_sources():
+        """Per-provenance-source eccentricity counts and means.
+
+        The three eccentricity_source values (header/ellipticity/csv, plus
+        NULL for unknown) measure eccentricity by different methods and must
+        not be pooled; the library average is restricted to the modal source.
+        """
+        q = select(
+            Image.eccentricity_source,
+            func.count(Image.id),
+            func.avg(Image.eccentricity),
+        ).where(
+            Image.image_type == "LIGHT",
+            Image.eccentricity.isnot(None),
+        ).group_by(Image.eccentricity_source)
+        async with async_session() as s:
+            return (await s.execute(q)).all()
 
     async def _query_db_size():
         q = select(func.pg_database_size(func.current_database()))
@@ -525,6 +586,8 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
         ingest_rows,
         fits_bytes,
         all_frames,
+        arcsec_bucket_row,
+        ecc_source_rows,
     ) = await asyncio.gather(
         _query_overview(),
         _query_cameras(),
@@ -543,6 +606,8 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
         _query_ingest_history(),
         _query_fits_bytes(),
         _query_all_frames(),
+        _query_hfr_arcsec_buckets(),
+        _query_ecc_sources(),
     )
 
     # --- Post-processing (sequential, CPU-only) ---
@@ -578,6 +643,7 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
     raw_cam_targets: dict[str, set] = {}
     raw_cam_fwhm: dict[str, list[tuple[float, int]]] = {}
     raw_cam_guide: dict[str, list[tuple[float, int]]] = {}
+    raw_cam_fwhm_as: dict[str, list[tuple[float, int]]] = {}
     for r in cam_rows:
         canonical = normalize_equipment(r[0], cam_map) or r[0]
         raw_cam_counts[canonical] = raw_cam_counts.get(canonical, 0) + r[1]
@@ -589,6 +655,8 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
             raw_cam_fwhm.setdefault(canonical, []).append((r[5], r[1]))
         if r[6] is not None:
             raw_cam_guide.setdefault(canonical, []).append((r[6], r[1]))
+        if len(r) > 7 and r[7] is not None:
+            raw_cam_fwhm_as.setdefault(canonical, []).append((r[7], r[1]))
 
     # Equipment - telescopes
     raw_tel_counts: dict[str, int] = {}
@@ -598,6 +666,7 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
     raw_tel_targets: dict[str, set] = {}
     raw_tel_fwhm: dict[str, list[tuple[float, int]]] = {}
     raw_tel_guide: dict[str, list[tuple[float, int]]] = {}
+    raw_tel_fwhm_as: dict[str, list[tuple[float, int]]] = {}
     for r in tel_rows:
         canonical = normalize_equipment(r[0], tel_map) or r[0]
         raw_tel_counts[canonical] = raw_tel_counts.get(canonical, 0) + r[1]
@@ -609,6 +678,8 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
             raw_tel_fwhm.setdefault(canonical, []).append((r[5], r[1]))
         if r[6] is not None:
             raw_tel_guide.setdefault(canonical, []).append((r[6], r[1]))
+        if len(r) > 7 and r[7] is not None:
+            raw_tel_fwhm_as.setdefault(canonical, []).append((r[7], r[1]))
 
     # EquipmentItem lists (and EquipmentStats) are built after the
     # weighted_median_approx helper is defined below, since the new median_fwhm /
@@ -713,6 +784,7 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
             nights=len(raw_cam_sessions[name]),
             target_count=len(raw_cam_targets.get(name, set())),
             median_fwhm=weighted_median_approx(raw_cam_fwhm.get(name, [])),
+            median_fwhm_arcsec=weighted_median_approx(raw_cam_fwhm_as.get(name, [])),
             median_guiding_rms=weighted_median_approx(raw_cam_guide.get(name, [])),
         )
         for name, count in sorted(raw_cam_counts.items(), key=lambda x: x[1], reverse=True)
@@ -727,6 +799,7 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
             nights=len(raw_tel_sessions[name]),
             target_count=len(raw_tel_targets.get(name, set())),
             median_fwhm=weighted_median_approx(raw_tel_fwhm.get(name, [])),
+            median_fwhm_arcsec=weighted_median_approx(raw_tel_fwhm_as.get(name, [])),
             median_guiding_rms=weighted_median_approx(raw_tel_guide.get(name, [])),
         )
         for name, count in sorted(raw_tel_counts.items(), key=lambda x: x[1], reverse=True)
@@ -793,7 +866,10 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
     top_targets = [TopTarget(name=r[0], integration_seconds=float(r[1])) for r in top_rows]
 
     # Data quality
-    avg_hfr, avg_ecc, best_hfr = quality_row
+    (
+        avg_hfr, avg_ecc, best_hfr,
+        avg_hfr_arcsec, best_hfr_arcsec, unscaled_frame_count,
+    ) = quality_row
 
     bucket_ranges = [(0, 1.0), (1.0, 1.5), (1.5, 2.0), (2.0, 2.5), (2.5, 3.0), (3.0, 4.0), (4.0, 5.0), (5.0, 100)]
     hfr_buckets = []
@@ -803,11 +879,37 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
             label = f"{low:.1f}-{high:.1f}" if high < 100 else f"{low:.1f}+"
             hfr_buckets.append(HfrBucket(bucket=label, count=count))
 
+    hfr_arcsec_buckets = []
+    for i, (low, high) in enumerate(_HFR_ARCSEC_BUCKET_RANGES):
+        count = (arcsec_bucket_row[i] if i < len(arcsec_bucket_row) else 0) or 0
+        if count > 0:
+            label = f"{low:.1f}-{high:.1f}" if high is not None else f"{low:.1f}+"
+            hfr_arcsec_buckets.append(HfrBucket(bucket=label, count=count))
+
+    # Eccentricity provenance: pool only the modal source (the three sources
+    # measure eccentricity differently and are not interchangeable). Falls
+    # back to the blind pooled average only when no per-source rows exist.
+    ecc_excluded_count = None
+    avg_ecc_final = round(float(avg_ecc), 2) if avg_ecc else None
+    src_rows = [r for r in (ecc_source_rows or []) if r[1]]
+    if src_rows:
+        # Deterministic tie-break: highest count, then lexicographically
+        # smallest source name (None source sorts last).
+        modal = min(src_rows, key=lambda r: (-r[1], r[0] is None, r[0] or ""))
+        total_ecc_frames = sum(r[1] for r in src_rows)
+        ecc_excluded_count = total_ecc_frames - modal[1]
+        avg_ecc_final = round(float(modal[2]), 2) if modal[2] is not None else None
+
     data_quality = DataQualityStats(
         avg_hfr=round(float(avg_hfr), 2) if avg_hfr else None,
-        avg_eccentricity=round(float(avg_ecc), 2) if avg_ecc else None,
+        avg_eccentricity=avg_ecc_final,
         best_hfr=round(float(best_hfr), 2) if best_hfr else None,
         hfr_distribution=hfr_buckets,
+        avg_hfr_arcsec=round(float(avg_hfr_arcsec), 2) if avg_hfr_arcsec else None,
+        best_hfr_arcsec=round(float(best_hfr_arcsec), 2) if best_hfr_arcsec else None,
+        unscaled_frame_count=int(unscaled_frame_count) if unscaled_frame_count is not None else None,
+        hfr_arcsec_hist=hfr_arcsec_buckets,
+        ecc_excluded_count=ecc_excluded_count,
     )
 
     # Storage

@@ -30,6 +30,7 @@ from app.models.mosaic import Mosaic
 from app.models.mosaic_panel import MosaicPanel
 from app.models.mosaic_suggestion import MosaicSuggestion
 from app.services.coordinates import _parse_ra, _parse_coord
+from app.services.units import arcsec_per_pixel
 from app.services.panel_tokens import (  # noqa: F401 -- re-exported
     _TILE_RE, _keyword_regex, match_panel_token_full, match_panel_token,
     strip_panel_token, build_panel_pattern, panel_number_from_label,
@@ -124,17 +125,15 @@ def compute_fov_arcmin(
     pixel scale (arcsec/px) = 206.265 * XPIXSZ(um) / FOCALLEN(mm)
     FOV (arcmin) = NAXIS * scale / 60
     """
+    scale_arcsec = arcsec_per_pixel(xpixsz, focallen)
+    if scale_arcsec is None:
+        return None
     try:
-        if not focallen or not xpixsz or not naxis:
-            return None
-        focallen = float(focallen)
-        xpixsz = float(xpixsz)
         naxis = float(naxis)
-        if focallen <= 0 or xpixsz <= 0 or naxis <= 0:
-            return None
     except (TypeError, ValueError):
         return None
-    scale_arcsec = 206.265 * xpixsz / focallen
+    if naxis <= 0:
+        return None
     return naxis * scale_arcsec / 60.0
 
 

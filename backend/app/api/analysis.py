@@ -30,6 +30,7 @@ from app.schemas.analysis import (
     TrendLine,
 )
 from app.services.normalization import load_alias_maps, expand_canonical, normalize_equipment, normalize_filter
+from app.services.units import sql_arcsec_per_pixel
 from app.api.auth import get_current_user
 
 router = APIRouter(prefix="/analysis", tags=["analysis"])
@@ -69,6 +70,10 @@ METRIC_MAP = {
     "adu_median": Image.adu_median,
     "adu_stdev": Image.adu_stdev,
 }
+
+# Metrics measured in pixels, whose values are only comparable across optical
+# trains after conversion to arcsec via each frame's plate scale.
+_PIXEL_METRICS = {"hfr", "fwhm"}
 
 X_METRICS = [
     "humidity", "wind_speed", "ambient_temp", "dew_point", "pressure",
@@ -756,10 +761,18 @@ async def get_compare(
         raise HTTPException(400, f"Unknown metric: {metric}")
 
     col = METRIC_MAP[metric]
+    # Pixel-domain metrics cannot be compared across optical trains directly:
+    # the same star measures a different pixel HFR on a different focal length
+    # or pixel size. For these, each frame is also converted to arcsec via its
+    # plate scale (XPIXSZ/FOCALLEN raw headers) and the verdict runs on the
+    # arcsec medians. Frames without a derivable plate scale contribute to the
+    # px box plots (backward compatible) but not to the arcsec comparison.
+    is_pixel_metric = metric in _PIXEL_METRICS
+    scale_expr = sql_arcsec_per_pixel(Image.raw_headers)
 
-    async def _fetch_values(group: str) -> list[float]:
+    async def _fetch_values(group: str) -> tuple[list[float], list[float]]:
         q = (
-            select(col.label("val"))
+            select(col.label("val"), scale_expr.label("scale"))
             .where(Image.image_type == "LIGHT")
             .where(col.is_not(None))
             .where(Image.capture_date.is_not(None))
@@ -782,10 +795,16 @@ async def get_compare(
             q = q.where(Image.filter_used == group)
 
         rows = (await session.execute(q)).all()
-        return [float(r.val) for r in rows]
+        vals = [float(r.val) for r in rows]
+        arcsec_vals = [
+            float(r.val) * float(r.scale)
+            for r in rows
+            if r.scale is not None
+        ] if is_pixel_metric else []
+        return vals, arcsec_vals
 
-    vals_a = await _fetch_values(group_a)
-    vals_b = await _fetch_values(group_b)
+    vals_a, arcsec_a = await _fetch_values(group_a)
+    vals_b, arcsec_b = await _fetch_values(group_b)
 
     if len(vals_a) < 4 or len(vals_b) < 4:
         raise HTTPException(400, "Not enough data in one or both groups (need at least 4 points each)")
@@ -795,19 +814,39 @@ async def get_compare(
     stats_a = _compute_summary_stats(vals_a)
     stats_b = _compute_summary_stats(vals_b)
 
-    if stats_a.median != 0:
-        pct_diff = abs(stats_a.median - stats_b.median) / abs(stats_a.median) * 100
-    elif stats_b.median != 0:
-        pct_diff = abs(stats_a.median - stats_b.median) / abs(stats_b.median) * 100
-    else:
-        pct_diff = 0
+    def _pct_verdict(med_a: float, med_b: float, unit: str = "") -> str:
+        if med_a != 0:
+            pct_diff = abs(med_a - med_b) / abs(med_a) * 100
+        elif med_b != 0:
+            pct_diff = abs(med_a - med_b) / abs(med_b) * 100
+        else:
+            pct_diff = 0
+        if med_a < med_b:
+            return f"{group_a} has {pct_diff:.0f}% lower median{unit} than {group_b} (N={stats_a.count} vs N={stats_b.count})"
+        elif med_b < med_a:
+            return f"{group_b} has {pct_diff:.0f}% lower median{unit} than {group_a} (N={stats_b.count} vs N={stats_a.count})"
+        return f"Both groups have identical median values (N={stats_a.count} vs N={stats_b.count})"
 
-    if stats_a.median < stats_b.median:
-        verdict = f"{group_a} has {pct_diff:.0f}% lower median than {group_b} (N={stats_a.count} vs N={stats_b.count})"
-    elif stats_b.median < stats_a.median:
-        verdict = f"{group_b} has {pct_diff:.0f}% lower median than {group_a} (N={stats_b.count} vs N={stats_a.count})"
+    comparable = True
+    median_arcsec_a: float | None = None
+    median_arcsec_b: float | None = None
+    if is_pixel_metric:
+        # Require the same minimum coverage in arcsec as the px comparison does
+        # in px; otherwise the groups are declared not comparable and no %
+        # figure is returned.
+        if len(arcsec_a) >= 4 and len(arcsec_b) >= 4:
+            median_arcsec_a = round(statistics.median(arcsec_a), 3)
+            median_arcsec_b = round(statistics.median(arcsec_b), 3)
+            verdict = _pct_verdict(median_arcsec_a, median_arcsec_b, unit=" (arcsec)")
+        else:
+            comparable = False
+            verdict = (
+                f"{group_a} and {group_b} cannot be compared: {metric} is measured in pixels "
+                "and one or both groups lack the plate-scale headers (XPIXSZ/FOCALLEN) "
+                "needed to convert to arcseconds"
+            )
     else:
-        verdict = f"Both groups have identical median values (N={stats_a.count} vs N={stats_b.count})"
+        verdict = _pct_verdict(stats_a.median, stats_b.median)
 
     return CompareResponse(
         group_a=CompareGroupStats(name=group_a, box=box_a, stats=stats_a),
@@ -815,4 +854,7 @@ async def get_compare(
         metric=metric,
         mode=mode,
         verdict=verdict,
+        comparable=comparable,
+        median_hfr_arcsec_a=median_arcsec_a,
+        median_hfr_arcsec_b=median_arcsec_b,
     )

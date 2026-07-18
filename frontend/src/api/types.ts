@@ -50,6 +50,12 @@ export interface SessionSummary {
   filters_used: string[];
   median_hfr: number | null;
   median_eccentricity: number | null;
+  // Plate-scale-derived seeing metrics (nullable: absent when the optical
+  // train's plate scale is unknown). Pixel HFR/FWHM are only comparable
+  // within one optical train; these arcsec fields are the cross-train
+  // comparable values. Optional until the backend ships them.
+  hfr_arcsec?: number | null;
+  fwhm_arcsec?: number | null;
 }
 
 export interface TargetAggregation {
@@ -138,6 +144,9 @@ export interface SessionDetail {
   custom_values?: CustomColumnValue[] | null;
   session_baselines: Baselines;
   rig_baselines: Baselines;
+  // Arcsec seeing metrics; null when plate scale is unknown (see SessionSummary).
+  hfr_arcsec?: number | null;
+  fwhm_arcsec?: number | null;
 }
 
 export interface FilterMedian {
@@ -162,6 +171,9 @@ export interface SessionOverview {
   median_detected_stars: number | null;
   median_guiding_rms_arcsec: number | null;
   filter_medians: FilterMedian[];
+  // Arcsec seeing metrics; null when plate scale is unknown (see SessionSummary).
+  hfr_arcsec?: number | null;
+  fwhm_arcsec?: number | null;
   has_notes: boolean;
   rig_count: number;
   custom_values?: Record<string, string> | null;
@@ -187,6 +199,8 @@ export interface TargetDetailResponse {
   total_integration_seconds: number;
   total_frames: number;
   avg_hfr: number | null;
+  // Cross-train comparable aggregate; null when plate scale is unknown.
+  avg_hfr_arcsec?: number | null;
   avg_eccentricity: number | null;
   filters_used: string[];
   equipment: string[];
@@ -375,16 +389,42 @@ export type MergedTargetResponse = Schemas["MergedTargetResponse"];
 export type FilenameCandidateResponse = Schemas["FilenameCandidateResponse"];
 
 // === Stats (Admin) ===
-export type EquipmentItem = Schemas["EquipmentItem"];
+// Arcsec-domain extensions (nullable, optional until the backend ships them):
+// pixel HFR/FWHM are only comparable within one optical train, so the stats
+// surfaces additionally carry plate-scale-derived arcsec values. Extended here
+// (intersection over the generated aliases) rather than in the generated
+// schema, which is regenerated from the backend OpenAPI spec.
+export type EquipmentItem = Schemas["EquipmentItem"] & {
+  median_fwhm_arcsec?: number | null;
+};
 export type TimelineEntry = Schemas["TimelineEntry"];
 export type TimelineDetailEntry = Schemas["TimelineDetailEntry"];
 export type SiteCoords = Schemas["SiteCoords"];
 export type TopTarget = Schemas["TopTarget"];
 export type HfrBucket = Schemas["HfrBucket"];
-export type EquipmentFilterMetrics = Schemas["EquipmentFilterMetrics"];
-export type EquipmentComboMetrics = Schemas["EquipmentComboMetrics"];
+export type EquipmentFilterMetrics = Schemas["EquipmentFilterMetrics"] & {
+  median_fwhm_arcsec?: number | null;
+};
+export type EquipmentComboMetrics = Omit<Schemas["EquipmentComboMetrics"], "filter_breakdown"> & {
+  median_fwhm_arcsec?: number | null;
+  filter_breakdown: EquipmentFilterMetrics[];
+};
 export type OverviewStats = Schemas["OverviewStats"];
-export type StatsResponse = Schemas["StatsResponse"];
+// Stats library data-quality block: arcsec aggregates plus the count of frames
+// excluded from the arcsec histogram because their plate scale is unknown.
+export type DataQualityStats = Schemas["DataQualityStats"] & {
+  avg_hfr_arcsec?: number | null;
+  best_hfr_arcsec?: number | null;
+  unscaled_frame_count?: number | null;
+  hfr_arcsec_hist?: HfrBucket[] | null;
+};
+export type StatsResponse = Omit<
+  Schemas["StatsResponse"],
+  "data_quality" | "equipment_performance"
+> & {
+  data_quality: DataQualityStats;
+  equipment_performance: EquipmentComboMetrics[];
+};
 
 // === Calendar ===
 export type CalendarEntry = Schemas["CalendarEntry"];
@@ -568,8 +608,18 @@ export interface TimeSeriesResponse {
 
 export type MatrixCell = Schemas["MatrixCell"];
 export type MatrixResponse = Schemas["MatrixResponse"];
+// Analysis compare: `comparable` is false when either side has fewer than 4
+// plate-scaled frames (applies in both equipment and filter modes) -- pixel
+// HFR/FWHM cannot be compared across optical trains. The two
+// `median_hfr_arcsec_a/_b` fields carry the plate-scale-derived arcsec median
+// of whichever pixel metric was requested (hfr or fwhm), despite the "hfr"
+// name. Optional until the regenerated schema includes them.
 export type CompareGroupStats = Schemas["CompareGroupStats"];
-export type CompareResponse = Schemas["CompareResponse"];
+export type CompareResponse = Schemas["CompareResponse"] & {
+  comparable?: boolean | null;
+  median_hfr_arcsec_a?: number | null;
+  median_hfr_arcsec_b?: number | null;
+};
 
 // === AstroBin Export ===
 export type ExportFilterRow = Schemas["ExportFilterRow"];

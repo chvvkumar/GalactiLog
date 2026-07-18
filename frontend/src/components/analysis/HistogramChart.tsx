@@ -8,6 +8,8 @@ interface Props {
   data: DistributionResponse | undefined;
   loading: boolean;
   baselineMedian?: number | null;
+  // Axis title for the binned metric (with unit), e.g. "HFR (px)".
+  metricLabel?: string;
 }
 
 // Maps a metric value to a fractional position on the histogram's category axis.
@@ -86,7 +88,7 @@ const HistogramChart: Component<Props> = (props) => {
         maintainAspectRatio: false,
         scales: {
           x: {
-            title: { display: true, text: "Value", color: "rgba(200, 210, 220, 0.8)", font: { size: chartFontSize.tooltipTitle() } },
+            title: { display: true, text: props.metricLabel || "Value", color: "rgba(200, 210, 220, 0.8)", font: { size: chartFontSize.tooltipTitle() } },
             ticks: { color: "rgba(200, 210, 220, 0.7)", font: { size: chartFontSize.tick() } },
             grid: { color: "rgba(200, 210, 220, 0.12)" },
           },

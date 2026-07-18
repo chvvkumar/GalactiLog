@@ -12,9 +12,12 @@ export interface MetricDefinition {
 }
 
 export const METRIC_DEFINITIONS: MetricDefinition[] = [
-  { key: "hfr", label: "HFR", colorVar: "--color-metric-hfr", yAxisId: "left", frameField: "median_hfr", overviewField: "median_hfr", decimals: 2 },
+  // HFR is a pixel-domain metric: labeled "(px)" and only comparable within a
+  // single optical train. The raw FWHM header value has no guaranteed unit, so
+  // it carries no unit annotation (2 decimals to match HFR formatting).
+  { key: "hfr", label: "HFR (px)", colorVar: "--color-metric-hfr", yAxisId: "left", frameField: "median_hfr", overviewField: "median_hfr", decimals: 2, unit: " px" },
   { key: "eccentricity", label: "Ecc", colorVar: "--color-metric-eccentricity", yAxisId: "left", frameField: "eccentricity", overviewField: "median_eccentricity", decimals: 2 },
-  { key: "fwhm", label: "FWHM", colorVar: "--color-metric-fwhm", yAxisId: "right", frameField: "fwhm", overviewField: "median_fwhm", decimals: 1 },
+  { key: "fwhm", label: "FWHM", colorVar: "--color-metric-fwhm", yAxisId: "right", frameField: "fwhm", overviewField: "median_fwhm", decimals: 2 },
   { key: "guiding_rms", label: "RMS", colorVar: "--color-metric-guiding", yAxisId: "left", frameField: "guiding_rms_arcsec", overviewField: "median_guiding_rms_arcsec", decimals: 2, unit: ARCSEC },
   { key: "detected_stars", label: "Stars", colorVar: "--color-metric-stars", yAxisId: "right", frameField: "detected_stars", overviewField: "median_detected_stars", decimals: 0 },
   { key: "sensor_temp", label: "Temp", colorVar: "--color-metric-temp", yAxisId: "right", frameField: "sensor_temp", overviewField: "", decimals: 0, unit: "°C" },

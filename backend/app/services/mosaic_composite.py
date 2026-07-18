@@ -21,6 +21,7 @@ from app.models.image import Image
 from app.services.activity import emit as _emit_activity
 from app.services.thumbnail import _read_binned
 from app.services.coordinates import _parse_ra, _parse_coord
+from app.services.units import arcsec_per_pixel
 from app.services.stretch import (
     normalize_to_unit,
     resize_array,
@@ -497,7 +498,7 @@ def compute_panel_layout(
     center_dec = sum(p.dec for p in panels) / len(panels)
 
     ref = panels[0]
-    plate_scale_arcsec = (ref.xpixsz / ref.focallen) * 206.265
+    plate_scale_arcsec = arcsec_per_pixel(ref.xpixsz, ref.focallen)
     plate_scale_deg = plate_scale_arcsec / 3600.0
 
     # Include camera rotation (OBJCTROT) in WCS via CD matrix so that

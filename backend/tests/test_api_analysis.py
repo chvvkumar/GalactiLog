@@ -545,3 +545,111 @@ async def test_get_compare_insufficient_data():
 
     app.dependency_overrides.clear()
     assert resp.status_code == 400
+
+
+def _row(val, scale):
+    r = MagicMock()
+    r.val = val
+    r.scale = scale
+    return r
+
+
+def _compare_session(rows_a, rows_b):
+    """Session whose two executes return group A rows then group B rows."""
+    res_a = MagicMock()
+    res_a.all.return_value = rows_a
+    res_b = MagicMock()
+    res_b.all.return_value = rows_b
+    session = AsyncMock()
+    session.execute = AsyncMock(side_effect=[res_a, res_b])
+    return session
+
+
+@pytest.mark.asyncio
+async def test_get_compare_pixel_metric_uses_arcsec_when_scaled():
+    """With plate scale on both sides, the verdict runs on arcsec medians and
+    the arcsec median fields are populated."""
+    user = _admin_user()
+    # Group A: 2.0..2.6 px at 1.5 arcsec/px -> arcsec median 3.3
+    rows_a = [_row(v, 1.5) for v in [2.0, 2.0, 2.2, 2.4, 2.6]]
+    # Group B: 4.0 px (worse in px!) at 0.5 arcsec/px -> arcsec median 2.0
+    rows_b = [_row(4.0, 0.5) for _ in range(5)]
+    session = _compare_session(rows_a, rows_b)
+
+    app.dependency_overrides[get_current_user] = _override_user(user)
+    app.dependency_overrides[get_session] = _override_session(session)
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get(
+            "/api/analysis/compare?metric=hfr&mode=filter&group_a=Ha&group_b=OIII"
+        )
+
+    app.dependency_overrides.clear()
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["comparable"] is True
+    assert data["median_hfr_arcsec_a"] == pytest.approx(3.3)
+    assert data["median_hfr_arcsec_b"] == pytest.approx(2.0)
+    # Group B wins in arcsec even though its px median (4.0) is larger than
+    # group A's (2.2): that is the whole point of the conversion.
+    assert data["verdict"].startswith("OIII has ")
+    assert "(arcsec)" in data["verdict"]
+
+
+@pytest.mark.asyncio
+async def test_get_compare_pixel_metric_not_comparable_without_scale():
+    """When one side lacks plate-scale coverage the response says so instead
+    of returning a bogus % figure."""
+    user = _admin_user()
+    rows_a = [_row(v, 1.5) for v in [2.0, 2.0, 2.2, 2.4, 2.6]]
+    rows_b = [_row(4.0, None) for _ in range(5)]  # no XPIXSZ/FOCALLEN
+    session = _compare_session(rows_a, rows_b)
+
+    app.dependency_overrides[get_current_user] = _override_user(user)
+    app.dependency_overrides[get_session] = _override_session(session)
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get(
+            "/api/analysis/compare?metric=hfr&mode=filter&group_a=Ha&group_b=OIII"
+        )
+
+    app.dependency_overrides.clear()
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["comparable"] is False
+    assert data["median_hfr_arcsec_a"] is None
+    assert data["median_hfr_arcsec_b"] is None
+    assert "%" not in data["verdict"]
+    assert "cannot be compared" in data["verdict"]
+    # px box plots stay populated for backward compatibility
+    assert data["group_a"]["stats"]["count"] == 5
+    assert data["group_b"]["stats"]["count"] == 5
+
+
+@pytest.mark.asyncio
+async def test_get_compare_non_pixel_metric_unaffected():
+    """Non-pixel metrics keep the original px-domain verdict and stay comparable."""
+    user = _admin_user()
+    rows_a = [_row(v, None) for v in [0.30, 0.32, 0.34, 0.36, 0.38]]
+    rows_b = [_row(v, None) for v in [0.50, 0.52, 0.54, 0.56, 0.58]]
+    session = _compare_session(rows_a, rows_b)
+
+    app.dependency_overrides[get_current_user] = _override_user(user)
+    app.dependency_overrides[get_session] = _override_session(session)
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get(
+            "/api/analysis/compare?metric=eccentricity&mode=filter&group_a=Ha&group_b=OIII"
+        )
+
+    app.dependency_overrides.clear()
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["comparable"] is True
+    assert data["median_hfr_arcsec_a"] is None
+    assert data["median_hfr_arcsec_b"] is None
+    assert "lower median than" in data["verdict"]
+    assert "(arcsec)" not in data["verdict"]
