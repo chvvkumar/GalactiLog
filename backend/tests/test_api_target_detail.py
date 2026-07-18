@@ -55,6 +55,7 @@ def make_image(
     img.guiding_rms_arcsec = None
     img.detected_stars = None
     img.rotator_position = None
+    img.eccentricity_source = None
     return img
 
 
@@ -202,6 +203,85 @@ async def test_target_detail_derives_object_category():
 
 
 @pytest.mark.asyncio
+async def test_target_detail_arcsec_fields():
+    """Sessions and the target aggregate expose plate-scale-converted HFR.
+
+    Frames whose raw headers carry XPIXSZ/FOCALLEN convert; frames without
+    them are excluded from the arcsec aggregates (never compared in px).
+    """
+    tid = uuid.uuid4()
+    target = MagicMock(spec=Target)
+    target.id = tid
+    target.primary_name = "M 42"
+    target.aliases = []
+    target.object_type = None
+    target.ra = None
+    target.dec = None
+    target.merged_into_id = None
+    target.notes = None
+    target.sac_description = None
+    target.sac_notes = None
+    target.reference_thumbnail_path = None
+    target.name_locked = False
+
+    # 3.76 um at 530 mm -> ~1.4633 arcsec/px
+    scaled = make_image(tid, "2026-03-20T21:00:00", hfr=2.0)
+    scaled.raw_headers = {"OBJECT": "M 42", "XPIXSZ": "3.76", "FOCALLEN": "530"}
+    unscaled = make_image(tid, "2026-03-14T22:00:00", hfr=3.0)  # no plate scale
+
+    mock_session = AsyncMock()
+    mock_session.get = AsyncMock(return_value=target)
+
+    mock_img_result = MagicMock()
+    mock_img_result.all.return_value = [scaled, unscaled]
+    mock_alias_result = MagicMock()
+    mock_alias_result.scalar_one_or_none.return_value = None
+    mock_notes_result = MagicMock()
+    mock_notes_result.all.return_value = []
+    mock_cv_result = MagicMock()
+    mock_cv_result.all.return_value = []
+    mock_memberships_result = MagicMock()
+    mock_memberships_result.scalars.return_value.all.return_value = []
+
+    mock_session.execute = AsyncMock(
+        side_effect=[
+            mock_img_result, mock_alias_result, mock_notes_result,
+            mock_cv_result, mock_memberships_result,
+        ]
+    )
+
+    async def override():
+        yield mock_session
+
+    from app.services.normalization import invalidate_alias_cache
+    invalidate_alias_cache()
+    app.dependency_overrides[get_session] = override
+    app.dependency_overrides[get_current_user] = lambda: _admin_user()
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get(f"/api/targets/{tid}/detail")
+
+    assert resp.status_code == 200
+    data = resp.json()
+
+    # Aggregate: only the scaled frame contributes (2.0 px * 1.4633)
+    assert data["avg_hfr_arcsec"] == pytest.approx(2.9265, abs=1e-3)
+    # px aggregate still pools both frames (backward compat)
+    assert data["avg_hfr"] == pytest.approx(2.5)
+
+    sessions = {s["session_date"]: s for s in data["sessions"]}
+    assert sessions["2026-03-20"]["hfr_arcsec"] == pytest.approx(2.9265, abs=1e-3)
+    assert sessions["2026-03-14"]["hfr_arcsec"] is None
+    assert sessions["2026-03-20"]["fwhm_arcsec"] is None  # no fwhm values
+
+    # Both frames share eccentricity_source=None -> nothing excluded
+    assert data["ecc_excluded_count"] == 0
+
+    app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
 async def test_target_detail_unresolved():
     images = [
         make_image(None, "2026-03-20T21:00:00", filter_used="Ha"),  # noqa: E501
@@ -261,3 +341,26 @@ async def test_target_detail_not_found():
     assert resp.status_code == 404
 
     app.dependency_overrides.clear()
+
+
+def test_modal_source_ecc_tie_break_is_deterministic():
+    """On a count tie, the lexicographically smaller source name wins, so the
+    result does not depend on input ordering."""
+    from app.services.target_detail import _modal_source_ecc
+
+    # Two sources, equal counts (2 each). "csv" < "header" lexicographically.
+    pairs = [
+        ("header", 0.40),
+        ("csv", 0.30),
+        ("header", 0.50),
+        ("csv", 0.20),
+    ]
+    mean_a, excluded_a = _modal_source_ecc(pairs)
+    # Reversed input must produce the identical result.
+    mean_b, excluded_b = _modal_source_ecc(list(reversed(pairs)))
+
+    # "csv" values are 0.30 and 0.20 -> mean 0.25; the two "header" frames are
+    # excluded.
+    assert mean_a == pytest.approx(0.25)
+    assert excluded_a == 2
+    assert (mean_a, excluded_a) == (mean_b, excluded_b)

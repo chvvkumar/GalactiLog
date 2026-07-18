@@ -350,18 +350,26 @@ def compute_insights(
     median_hfr: float | None,
     hfr_values: list[float],
     temp_values: list[float],
-    target_avg_hfr: float | None,
     is_best_hfr: bool,
     first_frame,
     last_frame,
     frames: list | None = None,
     baselines: dict | None = None,
+    median_hfr_arcsec: float | None = None,
+    target_avg_hfr_arcsec: float | None = None,
 ) -> list[SessionInsight]:
     """Session-level insights.
 
     `frames` and `baselines` are the same normalized frame dicts and
     MAD baselines the per-frame grading table is built from, passed in rather
     than re-derived here so the two never drift apart.
+
+    The best/poor HFR-vs-target verdicts compare across sessions that may span
+    different optical trains, so they run on the arcsec values
+    (`median_hfr_arcsec` / `target_avg_hfr_arcsec`); when either is None (no
+    derivable plate scale) the verdict is omitted rather than computed in
+    pixels. `median_hfr` (px) still feeds the within-session outlier rule,
+    where a single unit is guaranteed.
     """
     insights = []
 
@@ -375,18 +383,24 @@ def compute_insights(
             message=f"Session duration: {int(hours)}h {int(minutes)}m ({first_frame.capture_date.strftime('%H:%M')} → {last_frame.capture_date.strftime('%H:%M')})",
         ))
 
-    if median_hfr is not None and target_avg_hfr is not None:
+    if median_hfr_arcsec is not None and target_avg_hfr_arcsec is not None:
         if is_best_hfr:
             insights.append(SessionInsight(
                 level="good",
                 kind="hfr_vs_target",
-                message=f"Best HFR session for this target (median {median_hfr:.2f} vs target avg {target_avg_hfr:.2f})",
+                message=(
+                    f"Best HFR session for this target (median {median_hfr_arcsec:.2f}\" "
+                    f"vs target avg {target_avg_hfr_arcsec:.2f}\")"
+                ),
             ))
-        elif median_hfr > target_avg_hfr * 1.3:
+        elif median_hfr_arcsec > target_avg_hfr_arcsec * 1.3:
             insights.append(SessionInsight(
                 level="warning",
                 kind="hfr_vs_target",
-                message=f"Poor HFR session (median {median_hfr:.2f} vs target avg {target_avg_hfr:.2f})",
+                message=(
+                    f"Poor HFR session (median {median_hfr_arcsec:.2f}\" "
+                    f"vs target avg {target_avg_hfr_arcsec:.2f}\")"
+                ),
             ))
 
     if temp_values:
