@@ -727,7 +727,7 @@ export type ActivityCategory =
 // widget); not a server response shape.
 export interface ActiveJob {
   id: string;
-  category: "scan" | "rebuild" | "thumbnail" | "enrichment" | "mosaic";
+  category: "scan" | "rebuild" | "thumbnail" | "enrichment" | "mosaic" | "wbpp_copy";
   label: string;
   subLabel?: string;
   progress?: number;
