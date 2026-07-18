@@ -40,8 +40,18 @@ function verdict(
   reason: FrameVerdict["reason"],
   over: Partial<FrameRecord> = {},
   failedBy: string | null = null,
+  failures: FrameVerdict["failures"] | null = null,
 ): FrameVerdict {
-  return { frame: frame(name, over), sessionDate: DATE, keep, reason, failedBy };
+  return {
+    frame: frame(name, over),
+    sessionDate: DATE,
+    keep,
+    reason,
+    failedBy,
+    // Unless a test hands explicit failures, mirror the production invariant:
+    // failedBy is the first failure's sentence.
+    failures: failures ?? (failedBy ? [{ metric: "hfr", text: failedBy }] : []),
+  };
 }
 
 const VERDICTS: FrameVerdict[] = [
@@ -108,7 +118,8 @@ function headerFor(container: HTMLElement, label: string): HTMLElement {
 }
 
 function fileColumn(container: HTMLElement): string[] {
-  return Array.from(container.querySelectorAll("tbody tr td:first-child")).map(
+  // File sits last-but-one, just before Session.
+  return Array.from(container.querySelectorAll("tbody tr td:nth-last-child(2)")).map(
     (td) => td.textContent!,
   );
 }
@@ -293,7 +304,7 @@ describe("WbppQualityPanel table columns", () => {
   it("renders the fixed column set with no Score column", () => {
     const { container } = setup();
     expect(headers(container)).toEqual([
-      "File", "Session", "Filter", "HFR", "Ecc", "FWHM", "Stars", "RMS", "Verdict",
+      "Verdict", "Filter", "HFR", "Ecc", "FWHM", "Stars", "RMS", "File", "Session",
     ]);
   });
 
@@ -315,15 +326,15 @@ describe("WbppQualityPanel table columns", () => {
       verdicts: [verdict("m.fits", true, "pass", { median_hfr: 2.1, detected_stars: 100 })],
     });
     const cells = Array.from(container.querySelectorAll("tbody tr td")).map((c) => c.textContent);
-    // File, Session, Filter, then HFR / Ecc / FWHM / Stars / RMS.
-    expect(cells.slice(3, 8)).toEqual(["2.10", "—", "—", "100", "—"]);
+    // Verdict, Filter, then HFR / Ecc / FWHM / Stars / RMS.
+    expect(cells.slice(2, 7)).toEqual(["2.10", "—", "—", "100", "—"]);
   });
 
   it("shows an em dash for a null filter", () => {
     const { container } = setup({
       verdicts: [verdict("d.fits", false, "unmeasured", { filter_used: null })],
     });
-    expect(container.querySelectorAll("tbody tr td")[2].textContent).toBe("—");
+    expect(container.querySelectorAll("tbody tr td")[1].textContent).toBe("—");
   });
 });
 
@@ -419,9 +430,9 @@ describe("WbppQualityPanel cell banding", () => {
     });
     const rows = container.querySelectorAll("tbody tr");
     const cell = (row: number, col: number) => rows[row].querySelectorAll("td")[col];
-    expect(cell(0, 3).className).toContain("text-theme-warning"); // HFR watch
-    expect(cell(1, 6).className).toContain("text-theme-error"); // Stars reject (sign flipped)
-    expect(cell(2, 3).className).toContain("text-theme-success"); // HFR better
+    expect(cell(0, 2).className).toContain("text-theme-warning"); // HFR watch
+    expect(cell(1, 5).className).toContain("text-theme-error"); // Stars reject (sign flipped)
+    expect(cell(2, 2).className).toContain("text-theme-success"); // HFR better
   });
 
   it("grades against the rig baseline when config.baseline is rig", () => {
@@ -435,7 +446,7 @@ describe("WbppQualityPanel cell banding", () => {
       verdicts: [verdict("r.fits", true, "pass", { median_hfr: 2.8 })],
       sessionDetails: { [DATE]: detail },
     });
-    expect(container.querySelectorAll("tbody tr td")[3].className).toContain(
+    expect(container.querySelectorAll("tbody tr td")[2].className).toContain(
       "text-theme-text-primary",
     );
   });
@@ -447,31 +458,69 @@ describe("WbppQualityPanel cell banding", () => {
     };
     const { container } = setup({ verdicts: [v], sessionDetails: {} });
     const cells = container.querySelectorAll("tbody tr td");
-    expect(cells[3].className).toContain("text-theme-text-primary");
-    expect(cells[3].className).not.toContain("text-theme-warning");
-    expect(cells[3].textContent).toBe("2.80");
+    expect(cells[2].className).toContain("text-theme-text-primary");
+    expect(cells[2].className).not.toContain("text-theme-warning");
+    expect(cells[2].textContent).toBe("2.80");
   });
 });
 
 describe("WbppQualityPanel verdict column", () => {
-  it("renders a pill per verdict kind with the failure reason beside Exclude", () => {
+  it("renders an icon per verdict kind with the failure detail in the tooltip", () => {
     const { container } = setup();
-    const cells = Array.from(container.querySelectorAll("tbody tr td:last-child"));
-    expect(cells[0].textContent!.trim()).toBe("Copy");
-    expect(cells[1].textContent).toContain("HFR 2.80 > 2.00");
-    expect(cells[1].textContent).toContain("Exclude");
-    expect(cells[2].textContent!.trim()).toBe("Unmeasured");
-    const pillOf = (cell: Element) => cell.querySelector("span:last-child")!;
-    expect(pillOf(cells[0]).className).toContain("text-theme-success");
-    expect(pillOf(cells[1]).className).toContain("text-theme-error");
-    expect(pillOf(cells[2]).className).toContain("text-theme-warning");
+    const icons = Array.from(
+      container.querySelectorAll("tbody tr td:first-child span"),
+    ) as HTMLElement[];
+    expect(icons[0].textContent).toBe("●");
+    expect(icons[0].title).toBe("Copy");
+    expect(icons[0].className).toContain("text-theme-success");
+    expect(icons[1].textContent).toBe("✕");
+    expect(icons[1].title).toContain("Exclude");
+    expect(icons[1].title).toContain("HFR 2.80 > 2.00");
+    expect(icons[1].className).toContain("text-theme-error");
+    expect(icons[2].textContent).toBe("◐");
+    expect(icons[2].title).toContain("Unmeasured");
+    expect(icons[2].className).toContain("text-theme-warning");
   });
 
-  it("shows every row as Copy with no reasons while the master toggle is off", () => {
+  it("marks the failing metric cell with a glyph, keeping the slot on passing cells", () => {
+    const { container } = setup({
+      verdicts: [
+        verdict("pass.fits", true, "pass", {
+          timestamp: "2026-07-01T01:00:00",
+          median_hfr: 1.5,
+        }),
+        verdict(
+          "fail.fits",
+          false,
+          "fail",
+          { timestamp: "2026-07-01T02:00:00", median_hfr: 2.8 },
+          "HFR 2.80 > 2.00",
+        ),
+      ],
+    });
+    const rows = container.querySelectorAll("tbody tr");
+    const hfrCell = (row: number) => rows[row].querySelectorAll("td")[2];
+    expect(hfrCell(1).className).toContain("text-theme-error");
+    expect(hfrCell(1).title).toBe("HFR 2.80 > 2.00");
+    expect(hfrCell(1).querySelector("span")!.textContent).toBe("✕");
+    // Passing cell keeps an EMPTY slot of the same width so digits align.
+    expect(hfrCell(0).querySelector("span")!.textContent).toBe("");
+    expect(hfrCell(0).querySelector("span")!.className).toContain("w-3");
+    expect(hfrCell(1).querySelector("span")!.className).toContain("w-3");
+  });
+
+  it("shows every row as Copy with no failure marks while the master toggle is off", () => {
     const { container } = setup({ enabled: false });
-    const cells = Array.from(container.querySelectorAll("tbody tr td:last-child"));
-    expect(cells.map((c) => c.textContent!.trim())).toEqual(["Copy", "Copy", "Copy"]);
+    const icons = Array.from(
+      container.querySelectorAll("tbody tr td:first-child span"),
+    ) as HTMLElement[];
+    expect(icons.map((i) => i.textContent)).toEqual(["●", "●", "●"]);
+    expect(icons.map((i) => i.title)).toEqual(["Copy", "Copy", "Copy"]);
     expect(container.textContent).not.toContain("HFR 2.80 > 2.00");
+    // No metric cell carries the failure mark or tooltip while disabled.
+    for (const td of Array.from(container.querySelectorAll("tbody td[title]"))) {
+      expect((td as HTMLElement).title).not.toContain("HFR");
+    }
   });
 });
 

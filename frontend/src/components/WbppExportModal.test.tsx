@@ -492,8 +492,12 @@ describe("WbppExportModal quality frame fetch", () => {
     expect(bodyText()).not.toContain("No light frames");
     expect(bodyText()).toContain("fetched_good.fits");
     expect(bodyText()).toContain("fetched_bad.fits");
-    // Real verdicts from the fetched frames, gate named on the failing row.
-    expect(bodyText()).toContain("HFR 3.00 > 2.00");
+    // Real verdicts from the fetched frames: the failing HFR cell carries the
+    // gate sentence as its tooltip (the table no longer prints reason text).
+    const tdTitles = Array.from(document.body.querySelectorAll("td[title]")).map((t) =>
+      t.getAttribute("title"),
+    );
+    expect(tdTitles).toContain("HFR 3.00 > 2.00");
   });
 });
 

@@ -256,6 +256,19 @@ describe("verdict failedBy", () => {
     expect(failedBy).toBe("ecc 0.90 > 0.50");
   });
 
+  it("collects EVERY violated gate in failures, failedBy staying the first", () => {
+    const f = frame({ median_hfr: 5.0, eccentricity: 0.9 });
+    const { failedBy, failures } = evaluateRawDetailed(f, [
+      con("ecc", "lte", 0.5),
+      con("hfr", "lte", 3.0),
+    ]);
+    expect(failures).toEqual([
+      { metric: "ecc", text: "ecc 0.90 > 0.50" },
+      { metric: "hfr", text: "HFR 5.00 > 3.00" },
+    ]);
+    expect(failedBy).toBe("ecc 0.90 > 0.50");
+  });
+
   it("never blames a disabled constraint", () => {
     const f = frame({ median_hfr: 5.0, eccentricity: 0.9 });
     const { failedBy } = evaluateRawDetailed(f, [
@@ -440,7 +453,7 @@ describe("isUnderRelativePath", () => {
 
 describe("excludedUnderSelectedLevels", () => {
   const verdict = (sessionDate: string, source_relative: string, keep: boolean): FrameVerdict =>
-    ({ frame: frame({ source_relative }), sessionDate, keep, reason: keep ? "pass" : "fail", failedBy: null });
+    ({ frame: frame({ source_relative }), sessionDate, keep, reason: keep ? "pass" : "fail", failedBy: null, failures: [] });
 
   it("drops excluded frames that sit outside the session's selected level", () => {
     const verdicts = [

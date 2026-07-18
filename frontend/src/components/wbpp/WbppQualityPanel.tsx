@@ -65,11 +65,11 @@ interface ColumnDef {
 }
 
 const COLUMNS: ColumnDef[] = [
-  { key: "file", label: "File", align: "left" },
-  { key: "session", label: "Session", align: "left" },
+  { key: "verdict", label: "Verdict", align: "center" },
   { key: "filter", label: "Filter", align: "center" },
   ...METRIC_ORDER.map((m): ColumnDef => ({ key: m, label: SHORT_LABEL[m], align: "right" })),
-  { key: "verdict", label: "Verdict", align: "right" },
+  { key: "file", label: "File", align: "left" },
+  { key: "session", label: "Session", align: "right" },
 ];
 
 const ALIGN_CLASS: Record<ColumnDef["align"], string> = {
@@ -404,6 +404,10 @@ export default function WbppQualityPanel(props: WbppQualityPanelProps): JSX.Elem
                       <th
                         class={`sticky top-0 z-20 bg-theme-elevated py-1.5 px-1.5 font-normal cursor-pointer select-none shadow-[inset_0_-1px_0_var(--color-border-default)] ${ALIGN_CLASS[col.align]}`}
                         classList={{
+                          // Metric headers carry extra right padding matching
+                          // the glyph slot in their cells, so the header label
+                          // right-aligns with the digits, not with the slot.
+                          "pr-[1.125rem]": METRIC_ORDER.includes(col.key as MetricKey),
                           "text-theme-text-primary": sortKey() === col.key,
                           "text-theme-text-tertiary hover:text-theme-text-secondary":
                             sortKey() !== col.key,
@@ -423,11 +427,29 @@ export default function WbppQualityPanel(props: WbppQualityPanelProps): JSX.Elem
                 <For each={sortedVerdicts()}>
                   {(v) => (
                     <tr class="border-b border-theme-border/30 last:border-b-0">
-                      <td class="py-0.5 px-1.5 text-theme-text-secondary font-mono truncate max-w-[14rem]">
-                        {v.frame.file_name}
-                      </td>
-                      <td class="py-0.5 px-1.5 text-theme-text-tertiary tabular-nums">
-                        {v.sessionDate}
+                      {/* Icon-only verdict: the glyph says THAT a frame is
+                          dropped; the marked metric cells say which gates
+                          fired. Hover carries the full failure sentences.
+                          With the filter off every row reads Copy. */}
+                      <td class="py-0.5 px-1.5 text-center">
+                        <span
+                          class={`inline-block text-[10px] leading-none cursor-default ${
+                            effectiveKeep(v)
+                              ? "text-theme-success"
+                              : v.reason === "unmeasured"
+                                ? "text-theme-warning"
+                                : "text-theme-error"
+                          }`}
+                          title={
+                            effectiveKeep(v)
+                              ? "Copy"
+                              : v.reason === "unmeasured"
+                                ? "Unmeasured: none of the constrained metrics recorded"
+                                : `Exclude: ${v.failures.map((f) => f.text).join(", ")}`
+                          }
+                        >
+                          {effectiveKeep(v) ? "●" : v.reason === "unmeasured" ? "◐" : "✕"}
+                        </span>
                       </td>
                       <td class="py-0.5 px-1.5 text-theme-text-primary text-center">
                         {v.frame.filter_used ?? "—"}
@@ -435,37 +457,36 @@ export default function WbppQualityPanel(props: WbppQualityPanelProps): JSX.Elem
                       <For each={METRIC_ORDER}>
                         {(metric) => {
                           const raw = () => metricValue(v.frame, metric);
+                          const failure = () =>
+                            props.enabled
+                              ? v.failures.find((f) => f.metric === metric)
+                              : undefined;
+                          // Every metric cell renders the same fixed-width
+                          // trailing slot, glyph or not, so the digits keep one
+                          // right edge across kept and excluded rows.
                           return (
                             <td
-                              class={`py-0.5 px-1.5 text-right tabular-nums ${cellClass(v, metric)}`}
+                              class={`py-0.5 px-1.5 text-right tabular-nums ${
+                                failure() ? "text-theme-error font-medium" : cellClass(v, metric)
+                              }`}
+                              title={failure()?.text}
                             >
                               {raw() != null ? formatMetric(metric, raw()!) : "—"}
+                              <span class="inline-block w-3 pl-0.5 text-left align-middle text-[9px] leading-none">
+                                {failure() ? "✕" : ""}
+                              </span>
                             </td>
                           );
                         }}
                       </For>
-                      {/* The pill says THAT a frame is dropped; the reason
-                          beside it says which gate fired and by how much.
-                          With the filter off every row reads Copy. */}
-                      <td class="py-0.5 px-1.5 text-right">
-                        <Show when={props.enabled && !v.keep && v.failedBy}>
-                          <span class="mr-1.5 font-mono text-theme-text-tertiary">{v.failedBy}</span>
-                        </Show>
-                        <span
-                          class={`px-1.5 py-0.5 rounded-full text-tiny font-medium ${
-                            effectiveKeep(v)
-                              ? "bg-theme-success/15 text-theme-success"
-                              : v.reason === "unmeasured"
-                                ? "bg-theme-warning/15 text-theme-warning"
-                                : "bg-theme-error/15 text-theme-error"
-                          }`}
-                        >
-                          {effectiveKeep(v)
-                            ? "Copy"
-                            : v.reason === "unmeasured"
-                              ? "Unmeasured"
-                              : "Exclude"}
-                        </span>
+                      {/* The file column absorbs whatever width the fitted
+                          columns leave over, so the table still fills the
+                          panel without stretching the data columns. */}
+                      <td class="w-full max-w-0 py-0.5 px-1.5 text-theme-text-secondary font-mono truncate">
+                        {v.frame.file_name}
+                      </td>
+                      <td class="py-0.5 px-1.5 text-right text-theme-text-tertiary tabular-nums">
+                        {v.sessionDate}
                       </td>
                     </tr>
                   )}
@@ -477,7 +498,9 @@ export default function WbppQualityPanel(props: WbppQualityPanelProps): JSX.Elem
       </div>
 
       <p class="text-tiny text-theme-text-tertiary">
-        Filters apply to light frames only. All other files are copied unchanged.
+        Filters apply to light frames only. All other files are copied unchanged.{" "}
+        <span class="text-theme-error">✕</span> marks the value that excluded a frame; hover it
+        for the threshold.
       </p>
     </div>
   );

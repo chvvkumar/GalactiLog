@@ -107,11 +107,23 @@ export function metricValue(frame: FrameRecord, metric: MetricKey): number | nul
 
 export type Verdict = "pass" | "fail" | "unmeasured";
 
+/** One violated gate: which metric fired and the human sentence for it. */
+export interface MetricFailure {
+  metric: MetricKey;
+  text: string;
+}
+
 export interface FrameVerdict {
   frame: FrameRecord;
   sessionDate: string;
   keep: boolean;
   reason: Verdict;
+  /**
+   * Every enabled gate this frame violated, in the user's constraint order.
+   * The preview table marks the offending metric cells from this, so a frame
+   * failing two gates shows both marks, not just the first.
+   */
+  failures: MetricFailure[];
   /**
    * Which gate excluded this frame, and with what numbers -- "ecc 0.62 > 0.55".
    * Null when the frame passed or was unmeasured (there is no gate to name:
@@ -221,23 +233,26 @@ function rawFailureText(c: RawConstraint & { value: number }, actual: number): s
  *     empty input is not a gate, so a freshly added chip excludes nothing
  *     until the user types a number or picks a preset.
  *
- * `failedBy` names the FIRST enabled constraint that failed, in the user's own
- * order.
+ * `failures` lists EVERY enabled constraint that failed, in the user's own
+ * order; `failedBy` is the first of those, kept as the one-sentence summary.
  */
 export function evaluateRawDetailed(
   frame: FrameRecord,
   constraints: RawConstraint[],
-): { verdict: Verdict; failedBy: string | null } {
+): { verdict: Verdict; failedBy: string | null; failures: MetricFailure[] } {
   const enabled = constraints.filter(isActiveConstraint);
-  if (enabled.length === 0) return { verdict: "pass", failedBy: null };
+  if (enabled.length === 0) return { verdict: "pass", failedBy: null, failures: [] };
   let present = 0;
+  const failures: MetricFailure[] = [];
   for (const c of enabled) {
     const v = metricValue(frame, c.metric);
     if (v == null) continue;
     present += 1;
-    if (!constraintPasses(c, v)) return { verdict: "fail", failedBy: rawFailureText(c, v) };
+    if (!constraintPasses(c, v)) failures.push({ metric: c.metric, text: rawFailureText(c, v) });
   }
-  return { verdict: present === 0 ? "unmeasured" : "pass", failedBy: null };
+  if (failures.length > 0)
+    return { verdict: "fail", failedBy: failures[0].text, failures };
+  return { verdict: present === 0 ? "unmeasured" : "pass", failedBy: null, failures: [] };
 }
 
 export function evaluateRaw(frame: FrameRecord, constraints: RawConstraint[]): Verdict {
@@ -256,8 +271,15 @@ export function computeVerdicts(
     const detail = sessionDetails[date];
     if (!detail) continue;
     for (const frame of detail.frames) {
-      const { verdict, failedBy } = evaluateRawDetailed(frame, config.constraints);
-      out.push({ frame, sessionDate: date, keep: verdict === "pass", reason: verdict, failedBy });
+      const { verdict, failedBy, failures } = evaluateRawDetailed(frame, config.constraints);
+      out.push({
+        frame,
+        sessionDate: date,
+        keep: verdict === "pass",
+        reason: verdict,
+        failedBy,
+        failures,
+      });
     }
   }
   return out;
