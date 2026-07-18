@@ -6,19 +6,17 @@ import { queryKeys } from "../../api/queryKeys";
 import type { SharedFilters } from "../../pages/AnalysisPage";
 import BoxPlotChart from "./BoxPlotChart";
 import StatsCard from "./StatsCard";
+// CompareResponse extends the generated schema with the top-level arcsec-domain
+// fields (`comparable`, `median_hfr_arcsec_a/_b`) that are optional until the
+// backend ships them; cast at the fetch boundary, same precedent as CorrelationTab.
+import type { CompareResponse } from "../../api/types";
+import { metricOptions, METRIC_UNITS } from "../../utils/metricLabels";
+import { formatArcsec } from "../../utils/format";
 
-const Y_METRICS = [
-  { value: "hfr", label: "HFR" },
-  { value: "fwhm", label: "FWHM" },
-  { value: "eccentricity", label: "Eccentricity" },
-  { value: "guiding_rms", label: "Guiding RMS" },
-  { value: "guiding_rms_ra", label: "Guiding RA RMS" },
-  { value: "guiding_rms_dec", label: "Guiding DEC RMS" },
-  { value: "detected_stars", label: "Detected Stars" },
-  { value: "adu_mean", label: "ADU Mean" },
-  { value: "adu_median", label: "ADU Median" },
-  { value: "adu_stdev", label: "ADU StDev" },
-];
+const Y_METRICS = metricOptions([
+  "hfr", "fwhm", "eccentricity", "guiding_rms", "guiding_rms_ra",
+  "guiding_rms_dec", "detected_stars", "adu_mean", "adu_median", "adu_stdev",
+]);
 
 interface Props {
   active: boolean;
@@ -47,10 +45,28 @@ const CompareTab: Component<Props> = (props) => {
   const dataQuery = useQuery(() => ({
     queryKey: queryKeys.compare(params()),
     queryFn: ({ signal }: { signal: AbortSignal }) =>
-      apiClient.GET("/api/analysis/compare", { params: { query: params() }, signal }).then(unwrap),
+      apiClient.GET("/api/analysis/compare", { params: { query: params() }, signal }).then(unwrap) as Promise<CompareResponse>,
     enabled: props.active && canCompare(),
     placeholderData: keepPreviousData,
   }));
+
+  // When the backend flags the two sides as different optical trains for a
+  // pixel-domain metric, the % improvement verdict is meaningless: suppress it
+  // and either fall back to the arcsec medians (cross-train comparable) or say
+  // why no comparison is shown.
+  const crossTrainVerdict = (): string | null => {
+    const d = dataQuery.data;
+    if (!d || d.comparable !== false) return null;
+    // The arcsec fields carry whichever pixel metric was requested (hfr or
+    // fwhm), so label them off the currently selected metric.
+    const label = metric() === "fwhm" ? "FWHM" : "HFR";
+    const a = d.median_hfr_arcsec_a;
+    const b = d.median_hfr_arcsec_b;
+    if (a != null && b != null) {
+      return `Different optical trains: pixel ${label} values are not directly comparable. Comparing in arcseconds instead: ${d.group_a.name} median ${formatArcsec(a)} vs ${d.group_b.name} median ${formatArcsec(b)}.`;
+    }
+    return `Different optical trains: pixel ${label} is not comparable between these groups, and arcsecond data is unavailable (plate scale unknown). No improvement figure is shown.`;
+  };
 
   const selectClass = "text-sm bg-theme-elevated border border-theme-border rounded px-2.5 py-1.5 text-theme-text-primary";
   const toggleClass = (active: boolean) =>
@@ -126,11 +142,16 @@ const CompareTab: Component<Props> = (props) => {
           />
         </div>
 
-        <div class="text-sm text-theme-text-primary mb-3 font-medium">{dataQuery.data!.verdict}</div>
+        <Show
+          when={crossTrainVerdict()}
+          fallback={<div class="text-sm text-theme-text-primary mb-3 font-medium">{dataQuery.data!.verdict}</div>}
+        >
+          <div class="text-sm text-theme-text-secondary mb-3">{crossTrainVerdict()}</div>
+        </Show>
 
         <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
-          <StatsCard stats={dataQuery.data!.group_a.stats} label={dataQuery.data!.group_a.name} />
-          <StatsCard stats={dataQuery.data!.group_b.stats} label={dataQuery.data!.group_b.name} />
+          <StatsCard stats={dataQuery.data!.group_a.stats} label={dataQuery.data!.group_a.name} unit={METRIC_UNITS[metric()]} />
+          <StatsCard stats={dataQuery.data!.group_b.stats} label={dataQuery.data!.group_b.name} unit={METRIC_UNITS[metric()]} />
         </div>
       </Show>
     </div>

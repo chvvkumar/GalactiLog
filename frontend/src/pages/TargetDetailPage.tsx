@@ -15,7 +15,7 @@ import { queryKeys } from "../api/queryKeys";
 // this type at the two fetch boundaries below.
 import type { TargetDetailResponse, SessionDetail } from "../api/types";
 import type { TargetSearchResultFuzzy, MergedTargetResponse } from "../api/types";
-import SessionAccordionCard from "../components/SessionAccordionCard";
+import SessionAccordionCard, { ASTROBIN_BUTTON_CLASS } from "../components/SessionAccordionCard";
 import { showToast } from "../components/Toast";
 import FilterBadges from "../components/FilterBadges";
 import TargetMetricsChart from "../components/TargetMetricsChart";
@@ -900,16 +900,26 @@ const TargetDetailPage: Component = () => {
                     <div class="text-caption text-theme-text-secondary">Total Frames</div>
                   </div>
                   <Show when={visible("quality", "hfr")}>
-                    <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-3 text-center">
-                      <div class="text-lg font-semibold text-metric-hfr">
-                        {detail().avg_hfr?.toFixed(2) ?? "—"}
+                    <div
+                      class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-3 text-center"
+                      title="Arcsecond HFR when the plate scale is known; pixel HFR is only comparable within one optical train"
+                    >
+                      <div class="text-lg font-semibold text-metric-hfr tabular-nums">
+                        {detail().avg_hfr_arcsec != null
+                          ? formatArcsec(detail().avg_hfr_arcsec)
+                          : detail().avg_hfr != null
+                            ? `${detail().avg_hfr!.toFixed(2)} px`
+                            : "—"}
                       </div>
                       <div class="text-caption text-theme-text-secondary">Avg HFR</div>
                     </div>
                   </Show>
                   <Show when={visible("quality", "eccentricity")}>
-                    <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-3 text-center">
-                      <div class="text-lg font-semibold text-metric-eccentricity">
+                    <div
+                      class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-3 text-center cursor-help"
+                      title="Eccentricity is session-relative: it reflects the ratio of rig error to seeing for that session, so there is no universal good/bad threshold. Compare sessions against each other, not against a fixed number."
+                    >
+                      <div class="text-lg font-semibold text-metric-eccentricity tabular-nums">
                         {detail().avg_eccentricity?.toFixed(2) ?? "—"}
                       </div>
                       <div class="text-caption text-theme-text-secondary">Avg Eccentricity</div>
@@ -1103,7 +1113,7 @@ const TargetDetailPage: Component = () => {
                 </HelpPopover>
                 <Show when={selectedChartDates().length > 0}>
                   <button
-                    class="ml-auto text-tiny px-2 py-0.5 border border-theme-border rounded text-theme-text-tertiary hover:text-theme-text-primary hover:border-theme-accent transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                    class={`ml-auto ${ASTROBIN_BUTTON_CLASS} disabled:opacity-50 disabled:cursor-not-allowed`}
                     onClick={copyMultiSessionAstrobinCsv}
                     disabled={csvLoading()}
                   >

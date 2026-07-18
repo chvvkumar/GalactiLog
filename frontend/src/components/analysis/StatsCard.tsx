@@ -4,13 +4,15 @@ import type { SummaryStats } from "../../api/types";
 interface Props {
   stats: SummaryStats;
   label?: string;
+  // Unit suffix appended to every numeric value ("px", the arcsec glyph, "°C").
+  unit?: string;
 }
 
 const StatsCard: Component<Props> = (props) => {
   const fmt = (v: number) => {
-    if (Math.abs(v) >= 1000) return v.toFixed(0);
-    if (Math.abs(v) >= 10) return v.toFixed(1);
-    return v.toFixed(2);
+    const num =
+      Math.abs(v) >= 1000 ? v.toFixed(0) : Math.abs(v) >= 10 ? v.toFixed(1) : v.toFixed(2);
+    return props.unit ? `${num}${props.unit}` : num;
   };
 
   return (
@@ -21,27 +23,27 @@ const StatsCard: Component<Props> = (props) => {
       <div class="grid grid-cols-3 sm:grid-cols-6 gap-x-4 gap-y-1 text-sm">
         <div>
           <span class="text-theme-text-tertiary">N: </span>
-          <span class="text-theme-text-primary">{props.stats.count}</span>
+          <span class="text-theme-text-primary tabular-nums">{props.stats.count}</span>
         </div>
         <div>
           <span class="text-theme-text-tertiary">Min: </span>
-          <span class="text-theme-text-primary">{fmt(props.stats.min)}</span>
+          <span class="text-theme-text-primary tabular-nums">{fmt(props.stats.min)}</span>
         </div>
         <div>
           <span class="text-theme-text-tertiary">Max: </span>
-          <span class="text-theme-text-primary">{fmt(props.stats.max)}</span>
+          <span class="text-theme-text-primary tabular-nums">{fmt(props.stats.max)}</span>
         </div>
         <div>
           <span class="text-theme-text-tertiary">Mean: </span>
-          <span class="text-theme-text-primary">{fmt(props.stats.mean)}</span>
+          <span class="text-theme-text-primary tabular-nums">{fmt(props.stats.mean)}</span>
         </div>
         <div>
           <span class="text-theme-text-tertiary">Median: </span>
-          <span class="text-theme-text-primary">{fmt(props.stats.median)}</span>
+          <span class="text-theme-text-primary tabular-nums">{fmt(props.stats.median)}</span>
         </div>
         <div>
           <span class="text-theme-text-tertiary">StDev: </span>
-          <span class="text-theme-text-primary">{fmt(props.stats.std_dev)}</span>
+          <span class="text-theme-text-primary tabular-nums">{fmt(props.stats.std_dev)}</span>
         </div>
       </div>
     </div>

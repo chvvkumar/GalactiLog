@@ -48,9 +48,10 @@ const INSIGHT_ICONS: Record<InsightLevel, string> = {
   info: "•",
 };
 
-// Shared style for every "Astrobin CSV" copy button (single-rig + per-rig).
-// Compact size with the accent look, kept in one place so the call sites can't drift.
-const ASTROBIN_BUTTON_CLASS =
+// Shared style for every "Astrobin CSV" copy button (single-rig, per-rig,
+// multi-session on the target page). Compact size with the accent look, kept
+// in one place so the call sites can't drift.
+export const ASTROBIN_BUTTON_CLASS =
   "text-tiny px-1.5 py-0.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded font-medium hover:bg-theme-accent/25 transition-colors cursor-pointer";
 
 interface VisibleColumns {

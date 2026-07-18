@@ -12,6 +12,7 @@ import type { SharedFilters } from "../../pages/AnalysisPage";
 import type { TimeSeriesResponse } from "../../api/types";
 import TimeSeriesChart from "./TimeSeriesChart";
 import { MIN_GROUP, type MetricBaseline } from "../../utils/frameQuality";
+import { metricOptions } from "../../utils/metricLabels";
 
 // Higher-is-better metrics flip z-score polarity so "worse than baseline" stays positive.
 const HIGHER_IS_BETTER = new Set(["detected_stars", "sky_quality"]);
@@ -31,28 +32,12 @@ function baselineFromValues(values: number[]): MetricBaseline | null {
   return { median, mad, n: xs.length };
 }
 
-const ALL_METRICS = [
-  { value: "humidity", label: "Humidity" },
-  { value: "wind_speed", label: "Wind Speed" },
-  { value: "ambient_temp", label: "Ambient Temp" },
-  { value: "dew_point", label: "Dew Point" },
-  { value: "pressure", label: "Pressure" },
-  { value: "cloud_cover", label: "Cloud Cover" },
-  { value: "sky_quality", label: "Sky Quality" },
-  { value: "focuser_temp", label: "Focuser Temp" },
-  { value: "airmass", label: "Airmass" },
-  { value: "sensor_temp", label: "Sensor Temp" },
-  { value: "hfr", label: "HFR" },
-  { value: "fwhm", label: "FWHM" },
-  { value: "eccentricity", label: "Eccentricity" },
-  { value: "guiding_rms", label: "Guiding RMS" },
-  { value: "guiding_rms_ra", label: "Guiding RA RMS" },
-  { value: "guiding_rms_dec", label: "Guiding DEC RMS" },
-  { value: "detected_stars", label: "Detected Stars" },
-  { value: "adu_mean", label: "ADU Mean" },
-  { value: "adu_median", label: "ADU Median" },
-  { value: "adu_stdev", label: "ADU StDev" },
-];
+const ALL_METRICS = metricOptions([
+  "humidity", "wind_speed", "ambient_temp", "dew_point", "pressure",
+  "cloud_cover", "sky_quality", "focuser_temp", "airmass", "sensor_temp",
+  "hfr", "fwhm", "eccentricity", "guiding_rms", "guiding_rms_ra",
+  "guiding_rms_dec", "detected_stars", "adu_mean", "adu_median", "adu_stdev",
+]);
 
 interface Props {
   active: boolean;

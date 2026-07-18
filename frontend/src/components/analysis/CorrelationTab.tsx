@@ -16,32 +16,17 @@ import type { SharedFilters } from "../../pages/AnalysisPage";
 import type { CorrelationResponse } from "../../api/types";
 import CorrelationChart from "./CorrelationChart";
 import StatsCard from "./StatsCard";
+import { metricOptions, METRIC_UNITS } from "../../utils/metricLabels";
 
-const X_OPTIONS = [
-  { value: "humidity", label: "Humidity" },
-  { value: "wind_speed", label: "Wind Speed" },
-  { value: "ambient_temp", label: "Ambient Temp" },
-  { value: "dew_point", label: "Dew Point" },
-  { value: "pressure", label: "Pressure" },
-  { value: "cloud_cover", label: "Cloud Cover" },
-  { value: "sky_quality", label: "Sky Quality" },
-  { value: "focuser_temp", label: "Focuser Temp" },
-  { value: "airmass", label: "Airmass" },
-  { value: "sensor_temp", label: "Sensor Temp" },
-];
+const X_OPTIONS = metricOptions([
+  "humidity", "wind_speed", "ambient_temp", "dew_point", "pressure",
+  "cloud_cover", "sky_quality", "focuser_temp", "airmass", "sensor_temp",
+]);
 
-const Y_OPTIONS = [
-  { value: "hfr", label: "HFR" },
-  { value: "fwhm", label: "FWHM" },
-  { value: "eccentricity", label: "Eccentricity" },
-  { value: "guiding_rms", label: "Guiding RMS" },
-  { value: "guiding_rms_ra", label: "Guiding RA RMS" },
-  { value: "guiding_rms_dec", label: "Guiding DEC RMS" },
-  { value: "detected_stars", label: "Detected Stars" },
-  { value: "adu_mean", label: "ADU Mean" },
-  { value: "adu_median", label: "ADU Median" },
-  { value: "adu_stdev", label: "ADU StDev" },
-];
+const Y_OPTIONS = metricOptions([
+  "hfr", "fwhm", "eccentricity", "guiding_rms", "guiding_rms_ra",
+  "guiding_rms_dec", "detected_stars", "adu_mean", "adu_median", "adu_stdev",
+]);
 
 const PRESETS = [
   { label: "Humidity vs HFR", x: "humidity", y: "hfr" },
@@ -195,8 +180,8 @@ const CorrelationTab: Component<Props> = (props) => {
       {/* Stats cards */}
       <Show when={dataQuery.data?.x_stats && dataQuery.data?.y_stats}>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-2 mt-3">
-          <StatsCard stats={dataQuery.data!.x_stats!} label={`X: ${X_OPTIONS.find((o) => o.value === customX())?.label}`} />
-          <StatsCard stats={dataQuery.data!.y_stats!} label={`Y: ${Y_OPTIONS.find((o) => o.value === customY())?.label}`} />
+          <StatsCard stats={dataQuery.data!.x_stats!} label={`X: ${X_OPTIONS.find((o) => o.value === customX())?.label}`} unit={METRIC_UNITS[customX()]} />
+          <StatsCard stats={dataQuery.data!.y_stats!} label={`Y: ${Y_OPTIONS.find((o) => o.value === customY())?.label}`} unit={METRIC_UNITS[customY()]} />
         </div>
       </Show>
     </div>
