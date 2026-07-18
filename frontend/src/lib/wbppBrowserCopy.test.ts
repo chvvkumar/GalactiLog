@@ -339,7 +339,7 @@ describe("runBrowserCopy", () => {
       s2: { "d.fits": b("d") },
     }, ctrl);
     const dest = makeDestDir("staging");
-    const onProgress = vi.fn<(done: number, total: number, label: string) => void>();
+    const onProgress = vi.fn<(done: number, total: number, label: string, bytes: number) => void>();
 
     await runBrowserCopy(root, dest, baseOpts([op("s1"), op("s2")], { onProgress }));
 
@@ -350,10 +350,14 @@ describe("runBrowserCopy", () => {
     for (const [, total] of calls) expect(total).toBe(4);
     const dones = calls.map(([done]) => done).sort((a, z) => a - z);
     expect(dones).toEqual([1, 2, 3, 4]);
-    // Each file is reported exactly once (labels are "session: filename").
+    // Each file is reported exactly once (labels are "session: filename"), and
+    // each report carries the completed file's byte size (every file here is
+    // one byte of content).
     const names = ["a.fits", "b.fits", "c.fits", "d.fits"];
     for (const name of names) {
-      expect(calls.filter(([, , label]) => label.endsWith(`: ${name}`)).length).toBe(1);
+      const forFile = calls.filter(([, , label]) => label.endsWith(`: ${name}`));
+      expect(forFile.length).toBe(1);
+      expect(forFile[0][3]).toBe(1);
     }
   });
 
@@ -435,8 +439,10 @@ describe("runBrowserCopy", () => {
     expect(totalBytes).toBe(40 * MB);
     expect(big.closed).toBe(true);
     expect(big.aborted).toBe(false);
-    // Still one progress report for the whole file, not one per chunk.
+    // Still one progress report for the whole file, not one per chunk, and it
+    // carries the full byte size for rate computation.
     expect(onProgress).toHaveBeenCalledTimes(1);
+    expect(onProgress).toHaveBeenCalledWith(1, 1, expect.any(String), 40 * MB);
   });
 
   it("copies a zero-byte file: destination created and closed with no writes", async () => {

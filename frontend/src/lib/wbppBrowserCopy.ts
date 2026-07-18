@@ -197,7 +197,9 @@ async function collectCopyWork(
   }
 }
 
-async function copyFile(item: CopyWorkItem, signal: AbortSignal): Promise<void> {
+// Resolves with the number of bytes copied, so the caller can derive a
+// transfer rate from per-file completions.
+async function copyFile(item: CopyWorkItem, signal: AbortSignal): Promise<number> {
   const file = await item.srcEntry.getFile();
   const fh = await item.destDir.getFileHandle(item.name, { create: true });
   const writable = await fh.createWritable();
@@ -211,6 +213,7 @@ async function copyFile(item: CopyWorkItem, signal: AbortSignal): Promise<void> 
       await writable.write(buf);
     }
     await writable.close();
+    return file.size;
   } catch (e) {
     try {
       await writable.abort();
@@ -227,7 +230,7 @@ async function copyFile(item: CopyWorkItem, signal: AbortSignal): Promise<void> 
 // after every worker has settled.
 async function runCopyPool(
   items: CopyWorkItem[],
-  onFile: (item: CopyWorkItem) => void,
+  onFile: (item: CopyWorkItem, bytes: number) => void,
   signal?: AbortSignal,
 ): Promise<void> {
   const pool = new AbortController();
@@ -241,8 +244,9 @@ async function runCopyPool(
     while (next < items.length) {
       if (pool.signal.aborted) return;
       const item = items[next++];
+      let bytes: number;
       try {
-        await copyFile(item, pool.signal);
+        bytes = await copyFile(item, pool.signal);
       } catch (e) {
         if (!failed && !pool.signal.aborted) {
           failed = true;
@@ -251,7 +255,7 @@ async function runCopyPool(
         pool.abort();
         return;
       }
-      onFile(item);
+      onFile(item, bytes);
     }
   };
   try {
@@ -274,7 +278,9 @@ export interface BrowserCopyOptions {
   // Quality-filter exclude set: fits-root-relative POSIX paths of LIGHT frames to
   // omit from the copy. Empty when the filter is off (whole-folder copy).
   excludedSourceRelatives: string[];
-  onProgress: (done: number, total: number, label: string) => void;
+  // `bytes` is the completed file's size, letting the caller derive a live
+  // transfer rate from per-file completions.
+  onProgress: (done: number, total: number, label: string, bytes: number) => void;
   /**
    * Reports what each permission request actually returned, as it returns -- including
    * the "denied" that then throws. Without it the caller can only infer permission
@@ -341,9 +347,9 @@ export async function runBrowserCopy(
   let done = 0;
   await runCopyPool(
     work,
-    (item) => {
+    (item, bytes) => {
       done += 1;
-      opts.onProgress(done, total, `${item.label}: ${item.name}`);
+      opts.onProgress(done, total, `${item.label}: ${item.name}`, bytes);
     },
     opts.signal,
   );

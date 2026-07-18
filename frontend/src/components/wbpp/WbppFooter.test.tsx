@@ -180,12 +180,12 @@ describe("WbppFooter while copying", () => {
       <WbppFooter
         {...props({
           copying: true,
-          copyProgress: { done: 12, total: 400, label: "LIGHT_M31_001.fits" },
+          copyProgress: { done: 12, total: 400, speed: "843 Mbps" },
           onStop,
         })}
       />
     ));
-    expect(container.textContent).toContain("12 / 400 - LIGHT_M31_001.fits");
+    expect(container.textContent).toContain("12 / 400 · 843 Mbps");
 
     const stop = getByText("Stop") as HTMLButtonElement;
     fireEvent.click(stop);
@@ -195,7 +195,7 @@ describe("WbppFooter while copying", () => {
   it("reads as scanning before the total is known", () => {
     const { container } = render(() => (
       <WbppFooter
-        {...props({ copying: true, copyProgress: { done: 0, total: 0, label: "" } })}
+        {...props({ copying: true, copyProgress: { done: 0, total: 0, speed: "" } })}
       />
     ));
     expect(container.textContent).toContain("Scanning...");

@@ -22,6 +22,7 @@ import {
   wbppCopyError,
   wbppCopyFinished,
   wbppCopyActiveJob,
+  wbppCopySpeed,
 } from "./wbppCopyJob";
 
 const args = {
@@ -42,7 +43,7 @@ describe("wbppCopyJob lifecycle", () => {
   it("tracks progress while running and exposes an ActiveJob, then clears on completion", async () => {
     let resolveCopy!: (r: { copied: number; destinationName: string }) => void;
     vi.mocked(runBrowserCopy).mockImplementation((_root, _dest, opts) => {
-      opts.onProgress(5, 10, "2025-01-01: frame.fits");
+      opts.onProgress(5, 10, "2025-01-01: frame.fits", 1024);
       return new Promise((res) => { resolveCopy = res; });
     });
 
@@ -127,7 +128,7 @@ describe("wbppCopyJob lifecycle", () => {
     // module-level store -- there is nothing component-local to lose.
     let resolveCopy!: (r: { copied: number; destinationName: string }) => void;
     vi.mocked(runBrowserCopy).mockImplementation((_root, _dest, opts) => {
-      opts.onProgress(3, 9, "in progress");
+      opts.onProgress(3, 9, "in progress", 512);
       return new Promise((res) => { resolveCopy = res; });
     });
 
@@ -145,6 +146,114 @@ describe("wbppCopyJob lifecycle", () => {
     resolveCopy({ copied: 9, destinationName: "d" });
     await p;
     expect(wbppCopyRunning()).toBe(false);
+  });
+
+  it("derives a windowed transfer rate from completed-file bytes", async () => {
+    vi.useFakeTimers();
+    try {
+      let resolveCopy!: (r: { copied: number; destinationName: string }) => void;
+      let progress!: (d: number, t: number, l: string, bytes: number) => void;
+      vi.mocked(runBrowserCopy).mockImplementation((_root, _dest, opts) => {
+        progress = opts.onProgress;
+        return new Promise((res) => { resolveCopy = res; });
+      });
+      const p = startWbppCopy(args);
+
+      // Window not yet filled (1 s elapsed < 3 s): cumulative average.
+      // 125 MB in 1 s = 1000 Mbps, which crosses into the Gbps format.
+      vi.advanceTimersByTime(1000);
+      progress(1, 4, "s: a.fits", 125_000_000);
+      expect(wbppCopySpeed()).toBe("1.0 Gbps");
+      expect(wbppCopyActiveJob()?.subLabel).toBe("1 / 4 files · 1.0 Gbps");
+
+      // Window filled (4 s elapsed): both samples sit inside the 3 s window,
+      // so (125 + 50) MB / 3 s = 466.67 Mbps, shown as integer Mbps.
+      vi.advanceTimersByTime(3000);
+      progress(2, 4, "s: b.fits", 50_000_000);
+      expect(wbppCopySpeed()).toBe("467 Mbps");
+
+      // Old samples age out: 5 s later only the new 30 MB sample remains,
+      // 30 MB / 3 s = 80 Mbps.
+      vi.advanceTimersByTime(5000);
+      progress(3, 4, "s: c.fits", 30_000_000);
+      expect(wbppCopySpeed()).toBe("80 Mbps");
+
+      resolveCopy({ copied: 4, destinationName: "d" });
+      await p;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("mirrors progress into the tab title and restores it when the run settles", async () => {
+    vi.useFakeTimers();
+    const originalTitle = document.title;
+    document.title = "GalactiLog · M31";
+    try {
+      let resolveCopy!: (r: { copied: number; destinationName: string }) => void;
+      let progress!: (d: number, t: number, l: string, bytes: number) => void;
+      vi.mocked(runBrowserCopy).mockImplementation((_root, _dest, opts) => {
+        progress = opts.onProgress;
+        return new Promise((res) => { resolveCopy = res; });
+      });
+      const p = startWbppCopy(args);
+
+      // Before the rate exists (no time elapsed) the title carries counts only.
+      progress(1, 4, "s: a.fits", 1_000_000);
+      expect(document.title).toBe("1/4 — GalactiLog · M31");
+
+      // Once a rate is available it joins the prefix; no nesting on later ticks.
+      vi.advanceTimersByTime(1000);
+      progress(2, 4, "s: b.fits", 124_000_000);
+      expect(document.title).toBe("2/4 · 1.0 Gbps — GalactiLog · M31");
+
+      resolveCopy({ copied: 4, destinationName: "d" });
+      await p;
+      expect(document.title).toBe("GalactiLog · M31");
+    } finally {
+      document.title = originalTitle;
+      vi.useRealTimers();
+    }
+  });
+
+  it("restores the tab title on cancel, and a second run does not nest prefixes", async () => {
+    // Fake timers freeze Date.now, so no rate exists and the title stays
+    // counts-only, keeping the assertions deterministic.
+    vi.useFakeTimers();
+    const originalTitle = document.title;
+    document.title = "GalactiLog";
+    try {
+      // First run: cancelled mid-flight.
+      let progress!: (d: number, t: number, l: string, bytes: number) => void;
+      vi.mocked(runBrowserCopy).mockImplementation((_root, _dest, opts) => {
+        progress = opts.onProgress;
+        return new Promise((_res, reject) => {
+          opts.signal?.addEventListener("abort", () => reject(new CopyCancelledError()));
+        });
+      });
+      const p1 = startWbppCopy(args);
+      progress(1, 8, "s: a.fits", 0);
+      expect(document.title).toBe("1/8 — GalactiLog");
+      stopWbppCopy();
+      await p1;
+      expect(document.title).toBe("GalactiLog");
+
+      // Second run recaptures the clean title: exactly one prefix, then restore.
+      let resolveCopy!: (r: { copied: number; destinationName: string }) => void;
+      vi.mocked(runBrowserCopy).mockImplementation((_root, _dest, opts) => {
+        progress = opts.onProgress;
+        return new Promise((res) => { resolveCopy = res; });
+      });
+      const p2 = startWbppCopy(args);
+      progress(3, 6, "s: b.fits", 0);
+      expect(document.title).toBe("3/6 — GalactiLog");
+      resolveCopy({ copied: 6, destinationName: "d" });
+      await p2;
+      expect(document.title).toBe("GalactiLog");
+    } finally {
+      document.title = originalTitle;
+      vi.useRealTimers();
+    }
   });
 
   it("stopWbppCopy aborts the in-flight signal", async () => {

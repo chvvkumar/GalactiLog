@@ -864,7 +864,7 @@ describe("WbppExportModal reattach to a live copy", () => {
     const wbppBrowserCopy = await import("../lib/wbppBrowserCopy");
     const spy = vi.spyOn(wbppBrowserCopy, "runBrowserCopy").mockImplementation(
       ((_root: any, _dest: any, opts: any) => {
-        opts.onProgress(4, 8, "reattach.fits");
+        opts.onProgress(4, 8, "reattach.fits", 1024);
         return new Promise<{ copied: number; destinationName: string }>((_res, rej) => {
           // Honor abort signal so stopWbppCopy() can actually stop the copy.
           // Reject with the real CopyCancelledError, matching what

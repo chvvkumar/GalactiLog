@@ -38,7 +38,7 @@ import {
   wbppCopyRunning,
   wbppCopyDone,
   wbppCopyTotal,
-  wbppCopyLabel,
+  wbppCopySpeed,
   wbppCopyError,
   wbppCopyFinished,
   clearWbppCopyError,
@@ -1192,7 +1192,7 @@ const WbppExportModal: Component<Props> = (props) => {
           copying={wbppCopyRunning()}
           copyProgress={
             wbppCopyRunning()
-              ? { done: wbppCopyDone(), total: wbppCopyTotal(), label: wbppCopyLabel() }
+              ? { done: wbppCopyDone(), total: wbppCopyTotal(), speed: wbppCopySpeed() }
               : null
           }
           onCopy={startBrowserCopy}
