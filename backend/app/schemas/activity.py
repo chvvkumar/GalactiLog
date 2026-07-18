@@ -41,3 +41,7 @@ class ActivityFilterParams(BaseModel):
     @classmethod
     def cap_limit(cls, v: int) -> int:
         return min(int(v), 200)
+
+
+class ActivitySeenResponse(BaseModel):
+    activity_seen_at: datetime

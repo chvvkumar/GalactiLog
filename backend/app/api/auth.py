@@ -235,7 +235,12 @@ async def logout(
 
 @router.get("/me", response_model=MeResponse)
 async def me(user: User = Depends(get_current_user)):
-    return MeResponse(id=user.id, username=user.username, role=user.role.value)
+    return MeResponse(
+        id=user.id,
+        username=user.username,
+        role=user.role.value,
+        activity_seen_at=user.activity_seen_at,
+    )
 
 
 @router.put("/password", response_model=StatusResponse)

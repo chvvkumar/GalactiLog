@@ -50,6 +50,7 @@ def admin_user():
     user.role = UserRole.admin
     user.is_active = True
     user.password_hash = "hashed"
+    user.activity_seen_at = None
     return user
 
 
@@ -62,4 +63,5 @@ def viewer_user():
     user.role = UserRole.viewer
     user.is_active = True
     user.password_hash = "hashed"
+    user.activity_seen_at = None
     return user
