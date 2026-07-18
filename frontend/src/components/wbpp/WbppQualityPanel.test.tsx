@@ -579,6 +579,50 @@ describe("WbppQualityPanel verdict column", () => {
   });
 });
 
+describe("WbppQualityPanel help accordion", () => {
+  const glyph = (r: ReturnType<typeof setup>) =>
+    r.getByLabelText("About the quality filter") as HTMLButtonElement;
+
+  it("renders the help glyph, collapsed by default", () => {
+    const r = setup();
+    expect(glyph(r)).toBeTruthy();
+    expect(glyph(r).getAttribute("aria-expanded")).toBe("false");
+    // No overlay, and the inline region is not in the document until expanded.
+    expect(r.queryByRole("region")).toBe(null);
+  });
+
+  it("stays reachable while the master toggle is off", () => {
+    // The glyph must sit outside the inert (pointer-events-none) wrapper.
+    const { container, getByLabelText } = setup({ enabled: false });
+    const inert = container.querySelector(".pointer-events-none") as HTMLElement;
+    expect(inert.contains(getByLabelText("About the quality filter"))).toBe(false);
+  });
+
+  it("expands inline on click and shows the guide with its key phrases", () => {
+    const r = setup();
+    fireEvent.click(glyph(r));
+    expect(glyph(r).getAttribute("aria-expanded")).toBe("true");
+    const region = r.getByRole("region", { name: "Quality filter guide" });
+    // The panel renders in normal flow, not as a floating dialog.
+    expect(r.queryByRole("dialog")).toBe(null);
+    const text = region.textContent!.replace(/\s+/g, " ");
+    expect(text).toContain("Global:");
+    expect(text).toContain("Per-session:");
+    expect(text).toContain("Choosing k");
+    expect(text).toContain("works in reverse");
+    expect(text).toContain("pooled");
+  });
+
+  it("collapses again on a second glyph click", () => {
+    const r = setup();
+    fireEvent.click(glyph(r));
+    expect(r.queryByRole("region")).not.toBe(null);
+    fireEvent.click(glyph(r));
+    expect(r.queryByRole("region")).toBe(null);
+    expect(glyph(r).getAttribute("aria-expanded")).toBe("false");
+  });
+});
+
 describe("WbppQualityPanel empty and loading states", () => {
   it("shows the loading line in place of the table while loading", () => {
     const { container } = setup({ loading: true, verdicts: [] });
