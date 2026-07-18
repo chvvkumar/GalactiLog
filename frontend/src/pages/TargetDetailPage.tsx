@@ -15,11 +15,10 @@ import { queryKeys } from "../api/queryKeys";
 // this type at the two fetch boundaries below.
 import type { TargetDetailResponse, SessionDetail } from "../api/types";
 import type { TargetSearchResultFuzzy, MergedTargetResponse } from "../api/types";
-import SessionAccordionCard, { ASTROBIN_BUTTON_CLASS } from "../components/SessionAccordionCard";
+import SessionAccordionCard from "../components/SessionAccordionCard";
 import { showToast } from "../components/Toast";
 import FilterBadges from "../components/FilterBadges";
 import TargetMetricsChart from "../components/TargetMetricsChart";
-import ExportModal from "../components/ExportModal";
 import WbppExportModal from "../components/WbppExportModal";
 import AladinViewer from "../components/AladinViewer";
 import { useSettingsContext } from "../components/SettingsProvider";
@@ -228,7 +227,6 @@ const TargetDetailPage: Component = () => {
   Object.defineProperty(targetDetail, "error", { enumerable: true, get: () => targetDetailQuery.error });
   const refetchDetail = async () => { await targetDetailQuery.refetch(); };
 
-  const [showExport, setShowExport] = createSignal(false);
   const [showMerge, setShowMerge] = createSignal(false);
   const [showWbppExport, setShowWbppExport] = createSignal(false);
   const [expandedSessions, setExpandedSessions] = createSignal<Set<string>>(new Set());
@@ -434,9 +432,6 @@ const TargetDetailPage: Component = () => {
 
   const selectNoDates = () => setSelectedChartDates([]);
 
-  const [csvCopied, setCsvCopied] = createSignal(false);
-  const [csvLoading, setCsvLoading] = createSignal(false);
-
   const copyMultiSessionAstrobinCsv = async () => {
     const dates = selectedChartDates();
     if (dates.length === 0) return;
@@ -445,7 +440,6 @@ const TargetDetailPage: Component = () => {
     const missingDates = dates.filter((d) => !cache[d]);
 
     if (missingDates.length > 0) {
-      setCsvLoading(true);
       try {
         const results = await Promise.all(
           missingDates.map((d) =>
@@ -463,10 +457,8 @@ const TargetDetailPage: Component = () => {
         setSessionCache(newCache);
       } catch (e: unknown) {
         showToast(getErrorMessage(e, "Failed to load session details"), "error");
-        setCsvLoading(false);
         return;
       }
-      setCsvLoading(false);
     }
 
     const aliasMap = ctx.filterAliasMap();
@@ -533,8 +525,7 @@ const TargetDetailPage: Component = () => {
 
     const csv = [header, ...allRows].join("\n");
     navigator.clipboard.writeText(csv).then(() => {
-      setCsvCopied(true);
-      setTimeout(() => setCsvCopied(false), 2000);
+      showToast(`AstroBin CSV copied (${dates.length} session${dates.length === 1 ? "" : "s"})`, "success", 3000);
     }).catch(() => {
       showToast("Failed to copy to clipboard", "error");
     });
@@ -635,15 +626,6 @@ const TargetDetailPage: Component = () => {
         <div class="p-8 text-theme-error">Failed to load target detail</div>
       </Show>
 
-      <Show when={showExport() && targetDetail()}>
-        <ExportModal
-          targetId={params.targetId}
-          targetName={targetDetail()!.primary_name}
-          sessions={targetDetail()!.sessions}
-          onClose={() => setShowExport(false)}
-        />
-      </Show>
-
       <Show when={showMerge() && targetDetail()}>
         <MergeFromDetailFlow
           winnerId={targetDetail()!.target_id}
@@ -737,7 +719,7 @@ const TargetDetailPage: Component = () => {
                         <li><strong class="text-theme-text-primary">Integration summary</strong> shows total exposure time, frame counts, and filter breakdown.</li>
                         <li><strong class="text-theme-text-primary">Charts</strong> visualize quality metrics (HFR, FWHM, guiding RMS, etc.) across sessions. Click the chart header to expand or collapse it.</li>
                         <li><strong class="text-theme-text-primary">Sessions</strong> are listed as expandable cards. Each card shows per-session metrics, and expanding it reveals individual frame details with all recorded FITS header data.</li>
-                        <li>Use the <strong class="text-theme-text-primary">Export</strong> button to generate AstroBin-compatible CSV files for your imaging data.</li>
+                        <li>Use the <strong class="text-theme-text-primary">Export</strong> menu in the Sessions section to copy an AstroBin-compatible CSV or generate a WBPP export for the selected sessions.</li>
                       </ul>
                     </HelpPopover>
                   </div>
@@ -747,43 +729,6 @@ const TargetDetailPage: Component = () => {
                         Merge
                       </Button>
                     </Show>
-                    <ActionsMenu
-                      ariaLabel="Export options"
-                      buttonClass={buttonClasses("primary")}
-                      triggerContent={<span class="inline-flex items-center gap-1">Export<span class="text-xs leading-none" aria-hidden="true">&#9662;</span></span>}
-                    >
-                      {(close) => (
-                        <>
-                          <button
-                            type="button"
-                            role="menuitem"
-                            class="w-full text-left px-3 py-1.5 text-sm text-theme-text-primary hover:bg-theme-hover transition-colors cursor-pointer"
-                            onClick={() => {
-                              close();
-                              setShowExport(true);
-                            }}
-                          >
-                            AstroBin CSV
-                          </button>
-                          <button
-                            type="button"
-                            role="menuitem"
-                            disabled={selectedChartDates().length === 0}
-                            title={selectedChartDates().length === 0 ? "Select one or more sessions first" : undefined}
-                            class="w-full text-left px-3 py-1.5 text-sm text-theme-text-primary hover:bg-theme-hover transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
-                            onClick={() => {
-                              if (selectedChartDates().length === 0) return;
-                              close();
-                              setShowWbppExport(true);
-                            }}
-                          >
-                            {selectedChartDates().length > 0
-                              ? `WBPP Export (${selectedChartDates().length})`
-                              : "WBPP Export"}
-                          </button>
-                        </>
-                      )}
-                    </ActionsMenu>
                   </div>
                   </div>
                   <div class="text-xs text-theme-text-secondary mt-1 flex flex-wrap gap-x-2 gap-y-0.5 items-center">
@@ -1111,19 +1056,50 @@ const TargetDetailPage: Component = () => {
                     Each card is one imaging session on this target. Expand a card to see per-frame details (exposure, filter, camera temperature, HFR, guiding). Example: compare two sessions of the same target to pick the better one for stacking.
                   </p>
                 </HelpPopover>
-                <Show when={selectedChartDates().length > 0}>
-                  <button
-                    class={`ml-auto ${ASTROBIN_BUTTON_CLASS} disabled:opacity-50 disabled:cursor-not-allowed`}
-                    onClick={copyMultiSessionAstrobinCsv}
-                    disabled={csvLoading()}
+                <div class="ml-auto">
+                  <ActionsMenu
+                    ariaLabel="Export options"
+                    buttonClass={buttonClasses("primary")}
+                    triggerContent={<span class="inline-flex items-center gap-1">Export<span class="text-xs leading-none" aria-hidden="true">&#9662;</span></span>}
                   >
-                    {csvCopied()
-                      ? "Copied!"
-                      : csvLoading()
-                        ? "Loading..."
-                        : `AstroBin CSV (${selectedChartDates().length})`}
-                  </button>
-                </Show>
+                    {(close) => (
+                      <>
+                        <button
+                          type="button"
+                          role="menuitem"
+                          disabled={selectedChartDates().length === 0}
+                          title={selectedChartDates().length === 0 ? "Select one or more sessions first" : undefined}
+                          class="w-full text-left px-3 py-1.5 text-sm text-theme-text-primary hover:bg-theme-hover transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+                          onClick={() => {
+                            if (selectedChartDates().length === 0) return;
+                            close();
+                            void copyMultiSessionAstrobinCsv();
+                          }}
+                        >
+                          {selectedChartDates().length > 0
+                            ? `AstroBin CSV (${selectedChartDates().length})`
+                            : "AstroBin CSV"}
+                        </button>
+                        <button
+                          type="button"
+                          role="menuitem"
+                          disabled={selectedChartDates().length === 0}
+                          title={selectedChartDates().length === 0 ? "Select one or more sessions first" : undefined}
+                          class="w-full text-left px-3 py-1.5 text-sm text-theme-text-primary hover:bg-theme-hover transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+                          onClick={() => {
+                            if (selectedChartDates().length === 0) return;
+                            close();
+                            setShowWbppExport(true);
+                          }}
+                        >
+                          {selectedChartDates().length > 0
+                            ? `WBPP Export (${selectedChartDates().length})`
+                            : "WBPP Export"}
+                        </button>
+                      </>
+                    )}
+                  </ActionsMenu>
+                </div>
               </div>
               <div class="overflow-x-auto">
               <table class="w-full min-w-[600px]" style={{ "border-collapse": "separate", "border-spacing": "0 10px" }}>
