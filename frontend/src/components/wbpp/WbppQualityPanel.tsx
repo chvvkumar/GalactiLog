@@ -412,13 +412,24 @@ export default function WbppQualityPanel(props: WbppQualityPanelProps): JSX.Elem
             <div class="inline-flex border border-theme-border rounded-[var(--radius-sm)] overflow-hidden shrink-0">
               <For
                 each={[
-                  { value: "session" as const, label: "This session" },
-                  { value: "rig" as const, label: "Rig (catalog)" },
+                  {
+                    value: "session" as const,
+                    label: "This session",
+                    title:
+                      "Cell colors grade each frame against its own session's statistics only.",
+                  },
+                  {
+                    value: "rig" as const,
+                    label: "Overall",
+                    title:
+                      "Cell colors grade each frame against this rig's full catalog history, not just these sessions.",
+                  },
                 ]}
               >
                 {(b, i) => (
                   <button
                     type="button"
+                    title={b.title}
                     class="h-6 px-2.5 text-tiny cursor-pointer"
                     classList={{
                       "bg-theme-accent/20 text-theme-accent font-medium":
@@ -451,7 +462,7 @@ export default function WbppQualityPanel(props: WbppQualityPanelProps): JSX.Elem
             </div>
           }
         >
-          <div class="max-h-[22rem] overflow-y-auto border border-t-0 border-theme-border rounded-b-[var(--radius-md)] bg-theme-elevated">
+          <div class="max-h-[36rem] overflow-y-auto border border-t-0 border-theme-border rounded-b-[var(--radius-md)] bg-theme-elevated">
             <table class="w-full text-tiny whitespace-nowrap">
               <thead>
                 <tr>

@@ -263,7 +263,7 @@ describe("WbppExportModal layout", () => {
 
     // Header: the title states the action; the target name moved to the subline.
     const h2 = document.body.querySelector("#wbpp-modal-title") as HTMLElement;
-    expect(h2.textContent?.trim()).toBe("Export to WBPP");
+    expect(h2.textContent?.trim()).toBe("Export For Stacking");
     expect(
       document.body.querySelector('[role="dialog"]')?.getAttribute("aria-labelledby"),
     ).toBe("wbpp-modal-title");
@@ -581,7 +581,7 @@ describe("WbppExportModal quality config persistence", () => {
     ) as HTMLInputElement;
     expect(value.value).toBe("0.55");
     // The stored "rig" baseline is the active segment.
-    const rigSegment = buttonsLabelled("Rig (catalog)")[0];
+    const rigSegment = buttonsLabelled("Overall")[0];
     expect(rigSegment.className).toContain("text-theme-accent");
   });
 
@@ -943,7 +943,11 @@ describe("WbppExportModal folder rows", () => {
     renderModal();
     await preview();
     expect(document.body.querySelector('[role="radiogroup"]')).toBe(null);
-    const row = buttons().find((b) => b.getAttribute("aria-expanded") === "false");
+    // The header's HelpPopover trigger also carries aria-expanded, so anchor
+    // the query to a session row by its visible date text.
+    const row = buttons().find(
+      (b) => b.getAttribute("aria-expanded") === "false" && b.textContent?.includes(DATE),
+    );
     expect(row).not.toBe(undefined);
     fireEvent.click(row!);
     expect(document.body.querySelector('[role="radiogroup"]')).not.toBe(null);

@@ -306,8 +306,8 @@ describe("WbppQualityPanel baseline control", () => {
   it("accents the active baseline and emits the other on click", () => {
     const { getByText, calls } = setup();
     expect(getByText("This session").className).toContain("bg-theme-accent/20");
-    expect(getByText("Rig (catalog)").className).not.toContain("bg-theme-accent/20");
-    fireEvent.click(getByText("Rig (catalog)"));
+    expect(getByText("Overall").className).not.toContain("bg-theme-accent/20");
+    fireEvent.click(getByText("Overall"));
     expect(calls.config).toEqual([{ ...DEFAULT_CONFIG, baseline: "rig" }]);
   });
 });
@@ -323,7 +323,7 @@ describe("WbppQualityPanel table columns", () => {
   it("pins the header with a solid background so rows cannot bleed through", () => {
     const { container } = setup();
     const scroller = container.querySelector(".overflow-y-auto") as HTMLElement;
-    expect(scroller.className).toContain("max-h-[22rem]");
+    expect(scroller.className).toContain("max-h-[36rem]");
     for (const th of Array.from(container.querySelectorAll("thead th"))) {
       expect(th.className).toContain("sticky");
       expect(th.className).toContain("top-0");

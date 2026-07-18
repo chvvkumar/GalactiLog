@@ -61,7 +61,7 @@ const JobRow: Component<{ job: ActiveJob }> = (props) => (
       </Show>
     </div>
     <Show when={props.job.subLabel}>
-      <div class="text-tiny text-theme-text-secondary tabular-nums truncate">
+      <div class="text-tiny text-theme-text-secondary tabular-nums whitespace-normal break-words">
         {props.job.subLabel}
         <Show when={props.job.category === "wbpp_copy"}>
           <span class="text-theme-text-tertiary"> · runs in this tab; closing it stops the copy</span>
