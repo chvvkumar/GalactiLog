@@ -319,6 +319,49 @@ def test_eccentricity_keyword_preferred(mock_fitsio, mock_get_csv):
 
 
 # ---------------------------------------------------------------------------
+# Materialized plate scale: arcsec_per_pixel from XPIXSZ + FOCALLEN
+# ---------------------------------------------------------------------------
+
+@patch("app.services.scanner.get_csv_metrics")
+@patch("app.services.scanner.fitsio")
+def test_arcsec_per_pixel_from_headers(mock_fitsio, mock_get_csv):
+    """XPIXSZ + FOCALLEN materialize the plate scale (206.265 * um / mm)."""
+    header = _make_fake_header({"XPIXSZ": 3.76, "FOCALLEN": 530.0})
+    mock_fitsio.read_header.return_value = header
+    mock_get_csv.return_value = {}
+
+    result = extract_metadata(Path("/data/Light.fits"))
+
+    assert result["arcsec_per_pixel"] == pytest.approx(206.265 * 3.76 / 530.0)
+
+
+@patch("app.services.scanner.get_csv_metrics")
+@patch("app.services.scanner.fitsio")
+def test_arcsec_per_pixel_none_when_headers_missing(mock_fitsio, mock_get_csv):
+    """Missing pixel size or focal length yields a NULL plate scale."""
+    header = _make_fake_header()  # no XPIXSZ/FOCALLEN in defaults
+    mock_fitsio.read_header.return_value = header
+    mock_get_csv.return_value = {}
+
+    result = extract_metadata(Path("/data/Light.fits"))
+
+    assert result["arcsec_per_pixel"] is None
+
+
+@patch("app.services.scanner.get_csv_metrics")
+@patch("app.services.scanner.fitsio")
+def test_arcsec_per_pixel_none_for_invalid_values(mock_fitsio, mock_get_csv):
+    """Non-positive or non-numeric header values yield a NULL plate scale."""
+    header = _make_fake_header({"XPIXSZ": 3.76, "FOCALLEN": 0})
+    mock_fitsio.read_header.return_value = header
+    mock_get_csv.return_value = {}
+
+    result = extract_metadata(Path("/data/Light.fits"))
+
+    assert result["arcsec_per_pixel"] is None
+
+
+# ---------------------------------------------------------------------------
 # AUD-020: unparseable DATE-OBS logs a warning instead of vanishing silently
 # ---------------------------------------------------------------------------
 
