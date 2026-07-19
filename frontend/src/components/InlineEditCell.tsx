@@ -1,4 +1,4 @@
-import { createSignal, Show, For, createEffect } from "solid-js";
+import { createSignal, Show, For, createEffect, on, untrack } from "solid-js";
 import { showToast } from "./Toast";
 import { getErrorMessage } from "../utils/errors";
 
@@ -16,11 +16,15 @@ export default function InlineEditCell(props: Props) {
   const [saving, setSaving] = createSignal(false);
 
   // Sync from props when external data changes (e.g. refetch), but never
-  // stomp on an in-flight save that has not yet resolved.
-  createEffect(() => {
-    const incoming = props.value;
-    if (!saving()) setLocalValue(incoming);
-  });
+  // stomp on an in-flight save that has not yet resolved. Track only
+  // props.value: tracking saving() too would re-run this when a save
+  // finishes and clobber the just-committed value with a stale prop.
+  createEffect(on(
+    () => props.value,
+    (incoming) => {
+      if (!untrack(saving)) setLocalValue(incoming);
+    },
+  ));
 
   // Confirm-then-commit: keep the old value visible (with a spinner) until the
   // save resolves. On success show the new value; on failure keep the old value
@@ -71,7 +75,16 @@ export default function InlineEditCell(props: Props) {
           type="checkbox"
           checked={localValue() === "true"}
           disabled={saving()}
-          onChange={(e) => void save(e.currentTarget.checked ? "true" : "false")}
+          onChange={(e) => {
+            const el = e.currentTarget;
+            const want = el.checked ? "true" : "false";
+            // Confirm-then-commit: snap the DOM back to the committed value;
+            // a successful save flips localValue and re-checks it. Without
+            // this a failed save leaves the DOM out of sync, since the
+            // unchanged signal never rewrites the checked attribute.
+            el.checked = localValue() === "true";
+            void save(want);
+          }}
           class="cursor-pointer disabled:opacity-50"
         />
         <Show when={saving()}><Spinner /></Show>
