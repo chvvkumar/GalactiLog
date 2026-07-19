@@ -60,9 +60,12 @@ export default function InlineEditCell(props: Props) {
     if (e.key === "Escape") setEditing(false);
   }
 
+  // Absolutely positioned so appearing/disappearing never shifts the layout:
+  // in a right-aligned cell an inline spinner pushes the control left for the
+  // duration of the save, then snaps back.
   const Spinner = () => (
     <span
-      class="inline-block w-3 h-3 ml-1 align-middle border border-theme-border border-t-theme-accent rounded-full animate-spin"
+      class="absolute left-full top-1/2 -translate-y-1/2 ml-1 w-3 h-3 border border-theme-border border-t-theme-accent rounded-full animate-spin"
       aria-label="Saving"
     />
   );
@@ -70,7 +73,7 @@ export default function InlineEditCell(props: Props) {
   // Boolean: simple checkbox
   if (props.columnType === "boolean") {
     return (
-      <span class="inline-flex items-center">
+      <span class="relative inline-flex items-center">
         <input
           type="checkbox"
           checked={localValue() === "true"}
@@ -95,7 +98,7 @@ export default function InlineEditCell(props: Props) {
   // Dropdown: select
   if (props.columnType === "dropdown") {
     return (
-      <span class="inline-flex items-center">
+      <span class="relative inline-flex items-center">
         <select
           value={localValue() ?? ""}
           disabled={saving()}
@@ -122,7 +125,7 @@ export default function InlineEditCell(props: Props) {
       fallback={
         <span
           onClick={startEdit}
-          class="cursor-pointer min-w-[2rem] inline-block hover:bg-theme-hover rounded px-1"
+          class="relative cursor-pointer min-w-[2rem] inline-block hover:bg-theme-hover rounded px-1"
           classList={{ "opacity-60 cursor-wait": saving() }}
           title={saving() ? "Saving..." : "Click to edit"}
         >
