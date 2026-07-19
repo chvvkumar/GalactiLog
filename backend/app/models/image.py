@@ -70,6 +70,14 @@ class Image(Base):
     # derived from RA/Dec + time + site.
     altitude_deg: Mapped[float | None] = mapped_column(Float, nullable=True)
 
+    # Plate scale in arcseconds per pixel, materialized at ingest from the
+    # XPIXSZ/FOCALLEN headers via units.arcsec_per_pixel (206.265 * um / mm).
+    # Stored as a column because deriving it per-row from raw_headers JSONB
+    # (regex-guarded text casts, see units.sql_arcsec_per_pixel) is what made
+    # cold /api/stats aggregations take tens of seconds. NULL when the headers
+    # carry no usable pixel size or focal length.
+    arcsec_per_pixel: Mapped[float | None] = mapped_column(Float, nullable=True)
+
     # --- CSV metrics (N.I.N.A. ImageMetaData) ---
     # Quality
     hfr_stdev: Mapped[float | None] = mapped_column(Float, nullable=True)

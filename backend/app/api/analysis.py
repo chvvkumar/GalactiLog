@@ -30,7 +30,6 @@ from app.schemas.analysis import (
     TrendLine,
 )
 from app.services.normalization import load_alias_maps, expand_canonical, normalize_equipment, normalize_filter
-from app.services.units import sql_arcsec_per_pixel
 from app.api.auth import get_current_user
 
 router = APIRouter(prefix="/analysis", tags=["analysis"])
@@ -764,11 +763,12 @@ async def get_compare(
     # Pixel-domain metrics cannot be compared across optical trains directly:
     # the same star measures a different pixel HFR on a different focal length
     # or pixel size. For these, each frame is also converted to arcsec via its
-    # plate scale (XPIXSZ/FOCALLEN raw headers) and the verdict runs on the
-    # arcsec medians. Frames without a derivable plate scale contribute to the
-    # px box plots (backward compatible) but not to the arcsec comparison.
+    # materialized plate scale (arcsec_per_pixel, NULL when the headers lacked
+    # a derivable XPIXSZ/FOCALLEN) and the verdict runs on the arcsec medians.
+    # Frames without a plate scale contribute to the px box plots (backward
+    # compatible) but not to the arcsec comparison.
     is_pixel_metric = metric in _PIXEL_METRICS
-    scale_expr = sql_arcsec_per_pixel(Image.raw_headers)
+    scale_expr = Image.arcsec_per_pixel
 
     async def _fetch_values(group: str) -> tuple[list[float], list[float]]:
         q = (

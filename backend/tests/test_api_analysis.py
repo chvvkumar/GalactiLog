@@ -603,7 +603,7 @@ async def test_get_compare_pixel_metric_not_comparable_without_scale():
     of returning a bogus % figure."""
     user = _admin_user()
     rows_a = [_row(v, 1.5) for v in [2.0, 2.0, 2.2, 2.4, 2.6]]
-    rows_b = [_row(4.0, None) for _ in range(5)]  # no XPIXSZ/FOCALLEN
+    rows_b = [_row(4.0, None) for _ in range(5)]  # arcsec_per_pixel NULL
     session = _compare_session(rows_a, rows_b)
 
     app.dependency_overrides[get_current_user] = _override_user(user)

@@ -22,6 +22,7 @@ from app.services.data_migrations import (
     _migrate_v12_exposure_and_metric_split,
     _migrate_v13_enrich_created_targets,
     _migrate_v14_eccentricity_provenance,
+    _migrate_v15_arcsec_per_pixel,
 )
 
 
@@ -77,7 +78,13 @@ class TestGetPendingMigrations:
         desc, func = MIGRATIONS[14]
         assert func is _migrate_v14_eccentricity_provenance
         assert "eccentricity" in desc.lower()
-        assert DATA_VERSION == 14
+
+    def test_v15_is_arcsec_per_pixel_backfill(self):
+        assert 15 in MIGRATIONS
+        desc, func = MIGRATIONS[15]
+        assert func is _migrate_v15_arcsec_per_pixel
+        assert "arcsec_per_pixel" in desc
+        assert DATA_VERSION == 15
 
 
 def _sync_session_factory():
@@ -370,6 +377,98 @@ class TestV14EccentricityProvenance:
         finally:
             session.rollback()
             for fp in (p_header, p_ellip, p_csv, p_alt):
+                session.execute(
+                    text("DELETE FROM images WHERE file_path = :fp"), {"fp": fp}
+                )
+            session.commit()
+            session.close()
+            engine.dispose()
+
+
+class TestV15ArcsecPerPixel:
+    """End-to-end backfill of the materialized plate scale from raw_headers."""
+
+    def test_backfills_plate_scale(self):
+        from sqlalchemy import text
+        from app.models import Image
+
+        Session, engine = _sync_session_factory()
+        session = Session()
+
+        tag = uuid.uuid4().hex[:8]
+        p_full = f"/fits/{tag}/full_headers.fits"
+        p_strings = f"/fits/{tag}/string_headers.fits"
+        p_missing = f"/fits/{tag}/no_focallen.fits"
+        p_bad = f"/fits/{tag}/bad_values.fits"
+        p_set = f"/fits/{tag}/already_set.fits"
+        ids = {}
+        try:
+            # Row 1: numeric XPIXSZ + FOCALLEN -- backfilled.
+            r1 = Image(
+                file_path=p_full, file_name="full_headers.fits",
+                arcsec_per_pixel=None,
+                raw_headers={"XPIXSZ": 3.76, "FOCALLEN": 530.0, "OBJECT": "M31"},
+            )
+            # Row 2: string values (XISF FITSKeywords land as text) -- backfilled.
+            r2 = Image(
+                file_path=p_strings, file_name="string_headers.fits",
+                arcsec_per_pixel=None,
+                raw_headers={"XPIXSZ": "3.76", "FOCALLEN": "530", "OBJECT": "M31"},
+            )
+            # Row 3: FOCALLEN missing -- stays NULL (JSONB key filter skips it).
+            r3 = Image(
+                file_path=p_missing, file_name="no_focallen.fits",
+                arcsec_per_pixel=None,
+                raw_headers={"XPIXSZ": 3.76, "OBJECT": "M31"},
+            )
+            # Row 4: non-positive focal length -- selected but underivable, NULL.
+            r4 = Image(
+                file_path=p_bad, file_name="bad_values.fits",
+                arcsec_per_pixel=None,
+                raw_headers={"XPIXSZ": 3.76, "FOCALLEN": 0, "OBJECT": "M31"},
+            )
+            # Row 5: already materialized -- left untouched (idempotency filter).
+            r5 = Image(
+                file_path=p_set, file_name="already_set.fits",
+                arcsec_per_pixel=2.5,
+                raw_headers={"XPIXSZ": 3.76, "FOCALLEN": 530.0, "OBJECT": "M31"},
+            )
+            session.add_all([r1, r2, r3, r4, r5])
+            session.commit()
+            for r in (r1, r2, r3, r4, r5):
+                ids[r.file_path] = r.id
+
+            summary = _migrate_v15_arcsec_per_pixel(session)
+            session.commit()
+
+            expected = 206.265 * 3.76 / 530.0
+
+            got1 = session.get(Image, ids[p_full])
+            assert got1.arcsec_per_pixel == pytest.approx(expected)
+
+            got2 = session.get(Image, ids[p_strings])
+            assert got2.arcsec_per_pixel == pytest.approx(expected)
+
+            got3 = session.get(Image, ids[p_missing])
+            assert got3.arcsec_per_pixel is None
+
+            got4 = session.get(Image, ids[p_bad])
+            assert got4.arcsec_per_pixel is None
+
+            got5 = session.get(Image, ids[p_set])
+            assert got5.arcsec_per_pixel == pytest.approx(2.5)
+
+            assert "plate scales backfilled" in summary
+
+            # Replaying the migration must not change anything (idempotent).
+            session.expire_all()
+            _migrate_v15_arcsec_per_pixel(session)
+            session.commit()
+            assert session.get(Image, ids[p_full]).arcsec_per_pixel == pytest.approx(expected)
+            assert session.get(Image, ids[p_set]).arcsec_per_pixel == pytest.approx(2.5)
+        finally:
+            session.rollback()
+            for fp in (p_full, p_strings, p_missing, p_bad, p_set):
                 session.execute(
                     text("DELETE FROM images WHERE file_path = :fp"), {"fp": fp}
                 )

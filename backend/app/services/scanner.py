@@ -10,6 +10,7 @@ import fitsio
 
 from app.services.csv_metadata import get_csv_metrics, merge_csv_metrics
 from app.services.scan_filters import ScanFilterConfig
+from app.services.units import arcsec_per_pixel
 
 logger = logging.getLogger(__name__)
 
@@ -236,6 +237,13 @@ def extract_metadata(fits_path: Path, header=None) -> dict[str, Any]:
         # OBJCTALT (MaxIm-style) first, CENTALT second; both are written by
         # common capture software and agree when both are present.
         "altitude_deg": _first_float(header, "OBJCTALT", "CENTALT"),
+        # Plate scale materialized at ingest (206.265 * XPIXSZ / FOCALLEN) so
+        # aggregations never have to re-derive it per-row from raw_headers
+        # JSONB. Same helper semantics as units.sql_arcsec_per_pixel: None
+        # when either keyword is missing, non-numeric, or non-positive.
+        "arcsec_per_pixel": arcsec_per_pixel(
+            header.get("XPIXSZ"), header.get("FOCALLEN")
+        ),
         "capture_date": capture_date,
         "raw_headers": raw_headers,
     }
