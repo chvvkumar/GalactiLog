@@ -1093,8 +1093,8 @@ const TargetDetailPage: Component = () => {
                           }}
                         >
                           {selectedChartDates().length > 0
-                            ? `WBPP Export (${selectedChartDates().length})`
-                            : "WBPP Export"}
+                            ? `Export For Stacking (${selectedChartDates().length})`
+                            : "Export For Stacking"}
                         </button>
                       </>
                     )}

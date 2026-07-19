@@ -15,6 +15,7 @@ import { getErrorMessage } from "../utils/errors";
 import { useSettingsContext } from "./SettingsProvider";
 import Dialog from "./Dialog";
 import Button from "./ui/Button";
+import HelpPopover from "./HelpPopover";
 import IconButton from "./ui/IconButton";
 import WbppLevelEditor from "./wbpp/WbppLevelEditor";
 import WbppQualityPanel from "./wbpp/WbppQualityPanel";
@@ -23,7 +24,6 @@ import WbppFooter, { type CopyBlocker } from "./wbpp/WbppFooter";
 import { detectOs, lastSegment, parentContext } from "./wbpp/paths";
 import {
   isFsAccessSupported,
-  runBrowserCopy,
   CopyCancelledError,
   pickDirectory,
   queryHandlePermission,
@@ -32,6 +32,17 @@ import {
   HANDLE_KEYS,
   type PermState,
 } from "../lib/wbppBrowserCopy";
+import {
+  startWbppCopy,
+  stopWbppCopy,
+  wbppCopyRunning,
+  wbppCopyDone,
+  wbppCopyTotal,
+  wbppCopySpeed,
+  wbppCopyError,
+  wbppCopyFinished,
+  clearWbppCopyError,
+} from "../store/wbppCopyJob";
 import {
   computeVerdicts,
   excludedSourceRelatives,
@@ -95,7 +106,7 @@ function permClass(p: PermOrNone): string {
 }
 
 /**
- * Export to WBPP.
+ * Export For Stacking (WBPP or SIRIL).
  *
  * Layout is header / body / footer, with the BODY as the only scroll container:
  * the primary action lives in the sticky footer beside a statement of what it is
@@ -104,9 +115,9 @@ function permClass(p: PermOrNone): string {
  * the same technique as ReleaseNotesModal's sticky header.
  *
  * The zones are ordered by the decision the user is making: where the files go,
- * which folders go there, then the options that modify that. App configuration
- * (library root, staging, exclusions) is deliberately NOT a peer section: it is
- * folded behind a "Change" inside Options, because it is a setting, not a step.
+ * the library root they come from, which folders go there, then the options that
+ * modify that. App configuration (library root, staging, exclusions) lives in
+ * the Library section, folded behind a "Change".
  */
 const WbppExportModal: Component<Props> = (props) => {
   const ctx = useSettingsContext();
@@ -146,12 +157,6 @@ const WbppExportModal: Component<Props> = (props) => {
   const [destHandle, setDestHandle] = createSignal<any>(null);
   const [srcPerm, setSrcPerm] = createSignal<PermOrNone>("none");
   const [destPerm, setDestPerm] = createSignal<PermOrNone>("none");
-  const [copying, setCopying] = createSignal(false);
-  const [copyDone, setCopyDone] = createSignal(0);
-  const [copyTotal, setCopyTotal] = createSignal(0);
-  const [copyLabel, setCopyLabel] = createSignal("");
-  const [copyFinished, setCopyFinished] = createSignal<number | null>(null);
-  let abortController: AbortController | null = null;
   let scriptRef: HTMLDivElement | undefined;
 
   // --- Quality filter state, persisted per rig ---
@@ -698,11 +703,17 @@ const WbppExportModal: Component<Props> = (props) => {
   };
 
   /**
-   * Grant-then-copy in one click: runBrowserCopy requests both permissions itself
-   * as its first act, still inside this click's user gesture, then copies. There
-   * is no separate "Grant access" step to forget.
+   * Grant-then-copy in one click: runBrowserCopy (inside the store) requests
+   * both permissions itself as its first act, still inside this click's user
+   * gesture, then copies. The copy runs in the module-level wbppCopyJob store,
+   * so closing this modal no longer loses it; the nav-bar job monitor shows
+   * progress and Stop, and reopening the modal reattaches to the live state.
    */
-  const startBrowserCopy = async () => {
+  const startBrowserCopy = () => {
+    if (wbppCopyRunning()) {
+      setError("A WBPP copy is already running. Stop it from the Activity monitor first.");
+      return;
+    }
     if (!srcHandle() || !destHandle()) {
       setError("Choose a library folder and a destination folder first.");
       return;
@@ -712,42 +723,23 @@ const WbppExportModal: Component<Props> = (props) => {
       return;
     }
     setError(null);
-    setCopyFinished(null);
-    setCopyDone(0);
-    setCopyTotal(0);
-    setCopyLabel("");
-    abortController = new AbortController();
-    setCopying(true);
-    try {
-      const result = await runBrowserCopy(srcHandle(), destHandle(), {
-        operations: plan(),
-        exclusions: parsedExclusions(),
-        excludedSourceRelatives: excludedSet(),
-        onProgress: (done, total, label) => {
-          setCopyDone(done);
-          setCopyTotal(total);
-          setCopyLabel(label);
-        },
-        // Take the permission state from what the request actually returned, on
-        // the failing path as much as the succeeding one. Hardcoding "granted"
-        // after a successful copy left a denial unable to reach "denied": the row
-        // kept saying "needs permission" and the primary kept offering to grant
-        // access that had just been refused, click after click.
-        onPermission: (which, state) =>
-          which === "source" ? setSrcPerm(state) : setDestPerm(state),
-        signal: abortController.signal,
-      });
-      setCopyFinished(result.copied);
-      showToast(`Copied ${result.copied} file${result.copied !== 1 ? "s" : ""} to ${result.destinationName}`);
-    } catch (e: unknown) {
-      if (!(e instanceof CopyCancelledError)) setError(getErrorMessage(e, "Browser copy failed."));
-    } finally {
-      setCopying(false);
-      abortController = null;
-    }
+    clearWbppCopyError();
+    void startWbppCopy({
+      rootHandle: srcHandle(),
+      destHandle: destHandle(),
+      operations: plan(),
+      exclusions: parsedExclusions(),
+      excludedSourceRelatives: excludedSet(),
+      targetName: props.targetName,
+      // Take the permission state from what the request actually returned, on
+      // the failing path as much as the succeeding one (see the store; these
+      // setters are safe to call even after this modal unmounts).
+      onPermission: (which, state) =>
+        which === "source" ? setSrcPerm(state) : setDestPerm(state),
+    });
   };
 
-  const stopCopy = () => abortController?.abort();
+  const stopCopy = () => stopWbppCopy();
 
   return (
     <Dialog open aria-labelledby="wbpp-modal-title" class="p-4" onClose={props.onClose}>
@@ -759,9 +751,18 @@ const WbppExportModal: Component<Props> = (props) => {
             it sits in the subline and the title states only what this does. */}
         <div class="shrink-0 px-4 py-3 border-b border-theme-border flex items-start justify-between gap-4">
           <div class="min-w-0">
-            <h2 id="wbpp-modal-title" class="text-sm font-medium text-theme-text-primary">
-              Export to WBPP
-            </h2>
+            <div class="flex items-center gap-1">
+              <h2 id="wbpp-modal-title" class="text-sm font-medium text-theme-text-primary">
+                Export For Stacking
+              </h2>
+              <HelpPopover label="About exporting for stacking" title="Export for stacking">
+                <p>Prepares selected frames for stacking in WBPP or SIRIL.</p>
+                <p>1. Pick your library root (the local folder mirroring the server's FITS data root).</p>
+                <p>2. Review the session folders to copy.</p>
+                <p>3. Optionally filter frames by quality.</p>
+                <p>4. Copy files in-browser or generate a script.</p>
+              </HelpPopover>
+            </div>
             <p class="text-tiny text-theme-text-secondary truncate">
               {props.targetName} · {props.selectedDates.length} session
               {props.selectedDates.length !== 1 ? "s" : ""} · {headerFrameCount()} frames
@@ -776,9 +777,9 @@ const WbppExportModal: Component<Props> = (props) => {
 
         {/* Body: the ONLY scroll container. */}
         <div data-testid="wbpp-modal-body" class="flex-1 min-h-0 overflow-y-auto px-4 py-4 space-y-4">
-          <Show when={error()}>
+          <Show when={error() ?? wbppCopyError()}>
             <div class="text-xs text-theme-error bg-theme-error/10 border border-theme-error/30 rounded-[var(--radius-sm)] px-3 py-2">
-              {error()}
+              {error() ?? wbppCopyError()}
             </div>
           </Show>
 
@@ -864,33 +865,109 @@ const WbppExportModal: Component<Props> = (props) => {
               </p>
             </Show>
 
-            <Show when={copying() || copyFinished() !== null}>
+            <Show when={wbppCopyRunning() || wbppCopyFinished() !== null}>
               <div class="space-y-1 mt-3">
                 <div class="h-1.5 bg-theme-elevated rounded-[var(--radius-sm)] overflow-hidden">
                   <div
                     class="h-full bg-theme-accent transition-all"
                     style={{
-                      width: `${copyTotal() > 0 ? Math.round((copyDone() / copyTotal()) * 100) : (copyFinished() !== null ? 100 : 0)}%`,
+                      width: `${wbppCopyTotal() > 0 ? Math.round((wbppCopyDone() / wbppCopyTotal()) * 100) : (wbppCopyFinished() !== null ? 100 : 0)}%`,
                     }}
                   />
                 </div>
-                <Show when={copyFinished() !== null}>
+                <Show when={wbppCopyFinished() !== null}>
                   <p class="text-tiny text-theme-text-tertiary">
-                    Done. Copied {copyFinished()} file{copyFinished() !== 1 ? "s" : ""}. Open WBPP and use Add Directory on the destination.
+                    Done. Copied {wbppCopyFinished()} file{wbppCopyFinished() !== 1 ? "s" : ""}. Open WBPP and use Add Directory on the destination.
                   </p>
                 </Show>
               </div>
             </Show>
           </div>
 
-          {/* Zone 2: Folders to copy */}
+          {/* Zone 2: Library. The root the folders are scanned under, with the
+              app-config fields (staging, exclusions) folded behind "Change". */}
+          <div class={CARD_CLASS}>
+            <h3 class={ZONE_TITLE_CLASS}>
+              <span class="text-theme-text-tertiary">Step 1 · </span>Library
+            </h3>
+            <div class="flex items-center gap-2 text-tiny text-theme-text-tertiary mt-2">
+              <span class="truncate min-w-0">
+                Library: <span class="font-mono">{libraryRoot().trim() || "not set"}</span> (
+                {osLabel(effectiveOs())})
+              </span>
+              <button
+                type="button"
+                class="text-tiny text-theme-accent hover:text-theme-accent-hover transition-colors cursor-pointer shrink-0"
+                onClick={() => setSettingsOpen(!settingsOpen())}
+              >
+                {settingsOpen() ? "Done" : "Change"}
+              </button>
+            </div>
+
+            <Show when={settingsOpen()}>
+              <div class="mt-3 space-y-3">
+                <p class="text-tiny text-theme-text-tertiary">
+                  These default to your Settings &gt; External Tools &gt; PixInsight Export values.
+                  Changes here apply to this export only unless you save them as defaults.
+                </p>
+
+                <div>
+                  <label class="text-xs font-medium text-theme-text-secondary uppercase tracking-wide block mb-1">
+                    Library root (on your machine)
+                  </label>
+                  <input
+                    type="text"
+                    class={FIELD_CLASS}
+                    placeholder="e.g. Z:\Astro or /mnt/astro"
+                    value={libraryRoot()}
+                    onInput={(e) => setLibraryRoot(e.currentTarget.value)}
+                  />
+                </div>
+
+                <div>
+                  <label class="text-xs font-medium text-theme-text-secondary uppercase tracking-wide block mb-1">
+                    Staging path (optional)
+                  </label>
+                  <input
+                    type="text"
+                    class={FIELD_CLASS}
+                    placeholder="Default: <library root>/_WBPP_staging/<target>"
+                    value={stagingPath()}
+                    onInput={(e) => setStagingPath(e.currentTarget.value)}
+                  />
+                </div>
+
+                <div>
+                  <label class="text-xs font-medium text-theme-text-secondary uppercase tracking-wide block mb-1">
+                    Excluded folder patterns (one per line)
+                  </label>
+                  <textarea
+                    class={`${FIELD_CLASS} font-mono`}
+                    rows={4}
+                    value={exclusionsText()}
+                    onInput={(e) => setExclusionsText(e.currentTarget.value)}
+                  />
+                </div>
+
+                <button
+                  type="button"
+                  class="text-tiny text-theme-accent hover:text-theme-accent-hover transition-colors cursor-pointer disabled:opacity-50"
+                  onClick={saveAsDefaults}
+                  disabled={!libraryRoot().trim()}
+                >
+                  {savedDefaults() ? "Saved!" : "Save as defaults"}
+                </button>
+              </div>
+            </Show>
+          </div>
+
+          {/* Zone 3: Folders to copy */}
           <div class={CARD_CLASS}>
             <div class="flex items-center gap-2">
-              <h3 class={ZONE_TITLE_CLASS}>Folders to copy</h3>
+              <h3 class={ZONE_TITLE_CLASS}>
+                <span class="text-theme-text-tertiary">Step 2 · </span>Folders to copy
+              </h3>
               <Show when={sessions().length > 0}>
-                <span class="text-micro tabular-nums px-1.5 py-0.5 rounded-[var(--radius-sm)] text-theme-text-secondary bg-theme-elevated border border-theme-border">
-                  {sessions().length}
-                </span>
                 {/* Rescanning a large library takes a while. A dimmed icon alone
                     reads as "broken", so the icon spins beside a word -- the
                     in-progress state the old "Loading..." text button carried. */}
@@ -1050,9 +1127,11 @@ const WbppExportModal: Component<Props> = (props) => {
             </Show>
           </div>
 
-          {/* Zone 3: Options */}
+          {/* Zone 4: Options */}
           <div class={CARD_CLASS}>
-            <h3 class={ZONE_TITLE_CLASS}>Options</h3>
+            <h3 class={ZONE_TITLE_CLASS}>
+              <span class="text-theme-text-tertiary">Step 3 · </span>Options
+            </h3>
 
             <div class="mt-3">
               <WbppQualityPanel
@@ -1064,79 +1143,6 @@ const WbppExportModal: Component<Props> = (props) => {
                 loading={qualityLoading()}
                 sessionDetails={qualitySessions()}
               />
-            </div>
-
-            {/* App config, not a peer step: one muted line, opened on demand. */}
-            <div class="mt-4 pt-3 border-t border-theme-border">
-              <div class="flex items-center gap-2 text-tiny text-theme-text-tertiary">
-                <span class="truncate min-w-0">
-                  Library: <span class="font-mono">{libraryRoot().trim() || "not set"}</span> (
-                  {osLabel(effectiveOs())})
-                </span>
-                <button
-                  type="button"
-                  class="text-tiny text-theme-accent hover:text-theme-accent-hover transition-colors cursor-pointer shrink-0"
-                  onClick={() => setSettingsOpen(!settingsOpen())}
-                >
-                  {settingsOpen() ? "Done" : "Change"}
-                </button>
-              </div>
-
-              <Show when={settingsOpen()}>
-                <div class="mt-3 space-y-3">
-                  <p class="text-tiny text-theme-text-tertiary">
-                    These default to your Settings &gt; External Tools &gt; PixInsight Export values.
-                    Changes here apply to this export only unless you save them as defaults.
-                  </p>
-
-                  <div>
-                    <label class="text-xs font-medium text-theme-text-secondary uppercase tracking-wide block mb-1">
-                      Library root (on your machine)
-                    </label>
-                    <input
-                      type="text"
-                      class={FIELD_CLASS}
-                      placeholder="e.g. Z:\Astro or /mnt/astro"
-                      value={libraryRoot()}
-                      onInput={(e) => setLibraryRoot(e.currentTarget.value)}
-                    />
-                  </div>
-
-                  <div>
-                    <label class="text-xs font-medium text-theme-text-secondary uppercase tracking-wide block mb-1">
-                      Staging path (optional)
-                    </label>
-                    <input
-                      type="text"
-                      class={FIELD_CLASS}
-                      placeholder="Default: <library root>/_WBPP_staging/<target>"
-                      value={stagingPath()}
-                      onInput={(e) => setStagingPath(e.currentTarget.value)}
-                    />
-                  </div>
-
-                  <div>
-                    <label class="text-xs font-medium text-theme-text-secondary uppercase tracking-wide block mb-1">
-                      Excluded folder patterns (one per line)
-                    </label>
-                    <textarea
-                      class={`${FIELD_CLASS} font-mono`}
-                      rows={4}
-                      value={exclusionsText()}
-                      onInput={(e) => setExclusionsText(e.currentTarget.value)}
-                    />
-                  </div>
-
-                  <button
-                    type="button"
-                    class="text-tiny text-theme-accent hover:text-theme-accent-hover transition-colors cursor-pointer disabled:opacity-50"
-                    onClick={saveAsDefaults}
-                    disabled={!libraryRoot().trim()}
-                  >
-                    {savedDefaults() ? "Saved!" : "Save as defaults"}
-                  </button>
-                </div>
-              </Show>
             </div>
           </div>
 
@@ -1183,9 +1189,11 @@ const WbppExportModal: Component<Props> = (props) => {
           permissionGranted={permissionGranted()}
           blockedBy={copyBlockedBy()}
           canBrowserCopy={canBrowserCopy}
-          copying={copying()}
+          copying={wbppCopyRunning()}
           copyProgress={
-            copying() ? { done: copyDone(), total: copyTotal(), label: copyLabel() } : null
+            wbppCopyRunning()
+              ? { done: wbppCopyDone(), total: wbppCopyTotal(), speed: wbppCopySpeed() }
+              : null
           }
           onCopy={startBrowserCopy}
           onStop={stopCopy}

@@ -2,6 +2,7 @@ import { Component, Show, createSignal, onMount, lazy } from "solid-js";
 import { A, useNavigate, useLocation } from "@solidjs/router";
 import { sidebarOpen, setSidebarOpen } from "../store/sidebar";
 import { useAuth } from "./AuthProvider";
+import JobMonitor from "./JobMonitor";
 import type { LatestRelease } from "./ReleaseNotesModal";
 
 const ReleaseNotesModal = lazy(() => import("./ReleaseNotesModal"));
@@ -112,6 +113,7 @@ const NavBar: Component = () => {
       </nav>
 
       <div class="ml-auto flex items-center gap-3">
+        <JobMonitor />
         <Show when={user()}>
           <span class="text-xs text-theme-text-secondary hidden sm:inline">
             {user()!.username}

@@ -19,6 +19,7 @@ class MeResponse(BaseModel):
     id: uuid.UUID
     username: str
     role: str
+    activity_seen_at: datetime | None = None
 
 
 class PasswordChangeRequest(BaseModel):

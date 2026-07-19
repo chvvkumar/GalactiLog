@@ -62,6 +62,31 @@ function stopPolling() {
   }
 }
 
+// Module-scope exports for the always-mounted job monitor: the monitor needs
+// the status accessor and stop action without owning a useScan() lifecycle,
+// and a way to bootstrap the 2s poller when its slow idle check discovers a
+// scan started elsewhere (auto-scan, another tab).
+export { scanStatus };
+
+export async function stopScan(): Promise<void> {
+  setStopping(true);
+  try {
+    await apiClient.POST("/api/scan/stop", {}).then(unwrap);
+  } catch {
+    setStopping(false);
+    setScanError("Failed to stop scan");
+  }
+}
+
+// One cheap status check; hands off to the existing 2s poller when active.
+export async function refreshScanStatus(): Promise<void> {
+  await fetchStatus();
+  const s = scanStatus();
+  if (s.state === "scanning" || s.state === "ingesting") {
+    startPolling(true);
+  }
+}
+
 export function useScan() {
   // On every mount, check server state - resume polling if scan is active
   onMount(async () => {
@@ -144,15 +169,7 @@ export function useScan() {
       }
     },
 
-    stopScan: async () => {
-      setStopping(true);
-      try {
-        await apiClient.POST("/api/scan/stop", {}).then(unwrap);
-      } catch {
-        setStopping(false);
-        setScanError("Failed to stop scan");
-      }
-    },
+    stopScan,
 
     stopPolling,
   };
