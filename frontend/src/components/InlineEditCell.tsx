@@ -60,20 +60,14 @@ export default function InlineEditCell(props: Props) {
     if (e.key === "Escape") setEditing(false);
   }
 
-  // Absolutely positioned so appearing/disappearing never shifts the layout:
-  // in a right-aligned cell an inline spinner pushes the control left for the
-  // duration of the save, then snaps back.
-  const Spinner = () => (
-    <span
-      class="absolute left-full top-1/2 -translate-y-1/2 ml-1 w-3 h-3 border border-theme-border border-t-theme-accent rounded-full animate-spin"
-      aria-label="Saving"
-    />
-  );
+  // Saving feedback is the greyed-out disabled control itself; anything that
+  // mounts next to it (spinner) flashes on fast LAN saves and reads as a
+  // rendering artifact.
 
   // Boolean: simple checkbox
   if (props.columnType === "boolean") {
     return (
-      <span class="relative inline-flex items-center">
+      <span class="inline-flex items-center">
         <input
           type="checkbox"
           checked={localValue() === "true"}
@@ -88,9 +82,9 @@ export default function InlineEditCell(props: Props) {
             el.checked = localValue() === "true";
             void save(want);
           }}
-          class="cursor-pointer disabled:opacity-50"
+          class="cursor-pointer disabled:opacity-40"
+          title={saving() ? "Saving..." : undefined}
         />
-        <Show when={saving()}><Spinner /></Show>
       </span>
     );
   }
@@ -98,7 +92,7 @@ export default function InlineEditCell(props: Props) {
   // Dropdown: select
   if (props.columnType === "dropdown") {
     return (
-      <span class="relative inline-flex items-center">
+      <span class="inline-flex items-center">
         <select
           value={localValue() ?? ""}
           disabled={saving()}
@@ -106,14 +100,14 @@ export default function InlineEditCell(props: Props) {
             const val = e.currentTarget.value;
             if (val) void save(val);
           }}
-          class="px-1 py-0.5 rounded border border-theme-border bg-theme-input text-theme-text-primary text-sm disabled:opacity-50"
+          class="px-1 py-0.5 rounded border border-theme-border bg-theme-input text-theme-text-primary text-sm disabled:opacity-40"
+          title={saving() ? "Saving..." : undefined}
         >
           <option value="">-</option>
           <For each={props.dropdownOptions ?? []}>
             {(opt) => <option value={opt}>{opt}</option>}
           </For>
         </select>
-        <Show when={saving()}><Spinner /></Show>
       </span>
     );
   }
@@ -125,12 +119,11 @@ export default function InlineEditCell(props: Props) {
       fallback={
         <span
           onClick={startEdit}
-          class="relative cursor-pointer min-w-[2rem] inline-block hover:bg-theme-hover rounded px-1"
-          classList={{ "opacity-60 cursor-wait": saving() }}
+          class="cursor-pointer min-w-[2rem] inline-block hover:bg-theme-hover rounded px-1"
+          classList={{ "opacity-40 cursor-wait": saving() }}
           title={saving() ? "Saving..." : "Click to edit"}
         >
           {localValue() || "-"}
-          <Show when={saving()}><Spinner /></Show>
         </span>
       }
     >
