@@ -21,6 +21,7 @@ from PIL import Image as PILImage
 
 from app.services.csv_metadata import get_csv_metrics, merge_csv_metrics
 from app.services.stretch import normalize_to_unit, resize_array, stretch_channel
+from app.services.units import arcsec_per_pixel
 
 logger = logging.getLogger(__name__)
 
@@ -213,6 +214,11 @@ def extract_xisf_metadata(xisf_path: Path) -> dict[str, Any]:
         # Frame-centre altitude, for the same atmospheric-dispersion reason as
         # the FITS path (see scanner.extract_metadata).
         "altitude_deg": _first_float(merged.get("OBJCTALT"), merged.get("CENTALT")),
+        # Plate scale materialized at ingest, same as the FITS path (see
+        # scanner.extract_metadata).
+        "arcsec_per_pixel": arcsec_per_pixel(
+            merged.get("XPIXSZ"), merged.get("FOCALLEN")
+        ),
         "capture_date": _parse_capture_date(merged.get("DATE-OBS"), xisf_path),
         "raw_headers": raw_headers,
     }

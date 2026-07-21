@@ -25,6 +25,8 @@ import {
 } from "../../lib/wbppQualityFilter";
 import { bandForZ, bandToCellClass } from "../../utils/frameQuality";
 import HelpPopover from "../HelpPopover";
+import { ClickableFilePath } from "../ClickableFilePath";
+import type { PreviewFile, PreviewMetaEntry } from "../FilePreviewModal";
 import type { FrameRecord, SessionDetail } from "../../api/types";
 
 export interface WbppQualityPanelProps {
@@ -191,6 +193,60 @@ export default function WbppQualityPanel(props: WbppQualityPanelProps): JSX.Elem
 
   const arrow = (key: SortKey) => (sortKey() === key ? (sortAsc() ? "▲" : "▼") : null);
 
+  // The preview modal's metadata strip mirrors this row's cells: verdict,
+  // filter, the five metrics with the same band coloring and failure marks,
+  // then the session date. The modal's own neutral text is used where the
+  // table would fall back to its default color.
+  const stripClass = (cls: string): string | undefined =>
+    cls === "text-theme-text-primary" ? undefined : cls;
+
+  const metaFor = (v: FrameVerdict): PreviewMetaEntry[] => {
+    const kept = effectiveKeep(v);
+    const verdictEntry: PreviewMetaEntry = kept
+      ? { label: "Verdict", value: "Copy", class: "text-theme-success", title: "Copy" }
+      : v.reason === "unmeasured"
+        ? {
+            label: "Verdict",
+            value: "Unmeasured",
+            class: "text-theme-warning",
+            title: "Unmeasured: none of the constrained metrics recorded",
+          }
+        : {
+            label: "Verdict",
+            value: "Exclude",
+            class: "text-theme-error",
+            title: `Exclude: ${v.failures.map((f) => f.text).join(", ")}`,
+          };
+    const metricEntries = METRIC_ORDER.map((metric): PreviewMetaEntry => {
+      const raw = metricValue(v.frame, metric);
+      const failure = props.enabled ? v.failures.find((f) => f.metric === metric) : undefined;
+      return {
+        label: SHORT_LABEL[metric],
+        value: raw != null ? formatMetric(metric, raw) : "—",
+        class: failure ? "text-theme-error font-medium" : stripClass(cellClass(v, metric)),
+        marked: !!failure,
+        title: failure?.text,
+      };
+    });
+    return [
+      verdictEntry,
+      { label: "Filter", value: v.frame.filter_used ?? "—" },
+      ...metricEntries,
+      { label: "Session", value: v.sessionDate },
+    ];
+  };
+
+  // Same order as the rendered rows, so a row's index addresses its own entry
+  // and ←/→ in the modal walks the table in its current sort.
+  const previewFiles = createMemo<PreviewFile[]>(() =>
+    sortedVerdicts().map((v) => ({
+      imageId: v.frame.image_id,
+      filePath: v.frame.file_path,
+      thumbnailUrl: v.frame.thumbnail_url,
+      meta: metaFor(v),
+    })),
+  );
+
   return (
     <div class="space-y-2">
       {/* Toolbar: enable checkbox, metric chips, kept/skipped tally, baseline.
@@ -356,13 +412,24 @@ export default function WbppQualityPanel(props: WbppQualityPanelProps): JSX.Elem
             <div class="inline-flex border border-theme-border rounded-[var(--radius-sm)] overflow-hidden shrink-0">
               <For
                 each={[
-                  { value: "session" as const, label: "This session" },
-                  { value: "rig" as const, label: "Rig (catalog)" },
+                  {
+                    value: "session" as const,
+                    label: "This session",
+                    title:
+                      "Cell colors grade each frame against its own session's statistics only.",
+                  },
+                  {
+                    value: "rig" as const,
+                    label: "Overall",
+                    title:
+                      "Cell colors grade each frame against this rig's full catalog history, not just these sessions.",
+                  },
                 ]}
               >
                 {(b, i) => (
                   <button
                     type="button"
+                    title={b.title}
                     class="h-6 px-2.5 text-tiny cursor-pointer"
                     classList={{
                       "bg-theme-accent/20 text-theme-accent font-medium":
@@ -395,7 +462,7 @@ export default function WbppQualityPanel(props: WbppQualityPanelProps): JSX.Elem
             </div>
           }
         >
-          <div class="max-h-[22rem] overflow-y-auto border border-t-0 border-theme-border rounded-b-[var(--radius-md)] bg-theme-elevated">
+          <div class="max-h-[36rem] overflow-y-auto border border-t-0 border-theme-border rounded-b-[var(--radius-md)] bg-theme-elevated">
             <table class="w-full text-tiny whitespace-nowrap">
               <thead>
                 <tr>
@@ -425,7 +492,7 @@ export default function WbppQualityPanel(props: WbppQualityPanelProps): JSX.Elem
               </thead>
               <tbody>
                 <For each={sortedVerdicts()}>
-                  {(v) => (
+                  {(v, i) => (
                     <tr class="border-b border-theme-border/30 last:border-b-0">
                       {/* Icon-only verdict: the glyph says THAT a frame is
                           dropped; the marked metric cells say which gates
@@ -482,8 +549,16 @@ export default function WbppQualityPanel(props: WbppQualityPanelProps): JSX.Elem
                       {/* The file column absorbs whatever width the fitted
                           columns leave over, so the table still fills the
                           panel without stretching the data columns. */}
-                      <td class="w-full max-w-0 py-0.5 px-1.5 text-theme-text-secondary font-mono truncate">
-                        {v.frame.file_name}
+                      <td class="w-full max-w-0 py-0.5 px-1.5">
+                        <ClickableFilePath
+                          imageId={v.frame.image_id}
+                          filePath={v.frame.file_path}
+                          thumbnailUrl={v.frame.thumbnail_url}
+                          display={v.frame.file_name}
+                          files={previewFiles()}
+                          index={i()}
+                          class="max-w-full font-mono align-middle"
+                        />
                       </td>
                       <td class="py-0.5 px-1.5 text-right text-theme-text-tertiary tabular-nums">
                         {v.sessionDate}

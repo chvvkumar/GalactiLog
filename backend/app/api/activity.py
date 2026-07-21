@@ -3,7 +3,7 @@ from __future__ import annotations
 import base64
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import delete, func, select
@@ -13,7 +13,11 @@ from app.api.deps import get_current_user, require_admin
 from app.database import get_session
 from app.models.activity_event import ActivityEvent
 from app.models.user import User
-from app.schemas.activity import ActivityItem, PaginatedActivityResponse
+from app.schemas.activity import (
+    ActivityItem,
+    ActivitySeenResponse,
+    PaginatedActivityResponse,
+)
 from app.schemas.common import StatusResponse
 
 logger = logging.getLogger(__name__)
@@ -138,3 +142,21 @@ async def clear_activity(
     await session.execute(delete(ActivityEvent))
     await session.commit()
     return {"status": "cleared"}
+
+
+@router.post("/seen", response_model=ActivitySeenResponse)
+async def mark_activity_seen(
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    """Record that the current user has seen the activity error feed.
+
+    Any authenticated role may call this: it mutates only the caller's own
+    row. get_current_user and this endpoint share the request's get_session
+    dependency (FastAPI caches per-request), so mutating the loaded user and
+    committing persists it, the same pattern change_password uses in auth.py.
+    """
+    now = datetime.now(timezone.utc)
+    user.activity_seen_at = now
+    await session.commit()
+    return ActivitySeenResponse(activity_seen_at=now)

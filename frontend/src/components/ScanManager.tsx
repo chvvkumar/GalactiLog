@@ -7,18 +7,6 @@ import { apiClient } from "../api/generated/client";
 import { unwrap } from "../api/unwrap";
 import { scanFilters as scanFiltersApi } from "../api/scanFilters";
 import type { DbSummary } from "../api/types";
-// Deliberately kept on the OLD hand-written `RebuildStatus` (narrow `state`
-// literal union, `details: Record<string, number>`) rather than the
-// generated-schema alias in `../api/types` (`RebuildStatusResponse`, which
-// types `state` as a plain `string` and `details` as `Record<string, unknown>`).
-// This component's `rebuildState` signal is threaded into
-// `store/activeJobs.ts`'s `wireActiveJobSources` (out of scope for this
-// slice) via the old type's literal-union contract; repointing here would
-// ripple a type break into that file. The field names are otherwise
-// identical to the generated `RebuildStatusResponse`, so narrowing the
-// fetch result via a runtime-safe cast preserves both the migration and the
-// existing contract. See store/scan.ts for the matching ScanStatus deferral.
-import type { RebuildStatus } from "../api/types";
 import type { ScanFiltersResponse } from "../api/scanFilters";
 import DatabaseOverview from "./DatabaseOverview";
 import CaptureActivity from "./CaptureActivity";
@@ -30,7 +18,7 @@ import ScanFiltersPanel from "./ScanFiltersPanel";
 import ScanFiltersOnboarding from "./ScanFiltersOnboarding";
 import { showToast } from "./Toast";
 import HelpPopover from "./HelpPopover";
-import { wireActiveJobSources } from "../store/activeJobs";
+import { rebuildStatus, fetchRebuildStatus } from "../store/rebuild";
 
 type FrameFilter = "all" | "light_only";
 
@@ -53,9 +41,7 @@ const ScanManager: Component = () => {
   const [forceOrphanCleanup, setForceOrphanCleanup] = createSignal(false);
   const [forceCleanupConfirmOpen, setForceCleanupConfirmOpen] = createSignal(false);
   const [dbSummary, setDbSummary] = createSignal<DbSummary | null>(null);
-  const [rebuildState, setRebuildState] = createSignal<RebuildStatus>({
-    state: "idle", mode: "", message: "", started_at: null, completed_at: null, details: {},
-  });
+  const rebuildState = rebuildStatus;
   const [autoScanEnabled, setAutoScanEnabled] = createSignal(true);
   const [autoScanInterval, setAutoScanInterval] = createSignal(240);
   const [observerName, setObserverName] = createSignal<string | null>(null);
@@ -64,9 +50,6 @@ const ScanManager: Component = () => {
   const [latError, setLatError] = createSignal<string | null>(null);
   const [lngError, setLngError] = createSignal<string | null>(null);
   const [scanFiltersData, setScanFiltersData] = createSignal<ScanFiltersResponse | null>(null);
-  let rebuildPollTimer: ReturnType<typeof setInterval> | null = null;
-
-  wireActiveJobSources(scanStatus, rebuildState, stopScan);
 
   // --- Scan filters (shared between ScanFiltersPanel & ScanFiltersOnboarding) ---
   const loadScanFilters = async () => {
@@ -166,40 +149,11 @@ const ScanManager: Component = () => {
     runScan();
   };
 
-  // --- Rebuild polling ---
-  const fetchRebuildStatus = async () => {
-    try {
-      const status = await apiClient.GET("/api/scan/rebuild-status").then(unwrap) as RebuildStatus;
-      const prev = rebuildState().state;
-      setRebuildState(status);
-      if (status.state !== "running") {
-        if (rebuildPollTimer) { clearInterval(rebuildPollTimer); rebuildPollTimer = null; }
-      }
-    } catch { /* ignore */ }
-  };
-
+  // Pick up an in-flight rebuild when Settings opens.
   fetchRebuildStatus();
-
-  const startRebuildPolling = () => {
-    // Clear any previous timer so we can restart
-    if (rebuildPollTimer) { clearInterval(rebuildPollTimer); rebuildPollTimer = null; }
-    // Set optimistic running state so UI shows feedback immediately
-    // (the Celery task may not have updated Redis yet)
-    setRebuildState((prev) => ({
-      ...prev,
-      state: "running",
-      message: "Starting...",
-      started_at: Date.now() / 1000,
-      completed_at: null,
-    }));
-    // Give the Celery task a moment to pick up before first poll
-    setTimeout(fetchRebuildStatus, 1000);
-    rebuildPollTimer = setInterval(fetchRebuildStatus, 2000);
-  };
 
   onCleanup(() => {
     stopPolling();
-    if (rebuildPollTimer) clearInterval(rebuildPollTimer);
   });
 
   return (

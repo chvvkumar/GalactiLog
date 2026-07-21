@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 # Current data version - bump this and add a migration function when
 # code changes affect how stored target data is derived.
-DATA_VERSION = 14
+DATA_VERSION = 15
 
 # Migrations whose per-target loops make external network calls (VizieR, Gaia,
 # SAC, HyperLEDA) with pacing sleeps commit their work every this many queried
@@ -812,6 +812,51 @@ def _migrate_v14_eccentricity_provenance(session: Session) -> str:
     return "; ".join(parts) if parts else "No changes needed"
 
 
+def _migrate_v15_arcsec_per_pixel(session: Session) -> str:
+    """Backfill the materialized plate scale (arcsec_per_pixel) from raw_headers.
+
+    Re-derives an image-level value from raw_headers after a schema change,
+    exactly as v12/v14 did: alembic 0021 added images.arcsec_per_pixel so
+    /api/stats aggregations no longer have to derive the plate scale per-row
+    from JSONB (regex-guarded text casts, units.sql_arcsec_per_pixel), which
+    is what made the cold path take tens of seconds. The scanner now sets the
+    column at ingest; existing rows carry XPIXSZ/FOCALLEN in raw_headers, so
+    the value is backfilled here rather than left to wait on a full re-ingest.
+
+    Uses units.plate_scale_from_headers, the Python counterpart of the SQL
+    expression, so the backfilled values match what the scanner writes and
+    what the SQL derivation produced (same keyword semantics, None for
+    missing/non-numeric/non-positive inputs).
+
+    Idempotent: only rows still NULL in arcsec_per_pixel are selected, and the
+    derivation is a pure function of raw_headers, so replaying is a no-op.
+    """
+    from app.models import Image
+    from app.services.units import plate_scale_from_headers
+
+    rows = session.execute(
+        select(Image.id, Image.raw_headers).where(
+            Image.arcsec_per_pixel.is_(None),
+            Image.raw_headers.has_key("XPIXSZ"),    # noqa: W601 (JSONB ?)
+            Image.raw_headers.has_key("FOCALLEN"),  # noqa: W601
+        )
+    ).all()
+
+    updates: list[dict] = []
+    for img_id, headers in rows:
+        scale = plate_scale_from_headers(headers)
+        if scale is not None:
+            updates.append({"id": img_id, "arcsec_per_pixel": scale})
+
+    if updates:
+        session.bulk_update_mappings(Image, updates)
+        session.flush()
+
+    if updates:
+        return f"{len(updates)} plate scales backfilled from raw_headers"
+    return "No changes needed"
+
+
 def reference_catalogs_are_empty(session: Session) -> bool:
     """Return True if the static OpenNGC catalog table has no rows.
 
@@ -879,6 +924,7 @@ MIGRATIONS: dict[int, tuple[str, Callable[[Session], str]]] = {
     12: ("Backfill exposure_time from EXPOSURE keyword and split FWHM out of median_hfr", _migrate_v12_exposure_and_metric_split),
     13: ("Backfill per-target enrichment (constellation, memberships, Gaia, HyperLEDA) for targets created since v11", _migrate_v13_enrich_created_targets),
     14: ("Recover eccentricity provenance and backfill frame altitude from raw_headers", _migrate_v14_eccentricity_provenance),
+    15: ("Backfill materialized plate scale (arcsec_per_pixel) from raw_headers", _migrate_v15_arcsec_per_pixel),
 }
 
 

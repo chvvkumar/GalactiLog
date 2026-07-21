@@ -33,7 +33,7 @@ export interface WbppFooterProps {
   blockedBy: CopyBlocker | null;
   canBrowserCopy: boolean;
   copying: boolean;
-  copyProgress: { done: number; total: number; label: string } | null;
+  copyProgress: { done: number; total: number; speed: string } | null;
   onCopy: () => void;
   onStop: () => void;
   scriptMenu: JSX.Element;
@@ -56,7 +56,10 @@ export default function WbppFooter(props: WbppFooterProps): JSX.Element {
   const progressText = () => {
     const p = props.copyProgress;
     if (!p) return "Copying...";
-    return p.total > 0 ? `${p.done} / ${p.total} - ${p.label}` : `Scanning... ${p.label}`;
+    if (p.total <= 0) return "Scanning...";
+    // Speed replaces the per-file name: a filename flickering 8x per second is
+    // unreadable, while the windowed rate is the number the user actually wants.
+    return p.speed ? `${p.done} / ${p.total} · ${p.speed}` : `${p.done} / ${p.total}`;
   };
 
   /**

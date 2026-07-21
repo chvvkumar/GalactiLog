@@ -15,7 +15,6 @@ from app.api.deps import get_current_user
 from app.models.user import User
 from app.models import Image, Target
 from app.services.normalization import load_alias_maps, normalize_filter, normalize_equipment
-from app.services.units import sql_arcsec_per_pixel
 
 from app.schemas.stats import (
     StatsResponse, OverviewStats, EquipmentStats, EquipmentItem,
@@ -278,12 +277,12 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
         async with async_session() as s:
             return (await s.execute(q)).one()
 
-    # Plate scale (arcsec/px) derived per row from the XPIXSZ/FOCALLEN raw
-    # headers; NULL when underivable, so multiplying a pixel metric by it
-    # yields NULL and percentile_cont skips the frame. This keeps the pooled
-    # arcsec medians unit-consistent across optical trains, unlike the raw
-    # pixel medians beside them.
-    _scale = sql_arcsec_per_pixel(Image.raw_headers)
+    # Plate scale (arcsec/px) materialized at scan time from the
+    # XPIXSZ/FOCALLEN raw headers; NULL when underivable, so multiplying a
+    # pixel metric by it yields NULL and percentile_cont skips the frame.
+    # This keeps the pooled arcsec medians unit-consistent across optical
+    # trains, unlike the raw pixel medians beside them.
+    _scale = Image.arcsec_per_pixel
 
     async def _query_cameras():
         q = select(

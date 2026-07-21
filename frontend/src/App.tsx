@@ -4,18 +4,18 @@ import NavBar from "./components/NavBar";
 import { Toast } from "./components/Toast";
 import { useAuth } from "./components/AuthProvider";
 import {
-  startErrorToastPoller,
-  stopErrorToastPoller,
-} from "./store/errorToastPoller";
+  startActivityErrorsPoller,
+  stopActivityErrorsPoller,
+} from "./store/activityErrors";
 
 const ErrorPollerMount: Component = () => {
   const { user } = useAuth();
 
   createEffect(() => {
     if (user() !== null) {
-      startErrorToastPoller();
+      startActivityErrorsPoller();
     } else {
-      stopErrorToastPoller();
+      stopActivityErrorsPoller();
     }
   });
 

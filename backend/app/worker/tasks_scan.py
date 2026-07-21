@@ -476,6 +476,7 @@ def _do_ingest(fits_path: str, include_calibration: bool = True) -> dict:
                 eccentricity=meta.get("eccentricity"),
                 eccentricity_source=meta.get("eccentricity_source"),
                 altitude_deg=meta.get("altitude_deg"),
+                arcsec_per_pixel=meta.get("arcsec_per_pixel"),
                 raw_headers=meta.get("raw_headers", {}),
                 # CSV metrics (N.I.N.A. Session Metadata)
                 hfr_stdev=meta.get("hfr_stdev"),

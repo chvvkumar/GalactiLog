@@ -263,7 +263,7 @@ describe("WbppExportModal layout", () => {
 
     // Header: the title states the action; the target name moved to the subline.
     const h2 = document.body.querySelector("#wbpp-modal-title") as HTMLElement;
-    expect(h2.textContent?.trim()).toBe("Export to WBPP");
+    expect(h2.textContent?.trim()).toBe("Export For Stacking");
     expect(
       document.body.querySelector('[role="dialog"]')?.getAttribute("aria-labelledby"),
     ).toBe("wbpp-modal-title");
@@ -581,7 +581,7 @@ describe("WbppExportModal quality config persistence", () => {
     ) as HTMLInputElement;
     expect(value.value).toBe("0.55");
     // The stored "rig" baseline is the active segment.
-    const rigSegment = buttonsLabelled("Rig (catalog)")[0];
+    const rigSegment = buttonsLabelled("Overall")[0];
     expect(rigSegment.className).toContain("text-theme-accent");
   });
 
@@ -855,6 +855,63 @@ describe("WbppExportModal settings", () => {
   });
 });
 
+describe("WbppExportModal reattach to a live copy", () => {
+  // The copy lives in the module-level wbppCopyJob store precisely so it
+  // survives the modal closing; a later remount (e.g. reopening the export
+  // dialog) must render the store's live state rather than starting fresh.
+  it("renders progress from the store immediately on mount, without the modal itself starting the copy", async () => {
+    postMock.mockClear();
+    const wbppBrowserCopy = await import("../lib/wbppBrowserCopy");
+    const spy = vi.spyOn(wbppBrowserCopy, "runBrowserCopy").mockImplementation(
+      ((_root: any, _dest: any, opts: any) => {
+        opts.onProgress(4, 8, "reattach.fits", 1024);
+        return new Promise<{ copied: number; destinationName: string }>((_res, rej) => {
+          // Honor abort signal so stopWbppCopy() can actually stop the copy.
+          // Reject with the real CopyCancelledError, matching what
+          // runBrowserCopy itself throws on abort: the store's catch treats
+          // any other error class as a genuine failure and surfaces it as an
+          // error toast plus a persistent error banner.
+          opts.signal?.addEventListener("abort", () => {
+            rej(new wbppBrowserCopy.CopyCancelledError());
+          });
+        });
+      }) as any,
+    );
+
+    try {
+      const { startWbppCopy, stopWbppCopy } = await import("../store/wbppCopyJob");
+
+      // Drive the store to "running" the same way a previous, now-unmounted
+      // instance of this modal would have, via startWbppCopy directly rather
+      // than through any component.
+      const copyPromise = startWbppCopy({
+        rootHandle: {},
+        destHandle: {},
+        operations: [],
+        exclusions: [],
+        excludedSourceRelatives: [],
+        targetName: "M31",
+      });
+
+      // A fresh mount of the modal -- simulating "reopen" -- must reflect the
+      // in-flight copy immediately, with no click of its own required.
+      renderModal();
+      expect(bodyText()).toMatch(/4|8/);
+      const bar = document.body.querySelector(".bg-theme-accent.transition-all") as HTMLElement;
+      expect(bar).not.toBe(null);
+      expect(bar.style.width).toBe("50%");
+
+      // Cleanup: stop the copy so it does not leak into later tests.
+      // startWbppCopy() never rethrows (it catches internally and routes
+      // failures through wbppCopyError/toast), so this always resolves.
+      stopWbppCopy();
+      await copyPromise;
+    } finally {
+      spy.mockRestore();
+    }
+  });
+});
+
 describe("WbppExportModal folder rows", () => {
   it("offers a manual preview only while no library root allows the auto-preview", () => {
     // With a root set the modal previews on mount; without one it must not fire
@@ -886,7 +943,11 @@ describe("WbppExportModal folder rows", () => {
     renderModal();
     await preview();
     expect(document.body.querySelector('[role="radiogroup"]')).toBe(null);
-    const row = buttons().find((b) => b.getAttribute("aria-expanded") === "false");
+    // The header's HelpPopover trigger also carries aria-expanded, so anchor
+    // the query to a session row by its visible date text.
+    const row = buttons().find(
+      (b) => b.getAttribute("aria-expanded") === "false" && b.textContent?.includes(DATE),
+    );
     expect(row).not.toBe(undefined);
     fireEvent.click(row!);
     expect(document.body.querySelector('[role="radiogroup"]')).not.toBe(null);

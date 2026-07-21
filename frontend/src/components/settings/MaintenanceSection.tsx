@@ -3,6 +3,7 @@ import { apiClient } from "../../api/generated/client";
 import { unwrap } from "../../api/unwrap";
 import { useAuth } from "../AuthProvider";
 import { emitWithToast } from "../../lib/emitWithToast";
+import { startRebuildPolling } from "../../store/rebuild";
 import type { RebuildStatus } from "../../api/types";
 
 type OpState = "idle" | "running" | "complete" | "error";
@@ -116,6 +117,10 @@ const MaintenanceSection: Component<MaintenanceSectionProps> = (props) => {
         taskLabel,
         timeout,
       });
+      // The action started the backend task successfully; kick the shared
+      // rebuild store's 2s poll immediately so the nav-bar job monitor
+      // reflects it right away instead of waiting for its own 30s idle check.
+      startRebuildPolling();
     } catch {
       // emitWithToast handles its own error toasts; we also catch here
       // so the inline state resets if it wasn't already
