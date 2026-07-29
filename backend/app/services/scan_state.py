@@ -68,6 +68,21 @@ class ScanStateSnapshot:
     skipped_calibration: int = 0
     new_files: int = 0
     changed_files: int = 0
+    # PHD2 guide-log ingest counters, written once at the end of the
+    # scan_phd2_logs run rather than incremented per file: the PHD2 pass runs
+    # after image discovery and must not interleave with the image ingest
+    # progress bar's step/total.
+    phd2_found: int = 0
+    phd2_ingested: int = 0
+    phd2_failed: int = 0
+    # "" | pending | running. The guide-log pass is dispatched by run_scan and
+    # then runs on its own, so `state` can read "complete" while it is still
+    # working. Without this field a caller polling for completeness reads the
+    # phd2_* counters during that window and gets zeros. "pending" covers the
+    # gap between dispatch and the worker picking the task up; "running" is
+    # written by the task itself and cleared, together with the counters, in
+    # the one write that publishes them.
+    phd2_state: str = ""
     # Phase 3 structured progress envelope (task/step/total_steps/percent/
     # message) - additive fields layered onto this same hash, alongside the
     # counters above which stay the source of truth for the scan_complete
@@ -93,6 +108,10 @@ class ScanStateSnapshot:
             "skipped_calibration": self.skipped_calibration,
             "new_files": self.new_files,
             "changed_files": self.changed_files,
+            "phd2_found": self.phd2_found,
+            "phd2_ingested": self.phd2_ingested,
+            "phd2_failed": self.phd2_failed,
+            "phd2_state": self.phd2_state,
             "task": self.task,
             "step": self.step,
             "total_steps": self.total_steps,
@@ -130,6 +149,10 @@ def parse_snapshot(data: dict | None) -> ScanStateSnapshot:
         skipped_calibration=int(data.get("skipped_calibration", 0)),
         new_files=int(data.get("new_files", 0)),
         changed_files=int(data.get("changed_files", 0)),
+        phd2_found=int(data.get("phd2_found", 0)),
+        phd2_ingested=int(data.get("phd2_ingested", 0)),
+        phd2_failed=int(data.get("phd2_failed", 0)),
+        phd2_state=data.get("phd2_state", "") or "",
         task=task,
         step=step,
         total_steps=total_steps,
@@ -513,6 +536,55 @@ def set_ingesting_sync(
 
 def increment_csv_enriched_sync(r: sync_redis.Redis) -> None:
     r.hincrby(SCAN_KEY, "csv_enriched", 1)
+
+
+PHD2_STATE_PENDING = "pending"
+PHD2_STATE_RUNNING = "running"
+PHD2_STATE_IDLE = ""
+
+
+def reset_phd2_counts_sync(r: sync_redis.Redis) -> None:
+    """Zero the PHD2 counters and mark a new guide-log pass as queued.
+
+    Called where the scan dispatches the pass. scan:state survives a completed
+    scan for EXPIRE_AFTER_COMPLETE, so without this the previous run's totals
+    stay readable as if they described the run now starting - a poller that
+    waits for `state == "complete"` and then reads phd2_ingested gets the last
+    scan's number. Zeroing and flagging together means the counters are only
+    ever non-zero once they describe this pass.
+    """
+    r.hset(SCAN_KEY, mapping={
+        "phd2_found": 0,
+        "phd2_ingested": 0,
+        "phd2_failed": 0,
+        "phd2_state": PHD2_STATE_PENDING,
+    })
+
+
+def set_phd2_state_sync(r: sync_redis.Redis, state: str) -> None:
+    """Record where the guide-log pass has got to (see ScanStateSnapshot)."""
+    r.hset(SCAN_KEY, "phd2_state", state)
+
+
+def set_phd2_counts_sync(
+    r: sync_redis.Redis, found: int, ingested: int, failed: int
+) -> None:
+    """Publish the PHD2 pass's totals in one write and clear the in-flight flag.
+
+    Not incremental: the PHD2 pass runs after image discovery and writes its
+    own fields, so it can never disturb the completed/failed/total counters
+    that drive the image ingest progress bar.
+
+    phd2_state is cleared in the same hset as the counters, deliberately: a
+    reader that sees the pass finished must see this pass's numbers in the
+    same snapshot, never the flag cleared a moment before the totals land.
+    """
+    r.hset(SCAN_KEY, mapping={
+        "phd2_found": found,
+        "phd2_ingested": ingested,
+        "phd2_failed": failed,
+        "phd2_state": PHD2_STATE_IDLE,
+    })
 
 
 def add_skipped_path_sync(r: sync_redis.Redis, path: str) -> None:

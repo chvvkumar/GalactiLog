@@ -29,3 +29,18 @@ export function timezoneLabel(timezone: string): string {
     return timezone;
   }
 }
+
+/**
+ * True when `tz` is a zone name the runtime's Intl database recognises.
+ * Empty/whitespace input is false: the settings field treats "no value" as
+ * "use the server default" and never submits it through this check.
+ */
+export function isValidTimeZone(tz: string): boolean {
+  if (!tz.trim()) return false;
+  try {
+    new Intl.DateTimeFormat([], { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
+}

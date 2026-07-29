@@ -133,11 +133,15 @@ async def test_session_detail_returns_baselines():
     mock_catalog_frames_result = MagicMock()
     mock_catalog_frames_result.all.return_value = catalog_frame_rows
 
+    # phd2 night sessions; scalars().all(). Empty: no guide log for this night.
+    mock_phd2_result = MagicMock()
+    mock_phd2_result.scalars.return_value.all.return_value = []
+
     mock_session.execute = AsyncMock(
         side_effect=[
             mock_img_result, mock_alias_result,
             mock_all_hfr_result, mock_note_result, mock_cv_result,
-            mock_catalog_frames_result,
+            mock_catalog_frames_result, mock_phd2_result,
         ]
     )
 

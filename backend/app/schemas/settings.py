@@ -1,6 +1,7 @@
 from typing import Literal
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 # The six metrics a WBPP raw quality constraint can target. Mirrors RAW_METRICS
@@ -51,6 +52,25 @@ class GeneralSettings(BaseModel):
     observer_longitude: float | None = None
     observer_name: str | None = None
     use_imaging_night: bool = True
+    # IANA zone name (e.g. "America/New_York") for interpreting PHD2 guide-log
+    # timestamps, which are local wall-clock with no zone marker. Not the same
+    # thing as `timezone` above: that one only formats already-absolute
+    # instants for display and can be changed at will, while this one decides
+    # which absolute instant a guide-log row is stored at, so a wrong value is
+    # a data error rather than a display preference. Empty means "use the
+    # server's local zone", which is correct for the common single-machine
+    # install and is the only answer available before the user configures
+    # anything.
+    observer_timezone: str = ""
+    # PHD2 guide-log discovery during the library scan. Cheap (a filename test
+    # inside the existing walk) and on by default; the toggle exists for users
+    # whose library happens to contain guide logs they do not want catalogued.
+    phd2_scan_enabled: bool = True
+    # Raw PHD2 equipment-profile name -> images.telescope value. Several
+    # profile names may map to the same telescope; that is how two names for
+    # one physical rig (a re-created profile, a renamed one) get merged
+    # without touching the stored logs.
+    phd2_profile_map: dict[str, str] = {}
     preview_resolution: int = 2400  # 0 means native full resolution
     preview_cache_mb: int = 2048
     activity_retention_days: int = Field(default=90, ge=1, le=3650)
@@ -79,6 +99,23 @@ class GeneralSettings(BaseModel):
     wbpp_quality_score_threshold: int = Field(default=60, ge=0, le=100)
     wbpp_quality_baseline: str = Field(default="session", pattern="^(session|rig)$")
     wbpp_quality_raw_constraints: list[WbppRawConstraint] = Field(default_factory=list)
+
+    @field_validator("observer_timezone")
+    @classmethod
+    def _validate_observer_timezone(cls, value: str) -> str:
+        """Reject a zone name ZoneInfo cannot load.
+
+        The ingest degrades an unknown zone to the server's local zone, which
+        is a silent multi-hour error on every guide session it then stores, so
+        the typo has to be refused while the user is still looking at it.
+        """
+        if not value:
+            return value
+        try:
+            ZoneInfo(value)
+        except (ZoneInfoNotFoundError, ValueError) as exc:
+            raise ValueError(f"'{value}' is not a known IANA time zone") from exc
+        return value
 
 
 class ActivitySettingsResponse(BaseModel):

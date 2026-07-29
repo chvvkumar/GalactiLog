@@ -248,6 +248,28 @@ async def update_general(
         except Exception:
             pass  # Worker may not be available in dev
 
+    # Re-key stored PHD2 sessions when the profile map changes. The mapping is
+    # a setting, not a property of the log, so an edit must take effect without
+    # re-reading any files.
+    if old_general.get("phd2_profile_map", {}) != payload.phd2_profile_map:
+        try:
+            from app.worker.tasks import scan_phd2_logs
+            scan_phd2_logs.delay(remap_only=True)
+        except Exception:
+            pass  # Worker may not be available in dev
+
+    # Re-parse stored PHD2 logs when the observer timezone changes. Unlike the
+    # profile map this cannot be re-keyed in place: ended_at_utc has no stored
+    # local counterpart, so the zone has to be applied while parsing. PHD2
+    # never rewrites a closed log, so the scan's size/mtime short-circuit would
+    # skip every file forever without the force flag.
+    if old_general.get("observer_timezone", "") != payload.observer_timezone:
+        try:
+            from app.worker.tasks import scan_phd2_logs
+            scan_phd2_logs.delay(force=True)
+        except Exception:
+            pass  # Worker may not be available in dev
+
     return _row_to_response(row)
 
 

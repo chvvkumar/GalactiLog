@@ -4,10 +4,10 @@ export default {
   theme: {
     extend: {
       fontSize: {
-        micro: "var(--font-size-micro)",
-        tiny: "var(--font-size-tiny)",
-        caption: "var(--font-size-caption)",
-        label: "var(--font-size-label)",
+        micro: "var(--text-micro)",
+        tiny: "var(--text-tiny)",
+        caption: "var(--text-caption)",
+        label: "var(--text-label)",
       },
       colors: {
         theme: {

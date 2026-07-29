@@ -979,6 +979,128 @@ async def test_put_general_rejects_an_unknown_quality_metric():
         app.dependency_overrides.clear()
 
 
+# ---------------------------------------------------------------------------
+# PHD2 settings triggers
+# ---------------------------------------------------------------------------
+
+def _mock_settings_session(row):
+    mock_result = MagicMock()
+    mock_result.scalar_one_or_none.return_value = row
+    mock_session = AsyncMock()
+    mock_session.execute = AsyncMock(return_value=mock_result)
+    mock_session.commit = AsyncMock()
+    mock_session.refresh = AsyncMock()
+    return mock_session
+
+
+async def _put_general(payload):
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        return await client.put("/api/settings/general", json=payload)
+
+
+@pytest.mark.asyncio
+async def test_put_general_forces_a_phd2_reparse_when_the_timezone_changes(monkeypatch):
+    """PHD2 logs store local wall-clock, so the zone is applied while parsing.
+    A change has to re-read every stored log or the timestamps ingested under
+    the old zone stay wrong forever."""
+    from app.worker import tasks as worker_tasks
+
+    row = _make_settings_row(general={"observer_timezone": "America/New_York"})
+    mock_session = _mock_settings_session(row)
+    task = MagicMock()
+    monkeypatch.setattr(worker_tasks, "scan_phd2_logs", task)
+
+    async def override():
+        yield mock_session
+
+    app.dependency_overrides[get_session] = override
+    _override_admin()
+    try:
+        resp = await _put_general({"observer_timezone": "Europe/Berlin"})
+        assert resp.status_code == 200
+        task.delay.assert_called_once_with(force=True)
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_put_general_does_not_reparse_when_the_timezone_is_unchanged(monkeypatch):
+    """A full-object PUT resends every field, so only a real change may queue
+    a re-parse of the whole guide-log corpus."""
+    from app.worker import tasks as worker_tasks
+
+    row = _make_settings_row(general={"observer_timezone": "Europe/Berlin"})
+    mock_session = _mock_settings_session(row)
+    task = MagicMock()
+    monkeypatch.setattr(worker_tasks, "scan_phd2_logs", task)
+
+    async def override():
+        yield mock_session
+
+    app.dependency_overrides[get_session] = override
+    _override_admin()
+    try:
+        resp = await _put_general({"observer_timezone": "Europe/Berlin"})
+        assert resp.status_code == 200
+        task.delay.assert_not_called()
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_put_general_does_not_remap_on_the_first_save_after_upgrade(monkeypatch):
+    """An install that predates the profile map has no stored key at all;
+    comparing that absence against the default empty map must not queue a
+    pointless re-key on the first settings save."""
+    from app.worker import tasks as worker_tasks
+
+    row = _make_settings_row(general={"auto_scan_enabled": True})
+    mock_session = _mock_settings_session(row)
+    task = MagicMock()
+    monkeypatch.setattr(worker_tasks, "scan_phd2_logs", task)
+
+    async def override():
+        yield mock_session
+
+    app.dependency_overrides[get_session] = override
+    _override_admin()
+    try:
+        resp = await _put_general({"auto_scan_interval": 120})
+        assert resp.status_code == 200
+        task.delay.assert_not_called()
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_put_general_rejects_an_unknown_timezone():
+    """A typo'd zone degrades to the server's zone at ingest, which is silent
+    and permanent once logs are parsed, so it must not be storable."""
+    row = _make_settings_row(general={})
+    mock_session = _mock_settings_session(row)
+
+    async def override():
+        yield mock_session
+
+    app.dependency_overrides[get_session] = override
+    _override_admin()
+    try:
+        resp = await _put_general({"observer_timezone": "America/New_Yrok"})
+        assert resp.status_code == 422
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_observer_timezone_accepts_a_real_zone_and_the_empty_default():
+    from app.schemas.settings import GeneralSettings
+
+    assert GeneralSettings().observer_timezone == ""
+    assert GeneralSettings(
+        observer_timezone="America/New_York"
+    ).observer_timezone == "America/New_York"
+
+
 def test_activity_retention_days_default():
     from app.schemas.settings import GeneralSettings
     assert GeneralSettings().activity_retention_days == 90

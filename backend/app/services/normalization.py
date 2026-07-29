@@ -93,6 +93,33 @@ def expand_canonical(canonical: str, alias_map: dict[str, str]) -> list[str]:
     return names
 
 
+def equipment_match_set(names, alias_map: dict[str, str]) -> set[str]:
+    """Every stored string that could name one of these pieces of equipment.
+
+    Folding alias to canonical is one-sided and is not enough on its own when
+    both sides of a comparison are user data written at different times. The
+    PHD2 profile map is the live example: a profile mapped before the rig was
+    grouped stores the raw name, grouping it afterwards never rewrites that
+    map, and a fold-only comparison then misses in the opposite direction from
+    the one it was added to fix. Normalizing and then expanding covers both:
+    the result holds the canonical name and every alias of it, whichever form
+    the caller supplied and whichever form was stored.
+    """
+    matches: set[str] = set()
+    for name in names:
+        if not name:
+            continue
+        canonical = normalize_equipment(name, alias_map) or name
+        matches.update(expand_canonical(canonical, alias_map))
+    return matches
+
+
+async def load_telescope_match_set(session: AsyncSession, names) -> set[str]:
+    """equipment_match_set for telescopes, against the stored alias map."""
+    _, _, tel_map = await load_alias_maps(session)
+    return equipment_match_set(names, tel_map)
+
+
 async def load_alias_maps(session: AsyncSession) -> tuple[dict[str, str], dict[str, str], dict[str, str]]:
     """Load filter, camera, and telescope alias maps from settings DB.
 

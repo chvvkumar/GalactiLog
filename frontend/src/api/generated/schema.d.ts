@@ -938,6 +938,94 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/phd2/profiles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Phd2 Profiles
+         * @description Every equipment profile seen in the ingested logs, with mapping status.
+         *
+         *     Drives the settings screen where profiles are mapped onto telescope names.
+         *     The helper metadata (guide camera, focal length, pixel scale) is a
+         *     per-column maximum across the profile's sessions, not one representative
+         *     session: the columns are near-constant for a given profile, and an
+         *     aggregate needs no correlated subquery to pick a row.
+         */
+        get: operations["list_phd2_profiles_api_phd2_profiles_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/phd2/sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Phd2 Sessions
+         * @description Guiding sessions for one night, optionally narrowed to one rig.
+         *
+         *     Sessions are never merged: two PHD2 instances on two rigs produce
+         *     overlapping wall-clock sessions with different pixel scales, and a caller
+         *     that wants one rig says so.
+         *
+         *     `telescope` is the value the session detail reports under
+         *     `equipment.telescope`, and is resolved against the equipment alias map
+         *     before matching: the profile map holds whichever name was on offer when
+         *     the profile was mapped, which is not necessarily the canonical one, and
+         *     grouping equipment later never rewrites it.
+         *
+         *     Narrowing uses the same rule as the session-detail night summary: rows
+         *     mapped to this telescope, or, when the night's sole profile is unmapped,
+         *     that profile's rows. A profile mapped to a different rig is never returned
+         *     here; the user already said where it belongs. A strict equality filter
+         *     disagreed with that rule for every install whose profile map is still
+         *     empty: the summary strip rendered through the fallback while this route
+         *     returned nothing, so the card showed guiding numbers above an empty graph.
+         */
+        get: operations["list_phd2_sessions_api_phd2_sessions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/phd2/sessions/{id}/frames": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Phd2 Session Frames
+         * @description The full frame series and event markers for one guiding session.
+         *
+         *     Pixels are converted to arcsec here using the session's own pixel scale.
+         *     Frames are stored in pixels precisely so a corrected pixel scale changes
+         *     this response without touching a single stored row.
+         */
+        get: operations["get_phd2_session_frames_api_phd2_sessions__id__frames_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/preview/{image_id}": {
         parameters: {
             query?: never;
@@ -3323,6 +3411,23 @@ export interface components {
             /** Observer Name */
             observer_name?: string | null;
             /**
+             * Observer Timezone
+             * @default
+             */
+            observer_timezone: string;
+            /**
+             * Phd2 Profile Map
+             * @default {}
+             */
+            phd2_profile_map: {
+                [key: string]: string;
+            };
+            /**
+             * Phd2 Scan Enabled
+             * @default true
+             */
+            phd2_scan_enabled: boolean;
+            /**
              * Preview Cache Mb
              * @default 2048
              */
@@ -4111,6 +4216,206 @@ export interface components {
             /** New Password */
             new_password: string;
         };
+        /**
+         * Phd2EventPoint
+         * @description A marker on the guide graph.
+         *
+         *     `type` is one of: dither, settle_start, settle_done, settle_failed,
+         *     star_lost, param_change, lock_shift.
+         */
+        Phd2EventPoint: {
+            /** Detail */
+            detail: string;
+            /** T */
+            t: number;
+            /** Type */
+            type: string;
+        };
+        /**
+         * Phd2FramePoint
+         * @description One guide-graph point. ra/dec are arcsec, converted from stored pixels.
+         */
+        Phd2FramePoint: {
+            /** Dec */
+            dec?: number | null;
+            /** Dec Dir */
+            dec_dir: string;
+            /** Dec Pulse Ms */
+            dec_pulse_ms: number;
+            /** Dropped */
+            dropped: boolean;
+            /** Mass */
+            mass?: number | null;
+            /** Ra */
+            ra?: number | null;
+            /** Ra Dir */
+            ra_dir: string;
+            /** Ra Pulse Ms */
+            ra_pulse_ms: number;
+            /** Snr */
+            snr?: number | null;
+            /** T */
+            t: number;
+        };
+        /** Phd2FramesResponse */
+        Phd2FramesResponse: {
+            /** Events */
+            events: components["schemas"]["Phd2EventPoint"][];
+            /** Frames */
+            frames: components["schemas"]["Phd2FramePoint"][];
+            /** Pixel Scale Arcsec */
+            pixel_scale_arcsec?: number | null;
+            /**
+             * Started At
+             * Format: date-time
+             */
+            started_at: string;
+        };
+        /**
+         * Phd2NightSummary
+         * @description Night+rig guiding rollup attached to a session-detail response.
+         *
+         *     RMS figures are frame-count weighted across the sessions long enough to
+         *     mean anything; gated_session_count reports how many were left out. Event
+         *     counts include every session regardless of length. settle_median_s is the
+         *     median of the per-session medians, not a pooled median over every settle
+         *     in the night.
+         */
+        Phd2NightSummary: {
+            /**
+             * Cal Issues
+             * @default []
+             */
+            cal_issues: string[];
+            /** Dither Count */
+            dither_count: number;
+            /** Drop Count */
+            drop_count: number;
+            /** Frame Count */
+            frame_count: number;
+            /** Gated Session Count */
+            gated_session_count: number;
+            /** Max Drop Run */
+            max_drop_run: number;
+            /**
+             * Profiles
+             * @default []
+             */
+            profiles: string[];
+            /** Rms Dec Arcsec */
+            rms_dec_arcsec?: number | null;
+            /** Rms Ra Arcsec */
+            rms_ra_arcsec?: number | null;
+            /** Rms Total Arcsec */
+            rms_total_arcsec?: number | null;
+            /** Session Count */
+            session_count: number;
+            /** Settle Failed Count */
+            settle_failed_count: number;
+            /** Settle Median S */
+            settle_median_s?: number | null;
+            /** Unguided Seconds */
+            unguided_seconds: number;
+        };
+        /**
+         * Phd2ProfileInfo
+         * @description A PHD2 equipment profile as seen in the corpus, for the mapping UI.
+         *
+         *     The guide camera, focal length and pixel scale are echoed from the log
+         *     headers so a user can tell two similarly named profiles apart without
+         *     opening a log.
+         */
+        Phd2ProfileInfo: {
+            /** First Seen */
+            first_seen?: string | null;
+            /** Focal Length Mm */
+            focal_length_mm?: number | null;
+            /** Guide Camera */
+            guide_camera?: string | null;
+            /** Last Seen */
+            last_seen?: string | null;
+            /** Mapped Telescope */
+            mapped_telescope?: string | null;
+            /** Name */
+            name: string;
+            /** Pixel Scale Arcsec */
+            pixel_scale_arcsec?: number | null;
+            /** Session Count */
+            session_count: number;
+        };
+        /** Phd2ProfilesResponse */
+        Phd2ProfilesResponse: {
+            /** Profiles */
+            profiles: components["schemas"]["Phd2ProfileInfo"][];
+        };
+        /** Phd2SessionListResponse */
+        Phd2SessionListResponse: {
+            /** Sessions */
+            sessions: components["schemas"]["Phd2SessionSummary"][];
+        };
+        /**
+         * Phd2SessionSummary
+         * @description One guiding session as shown on a session card or in the guide list.
+         *
+         *     RMS values are returned even for gated sessions; `gated` says the sample
+         *     is too small to compare (frame_count < phd2_metrics.MIN_FRAMES) so the UI
+         *     can show the number with a caveat rather than hiding it.
+         */
+        Phd2SessionSummary: {
+            /** Dither Count */
+            dither_count: number;
+            /** Drop Count */
+            drop_count: number;
+            /** Duration S */
+            duration_s: number;
+            /** Ended At */
+            ended_at?: string | null;
+            /** Equipment Profile */
+            equipment_profile: string;
+            /** Frame Count */
+            frame_count: number;
+            /** Gated */
+            gated: boolean;
+            /** Id */
+            id: string;
+            /** Last Cal Issue */
+            last_cal_issue?: string | null;
+            /** Max Drop Run */
+            max_drop_run: number;
+            /** Peak Dec Arcsec */
+            peak_dec_arcsec?: number | null;
+            /** Peak Ra Arcsec */
+            peak_ra_arcsec?: number | null;
+            /** Pier Side */
+            pier_side?: string | null;
+            /** Pixel Scale Arcsec */
+            pixel_scale_arcsec?: number | null;
+            /** Rms Dec Arcsec */
+            rms_dec_arcsec?: number | null;
+            /** Rms Ra Arcsec */
+            rms_ra_arcsec?: number | null;
+            /** Rms Total Arcsec */
+            rms_total_arcsec?: number | null;
+            /** Settle Count */
+            settle_count: number;
+            /** Settle Failed Count */
+            settle_failed_count: number;
+            /** Settle Median S */
+            settle_median_s?: number | null;
+            /** Snr Mean */
+            snr_mean?: number | null;
+            /** Star Mass Mean */
+            star_mass_mean?: number | null;
+            /**
+             * Started At
+             * Format: date-time
+             */
+            started_at: string;
+            /** Telescope */
+            telescope?: string | null;
+            /** Unguided Seconds */
+            unguided_seconds: number;
+        };
         /** RebuildStatusResponse */
         RebuildStatusResponse: {
             /** Completed At */
@@ -4331,6 +4636,26 @@ export interface components {
              */
             percent: number;
             /**
+             * Phd2 Failed
+             * @default 0
+             */
+            phd2_failed: number;
+            /**
+             * Phd2 Found
+             * @default 0
+             */
+            phd2_found: number;
+            /**
+             * Phd2 Ingested
+             * @default 0
+             */
+            phd2_ingested: number;
+            /**
+             * Phd2 State
+             * @default
+             */
+            phd2_state: string;
+            /**
              * Removed
              * @default 0
              */
@@ -4480,6 +4805,7 @@ export interface components {
             notes?: string | null;
             /** Offset */
             offset?: number | null;
+            phd2?: components["schemas"]["Phd2NightSummary"] | null;
             /** Raw Reference Header */
             raw_reference_header?: {
                 [key: string]: unknown;
@@ -7303,6 +7629,106 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_phd2_profiles_api_phd2_profiles_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Phd2ProfilesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_phd2_sessions_api_phd2_sessions_get: {
+        parameters: {
+            query: {
+                /** @description Imaging night, YYYY-MM-DD */
+                session_date: string;
+                /** @description images.telescope value */
+                telescope?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Phd2SessionListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_phd2_session_frames_api_phd2_sessions__id__frames_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Phd2FramesResponse"];
                 };
             };
             /** @description Validation Error */

@@ -19,6 +19,7 @@ import ScanFiltersOnboarding from "./ScanFiltersOnboarding";
 import { showToast } from "./Toast";
 import HelpPopover from "./HelpPopover";
 import { rebuildStatus, fetchRebuildStatus } from "../store/rebuild";
+import { isValidTimeZone } from "../utils/dateTime";
 
 type FrameFilter = "all" | "light_only";
 
@@ -49,6 +50,9 @@ const ScanManager: Component = () => {
   const [observerLongitude, setObserverLongitude] = createSignal<number | null>(null);
   const [latError, setLatError] = createSignal<string | null>(null);
   const [lngError, setLngError] = createSignal<string | null>(null);
+  const [observerTimezone, setObserverTimezone] = createSignal<string>("");
+  const [tzError, setTzError] = createSignal<string | null>(null);
+  const [phd2ScanEnabled, setPhd2ScanEnabled] = createSignal(true);
   const [scanFiltersData, setScanFiltersData] = createSignal<ScanFiltersResponse | null>(null);
 
   // --- Scan filters (shared between ScanFiltersPanel & ScanFiltersOnboarding) ---
@@ -98,9 +102,12 @@ const ScanManager: Component = () => {
       setObserverName(s.general.observer_name ?? null);
       setObserverLatitude(s.general.observer_latitude ?? null);
       setObserverLongitude(s.general.observer_longitude ?? null);
+      setObserverTimezone(s.general.observer_timezone ?? "");
+      setPhd2ScanEnabled(s.general.phd2_scan_enabled ?? true);
       // Clear validation errors when settings are refreshed from the server
       setLatError(null);
       setLngError(null);
+      setTzError(null);
     }
   });
 
@@ -131,6 +138,38 @@ const ScanManager: Component = () => {
         setAutoScanInterval(prev);
         showToast("Failed to save setting", "error");
       }
+    }
+  };
+
+  // Same optimistic-signal + rollback shape as handleAutoScanToggle: flip
+  // locally, persist, and restore the previous value if the save fails.
+  const handlePhd2ScanToggle = async () => {
+    const newVal = !phd2ScanEnabled();
+    setPhd2ScanEnabled(newVal);
+    const current = settings()?.general;
+    if (current) {
+      try {
+        await saveGeneral({ ...current, phd2_scan_enabled: newVal });
+        showToast(newVal ? "PHD2 guide log scanning enabled" : "PHD2 guide log scanning disabled");
+      } catch {
+        setPhd2ScanEnabled(!newVal);
+        showToast("Failed to save setting", "error");
+      }
+    }
+  };
+
+  const saveObserverTimezone = async () => {
+    if (tzError()) return;
+    const current = settings()?.general;
+    if (!current) return;
+    const value = observerTimezone().trim();
+    try {
+      // Empty string is the sentinel for "use the server's local zone". The
+      // backend declares observer_timezone as a non-nullable str, so sending
+      // null for a cleared field would fail validation with a 422.
+      await saveGeneral({ ...current, observer_timezone: value });
+    } catch {
+      showToast("Failed to save observer timezone", "error");
     }
   };
 
@@ -236,6 +275,37 @@ const ScanManager: Component = () => {
               </section>
             </Show>
 
+            <Show when={isAdmin()}>
+              <section class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
+                <div class="flex items-center gap-2">
+                  <h4 class="text-sm font-medium text-theme-text-primary">Guide Logs</h4>
+                  <HelpPopover title="Guide Logs">
+                    <p class="text-sm text-theme-text-secondary">
+                      Collects PHD2 guide logs found anywhere under the library path during the same walk that reads FITS files, and stores per-session guiding statistics alongside your frames.
+                    </p>
+                    <p class="text-sm text-theme-text-secondary">
+                      Only files named PHD2_GuideLog_*.txt are read; PHD2 debug logs are ignored. Turn this off if your library holds guide logs you do not want catalogued.
+                    </p>
+                  </HelpPopover>
+                </div>
+                <div class="flex items-center justify-between">
+                  <label class="text-sm text-theme-text-secondary">Scan PHD2 guide logs</label>
+                  <button
+                    onClick={handlePhd2ScanToggle}
+                    class={`relative w-10 h-5 rounded-full transition-colors ${
+                      phd2ScanEnabled() ? "bg-theme-accent" : "bg-theme-text-tertiary"
+                    }`}
+                  >
+                    <span
+                      class={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full transition-transform ${
+                        phd2ScanEnabled() ? "translate-x-5" : ""
+                      }`}
+                    />
+                  </button>
+                </div>
+              </section>
+            </Show>
+
             <section class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
               <div class="flex items-center gap-2">
                 <h4 class="text-sm font-medium text-theme-text-primary">Observer Location</h4>
@@ -246,9 +316,12 @@ const ScanManager: Component = () => {
                   <p class="text-sm text-theme-text-secondary">
                     Example: with a longitude of -74, frames captured between local noon one day and local noon the next are grouped as one imaging night, so a session that crosses midnight stays together.
                   </p>
+                  <p class="text-sm text-theme-text-secondary">
+                    The timezone is the IANA zone your capture machine runs in. PHD2 writes guide log timestamps as local wall-clock with no zone, so this is what lines those sessions up with your frames.
+                  </p>
                 </HelpPopover>
               </div>
-              <div class="grid grid-cols-3 gap-3">
+              <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
                 <div class="space-y-1">
                   <label class="text-xs text-theme-text-secondary">Name</label>
                   <input
@@ -338,6 +411,30 @@ const ScanManager: Component = () => {
                   />
                   <Show when={lngError()}>
                     <p class="text-xs text-red-500">{lngError()}</p>
+                  </Show>
+                </div>
+                <div class="space-y-1">
+                  <label class="text-xs text-theme-text-secondary">Timezone</label>
+                  <input
+                    type="text"
+                    placeholder="America/New_York"
+                    class={`w-full px-3 py-1.5 bg-theme-input border rounded-[var(--radius-sm)] text-sm text-theme-text-primary focus:ring-1 outline-none ${
+                      tzError()
+                        ? "border-red-500 focus:ring-red-500 focus:border-red-500"
+                        : "border-theme-border focus:ring-theme-accent focus:border-theme-accent"
+                    }`}
+                    value={observerTimezone()}
+                    onInput={(e) => {
+                      const raw = e.currentTarget.value;
+                      setObserverTimezone(raw);
+                      setTzError(!raw.trim() || isValidTimeZone(raw.trim()) ? null : "Not a recognized IANA time zone");
+                    }}
+                    onBlur={saveObserverTimezone}
+                  />
+                  <Show when={tzError()} fallback={
+                    <p class="text-xs text-theme-text-tertiary">Leave empty to use the server timezone.</p>
+                  }>
+                    <p class="text-xs text-red-500">{tzError()}</p>
                   </Show>
                 </div>
               </div>

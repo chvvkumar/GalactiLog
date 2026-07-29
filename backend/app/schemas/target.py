@@ -4,6 +4,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
+from app.schemas.phd2 import Phd2NightSummary
+
 
 class NotesUpdate(BaseModel):
     notes: str | None = None
@@ -329,6 +331,10 @@ class SessionDetailResponse(BaseModel):
     custom_values: list[dict] | None = None
     session_baselines: dict[str, GroupBaseline] = {}
     rig_baselines: dict[str, GroupBaseline] = {}
+    # Night+rig PHD2 guiding rollup, or None when no guide log covers this
+    # night for this rig. Optional rather than an empty object so the client
+    # can tell "no PHD2 data" from "PHD2 data showing zero problems".
+    phd2: Phd2NightSummary | None = None
 
 
 class EquipmentOption(BaseModel):

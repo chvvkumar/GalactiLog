@@ -12,6 +12,8 @@ import ReferenceThumbnail from "./ReferenceThumbnail";
 import RawHeaderAccordion from "./RawHeaderAccordion";
 import FilterBadges from "./FilterBadges";
 import SessionMetricsChart from "./SessionMetricsChart";
+import Phd2GuidingPanel from "./Phd2GuidingPanel";
+import Phd2GuideGraph from "./Phd2GuideGraph";
 import { rigColor } from "./RigTogglePills";
 import { useSettingsContext } from "./SettingsProvider";
 import { isFieldVisible, isColumnVisible } from "../utils/displaySettings";
@@ -1089,6 +1091,11 @@ const SessionAccordionCard: Component<{
                 </div>
                 </div>
 
+                {/* Guiding (PHD2) - absent entirely when no guide log covered this night */}
+                <Show when={detail().phd2}>
+                  {(phd2) => <Phd2GuidingPanel summary={phd2()} />}
+                </Show>
+
                 {/* Session Insights */}
                 <Show when={detail().insights.length > 0}>
                   <div class="bg-theme-elevated border border-theme-border-em rounded-[var(--radius-sm)]">
@@ -1128,6 +1135,18 @@ const SessionAccordionCard: Component<{
                 <div class="tab-fade-in">
                   <SessionMetricsChart detail={detail()} enabledRigs={enabledRigs()} onToggleRig={toggleRig} />
                 </div>
+
+                {/* PHD2 guide graph. On a multi-rig night the card's reference
+                    telescope names only one of the rigs, so the query is left
+                    unfiltered and the selector distinguishes by profile. */}
+                <Show when={detail().phd2}>
+                  <div class="tab-fade-in">
+                    <Phd2GuideGraph
+                      sessionDate={detail().session_date}
+                      telescope={isMultiRig() ? null : detail().equipment.telescope}
+                    />
+                  </div>
+                </Show>
 
                 {/* Row 4: Per-Frame Table (collapsed) */}
                 <div class="bg-theme-elevated border border-theme-border-em rounded-[var(--radius-sm)]">

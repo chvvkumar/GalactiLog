@@ -147,6 +147,9 @@ export interface SessionDetail {
   // Arcsec seeing metrics; null when plate scale is unknown (see SessionSummary).
   hfr_arcsec?: number | null;
   fwhm_arcsec?: number | null;
+  // Night+rig level PHD2 rollup; null/absent when no guide log covered this
+  // session date. The session card renders nothing at all when it is absent.
+  phd2?: Phd2NightSummary | null;
 }
 
 export interface FilterMedian {
@@ -312,6 +315,102 @@ export interface FrameRecord {
   cloud_cover: number | null;
   sky_quality: number | null;
   rig: string | null;
+}
+
+// === PHD2 guiding ===
+// Hand-written (not `Schemas[...]` aliases), for the same reason as
+// SessionDetail/GeneralSettings above: the generated schema widens the
+// nullable numeric fields to `number | null | undefined`, and the guide
+// graph's downsampling/axis math (utils/phd2Guide.ts) plus the session
+// card's `formatArcsec` calls are typed against the strict `number | null`
+// shape. The backend always populates the full shape, so the casts at the
+// apiClient call sites (Phd2ProfilePanel, Phd2GuideGraph) reflect actual
+// runtime data, not a behavior change -- same precedent as
+// api/scanFilters.ts and SettingsProvider.tsx's bootstrap cast.
+export interface Phd2SessionSummary {
+  id: string;
+  started_at: string;
+  ended_at: string | null;
+  duration_s: number;
+  frame_count: number;
+  equipment_profile: string;
+  telescope: string | null;
+  pixel_scale_arcsec: number | null;
+  rms_ra_arcsec: number | null;
+  rms_dec_arcsec: number | null;
+  rms_total_arcsec: number | null;
+  peak_ra_arcsec: number | null;
+  peak_dec_arcsec: number | null;
+  drop_count: number;
+  max_drop_run: number;
+  unguided_seconds: number;
+  dither_count: number;
+  settle_count: number;
+  settle_failed_count: number;
+  settle_median_s: number | null;
+  snr_mean: number | null;
+  star_mass_mean: number | null;
+  last_cal_issue: string | null;
+  pier_side: string | null;
+  gated: boolean;
+}
+
+export type Phd2EventType =
+  | "dither" | "settle_start" | "settle_done" | "settle_failed"
+  | "star_lost" | "param_change" | "lock_shift";
+
+export interface Phd2Event { type: Phd2EventType; t: number; detail: string; }
+
+export interface Phd2Frame {
+  t: number;
+  ra: number | null;
+  dec: number | null;
+  ra_pulse_ms: number;
+  ra_dir: string;
+  dec_pulse_ms: number;
+  dec_dir: string;
+  snr: number | null;
+  mass: number | null;
+  dropped: boolean;
+}
+
+export interface Phd2FramesResponse {
+  pixel_scale_arcsec: number | null;
+  started_at: string;
+  frames: Phd2Frame[];
+  events: Phd2Event[];
+}
+
+export interface Phd2SessionListResponse { sessions: Phd2SessionSummary[]; }
+
+export interface Phd2Profile {
+  name: string;
+  guide_camera: string | null;
+  focal_length_mm: number | null;
+  pixel_scale_arcsec: number | null;
+  session_count: number;
+  first_seen: string | null;
+  last_seen: string | null;
+  mapped_telescope: string | null;
+}
+
+export interface Phd2ProfileListResponse { profiles: Phd2Profile[]; }
+
+export interface Phd2NightSummary {
+  session_count: number;
+  gated_session_count: number;
+  frame_count: number;
+  rms_ra_arcsec: number | null;
+  rms_dec_arcsec: number | null;
+  rms_total_arcsec: number | null;
+  drop_count: number;
+  max_drop_run: number;
+  unguided_seconds: number;
+  dither_count: number;
+  settle_failed_count: number;
+  settle_median_s: number | null;
+  cal_issues: string[];
+  profiles: string[];
 }
 
 // === Equipment === (generated name: EquipmentResponse)
@@ -484,6 +583,15 @@ export interface GeneralSettings {
   wbpp_quality_score_threshold?: number;
   wbpp_quality_baseline?: string;
   wbpp_quality_raw_constraints?: { metric: string; value: number }[];
+  // IANA zone name used to convert PHD2's local wall-clock timestamps to UTC.
+  // Empty/absent means "use the server's local zone".
+  observer_timezone?: string | null;
+  // Whether the library scan also collects PHD2_GuideLog_*.txt files.
+  // Absent means enabled (the backend default).
+  phd2_scan_enabled?: boolean;
+  // Raw PHD2 equipment profile name -> catalog telescope name. Several
+  // profiles may map to one telescope; that is the rig merge mechanism.
+  phd2_profile_map?: Record<string, string>;
 }
 
 export interface FilterConfig {

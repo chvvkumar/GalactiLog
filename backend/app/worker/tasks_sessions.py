@@ -90,6 +90,33 @@ def backfill_dark_hours(parent_activity_id: int | None = None) -> dict:
         _redis.delete(DARK_HOURS_LOCK)
 
 
+def _rekey_phd2_sessions(session, *, use_night: bool, longitude: float | None) -> int:
+    """Recompute session_date for every PHD2 session and calibration row.
+
+    Simpler than the image-derived re-keying used for notes and custom values:
+    a PHD2 row already carries its own absolute started_at_utc, so the night it
+    belongs to is a direct computation rather than a vote among nearby frames.
+    The observer longitude is the configured one - a guide log has no site
+    headers to read a longitude from.
+
+    Returns the number of rows whose date changed. Caller commits.
+    """
+    from app.models.phd2 import Phd2Calibration, Phd2Session
+
+    changed = 0
+    for model in (Phd2Session, Phd2Calibration):
+        for row in session.execute(select(model)).scalars().all():
+            new_date = compute_session_date(
+                row.started_at_utc,
+                use_imaging_night=use_night,
+                longitude=longitude,
+            )
+            if row.session_date != new_date:
+                row.session_date = new_date
+                changed += 1
+    return changed
+
+
 @celery_app.task(name="recompute_session_dates", bind=True)
 def recompute_session_dates(self):
     """Recompute session_date for all images and re-key session notes/custom values."""
@@ -228,5 +255,22 @@ def recompute_session_dates(self):
 
         session.commit()
 
-        logger.info("recompute_session_dates: updated %d images", total)
-        return {"status": "done", "images_updated": total}
+        # Phase 4: Re-key PHD2 guiding sessions and calibrations.
+        # phd2_sessions is session_date-keyed exactly like session_notes and
+        # custom_column_values above. Without this phase, toggling
+        # imaging-night moves every image to a new night while the guiding
+        # sessions stay on the old one, and the session-detail join quietly
+        # returns nothing for every night in the catalog.
+        phd2_rekeyed = _rekey_phd2_sessions(
+            session, use_night=use_night, longitude=fallback_lon
+        )
+        session.commit()
+
+        logger.info(
+            "recompute_session_dates: updated %d images, re-keyed %d PHD2 rows",
+            total, phd2_rekeyed,
+        )
+        return {
+            "status": "done", "images_updated": total,
+            "phd2_rows_rekeyed": phd2_rekeyed,
+        }

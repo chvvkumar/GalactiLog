@@ -99,4 +99,10 @@ export const queryKeys = {
   timeseries: (params: unknown) => ["analysis", "timeseries", params] as const,
   matrix: (params: unknown) => ["analysis", "matrix", params] as const,
   compare: (params: unknown) => ["analysis", "compare", params] as const,
+
+  // PHD2 guiding
+  phd2Profiles: () => ["phd2", "profiles"] as const,
+  phd2Sessions: (sessionDate: string, telescope?: string | null) =>
+    ["phd2", "sessions", "list", sessionDate, telescope ?? null] as const,
+  phd2Frames: (sessionId: string) => ["phd2", "sessions", sessionId, "frames"] as const,
 };

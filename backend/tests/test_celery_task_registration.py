@@ -24,3 +24,25 @@ def test_sibling_module_beat_tasks_are_registered():
     }
     missing = expected - registered
     assert not missing, f"Sibling-module beat tasks not registered: {sorted(missing)}"
+
+
+def test_phd2_scan_task_is_reexported_from_the_tasks_facade():
+    """scan_phd2_logs lives in tasks_phd2.py, which autodiscover never imports.
+
+    Celery's autodiscover_tasks(["app.worker"]) imports only app.worker.tasks,
+    so a task defined in a sibling domain module is registered solely because
+    the facade re-exports it. Without the re-export, run_scan would dispatch
+    the task by name and the worker would reject it as unregistered.
+    """
+    import ast
+    import pathlib
+
+    facade = pathlib.Path(__file__).resolve().parents[1] / "app" / "worker" / "tasks.py"
+    tree = ast.parse(facade.read_text(encoding="utf-8"))
+    imported = {
+        alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and node.module == "app.worker.tasks_phd2"
+        for alias in node.names
+    }
+    assert "scan_phd2_logs" in imported

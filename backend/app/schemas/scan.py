@@ -56,6 +56,14 @@ class ScanStateResponse(BaseModel):
     skipped_calibration: int = 0
     new_files: int = 0
     changed_files: int = 0
+    phd2_found: int = 0
+    phd2_ingested: int = 0
+    phd2_failed: int = 0
+    # "" | pending | running. The guide-log pass outlives the image scan, so
+    # ``state == "complete"`` alone does not mean the scan is finished. A
+    # caller that needs everything done waits for this to be "" as well; the
+    # phd2_* counters above only describe the current pass once it is.
+    phd2_state: str = ""
     failed_files: list[str] | None = None
     task: str = ""
     step: int = 0

@@ -112,11 +112,16 @@ async def test_session_detail_has_new_fields():
     mock_catalog_frames_result = MagicMock()
     mock_catalog_frames_result.all.return_value = []
 
+    # phd2 night sessions; scalars().all(). Empty: these tests cover the
+    # no-guide-log case, so the summary comes back None.
+    mock_phd2_result = MagicMock()
+    mock_phd2_result.scalars.return_value.all.return_value = []
+
     mock_session.execute = AsyncMock(
         side_effect=[
             mock_img_result, mock_alias_result,
             mock_all_hfr_result, mock_note_result, mock_cv_result,
-            mock_catalog_frames_result,
+            mock_catalog_frames_result, mock_phd2_result,
         ]
     )
 
@@ -202,11 +207,15 @@ async def test_session_detail_hfr_outlier_insight():
     mock_catalog_frames_result = MagicMock()
     mock_catalog_frames_result.all.return_value = []
 
+    # phd2 night sessions; scalars().all(). Empty: no guide log for this night.
+    mock_phd2_result = MagicMock()
+    mock_phd2_result.scalars.return_value.all.return_value = []
+
     mock_session.execute = AsyncMock(
         side_effect=[
             mock_img_result, mock_alias_result,
             mock_all_hfr_result, mock_note_result, mock_cv_result,
-            mock_catalog_frames_result,
+            mock_catalog_frames_result, mock_phd2_result,
         ]
     )
 
@@ -267,11 +276,15 @@ async def _fetch_session(images, catalog_rows=None, avg_hfr=2.0, tid=None):
     mock_catalog_frames_result = MagicMock()
     mock_catalog_frames_result.all.return_value = catalog_rows or []
 
+    # phd2 night sessions; scalars().all(). Empty: no guide log for this night.
+    mock_phd2_result = MagicMock()
+    mock_phd2_result.scalars.return_value.all.return_value = []
+
     mock_session.execute = AsyncMock(
         side_effect=[
             mock_img_result, mock_alias_result,
             mock_all_hfr_result, mock_note_result, mock_cv_result,
-            mock_catalog_frames_result,
+            mock_catalog_frames_result, mock_phd2_result,
         ]
     )
 

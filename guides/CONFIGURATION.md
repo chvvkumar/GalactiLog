@@ -95,6 +95,34 @@ Configure from **Settings > General**:
 
 Manual scans can be triggered from **Settings > Library**.
 
+## PHD2 Guide Logs
+
+Guide logs are collected during the normal library scan. Any file named `PHD2_GuideLog_*.txt` under the library path is parsed and catalogued; `PHD2_DebugLog_*` files are ignored.
+
+Configure from **Settings > Library**:
+
+- **Scan PHD2 guide logs** -- Toggles discovery of guide logs on disk. Turning it off leaves already-catalogued logs in place, and does not block corrections applied to stored guiding data (a profile re-key or a timezone re-parse).
+- **Observer Timezone** -- The IANA zone name of the capture machine, for example `America/New_York`. PHD2 writes guide-log timestamps as local wall-clock with no zone marker, so this value decides what absolute time each guiding session is stored at. Leave it empty to use the server's own zone. Changing it re-parses every catalogued guide log so existing sessions are corrected too.
+- **Observer Longitude** -- Required for guide sessions to be grouped by imaging night. See below.
+
+Map PHD2 equipment profiles onto telescope names from **Settings > Equipment**. The mapping is applied to stored sessions by a background task; no re-scan is required.
+
+### Observer Location and Guiding Nights
+
+Set **Observer Latitude** and **Observer Longitude** under **Settings > Library > Observer Location** if imaging-night grouping is enabled, which it is by default.
+
+Imaging-night grouping puts a whole night's data on one date by cutting the day at local solar noon instead of UTC midnight. Images can work that out on their own, because each FITS file carries the site longitude in its `SITELONG` header. A PHD2 guide log carries no coordinates, so the observer longitude setting is the only source it has.
+
+With the longitude unset, guide sessions fall back to grouping by UTC midnight while images keep grouping by solar noon. West of Greenwich an evening session then lands one day after the frames it belongs with, so the session card for that night shows no guiding data at all. The scan logs a warning when this happens, and the activity feed reports the guiding nights that fall a day off.
+
+Filling in the longitude fixes existing data as well as new: saving it re-keys every stored guide session and calibration onto the correct night. No re-scan is needed.
+
+### Scan Filters and Guide-Log Discovery
+
+Guide logs are tested against the same include and exclude rules as image files. A file-target include rule narrows every file the scan sees, not only images, so a rule such as `include` / `file` / `*.fits` suppresses guide-log discovery completely: no `PHD2_GuideLog_*.txt` name can match it. The scan reports zero guide logs found and raises no error, which is the expected result of the rule rather than a fault.
+
+To keep both, either restrict the library with folder-target rules and include paths instead of a file-target include rule, or add a second file-target include rule for `PHD2_GuideLog_*.txt`.
+
 ## Filter Aliases
 
 Different equipment or N.I.N.A. profiles may record the same filter under different names (e.g. "Ha", "H-alpha", "Hydrogen Alpha"). Aliases map these variants to a single canonical name.

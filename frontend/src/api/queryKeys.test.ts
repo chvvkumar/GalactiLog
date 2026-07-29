@@ -78,4 +78,28 @@ describe("queryKeys", () => {
     ].map((k) => JSON.stringify(k));
     expect(new Set(keys).size).toBe(keys.length);
   });
+
+  it("phd2 keys are prefix-scoped and vary by every distinguishing argument", () => {
+    expect(queryKeys.phd2Profiles()[0]).toBe("phd2");
+    expect(queryKeys.phd2Sessions("2026-07-14", "140APO")).toEqual(
+      queryKeys.phd2Sessions("2026-07-14", "140APO")
+    );
+    expect(queryKeys.phd2Sessions("2026-07-14", "140APO")).not.toEqual(
+      queryKeys.phd2Sessions("2026-07-14", "OAG")
+    );
+    expect(queryKeys.phd2Sessions("2026-07-14", null)).not.toEqual(
+      queryKeys.phd2Sessions("2026-07-15", null)
+    );
+    expect(queryKeys.phd2Frames("a")).not.toEqual(queryKeys.phd2Frames("b"));
+  });
+
+  it("phd2 session-list and frames keys cannot collide", () => {
+    const keys = [
+      queryKeys.phd2Profiles(),
+      queryKeys.phd2Sessions("2026-07-14", null),
+      queryKeys.phd2Sessions("2026-07-14", "frames"),
+      queryKeys.phd2Frames("2026-07-14"),
+    ].map((k) => JSON.stringify(k));
+    expect(new Set(keys).size).toBe(keys.length);
+  });
 });

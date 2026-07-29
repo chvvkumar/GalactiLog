@@ -107,3 +107,40 @@ def test_wbpp_raw_constraint_stores_no_direction():
     assert set(WbppRawConstraint(metric="eccentricity", value=0.6).model_dump()) == {
         "metric", "value",
     }
+
+
+# --- PHD2 guide-log settings --------------------------------------------------
+
+def test_phd2_settings_defaults():
+    s = GeneralSettings()
+    assert s.observer_timezone == ""
+    assert s.phd2_scan_enabled is True
+    assert s.phd2_profile_map == {}
+
+
+def test_phd2_profile_map_accepts_many_names_for_one_telescope():
+    s = GeneralSettings(phd2_profile_map={
+        "140APO_AM5N_ASI174MM": "140APO",
+        "AM5n_OAG_ASI174M": "140APO",
+        "ASI220mm_30F5_AM5": "RedCat 51",
+    })
+    assert s.phd2_profile_map["140APO_AM5N_ASI174MM"] == "140APO"
+    assert s.phd2_profile_map["AM5n_OAG_ASI174M"] == "140APO"
+    assert len(set(s.phd2_profile_map.values())) == 2
+
+
+def test_phd2_settings_survive_a_general_round_trip():
+    payload = GeneralSettings(
+        observer_timezone="America/New_York",
+        phd2_scan_enabled=False,
+        phd2_profile_map={"AM5n_OAG_ASI174M": "140APO"},
+    ).model_dump()
+    restored = GeneralSettings(**payload)
+    assert restored.observer_timezone == "America/New_York"
+    assert restored.phd2_scan_enabled is False
+    assert restored.phd2_profile_map == {"AM5n_OAG_ASI174M": "140APO"}
+
+
+def test_phd2_profile_map_rejects_non_string_values():
+    with pytest.raises(ValidationError):
+        GeneralSettings(phd2_profile_map={"AM5n_OAG_ASI174M": ["140APO"]})

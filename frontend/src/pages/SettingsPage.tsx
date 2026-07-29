@@ -28,8 +28,20 @@ const EquipmentGroupingSectionHelp: Component = () => (
   </>
 );
 
+const Phd2ProfilesSectionHelp: Component = () => (
+  <>
+    <p class="text-sm text-theme-text-secondary">
+      PHD2 records an equipment profile name in every guide log. Mapping a profile to one of your telescopes is what attaches its guiding statistics to that rig's sessions.
+    </p>
+    <p class="text-sm text-theme-text-secondary">
+      Profiles that describe the same physical setup can point at the same telescope, which merges them. On a night where more than one rig was imaging, an unmapped profile is skipped rather than guessed at.
+    </p>
+  </>
+);
+
 const FiltersTab = lazy(() => import("../components/settings/FiltersTab").then(m => ({ default: m.FiltersTab })));
 const EquipmentTab = lazy(() => import("../components/settings/EquipmentTab").then(m => ({ default: m.EquipmentTab })));
+const Phd2ProfilePanel = lazy(() => import("../components/settings/Phd2ProfilePanel").then(m => ({ default: m.Phd2ProfilePanel })));
 const TargetManagementTab = lazy(() => import("../components/settings/TargetManagementTab").then(m => ({ default: m.TargetManagementTab })));
 const UsersTab = lazy(() => import("../components/settings/UsersTab").then(m => ({ default: m.UsersTab })));
 const BackupRestoreTab = lazy(() => import("../components/settings/BackupRestoreTab").then(m => ({ default: m.BackupRestoreTab })));
@@ -91,7 +103,7 @@ export const SettingsPage: Component = () => {
           </p>
           <ul class="text-sm text-theme-text-secondary list-disc list-inside space-y-1">
             <li><strong class="text-theme-text-primary">Library</strong>: scan triggers, auto-scan schedule, observer location, path and name rules, maintenance actions.</li>
-            <li><strong class="text-theme-text-primary">Equipment</strong>: filter and equipment canonical names and alias merging.</li>
+            <li><strong class="text-theme-text-primary">Equipment</strong>: filter and equipment canonical names, alias merging, and PHD2 profile to telescope mapping.</li>
             <li><strong class="text-theme-text-primary">Display</strong>: theme, text size, filter badge style, timezone, content width, preview cache, metric visibility.</li>
             <li><strong class="text-theme-text-primary">External Tools</strong>: AstroBin filter ID mapping and Bortle class, NINA/Stellarium instance configuration for coordinate forwarding, and PixInsight (WBPP) export defaults.</li>
             <li><strong class="text-theme-text-primary">Target Management</strong>: duplicate candidates, unresolved names, and maintenance actions.</li>
@@ -129,6 +141,15 @@ export const SettingsPage: Component = () => {
                 </HelpPopover>
               </div>
               <EquipmentTab />
+            </div>
+            <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
+              <div class="flex items-center gap-2">
+                <h2 class="text-sm font-semibold text-theme-text-primary">PHD2 Profiles</h2>
+                <HelpPopover title="PHD2 Profiles">
+                  <Phd2ProfilesSectionHelp />
+                </HelpPopover>
+              </div>
+              <Phd2ProfilePanel />
             </div>
           </div>
         </Show>
