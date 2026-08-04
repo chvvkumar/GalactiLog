@@ -51,6 +51,7 @@ def make_image(
     img.guiding_rms_arcsec = None
     img.guiding_rms_ra_arcsec = None
     img.guiding_rms_dec_arcsec = None
+    img.guiding_rms_source = None
     img.detected_stars = None
     img.adu_stdev = None
     img.adu_mean = None

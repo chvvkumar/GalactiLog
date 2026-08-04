@@ -56,7 +56,7 @@ from app.worker.tasks_sessions import (  # noqa: F401
     DARK_HOURS_LOCK, DARK_HOURS_LOCK_TTL,
 )
 from app.worker.tasks_phd2 import (  # noqa: F401
-    scan_phd2_logs, ingest_phd2_log, apply_profile_map,
+    scan_phd2_logs, ingest_phd2_log, apply_profile_map, correlate_phd2_images,
 )
 
 # A handful of call sites (mostly tests, plus a couple of production modules

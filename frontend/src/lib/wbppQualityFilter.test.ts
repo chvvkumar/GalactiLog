@@ -491,3 +491,20 @@ describe("excludedUnderSelectedLevels", () => {
     expect(excludedUnderSelectedLevels(verdicts, new Map())).toEqual([]);
   });
 });
+
+describe("WBPP guiding filter is provenance blind", () => {
+  it("grades a PHD2-sourced frame exactly as it grades a CSV-sourced one", () => {
+    // The filter reads guiding_rms_arcsec, which the correlation pass fills
+    // in the same column and the same units as the CSV importer. Provenance
+    // must not reach the verdict.
+    const csvFrame = frame({ guiding_rms_arcsec: 0.62, guiding_rms_source: "csv" });
+    const phd2Frame = frame({ guiding_rms_arcsec: 0.62, guiding_rms_source: "phd2" });
+    const constraints = [con("rms", "lte", 0.8)];
+
+    expect(evaluateRaw(phd2Frame, constraints)).toEqual(evaluateRaw(csvFrame, constraints));
+  });
+
+  it("still maps the rms metric to the guiding column the pass fills", () => {
+    expect(METRIC_DEFS.rms.field).toBe("guiding_rms_arcsec");
+  });
+});

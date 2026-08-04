@@ -144,3 +144,57 @@ def test_phd2_settings_survive_a_general_round_trip():
 def test_phd2_profile_map_rejects_non_string_values():
     with pytest.raises(ValidationError):
         GeneralSettings(phd2_profile_map={"AM5n_OAG_ASI174M": ["140APO"]})
+
+
+def test_the_wbpp_quality_filter_can_target_guiding_rms():
+    """The constraint names a FrameRecord field so the client can index a
+    frame directly. Correlation fills that same field, so a PHD2-sourced
+    frame is filterable without any change to the constraint model."""
+    from app.schemas.settings import WbppRawConstraint
+
+    constraint = WbppRawConstraint(metric="guiding_rms_arcsec", value=0.8)
+    assert constraint.metric == "guiding_rms_arcsec"
+
+
+def test_the_wbpp_metric_names_are_all_frame_record_fields():
+    """The comment above WbppRawMetric promises this and nothing enforced it,
+    which is how it came to name a frontend constant that no longer exists."""
+    import typing
+
+    from app.schemas.settings import WbppRawMetric
+    from app.schemas.target import FrameRecord
+
+    for name in typing.get_args(WbppRawMetric):
+        assert name in FrameRecord.model_fields, name
+
+
+def test_an_unknown_stored_metric_fails_the_settings_read_not_just_the_write():
+    """test_wbpp_quality_rejects_an_unknown_metric above is a write-time guard.
+    This pins the read path, which is the one with the blast radius:
+    _row_to_response rebuilds GeneralSettings from the stored JSON on every
+    settings fetch, so a constraint naming a metric this backend does not know
+    takes the whole response down rather than degrading the WBPP filter.
+
+    The asymmetry with an unknown top-level key is deliberate. Pydantic's
+    default extra policy drops a stray key, so a setting a newer client
+    invented is simply ignored on an older backend. A stray metric inside the
+    typed list cannot be treated the same way: the client indexes a frame by
+    that name, so an unrecognised one would evaluate to missing and silently
+    skip the frame. A loud read failure was chosen over a wrong export."""
+    stored = GeneralSettings(
+        wbpp_quality_enabled=True,
+        wbpp_quality_mode="raw",
+        wbpp_quality_raw_constraints=[{"metric": "guiding_rms_arcsec", "value": 0.8}],
+    ).model_dump()
+
+    # A key a newer client invented is ignored, and the constraint a PHD2-derived
+    # frame is filtered by survives the same read intact.
+    tolerated = GeneralSettings(**{**stored, "wbpp_quality_future_knob": 7})
+    assert tolerated.wbpp_quality_raw_constraints[0].metric == "guiding_rms_arcsec"
+    assert not hasattr(tolerated, "wbpp_quality_future_knob")
+
+    # An unrecognised metric inside the typed list is not tolerated, and it
+    # fails when the row is read back, not only when a client writes it.
+    stored["wbpp_quality_raw_constraints"].append({"metric": "snr", "value": 1.0})
+    with pytest.raises(ValidationError):
+        GeneralSettings(**stored)

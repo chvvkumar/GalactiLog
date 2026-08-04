@@ -68,16 +68,52 @@ const DEFAULT_GRAPH_HEIGHT = 220;
 /** Below this the axis labels and the legend crowd out the trace itself. */
 const MIN_GRAPH_HEIGHT = 140;
 
-/** Dropdown label for one guiding session: start time, duration, optional profile. */
+/** Which rig a guiding session belongs to.
+ *
+ * `equipment_profile` is the raw PHD2 log header name; `telescope` is what the
+ * profile map resolves it to, and it is the canonical rig everywhere else in
+ * the app. Two profile names can resolve to one physical scope, for instance
+ * after a profile rename mid-season, so keying rig identity on the header name
+ * would offer the same rig twice and hide half its sessions behind either
+ * entry. The fallback matters: an unmapped profile has a null telescope, and
+ * dropping it would take its sessions off the panel entirely.
+ */
+export function guideRigLabel(session: Phd2SessionSummary): string {
+  return session.telescope ?? session.equipment_profile;
+}
+
+/** Dropdown label for one guiding session: start time, duration, optional rig. */
 export function sessionOptionLabel(
   session: Phd2SessionSummary,
   startLabel: string,
   showProfile: boolean,
 ): string {
   const parts = [startLabel, formatSecondsShort(session.duration_s)];
-  if (showProfile) parts.push(session.equipment_profile);
+  if (showProfile) parts.push(guideRigLabel(session));
   if (session.gated) parts.push("short");
   return parts.join(" · ");
+}
+
+/** Every rig that appears on this night, once each, in a stable order. Two
+ *  PHD2 instances can run on one night against two rigs, and the session list
+ *  is then an interleaving of both; this is what the rig filter offers and,
+ *  when it holds a single entry, why the filter stays hidden. */
+export function guideProfileOptions(sessions: Phd2SessionSummary[]): string[] {
+  return [...new Set(sessions.map(guideRigLabel))].sort((a, b) =>
+    a.localeCompare(b),
+  );
+}
+
+/** The sessions the panel should treat as the night. A null rig means the
+ *  whole night; a rig no longer present on the night yields nothing, which the
+ *  caller resolves by clearing the filter rather than by silently showing the
+ *  other rig. */
+export function filterSessionsByProfile(
+  sessions: Phd2SessionSummary[],
+  profile: string | null,
+): Phd2SessionSummary[] {
+  if (!profile) return sessions;
+  return sessions.filter((s) => guideRigLabel(s) === profile);
 }
 
 /** True when frames arrived but the session carries no pixel scale.
@@ -225,6 +261,8 @@ const Phd2GuideGraphBody: Component<{
 }> = (props) => {
   const settingsCtx = useSettingsContext();
   const [selectedId, setSelectedId] = createSignal<string | null>(null);
+  // Null means the whole night. Only meaningful when the night mixes rigs.
+  const [profileFilter, setProfileFilter] = createSignal<string | null>(null);
   // null means the whole session; a window means the user zoomed in.
   const [view, setView] = createSignal<GuideView | null>(null);
   const [yView, setYView] = createSignal<GuideView | null>(null);
@@ -262,10 +300,25 @@ const Phd2GuideGraphBody: Component<{
 
   const sessions = (): Phd2SessionSummary[] => sessionsQuery.data?.sessions ?? [];
 
-  // Default to the first session long enough to be graded; a night of only
-  // short sessions still gets a plot, just no gradeable RMS behind it.
+  const profileOptions = createMemo(() => guideProfileOptions(sessions()));
+
+  const visibleSessions = createMemo(() =>
+    filterSessionsByProfile(sessions(), profileFilter()),
+  );
+
+  // Moving to another night can retire the rig that was filtered on. Clearing
+  // the filter is the only correct recovery: leaving it set would show an
+  // empty panel on a night that has data.
   createEffect(() => {
-    const list = sessions();
+    const chosen = profileFilter();
+    if (chosen !== null && !profileOptions().includes(chosen)) setProfileFilter(null);
+  });
+
+  // Default to the first session long enough to be graded; a night of only
+  // short sessions still gets a plot, just no gradeable RMS behind it. Reads
+  // the filtered list, so choosing a rig also moves the selection onto it.
+  createEffect(() => {
+    const list = visibleSessions();
     if (list.length === 0) { setSelectedId(null); return; }
     const current = selectedId();
     if (current && list.some((s) => s.id === current)) return;
@@ -292,7 +345,9 @@ const Phd2GuideGraphBody: Component<{
   const startLabel = (session: Phd2SessionSummary) =>
     formatTime(session.started_at, settingsCtx.timezone(), settingsCtx.use24hTime());
 
-  const showProfile = () => new Set(sessions().map((s) => s.equipment_profile)).size > 1;
+  // Reads the visible list, not the night: once the user has filtered down to
+  // one rig, repeating its name on every option is noise.
+  const showProfile = () => new Set(visibleSessions().map(guideRigLabel)).size > 1;
 
   /** Elapsed-time extent of the whole session, the outer limit for any view. */
   const fullRange = createMemo<GuideView>(() => {
@@ -745,13 +800,27 @@ const Phd2GuideGraphBody: Component<{
         <div class="text-xs text-theme-text-secondary">No PHD2 data for this session</div>
       }>
         <div class="flex flex-wrap items-center gap-3">
-          <Show when={sessions().length > 1}>
+          <Show when={profileOptions().length > 1}>
             <select
+              aria-label="Guiding rig"
+              class="px-2.5 py-1 bg-theme-input border border-theme-border rounded-[var(--radius-sm)] text-xs text-theme-text-primary focus:ring-1 focus:ring-theme-accent focus:border-theme-accent outline-none"
+              value={profileFilter() ?? ""}
+              onChange={(e) => setProfileFilter(e.currentTarget.value || null)}
+            >
+              <option value="">All rigs</option>
+              <For each={profileOptions()}>
+                {(profile) => <option value={profile}>{profile}</option>}
+              </For>
+            </select>
+          </Show>
+          <Show when={visibleSessions().length > 1}>
+            <select
+              aria-label="Guiding session"
               class="px-2.5 py-1 bg-theme-input border border-theme-border rounded-[var(--radius-sm)] text-xs text-theme-text-primary focus:ring-1 focus:ring-theme-accent focus:border-theme-accent outline-none"
               value={selectedId() ?? ""}
               onChange={(e) => setSelectedId(e.currentTarget.value)}
             >
-              <For each={sessions()}>
+              <For each={visibleSessions()}>
                 {(s) => <option value={s.id}>{sessionOptionLabel(s, startLabel(s), showProfile())}</option>}
               </For>
             </select>

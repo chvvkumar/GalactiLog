@@ -3285,6 +3285,8 @@ export interface components {
             guiding_rms_dec_arcsec?: number | null;
             /** Guiding Rms Ra Arcsec */
             guiding_rms_ra_arcsec?: number | null;
+            /** Guiding Rms Source */
+            guiding_rms_source?: string | null;
             /** Hfr Stdev */
             hfr_stdev?: number | null;
             /** Humidity */
@@ -3855,6 +3857,19 @@ export interface components {
              * Format: uuid
              */
             target_id: string;
+        };
+        /**
+         * MosaicStatusResponse
+         * @description Single-field status response for the mosaic mutation routes.
+         *
+         *     Named for its module rather than sharing the generic name in
+         *     schemas/common.py: FastAPI derives OpenAPI component names from the class
+         *     name, so two identically named models produce module-qualified names in
+         *     the generated client for some routes and a bare one for others.
+         */
+        MosaicStatusResponse: {
+            /** Status */
+            status: string;
         };
         /** MosaicSuggestionResponse */
         MosaicSuggestionResponse: {
@@ -4655,6 +4670,8 @@ export interface components {
              * @default
              */
             phd2_state: string;
+            /** Phd2 State At */
+            phd2_state_at?: number | null;
             /**
              * Removed
              * @default 0
@@ -4985,7 +5002,10 @@ export interface components {
             /** Top Targets */
             top_targets: components["schemas"]["TopTarget"][];
         };
-        /** StatusResponse */
+        /**
+         * StatusResponse
+         * @description Generic single-field status response, e.g. {"status": "ok"}.
+         */
         StatusResponse: {
             /** Status */
             status: string;
@@ -5293,6 +5313,17 @@ export interface components {
              * @default false
              */
             unresolved: boolean;
+        };
+        /**
+         * TargetStatusResponse
+         * @description Single-field status response for the target and merge mutation routes.
+         *
+         *     Named for its module rather than sharing the generic name in
+         *     schemas/common.py; see MosaicStatusResponse for why.
+         */
+        TargetStatusResponse: {
+            /** Status */
+            status: string;
         };
         /** TaskStatusResponse */
         TaskStatusResponse: {
@@ -5610,19 +5641,6 @@ export interface components {
             /** Total Frame Count */
             total_frame_count: number;
         };
-        /**
-         * StatusResponse
-         * @description Generic single-field status response, e.g. {"status": "ok"}.
-         */
-        app__schemas__common__StatusResponse: {
-            /** Status */
-            status: string;
-        };
-        /** StatusResponse */
-        app__schemas__mosaic__StatusResponse: {
-            /** Status */
-            status: string;
-        };
     };
     responses: never;
     parameters: never;
@@ -5686,7 +5704,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["app__schemas__common__StatusResponse"];
+                    "application/json": components["schemas"]["StatusResponse"];
                 };
             };
             /** @description Validation Error */
@@ -6052,7 +6070,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["app__schemas__common__StatusResponse"];
+                    "application/json": components["schemas"]["StatusResponse"];
                 };
             };
             /** @description Validation Error */
@@ -6118,7 +6136,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["app__schemas__common__StatusResponse"];
+                    "application/json": components["schemas"]["StatusResponse"];
                 };
             };
             /** @description Validation Error */
@@ -6149,7 +6167,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["app__schemas__common__StatusResponse"];
+                    "application/json": components["schemas"]["StatusResponse"];
                 };
             };
             /** @description Validation Error */
@@ -6685,7 +6703,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["app__schemas__common__StatusResponse"];
+                    "application/json": components["schemas"]["StatusResponse"];
                 };
             };
             /** @description Validation Error */
@@ -6718,7 +6736,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["app__schemas__common__StatusResponse"];
+                    "application/json": components["schemas"]["StatusResponse"];
                 };
             };
             /** @description Validation Error */
@@ -6751,7 +6769,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["app__schemas__common__StatusResponse"];
+                    "application/json": components["schemas"]["StatusResponse"];
                 };
             };
             /** @description Validation Error */
@@ -6941,7 +6959,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["app__schemas__common__StatusResponse"];
+                    "application/json": components["schemas"]["StatusResponse"];
                 };
             };
             /** @description Validation Error */
@@ -7239,7 +7257,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["app__schemas__mosaic__StatusResponse"];
+                    "application/json": components["schemas"]["MosaicStatusResponse"];
                 };
             };
             /** @description Validation Error */
@@ -7309,7 +7327,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["app__schemas__mosaic__StatusResponse"];
+                    "application/json": components["schemas"]["MosaicStatusResponse"];
                 };
             };
             /** @description Validation Error */
@@ -7342,7 +7360,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["app__schemas__mosaic__StatusResponse"];
+                    "application/json": components["schemas"]["MosaicStatusResponse"];
                 };
             };
             /** @description Validation Error */
@@ -7520,7 +7538,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["app__schemas__mosaic__StatusResponse"];
+                    "application/json": components["schemas"]["MosaicStatusResponse"];
                 };
             };
             /** @description Validation Error */
@@ -7592,7 +7610,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["app__schemas__mosaic__StatusResponse"];
+                    "application/json": components["schemas"]["MosaicStatusResponse"];
                 };
             };
             /** @description Validation Error */
@@ -9180,7 +9198,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["StatusResponse"];
+                    "application/json": components["schemas"]["TargetStatusResponse"];
                 };
             };
             /** @description Validation Error */
@@ -9246,7 +9264,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["StatusResponse"];
+                    "application/json": components["schemas"]["TargetStatusResponse"];
                 };
             };
             /** @description Validation Error */
@@ -9279,7 +9297,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["StatusResponse"];
+                    "application/json": components["schemas"]["TargetStatusResponse"];
                 };
             };
             /** @description Validation Error */
@@ -9626,7 +9644,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["StatusResponse"];
+                    "application/json": components["schemas"]["TargetStatusResponse"];
                 };
             };
             /** @description Validation Error */
@@ -9731,7 +9749,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["StatusResponse"];
+                    "application/json": components["schemas"]["TargetStatusResponse"];
                 };
             };
             /** @description Validation Error */
@@ -9764,7 +9782,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["StatusResponse"];
+                    "application/json": components["schemas"]["TargetStatusResponse"];
                 };
             };
             /** @description Validation Error */

@@ -223,7 +223,7 @@ const settle = async (ticks = 10) => {
 describe("Phd2GuideGraph canvas binding", () => {
   it("rebinds the chart after the pixel-scale gate swaps the canvas", async () => {
     built.length = 0;
-    const { getByRole, container } = render(() => <Harness />);
+    const { getByRole, getByLabelText, container } = render(() => <Harness />);
 
     fireEvent.click(getByRole("button", { name: "Guide Graph (PHD2)" }));
     await settle();
@@ -235,8 +235,7 @@ describe("Phd2GuideGraph canvas binding", () => {
 
     // Select the session with no pixel scale: the canvas is replaced by the
     // explanatory message while the frame count stays at three.
-    const select = container.querySelector("select") as HTMLSelectElement;
-    expect(select).not.toBeNull();
+    const select = getByLabelText("Guiding session") as HTMLSelectElement;
     fireEvent.change(select, { target: { value: "unscaled-2" } });
     await settle();
     expect(container.querySelector("canvas")).toBeNull();

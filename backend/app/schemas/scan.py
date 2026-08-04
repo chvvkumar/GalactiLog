@@ -64,6 +64,11 @@ class ScanStateResponse(BaseModel):
     # caller that needs everything done waits for this to be "" as well; the
     # phd2_* counters above only describe the current pass once it is.
     phd2_state: str = ""
+    # Unix time phd2_state was last written, or null. A "pending" claim has no
+    # expiry of its own - a task queued and then lost never clears it - so a
+    # consumer that would otherwise wait on the flag forever ages it out on
+    # this instead.
+    phd2_state_at: float | None = None
     failed_files: list[str] | None = None
     task: str = ""
     step: int = 0

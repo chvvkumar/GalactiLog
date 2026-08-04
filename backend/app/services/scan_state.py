@@ -83,6 +83,13 @@ class ScanStateSnapshot:
     # written by the task itself and cleared, together with the counters, in
     # the one write that publishes them.
     phd2_state: str = ""
+    # Unix time at which phd2_state was last written, or None for a hash
+    # written before this field existed. Only a RAISING apply_async clears
+    # the flag: a guide-log task that was queued and then lost (worker down,
+    # broker discard) leaves "pending" set until the whole scan:state key
+    # expires, and a consumer that waits for the flag to clear waits forever.
+    # The age of the claim is what lets a reader stop believing it.
+    phd2_state_at: float | None = None
     # Phase 3 structured progress envelope (task/step/total_steps/percent/
     # message) - additive fields layered onto this same hash, alongside the
     # counters above which stay the source of truth for the scan_complete
@@ -112,6 +119,7 @@ class ScanStateSnapshot:
             "phd2_ingested": self.phd2_ingested,
             "phd2_failed": self.phd2_failed,
             "phd2_state": self.phd2_state,
+            "phd2_state_at": self.phd2_state_at,
             "task": self.task,
             "step": self.step,
             "total_steps": self.total_steps,
@@ -153,6 +161,9 @@ def parse_snapshot(data: dict | None) -> ScanStateSnapshot:
         phd2_ingested=int(data.get("phd2_ingested", 0)),
         phd2_failed=int(data.get("phd2_failed", 0)),
         phd2_state=data.get("phd2_state", "") or "",
+        phd2_state_at=(
+            float(data["phd2_state_at"]) if data.get("phd2_state_at") else None
+        ),
         task=task,
         step=step,
         total_steps=total_steps,
@@ -446,13 +457,18 @@ def check_complete_sync(r: sync_redis.Redis) -> None:
     from app.worker.tasks import (
         smart_rebuild_targets, detect_mosaic_panels_task,
         generate_reference_thumbnails, detect_duplicate_targets,
-        backfill_dark_hours,
+        backfill_dark_hours, correlate_phd2_images,
     )
     smart_rebuild_targets.apply_async(countdown=10, kwargs={"parent_activity_id": scan_activity_id})
     generate_reference_thumbnails.apply_async(countdown=20, kwargs={"parent_activity_id": scan_activity_id})
     detect_mosaic_panels_task.apply_async(countdown=30, kwargs={"parent_activity_id": scan_activity_id})
     detect_duplicate_targets.apply_async(countdown=30, kwargs={"parent_activity_id": scan_activity_id})
     backfill_dark_hours.apply_async(countdown=45, kwargs={"parent_activity_id": scan_activity_id})
+    # Newly ingested frames whose night already holds guide-log sessions. Last
+    # in the cascade at 120 s: the guide-log pass run_scan dispatched at 50 s
+    # re-derives the nights it writes, and this only has to catch the frames
+    # that pass never looked at.
+    correlate_phd2_images.apply_async(countdown=120, kwargs={"parent_activity_id": scan_activity_id})
     # Write initial scan summary to Redis for /scan/summary endpoint
     try:
         import json as _json
@@ -543,7 +559,7 @@ PHD2_STATE_RUNNING = "running"
 PHD2_STATE_IDLE = ""
 
 
-def reset_phd2_counts_sync(r: sync_redis.Redis) -> None:
+def reset_phd2_counts_sync(r: sync_redis.Redis, found: int) -> None:
     """Zero the PHD2 counters and mark a new guide-log pass as queued.
 
     Called where the scan dispatches the pass. scan:state survives a completed
@@ -552,18 +568,91 @@ def reset_phd2_counts_sync(r: sync_redis.Redis) -> None:
     waits for `state == "complete"` and then reads phd2_ingested gets the last
     scan's number. Zeroing and flagging together means the counters are only
     ever non-zero once they describe this pass.
+
+    `found` is how many guide logs this pass has in scope, and it is the
+    denominator the scan screen counts "N of M" against. It is required, and
+    written in this same hset, because the pass is dispatched with a 50 second
+    countdown: the task's own set_phd2_found_sync call does not run until then,
+    so a placeholder written here is what the user reads for the whole
+    countdown, and a denominator of zero is exactly what makes the UI drop the
+    sub-label. Requiring the argument is also what keeps "not yet known" and
+    "known to be zero" apart. The count can never lag the flag, so a reader
+    seeing phd2_found == 0 next to a live phd2_state knows this pass has no
+    guide logs in scope rather than a number still to come.
+
+    phd2_state_at goes in the same write. The flag has no other expiry: a task
+    that is queued and then lost never runs the code that clears it, so a
+    reader needs the age of the claim to stop believing it.
     """
     r.hset(SCAN_KEY, mapping={
-        "phd2_found": 0,
+        "phd2_found": found,
         "phd2_ingested": 0,
         "phd2_failed": 0,
         "phd2_state": PHD2_STATE_PENDING,
+        "phd2_state_at": time.time(),
     })
 
 
 def set_phd2_state_sync(r: sync_redis.Redis, state: str) -> None:
-    """Record where the guide-log pass has got to (see ScanStateSnapshot)."""
-    r.hset(SCAN_KEY, "phd2_state", state)
+    """Record where the guide-log pass has got to (see ScanStateSnapshot).
+
+    The timestamp moves with the state, so "running" written by a worker that
+    then dies ages out the same way "pending" does.
+    """
+    r.hset(SCAN_KEY, mapping={
+        "phd2_state": state,
+        "phd2_state_at": time.time() if state else "",
+    })
+
+
+def set_phd2_found_sync(r: sync_redis.Redis, found: int) -> None:
+    """Publish how many guide logs this pass will look at, as soon as it knows.
+
+    The scan screen counts "N of M" while the pass runs, and M is known the
+    moment the candidate list exists. Publishing it only in the end-of-pass
+    write meant the UI had a numerator that climbed against a denominator of
+    zero for the whole pass - which is why the counters read 0 for the pass's
+    entire lifetime rather than only until it started.
+
+    Written alone rather than through set_phd2_counts_sync: that function
+    clears the in-flight flag in the same write, and the pass is very much
+    still in flight here.
+    """
+    r.hset(SCAN_KEY, "phd2_found", found)
+
+
+def increment_phd2_progress_sync(
+    r: sync_redis.Redis, ingested: int = 0, failed: int = 0
+) -> None:
+    """Advance the per-file guide-log counters, following increment_csv_enriched_sync.
+
+    hincrby rather than hset because the pass keeps its authoritative totals
+    in local variables and writes them once at the end: re-writing a derived
+    running total per file would race that final write, and a crash halfway
+    through would leave a total that describes neither state. Incrementing is
+    also what the image-ingest counters do, so the scan screen's two progress
+    readouts behave the same way.
+
+    A call with nothing to report writes nothing. Most files in a rescan are
+    unchanged, and a Redis round trip per unchanged file in a library of
+    hundreds of logs is pure overhead.
+
+    Real progress also renews phd2_state_at. The timestamp is what lets a
+    reader age a stuck claim out, and a consumer that applies its staleness
+    window to "running" as well as "pending" would otherwise call a healthy
+    pass stalled the moment it ran longer than that window - which a library
+    of hundreds of guide logs comfortably does. Renewing it here means a
+    timestamp that has stopped moving is evidence the pass has, rather than
+    evidence it is merely slow. Only a call that has progress to report
+    renews it: a no-op must not keep a genuinely hung pass looking alive.
+    """
+    if not ingested and not failed:
+        return
+    if ingested:
+        r.hincrby(SCAN_KEY, "phd2_ingested", ingested)
+    if failed:
+        r.hincrby(SCAN_KEY, "phd2_failed", failed)
+    r.hset(SCAN_KEY, "phd2_state_at", time.time())
 
 
 def set_phd2_counts_sync(
@@ -584,6 +673,7 @@ def set_phd2_counts_sync(
         "phd2_ingested": ingested,
         "phd2_failed": failed,
         "phd2_state": PHD2_STATE_IDLE,
+        "phd2_state_at": "",
     })
 
 

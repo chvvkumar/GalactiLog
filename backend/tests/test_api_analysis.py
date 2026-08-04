@@ -653,3 +653,91 @@ async def test_get_compare_non_pixel_metric_unaffected():
     assert data["median_hfr_arcsec_b"] is None
     assert "lower median than" in data["verdict"]
     assert "(arcsec)" not in data["verdict"]
+
+
+def test_the_guiding_metrics_are_column_backed_and_source_agnostic():
+    """Analysis reads the three guiding columns, not a source. A phd2-sourced
+    row and a csv-sourced row are the same row to every consumer here, which
+    is the whole point of filling the existing columns rather than adding
+    parallel ones."""
+    from app.api.analysis import METRIC_MAP, Y_METRICS
+    from app.models import Image
+
+    assert METRIC_MAP["guiding_rms"] is Image.guiding_rms_arcsec
+    assert METRIC_MAP["guiding_rms_ra"] is Image.guiding_rms_ra_arcsec
+    assert METRIC_MAP["guiding_rms_dec"] is Image.guiding_rms_dec_arcsec
+    for name in ("guiding_rms", "guiding_rms_ra", "guiding_rms_dec"):
+        assert name in Y_METRICS
+
+
+def test_the_guiding_metrics_are_not_plate_scale_converted():
+    """They are already in arcsec. HFR and FWHM are the pixel metrics."""
+    from app.api.analysis import METRIC_MAP, _PIXEL_METRICS
+
+    assert _PIXEL_METRICS == {"hfr", "fwhm"}
+    assert not _PIXEL_METRICS & {
+        "guiding_rms", "guiding_rms_ra", "guiding_rms_dec"
+    }
+    assert set(_PIXEL_METRICS) <= set(METRIC_MAP)
+
+
+@pytest.mark.asyncio
+async def test_distribution_counts_a_phd2_row_and_a_csv_row_alike():
+    """The metric-map identity above survives a provenance filter added to the
+    query, so it cannot guard the regression this phase actually fears. This
+    drives the endpoint instead: four guiding rows, two stamped phd2 and two
+    stamped csv, and every one of them has to reach the response.
+
+    The mocked session returns its rows whatever it is asked, so the count
+    assertions alone would not notice a WHERE clause. The statement the
+    endpoint executed is therefore captured and compiled, and the compiled SQL
+    must select the arcsec column and must never mention the provenance
+    column. That fails for any expression that filters on the source, not only
+    for the one spelling of it."""
+    from sqlalchemy.dialects import postgresql
+
+    user = _admin_user()
+
+    rows = []
+    for value, source in [(0.40, "phd2"), (0.45, "phd2"), (0.85, "csv"), (0.90, "csv")]:
+        row = MagicMock()
+        row.val = value
+        row.night = "2026-07-14"
+        row.resolved_target_id = None
+        row.guiding_rms_source = source
+        rows.append(row)
+
+    executed = []
+    result = MagicMock()
+    result.all.return_value = rows
+
+    async def _execute(stmt, *args, **kwargs):
+        executed.append(stmt)
+        return result
+
+    session = AsyncMock()
+    session.execute = _execute
+
+    app.dependency_overrides[get_current_user] = _override_user(user)
+    app.dependency_overrides[get_session] = _override_session(session)
+
+    with _make_cache_miss_patch():
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.get("/api/analysis/distribution?metric=guiding_rms")
+
+    app.dependency_overrides.clear()
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["metric"] == "guiding_rms"
+    # Both stamps counted: dropping either pair changes the count and collapses
+    # the range onto one of the two clusters.
+    assert data["stats"]["count"] == 4
+    assert data["stats"]["min"] == 0.40
+    assert data["stats"]["max"] == 0.90
+    assert sum(b["count"] for b in data["bins"]) == 4
+
+    assert len(executed) == 1
+    sql = str(executed[0].compile(dialect=postgresql.dialect()))
+    assert "images.guiding_rms_arcsec" in sql
+    assert "guiding_rms_source" not in sql

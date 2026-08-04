@@ -4,9 +4,12 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from pydantic import BaseModel, Field, field_validator
 
 
-# The six metrics a WBPP raw quality constraint can target. Mirrors RAW_METRICS
-# in frontend/src/lib/wbppQualityFilter.ts; the names are FrameRecord fields, so
-# a constraint indexes a frame directly on the client.
+# The six metrics a WBPP raw quality constraint can target. The names are
+# FrameRecord fields, so a constraint indexes a frame directly on the client.
+# The frontend counterpart is MetricKey + METRIC_DEFS in
+# frontend/src/lib/wbppQualityFilter.ts, which speaks short keys ("hfr",
+# "rms", ...) and maps each to the FrameRecord field named here; the older
+# RAW_METRICS constant this comment used to name no longer exists.
 WbppRawMetric = Literal[
     "median_hfr",
     "fwhm",

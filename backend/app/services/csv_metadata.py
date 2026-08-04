@@ -79,6 +79,16 @@ IMAGE_COLUMN_MAP: dict[str, tuple[str, callable]] = {
     "Airmass":             ("airmass",                 _float_or_none),
 }
 
+# The guiding RMS columns a CSV row can speak about, listed once so the
+# provenance stamp in merge_csv_metrics reads them from one place. These
+# restate the map above rather than deriving from it, so a rename there needs
+# a matching edit here.
+_GUIDING_RMS_COLUMNS: tuple[str, ...] = (
+    "guiding_rms_arcsec",
+    "guiding_rms_ra_arcsec",
+    "guiding_rms_dec_arcsec",
+)
+
 WEATHER_COLUMN_MAP: dict[str, tuple[str, callable]] = {
     "Temperature":    ("ambient_temp",    _float_or_none),
     "DewPoint":       ("dew_point",       _float_or_none),
@@ -194,6 +204,13 @@ def merge_csv_metrics(metadata: dict, csv_metrics: dict) -> dict:
     comparable with a header-derived one, so winning the merge also means
     owning `eccentricity_source`. That is decided here because this is where
     the merge outcome is known.
+
+    Guiding RMS carries provenance for the same reason: the CSV and the PHD2
+    guide log both produce it, and only the writer knows which one won. Any
+    guiding value taken from the CSV stamps the whole triple as CSV-sourced,
+    since a frame's guiding numbers come from one measurement. A CSV that is
+    silent about guiding stamps nothing, so a value already labelled "phd2"
+    keeps both its number and its label.
     """
     for key, value in csv_metrics.items():
         if value is None and metadata.get(key) is not None:
@@ -202,6 +219,9 @@ def merge_csv_metrics(metadata: dict, csv_metrics: dict) -> dict:
 
     if csv_metrics.get("eccentricity") is not None:
         metadata["eccentricity_source"] = "csv"
+
+    if any(csv_metrics.get(col) is not None for col in _GUIDING_RMS_COLUMNS):
+        metadata["guiding_rms_source"] = "csv"
 
     return metadata
 

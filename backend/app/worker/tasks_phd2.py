@@ -20,14 +20,20 @@ from app.models import Image
 from app.models.phd2 import Phd2Calibration, Phd2Frame, Phd2Log, Phd2Session
 from app.models.user_settings import UserSettings, SETTINGS_ROW_ID
 from app.schemas.settings import GeneralSettings
-from app.services import phd2_parser
+# Both of these are imported as modules rather than by name. phd2_parser has
+# to be, because its dataclasses share names with the ORM models this module
+# also imports. phd2_correlation is for the same reason its own callers use:
+# the correlation entry points are resolved at call time, so a test or a data
+# migration can substitute them on the defining module and have the
+# substitution take effect here.
+from app.services import phd2_correlation, phd2_parser
 from app.services.activity import emit_sync as _emit_activity_sync
 from app.services.phd2_metrics import (
     build_calibration_row, build_frame_rows, compute_session_metrics,
 )
 from app.services.scan_state import (
-    PHD2_STATE_IDLE, PHD2_STATE_RUNNING, set_phd2_counts_sync,
-    set_phd2_state_sync,
+    PHD2_STATE_IDLE, PHD2_STATE_RUNNING, increment_phd2_progress_sync,
+    set_phd2_counts_sync, set_phd2_found_sync, set_phd2_state_sync,
 )
 from app.services.session_date import warn_imaging_night_fallback
 from app.worker.celery_app import celery_app
@@ -208,7 +214,10 @@ def ingest_phd2_log(
 
     for run_index, run in enumerate(runs):
         for warning in run.warnings:
-            logger.info("phd2: %s: %s", file_path.name, warning)
+            # WARNING, not INFO. These are the parser saying it threw data
+            # away or could not read a section at all; at INFO they sat below
+            # the default app-log capture level and nobody ever saw them.
+            logger.warning("phd2: %s: %s", file_path.name, warning)
         for section_index, section in enumerate(run.sections):
             metrics = compute_session_metrics(
                 section,
@@ -254,6 +263,7 @@ def _cleanup_orphans(
     db: Session,
     notices: list[tuple[str, str]] | None = None,
     force: bool = False,
+    parent_activity_id: int | None = None,
 ) -> int:
     """Drop rows for guide logs that no longer exist on disk.
 
@@ -274,6 +284,16 @@ def _cleanup_orphans(
 
     `notices` collects (event_type, message) pairs so the caller can surface
     them in the activity feed. Both cases are logged either way.
+
+    A deletion here also makes image rows stale. phd2_sessions.log_id cascades,
+    so the sessions and frames a deleted log owned go with it, while the images
+    keep the guiding values correlation derived from those sessions. Nothing
+    else revisits those nights: the end-of-pass dispatch covers the nights this
+    pass ingested, a deleted log is by definition not one of them, and
+    incremental correlation only visits images that hold no guiding RMS at all.
+    So the nights the deleted logs covered are re-derived from here. A night
+    left with no surviving guide sessions ends with its phd2-sourced values
+    back at NULL, which is the right answer for it.
     """
     rows = db.execute(select(Phd2Log)).scalars().all()
     missing = [r for r in rows if not Path(r.file_path).exists()]
@@ -293,9 +313,32 @@ def _cleanup_orphans(
             notices.append(("phd2_orphan_warning", message))
         return 0
 
+    # Read before the delete: the cascade takes these session rows with it, so
+    # after the commit there is nothing left to ask which nights were affected.
+    stale_dates = {
+        d for (d,) in db.execute(
+            select(Phd2Session.session_date)
+            .join(Phd2Log, Phd2Session.log_id == Phd2Log.id)
+            .where(
+                Phd2Log.id.in_([r.id for r in missing]),
+                Phd2Session.session_date.isnot(None),
+            )
+            .distinct()
+        ).all()
+    }
+
     for log_row in missing:
         db.delete(log_row)
     db.commit()
+
+    # After the commit, never before it: a worker that started re-deriving
+    # while the rows were still present would refill these nights from the
+    # sessions that are about to vanish. This is a second dispatch in a pass
+    # that also ingested files, and deliberately so - re-derive is idempotent,
+    # and folding these dates into the end-of-pass set would move the dispatch
+    # back before the point where the deletion is durable.
+    if stale_dates:
+        _dispatch_correlation(stale_dates, parent_activity_id)
 
     if large_removal:
         # Mirrors the image side's orphan_force_warning: the admin asked for
@@ -441,8 +484,16 @@ def _run_phd2_pass(
         with Session(_sync_engine) as db:
             changed = apply_profile_map(db, general.phd2_profile_map or {})
             db.commit()
+            # A remap changes which rig a session belongs to, so every frame
+            # whose guiding came from one of these sessions is now potentially
+            # attributed to the wrong telescope. Incremental mode would never
+            # revisit those frames - they already hold a value - so the
+            # affected nights are re-derived explicitly.
+            dates = phd2_correlation.affected_dates(db)
         _invalidate_stats_cache()
         logger.info("phd2: profile map applied, %d rows re-keyed", changed)
+        if dates:
+            _dispatch_correlation(dates)
         return {"status": "remapped", "rows": changed}
 
     scanned = _is_scan_pass(paths, force)
@@ -480,6 +531,16 @@ def _run_phd2_pass(
     touched_dates: set[date_type] = set()
     orphan_notices: list[tuple[str, str]] = []
 
+    # Publish the denominator now rather than at the end. The scan screen
+    # counts "N of M" guide logs while the pass runs, and M has been known
+    # since the candidate list was built; writing it only in the pass's final
+    # counter write left the UI counting against zero for the whole pass.
+    # Gated on `scanned` for the same reason that write is: a
+    # settings-triggered pass is not a scan and has no scan progress to
+    # describe.
+    if scanned:
+        set_phd2_found_sync(_redis, found)
+
     with Session(_sync_engine) as db:
         for path in candidates:
             try:
@@ -490,14 +551,20 @@ def _run_phd2_pass(
                 logger.exception("phd2: ingest crashed for %s", path)
                 db.rollback()
                 failed += 1
+                if scanned:
+                    increment_phd2_progress_sync(_redis, failed=1)
                 continue
             if result == "ok":
                 ingested += 1
                 ingested_paths.append(path)
+                if scanned:
+                    increment_phd2_progress_sync(_redis, ingested=1)
             elif result == "empty":
                 empty += 1
             elif result == "failed":
                 failed += 1
+                if scanned:
+                    increment_phd2_progress_sync(_redis, failed=1)
 
         # The map may have changed since the last scan; re-applying it here
         # keeps existing rows converged without a second task.
@@ -509,7 +576,10 @@ def _run_phd2_pass(
         # stat() and then delete every row, from a UI action nobody would
         # associate with a purge.
         removed = (
-            _cleanup_orphans(db, orphan_notices, force_orphan_cleanup)
+            _cleanup_orphans(
+                db, orphan_notices, force_orphan_cleanup,
+                parent_activity_id=parent_activity_id,
+            )
             if scanned else 0
         )
 
@@ -539,6 +609,14 @@ def _run_phd2_pass(
     if scanned:
         set_phd2_counts_sync(_redis, found, ingested, failed)
     _invalidate_stats_cache()
+
+    # Re-derive the nights this pass wrote. A guide log is replaced whole on
+    # re-ingest (delete then reparse), so a frame's stored guiding RMS can be
+    # derived from sessions that no longer exist; only a re-derive of the
+    # touched nights clears that. Nights this pass did not touch keep their
+    # values and cost nothing.
+    if touched_dates:
+        _dispatch_correlation(touched_dates, parent_activity_id)
 
     if scanned:
         message = (
@@ -628,4 +706,139 @@ def _run_phd2_pass(
         "status": "complete", "found": found, "ingested": ingested,
         "empty": empty, "failed": failed, "removed": removed,
         "timezone_warnings": len(suspicious),
+    }
+
+
+def _dispatch_correlation(
+    dates, parent_activity_id: int | None = None, countdown: int = 5
+) -> None:
+    """Queue the per-image correlation pass, best effort.
+
+    Correlation is auxiliary to the guide-log pass: by the time it is queued
+    the sessions and frames are already committed, so a broker problem at
+    this one call must not raise out of a pass that succeeded. The next scan
+    picks the work up either way, because incremental mode looks for images
+    with no guiding RMS rather than for a marker this call would have left.
+
+    Every caller names its nights in guide-log date space: `stale_dates` and
+    `touched_dates` are Phd2Session.session_date values, and so is half of
+    phd2_correlation.affected_dates. correlate_dates consumes them as
+    Image.session_date. Those are two different spaces - with the observer
+    longitude unset, which is the default, guide sessions group by UTC
+    midnight while images keep solar-noon grouping, so a session dated D
+    covers frames dated D-1 (the fingerprint _session_date_sanity_check warns
+    about). So each night is widened by a day either way before it is
+    dispatched, the same widening and for the same reason as
+    phd2_correlation._dates_needing_fill. Widening here rather than at the
+    three call sites is deliberate: this is the single seam every re-derive
+    crosses, and a later caller gets the correction for free. The cost is a
+    bounded 3x on nights visited, and re-derive is idempotent, so a widened
+    night that holds nothing simply finds nothing.
+
+    `dates` crosses the broker as ISO strings. Celery kwargs are
+    JSON-serialised and a datetime.date does not survive the round trip; it
+    arrives as a string the task would then have to parse anyway, so it is
+    converted here where the failure is visible.
+    """
+    if dates is None:
+        payload = None
+    else:
+        widened: set[date_type] = set()
+        for d in dates:
+            widened.update({d - timedelta(days=1), d, d + timedelta(days=1)})
+        payload = sorted(d.isoformat() for d in widened)
+    try:
+        correlate_phd2_images.apply_async(
+            countdown=countdown,
+            kwargs={"dates": payload, "parent_activity_id": parent_activity_id},
+        )
+    except Exception:
+        logger.warning(
+            "phd2: could not dispatch the per-image correlation pass "
+            "(%s); the next scan will pick it up",
+            "incremental" if payload is None else f"{len(payload)} night(s)",
+            exc_info=True,
+        )
+
+
+def _emit_correlation_activity(result, parent_activity_id: int | None) -> None:
+    """Report a correlation pass, but only when it changed something.
+
+    An idle scan runs this pass and finds nothing to do. Emitting then would
+    add a row to the activity feed on every scan interval, which is how a
+    feed stops being read.
+    """
+    if not (result.filled or result.cleared or result.unattributed_profiles):
+        return
+    with _activity_session() as adb:
+        if result.filled or result.cleared:
+            _emit_activity_sync(
+                adb, redis=_redis, category="scan", severity="info",
+                event_type="phd2_correlation_complete",
+                message=f"PHD2 guiding matched to frames: {result.summary()}",
+                details={
+                    "dates": result.dates,
+                    "images_considered": result.images_considered,
+                    "filled": result.filled,
+                    "cleared": result.cleared,
+                    "below_gate": result.below_gate,
+                },
+                actor="system", parent_id=parent_activity_id,
+            )
+        if result.unattributed_profiles:
+            names = ", ".join(result.unattributed_profiles)
+            _emit_activity_sync(
+                adb, redis=_redis, category="scan", severity="warning",
+                event_type="phd2_correlation_unattributed",
+                message=(
+                    f"Guiding from PHD2 profile(s) {names} was not matched to "
+                    "any frame: the night used more than one telescope and the "
+                    "profile is not mapped to one of them. Open Settings > "
+                    "Library > PHD2 and map the profile to the telescope it "
+                    "guides."
+                ),
+                details={"profiles": result.unattributed_profiles},
+                actor="system", parent_id=parent_activity_id,
+            )
+
+
+@celery_app.task(name="app.worker.tasks.correlate_phd2_images")
+def correlate_phd2_images(
+    dates: list[str] | None = None,
+    parent_activity_id: int | None = None,
+) -> dict:
+    """Fill each frame's guiding RMS from the PHD2 samples that cover it.
+
+    `dates` is the ISO-string list of imaging nights to RE-DERIVE: every
+    phd2-sourced value on them is cleared and recomputed, which is what a
+    re-ingested log or an edited profile map requires. `None` is incremental
+    mode, run from the image-scan seams: fill frames that have no guiding RMS
+    at all and re-derive nothing.
+    """
+    parsed = None
+    if dates is not None:
+        parsed = []
+        for value in dates:
+            try:
+                parsed.append(date_type.fromisoformat(value))
+            except (TypeError, ValueError):
+                logger.warning(
+                    "phd2: ignoring unparsable correlation date %r", value
+                )
+
+    with Session(_sync_engine) as db:
+        result = phd2_correlation.correlate_dates(db, parsed)
+        db.commit()
+
+    _invalidate_stats_cache()
+    _emit_correlation_activity(result, parent_activity_id)
+    logger.info("phd2 correlation: %s", result.summary())
+    return {
+        "status": "complete",
+        "dates": result.dates,
+        "images_considered": result.images_considered,
+        "filled": result.filled,
+        "cleared": result.cleared,
+        "below_gate": result.below_gate,
+        "unattributed_profiles": result.unattributed_profiles,
     }

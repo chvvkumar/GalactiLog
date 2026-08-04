@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { queryKeys } from "./queryKeys";
+import { queryKeys, PHD2_QUERY_PREFIX } from "./queryKeys";
 import type { ActiveFilters } from "./types";
 
 const emptyFilters: ActiveFilters = {
@@ -101,5 +101,16 @@ describe("queryKeys", () => {
       queryKeys.phd2Frames("2026-07-14"),
     ].map((k) => JSON.stringify(k));
     expect(new Set(keys).size).toBe(keys.length);
+  });
+
+  it("every phd2 key sits under the prefix the scan store invalidates", () => {
+    const keys = [
+      queryKeys.phd2Profiles(),
+      queryKeys.phd2Sessions("2026-07-14", null),
+      queryKeys.phd2Frames("s-1"),
+    ];
+    for (const key of keys) {
+      expect(key.slice(0, PHD2_QUERY_PREFIX.length)).toEqual([...PHD2_QUERY_PREFIX]);
+    }
   });
 });

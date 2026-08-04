@@ -1,6 +1,9 @@
 import { describe, it, expect } from "vitest";
 import {
+  filterSessionsByProfile,
+  guideProfileOptions,
   guideRangeCaption,
+  guideRigLabel,
   guideTimeTick,
   guideTooltipLabel,
   guideTooltipTitle,
@@ -44,8 +47,13 @@ describe("sessionOptionLabel", () => {
     expect(sessionOptionLabel(session, "9:42 PM", false)).toBe("9:42 PM · 22m");
   });
 
-  it("appends the profile when the night mixes profiles", () => {
-    expect(sessionOptionLabel(session, "9:42 PM", true)).toBe(
+  it("appends the rig when the night mixes rigs, naming what the filter selects", () => {
+    expect(sessionOptionLabel(session, "9:42 PM", true)).toBe("9:42 PM · 22m · 140APO");
+  });
+
+  it("appends the raw profile only when no rig is mapped to it", () => {
+    const unmapped: Phd2SessionSummary = { ...session, telescope: null };
+    expect(sessionOptionLabel(unmapped, "9:42 PM", true)).toBe(
       "9:42 PM · 22m · 140APO_AM5N_ASI174MM"
     );
   });
@@ -202,5 +210,147 @@ describe("guideRangeCaption", () => {
     expect(guideRangeCaption({ min: 300, max: 420 }, { min: 0, max: 1320 }, STARTED_AT)).not.toContain(
       "peaks preserved"
     );
+  });
+});
+
+// One rig per profile unless a test says otherwise, which is the common case
+// and keeps these fixtures reading as "two profiles, two rigs".
+const withProfile = (
+  id: string,
+  profile: string,
+  telescope: string | null = profile,
+): Phd2SessionSummary => ({
+  ...session,
+  id,
+  equipment_profile: profile,
+  telescope,
+});
+
+describe("guideRigLabel", () => {
+  it("names the rig the profile maps to, not the profile", () => {
+    expect(guideRigLabel(withProfile("a", "140APO_AM5N_ASI174MM", "140APO"))).toBe("140APO");
+  });
+
+  it("falls back to the profile when the map has no entry for it", () => {
+    // Dropping an unmapped profile would hide its sessions entirely, so the
+    // raw header name stands in as the rig of last resort.
+    expect(guideRigLabel(withProfile("a", "Unmapped_Profile", null))).toBe("Unmapped_Profile");
+  });
+});
+
+describe("guideProfileOptions", () => {
+  it("lists each equipment profile on the night exactly once", () => {
+    expect(
+      guideProfileOptions([
+        withProfile("a", "140APO_AM5N_ASI174MM"),
+        withProfile("b", "ASI220mm_30F5_AM5"),
+        withProfile("c", "140APO_AM5N_ASI174MM"),
+      ])
+    ).toEqual(["140APO_AM5N_ASI174MM", "ASI220mm_30F5_AM5"]);
+  });
+
+  it("offers one entry per rig when two profiles name the same scope", () => {
+    // A profile rename mid-season leaves one physical scope behind two header
+    // names. Offering both would put the same rig in the control twice, and
+    // picking either would hide half that rig's sessions.
+    expect(
+      guideProfileOptions([
+        withProfile("a", "140APO_AM5N_ASI174MM", "140APO"),
+        withProfile("b", "140APO_AM5N_ASI174MM_v2", "140APO"),
+        withProfile("c", "ASI220mm_30F5_AM5", "30F5"),
+      ])
+    ).toEqual(["140APO", "30F5"]);
+  });
+
+  it("keeps an unmapped profile in the list rather than losing its sessions", () => {
+    expect(
+      guideProfileOptions([
+        withProfile("a", "140APO_AM5N_ASI174MM", "140APO"),
+        withProfile("b", "Unmapped_Profile", null),
+      ])
+    ).toEqual(["140APO", "Unmapped_Profile"]);
+  });
+
+  it("sorts so the control's option order does not depend on ingest order", () => {
+    expect(
+      guideProfileOptions([withProfile("a", "Zulu"), withProfile("b", "Alpha")])
+    ).toEqual(["Alpha", "Zulu"]);
+  });
+
+  it("returns a single entry on a single-rig night, which is how the control stays hidden", () => {
+    expect(guideProfileOptions([withProfile("a", "140APO_AM5N_ASI174MM")])).toHaveLength(1);
+    expect(guideProfileOptions([])).toEqual([]);
+  });
+});
+
+describe("filterSessionsByProfile", () => {
+  const list = [
+    withProfile("a", "140APO_AM5N_ASI174MM"),
+    withProfile("b", "ASI220mm_30F5_AM5"),
+    withProfile("c", "140APO_AM5N_ASI174MM"),
+  ];
+
+  it("keeps only the sessions of the chosen rig", () => {
+    expect(filterSessionsByProfile(list, "140APO_AM5N_ASI174MM").map((s) => s.id)).toEqual([
+      "a",
+      "c",
+    ]);
+  });
+
+  it("returns every session when no rig is chosen", () => {
+    expect(filterSessionsByProfile(list, null)).toHaveLength(3);
+  });
+
+  it("returns nothing for a rig that is not on this night, rather than falling back to all", () => {
+    expect(filterSessionsByProfile(list, "AM5n_OAG_ASI174M")).toEqual([]);
+  });
+
+  it("keeps every session of a rig that ran under two profile names", () => {
+    const renamed = [
+      withProfile("a", "140APO_AM5N_ASI174MM", "140APO"),
+      withProfile("b", "140APO_AM5N_ASI174MM_v2", "140APO"),
+      withProfile("c", "ASI220mm_30F5_AM5", "30F5"),
+    ];
+    expect(filterSessionsByProfile(renamed, "140APO").map((s) => s.id)).toEqual(["a", "b"]);
+  });
+
+  it("matches an unmapped profile by the name the option list showed", () => {
+    const mixed = [
+      withProfile("a", "140APO_AM5N_ASI174MM", "140APO"),
+      withProfile("b", "Unmapped_Profile", null),
+    ];
+    expect(filterSessionsByProfile(mixed, "Unmapped_Profile").map((s) => s.id)).toEqual(["b"]);
+  });
+});
+
+describe("rig filter narrowing", () => {
+  const list = [
+    withProfile("a", "140APO_AM5N_ASI174MM"),
+    withProfile("b", "ASI220mm_30F5_AM5"),
+  ];
+
+  it("narrows the session list the dropdown and the default selection both read", () => {
+    // The component derives both from one filtered list, so asserting the
+    // filter is asserting what the selector offers and what it lands on.
+    const narrowed = filterSessionsByProfile(list, "ASI220mm_30F5_AM5");
+    expect(narrowed.map((s) => s.id)).toEqual(["b"]);
+    expect((narrowed.find((s) => !s.gated) ?? narrowed[0]).id).toBe("b");
+  });
+
+  it("still names the rig in a label only while more than one rig is visible", () => {
+    const showProfile = (visible: Phd2SessionSummary[]) =>
+      new Set(visible.map(guideRigLabel)).size > 1;
+    expect(showProfile(filterSessionsByProfile(list, null))).toBe(true);
+    expect(showProfile(filterSessionsByProfile(list, "ASI220mm_30F5_AM5"))).toBe(false);
+  });
+
+  it("stops naming the rig on a night that is one scope under two profile names", () => {
+    // Counting profiles here would repeat "140APO" on every option of a
+    // single-rig night, which is the noise the flag exists to suppress.
+    const renamed = [
+      withProfile("a", "140APO_AM5N_ASI174MM", "140APO"),
+      withProfile("b", "140APO_AM5N_ASI174MM_v2", "140APO"),
+    ];
+    expect(new Set(renamed.map(guideRigLabel)).size > 1).toBe(false);
   });
 });

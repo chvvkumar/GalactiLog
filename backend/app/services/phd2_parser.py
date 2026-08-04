@@ -260,6 +260,11 @@ class Phd2GuidingSection:
     frames: list[Phd2Frame] = field(default_factory=list)
     events: list[Phd2Event] = field(default_factory=list)
     truncated: bool = False
+    # CSV rows thrown away after the first unparsable one. `truncated` says
+    # that something went wrong; this says how much it cost. A corrupt row in
+    # the last line of a section and a corrupt row two lines in look identical
+    # without it, and one of them is a lost night.
+    discarded_rows: int = 0
 
 
 @dataclass
@@ -531,6 +536,25 @@ def _crosscheck_summaries(runs: list[Phd2Run]) -> None:
             )
 
 
+def _warn_discarded_rows(runs: list[Phd2Run]) -> None:
+    """Surface how many CSV rows were thrown away after a corrupt row.
+
+    The parser cannot recover a section once a row fails to parse - the file
+    may be truncated mid-write, and guessing at partial rows would invent
+    data. What it can do is say how much was lost, so a user reading the
+    ingest log can tell a clipped tail apart from a section that was
+    effectively discarded.
+    """
+    for run in runs:
+        for index, section in enumerate(run.sections):
+            if section.discarded_rows:
+                run.warnings.append(
+                    f"guiding section {index + 1} beginning "
+                    f"{section.started_at_local}: {section.discarded_rows} CSV "
+                    f"row(s) discarded after an unparsable row"
+                )
+
+
 def parse_guide_log(text: str) -> list[Phd2Run]:
     """Parse a whole guide-log file into its stacked runs.
 
@@ -541,7 +565,8 @@ def parse_guide_log(text: str) -> list[Phd2Run]:
     run: Phd2Run | None = None
     section: Phd2GuidingSection | None = None
     calibration: Phd2Calibration | None = None
-    mode = "none"  # none | guide_header | guide_rows | cal_header | cal_rows
+    # none | guide_header | guide_rows | guide_discard | cal_header | cal_rows
+    mode = "none"
     last_t = 0.0
 
     def _abandon_section() -> None:
@@ -650,6 +675,18 @@ def parse_guide_log(text: str) -> list[Phd2Run]:
             mode = "cal_rows"
             continue
 
+        if line.startswith("Frame,Time") or line.startswith("Direction,Step"):
+            # The two matches above are byte comparisons against the Log
+            # version 2.5 layout. A PHD2 release that adds or renames one
+            # column would never enter row mode: every frame silently dropped,
+            # frame_count 0, no error, no warning, and nothing in the file to
+            # point at. Say so instead.
+            run.warnings.append(
+                "CSV header line does not match the known PHD2 2.5 layout, so "
+                f"its rows were not parsed: {line[:200]}"
+            )
+            continue
+
         if line.startswith("INFO:"):
             event = _parse_event(line, last_t)
             if event is not None and section is not None:
@@ -660,10 +697,21 @@ def parse_guide_log(text: str) -> list[Phd2Run]:
             frame = _parse_frame_row(line)
             if frame is None:
                 section.truncated = True
-                mode = "none"
+                section.discarded_rows += 1
+                # Keep counting rather than dropping straight to "none": the
+                # rows after a corrupt one are still CSV rows, and the count
+                # of them is what tells a user whether they lost a truncated
+                # tail or the body of a session. Structural lines (Guiding
+                # Ends, the next banner, INFO events, headers) are all matched
+                # earlier in this loop, so this mode cannot swallow them.
+                mode = "guide_discard"
                 continue
             last_t = frame.time_offset
             section.frames.append(frame)
+            continue
+
+        if mode == "guide_discard" and section is not None:
+            section.discarded_rows += 1
             continue
 
         if mode == "cal_rows" and calibration is not None:
@@ -681,5 +729,6 @@ def parse_guide_log(text: str) -> list[Phd2Run]:
             continue
 
     _abandon_section()
+    _warn_discarded_rows(runs)
     _crosscheck_summaries(runs)
     return runs

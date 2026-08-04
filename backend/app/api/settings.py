@@ -374,6 +374,39 @@ async def update_equipment(
     await session.commit()
     await session.refresh(row)
     invalidate_alias_cache()
+
+    # Grouping two telescope names together turns one of them into an alias.
+    # The PHD2 profile map's values are telescope names the user picked when
+    # they mapped each profile, and nothing has ever rewritten them, so a
+    # grouping made afterwards strands the map pointing at an alias. Reads
+    # tolerate that through normalization.equipment_match_set; the per-image
+    # guiding correlation does not, because it attributes on the value stored
+    # on the session row. Fold the map onto the new canonical names here,
+    # while the change that caused the drift is being saved.
+    general = dict(row.general or {})
+    profile_map = dict(general.get("phd2_profile_map") or {})
+    if profile_map:
+        from app.services.normalization import (
+            build_equipment_alias_maps, normalize_equipment,
+        )
+
+        _, tel_map = build_equipment_alias_maps(row.equipment or {})
+        corrected = {
+            profile: (normalize_equipment(name, tel_map) or name)
+            for profile, name in profile_map.items()
+        }
+        if corrected != profile_map:
+            row.general = {**general, "phd2_profile_map": corrected}
+            await session.commit()
+            await session.refresh(row)
+            # The re-key rewrites every stored guiding session, so it is only
+            # worth queueing when the map actually moved.
+            try:
+                from app.worker.tasks import scan_phd2_logs
+                scan_phd2_logs.delay(remap_only=True)
+            except Exception:
+                pass  # Worker may not be available in dev
+
     return _row_to_response(row)
 
 

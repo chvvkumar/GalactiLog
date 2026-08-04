@@ -404,3 +404,92 @@ def test_log_summary_mismatch_produces_a_warning():
     run = parse_guide_log(mismatched)[0]
     assert any("gcnt:3" in w for w in run.warnings)
     assert any("calcnt:2" in w for w in run.warnings)
+
+
+# --- A-M3: a corrupt row must not silently swallow the rest of a section ----
+
+CORRUPT_MID_SECTION = """PHD2 version 2.6.14 [Windows], Log version 2.5. Log enabled at 2026-07-14 20:13:33
+
+Guiding Begins at 2026-07-14 21:42:27
+Equipment Profile = AM5n_OAG_ASI174M
+Pixel scale = 1.54 arc-sec/px, Binning = 1, Focal length = 784 mm
+Exposure = 500 ms
+Frame,Time,mount,dx,dy,RARawDistance,DECRawDistance,RAGuideDistance,DECGuideDistance,RADuration,RADirection,DECDuration,DECDirection,XStep,YStep,StarMass,SNR,ErrorCode
+1,1.228,"Mount",0.330,0.544,0.556,-0.189,0.350,0.000,98,W,0,,,,1713,28.59,1
+2,2.093,"Mount",0.524
+3,3.001,"Mount",0.524,0.132,0.151,-0.477,0.000,0.000,0,,0,,,,1702,28.36,0
+4,4.001,"Mount",0.524,0.132,0.151,-0.477,0.000,0.000,0,,0,,,,1702,28.36,0
+Guiding Ends at 2026-07-14 21:42:46
+
+Log Summary: calcnt:0 gcnt:1 gdur:19 gacnt:4
+Log closed at 2026-07-14 21:43:00
+"""
+
+
+def test_rows_discarded_after_a_corrupt_row_are_counted():
+    """The old behaviour set truncated=True and dropped every following row in
+    silence. A corrupt row two lines into a 5000-row section then cost a whole
+    night's samples with nothing to say so."""
+    runs = parse_guide_log(CORRUPT_MID_SECTION)
+    section = runs[0].sections[0]
+    assert section.truncated is True
+    assert len(section.frames) == 1
+    # the malformed row plus the two good rows that followed it
+    assert section.discarded_rows == 3
+
+
+def test_the_discard_count_reaches_the_run_warnings():
+    runs = parse_guide_log(CORRUPT_MID_SECTION)
+    assert any(
+        "discarded" in w and "3" in w for w in runs[0].warnings
+    ), runs[0].warnings
+
+
+def test_a_clean_section_discards_nothing_and_warns_about_nothing():
+    runs = parse_guide_log(CORRUPT_MID_SECTION.replace(
+        '2,2.093,"Mount",0.524\n',
+        '2,2.093,"Mount",0.524,0.132,0.151,-0.477,0.000,0.000,0,,0,,,,1702,28.36,0\n',
+    ))
+    section = runs[0].sections[0]
+    assert section.discarded_rows == 0
+    assert not any("discarded" in w for w in runs[0].warnings)
+
+
+def test_the_section_end_line_still_closes_a_discarding_section():
+    """Discard mode must not swallow structural lines: the section still has
+    to end where PHD2 says it ended."""
+    runs = parse_guide_log(CORRUPT_MID_SECTION)
+    assert runs[0].sections[0].ended_at_local is not None
+
+
+# --- A-M6: a CSV header that is close but not exact --------------------------
+
+NEAR_MISS_HEADER = CORRUPT_MID_SECTION.replace(
+    "Frame,Time,mount,dx,dy,RARawDistance",
+    "Frame,Time,mount,dx,dy,dz,RARawDistance",
+)
+
+
+def test_a_near_miss_csv_header_is_reported_loudly():
+    """The header match is a byte comparison against the 2.5 layout. A PHD2
+    release that adds one column would otherwise never enter row mode: every
+    frame dropped, frame_count 0, no error, no warning, nothing to debug."""
+    runs = parse_guide_log(NEAR_MISS_HEADER)
+    assert runs[0].sections[0].frames == []
+    assert any(
+        "does not match" in w and "Frame,Time" in w for w in runs[0].warnings
+    ), runs[0].warnings
+
+
+def test_the_exact_header_produces_no_such_warning():
+    runs = parse_guide_log(CORRUPT_MID_SECTION)
+    assert not any("does not match" in w for w in runs[0].warnings)
+
+
+def test_a_calibration_header_near_miss_is_reported_too():
+    text = CORRUPT_MID_SECTION.replace(
+        "Frame,Time,mount,dx,dy,RARawDistance",
+        "Direction,Step,dx,dy,x,y,Dist,Extra\nFrame,Time,mount,dx,dy,RARawDistance",
+    )
+    runs = parse_guide_log(text)
+    assert any("Direction,Step" in w for w in runs[0].warnings), runs[0].warnings

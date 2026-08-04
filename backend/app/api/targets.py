@@ -17,7 +17,7 @@ from app.models.user import User
 from app.schemas.target import (
     TargetAggregationResponse, EquipmentResponse, SessionDetailResponse,
     TargetDetailResponse, TargetSearchResultFuzzy, ObjectTypeCount, NotesUpdate,
-    StatusResponse,
+    TargetStatusResponse,
 )
 from app.schemas.export import ExportResponse
 from app.services import target_aggregation
@@ -264,7 +264,7 @@ async def get_session_detail(
 # ids), which would otherwise also match `/{id}/sessions/{date}/notes` PUT
 # requests since that path also ends in "/notes".
 
-@router.put("/{target_id}/sessions/{date}/notes", response_model=StatusResponse)
+@router.put("/{target_id}/sessions/{date}/notes", response_model=TargetStatusResponse)
 async def update_session_notes(
     target_id: str,
     date: str,
@@ -319,7 +319,7 @@ async def update_session_notes(
     return {"status": "ok"}
 
 
-@router.put("/{target_id:path}/notes", response_model=StatusResponse)
+@router.put("/{target_id:path}/notes", response_model=TargetStatusResponse)
 async def update_target_notes(
     target_id: str,
     body: NotesUpdate,

@@ -56,6 +56,7 @@ def make_image(date_str, filter_used="Ha", hfr=2.1, ecc=0.38):
     img.guiding_rms_arcsec = None
     img.guiding_rms_ra_arcsec = None
     img.guiding_rms_dec_arcsec = None
+    img.guiding_rms_source = None
     img.detected_stars = None
     img.adu_stdev = None
     img.adu_mean = None

@@ -404,14 +404,180 @@ def test_a_forced_admin_cleanup_deletes_past_the_guard(db, log_file):
     assert [t for t, _ in notices] == ["phd2_orphan_force_warning"]
 
 
+def _capture_dispatch(monkeypatch, fail=False):
+    """Stand in for the correlation task and return the list of recorded calls.
+
+    Same seam as test_phd2_correlation_task.py uses: the task object is looked
+    up on the module at call time, so replacing it there records the dispatch
+    without a broker.
+    """
+    from app.worker import tasks_phd2
+
+    calls = []
+
+    class _Task:
+        @staticmethod
+        def apply_async(**kwargs):
+            calls.append(kwargs)
+            if fail:
+                raise RuntimeError("broker unreachable")
+
+    monkeypatch.setattr(tasks_phd2, "correlate_phd2_images", _Task)
+    return calls
+
+
+def _ingest_one(db, path, text_body):
+    from app.worker.tasks_phd2 import ingest_phd2_log
+
+    path.write_text(text_body, encoding="utf-8")
+    with db() as s:
+        assert ingest_phd2_log(s, str(path), _settings()) == "ok"
+    return path
+
+
+def _orphan_on_its_own_night(db, directory):
+    """Ingest a log whose only session lands on a night no other log covers."""
+    path = directory / "PHD2_GuideLog_2026-07-20_201333.txt"
+    return _ingest_one(db, path, SAMPLE_LOG.replace("2026-07-14", "2026-07-20"))
+
+
+def test_cleanup_orphans_re_derives_the_nights_the_deleted_logs_covered(
+    db, log_file, monkeypatch
+):
+    """Deleting a log cascades its sessions and frames away, but the images
+    those sessions supplied keep the guiding values correlation derived from
+    them. No other seam ever revisits those nights - the end-of-pass dispatch
+    covers nights this pass ingested, and a deleted log is not ingested - so
+    the delete has to ask for them itself, and for those nights only."""
+    from app.worker.tasks_phd2 import _cleanup_orphans
+
+    _isolate_log_table(db)
+    _ingest_files(db, log_file.parent, 3)
+    orphan = _orphan_on_its_own_night(db, log_file.parent)
+
+    calls = _capture_dispatch(monkeypatch)
+    orphan.unlink()
+    with db() as s:
+        assert _cleanup_orphans(s) == 1
+
+    assert len(calls) == 1
+    # The deleted log's own night, widened by a day either way because the
+    # dispatch names it in guide-log date space and the re-derive reads it as
+    # an imaging night (see _dispatch_correlation). Still bounded to that
+    # neighbourhood: 2026-07-14, which the three surviving logs cover, is not
+    # in the set.
+    assert calls[0]["kwargs"]["dates"] == [
+        "2026-07-19", "2026-07-20", "2026-07-21",
+    ]
+
+
+def test_the_orphan_re_derive_is_nested_under_the_scan_activity(
+    db, log_file, monkeypatch
+):
+    """The dispatch belongs to the scan that triggered it, so the parent
+    activity id the pass holds has to reach it."""
+    from app.worker.tasks_phd2 import _cleanup_orphans
+
+    _isolate_log_table(db)
+    _ingest_files(db, log_file.parent, 3)
+    orphan = _orphan_on_its_own_night(db, log_file.parent)
+
+    calls = _capture_dispatch(monkeypatch)
+    orphan.unlink()
+    with db() as s:
+        assert _cleanup_orphans(s, parent_activity_id=4242) == 1
+
+    assert calls[0]["kwargs"]["parent_activity_id"] == 4242
+
+
+def test_the_orphan_re_derive_is_dispatched_after_the_delete_is_durable(
+    db, log_file, monkeypatch
+):
+    """A worker that started re-deriving while the rows were still there would
+    refill the nights from sessions that are about to vanish."""
+    from app.worker import tasks_phd2
+
+    _isolate_log_table(db)
+    _ingest_files(db, log_file.parent, 3)
+    orphan = _orphan_on_its_own_night(db, log_file.parent)
+
+    seen = []
+
+    class _Task:
+        @staticmethod
+        def apply_async(**kwargs):
+            seen.append(_row_exists(db, orphan))
+
+    monkeypatch.setattr(tasks_phd2, "correlate_phd2_images", _Task)
+    orphan.unlink()
+    with db() as s:
+        assert tasks_phd2._cleanup_orphans(s) == 1
+
+    assert seen == [False]
+
+
+def test_the_missing_share_guard_re_derives_nothing(db, log_file, monkeypatch):
+    """The guard deletes nothing, so nothing on any night went stale."""
+    from app.worker.tasks_phd2 import _cleanup_orphans
+
+    _isolate_log_table(db)
+    paths = _ingest_files(db, log_file.parent, 3)
+    for path in paths:
+        path.unlink()
+
+    calls = _capture_dispatch(monkeypatch)
+    with db() as s:
+        assert _cleanup_orphans(s, []) == 0
+    assert calls == []
+
+
+def test_a_cleanup_that_finds_nothing_missing_re_derives_nothing(
+    db, log_file, monkeypatch
+):
+    """An idle scan must not queue a correlation pass per scan."""
+    from app.worker.tasks_phd2 import _cleanup_orphans
+
+    _isolate_log_table(db)
+    _ingest_files(db, log_file.parent, 3)
+
+    calls = _capture_dispatch(monkeypatch)
+    with db() as s:
+        assert _cleanup_orphans(s) == 0
+    assert calls == []
+
+
+def test_a_failed_re_derive_dispatch_does_not_break_the_cleanup(
+    db, log_file, monkeypatch
+):
+    """The deletion is already committed by the time the dispatch is tried. A
+    broker problem must not turn a completed cleanup into a crashed pass."""
+    from app.worker.tasks_phd2 import _cleanup_orphans
+
+    _isolate_log_table(db)
+    _ingest_files(db, log_file.parent, 3)
+    orphan = _orphan_on_its_own_night(db, log_file.parent)
+
+    calls = _capture_dispatch(monkeypatch, fail=True)
+    orphan.unlink()
+    with db() as s:
+        assert _cleanup_orphans(s) == 1
+
+    assert len(calls) == 1
+    assert not _row_exists(db, orphan)
+
+
 class _RecordingRedis:
-    """Captures hset calls so scan-state writes can be asserted without Redis."""
+    """Captures hset/hincrby calls so scan-state writes can be asserted without Redis."""
 
     def __init__(self):
         self.writes = []
+        self.increments = []
 
     def hset(self, key, *args, mapping=None, **kwargs):
         self.writes.append((key, mapping if mapping is not None else args))
+
+    def hincrby(self, key, field, amount):
+        self.increments.append((key, field, amount))
 
 
 def test_a_scan_forwards_the_admin_cleanup_flag_to_the_guide_log_pass(monkeypatch):
@@ -454,12 +620,86 @@ def test_dispatching_the_guide_log_pass_zeroes_the_previous_runs_counters(monkey
     monkeypatch.setattr(tasks_scan, "scan_phd2_logs", _Task)
     tasks_scan._dispatch_phd2_scan(["/logs/a.txt"])
 
-    assert redis.writes == [(SCAN_KEY, {
-        "phd2_found": 0,
-        "phd2_ingested": 0,
-        "phd2_failed": 0,
-        "phd2_state": "pending",
-    })]
+    assert len(redis.writes) == 1
+    key, mapping = redis.writes[0]
+    assert key == SCAN_KEY
+    # The progress counters are this pass's own, and start at nothing done.
+    # phd2_found is NOT one of them: it is the denominator, asserted against
+    # the candidate list in
+    # test_marking_the_pass_pending_publishes_the_candidate_count.
+    assert mapping["phd2_ingested"] == 0
+    assert mapping["phd2_failed"] == 0
+    assert mapping["phd2_state"] == "pending"
+    # The wall-clock value cannot be asserted exactly; that the reset stamps
+    # one at all is covered by test_the_pending_flag_carries_the_time_it_was_set.
+    assert isinstance(mapping["phd2_state_at"], float)
+
+
+def test_marking_the_pass_pending_publishes_the_candidate_count(monkeypatch):
+    """The guide-log task is dispatched with a 50 s countdown, so the number it
+    publishes when it starts arrives about a minute after the job row goes up.
+    The scan already holds the candidate list at dispatch, so the denominator
+    is published with the flag and the row reads "0 of 3 logs" from its first
+    render instead of carrying no sub-label for the whole countdown."""
+    from app.services.scan_state import SCAN_KEY
+    from app.worker import tasks_scan
+
+    class _Task:
+        @staticmethod
+        def apply_async(**kwargs):
+            pass
+
+    redis = _RecordingRedis()
+    monkeypatch.setattr(tasks_scan, "_redis", redis)
+    monkeypatch.setattr(tasks_scan, "scan_phd2_logs", _Task)
+    tasks_scan._dispatch_phd2_scan(["/logs/a.txt", "/logs/b.txt", "/logs/c.txt"])
+
+    key, mapping = redis.writes[0]
+    assert key == SCAN_KEY
+    assert mapping["phd2_found"] == 3
+
+
+def test_a_pass_with_no_guide_logs_publishes_a_true_zero_alongside_the_flag():
+    """"Not yet known" and "known to be zero" have to stay tellable apart, and
+    the only thing that separates them is whether the count can lag the flag.
+    Both go in one hset mapping, so a reader never sees the pass claimed with
+    its denominator unpublished: phd2_found == 0 next to a live phd2_state
+    means zero logs in scope, never "wait and see"."""
+    from app.services.scan_state import SCAN_KEY, reset_phd2_counts_sync
+
+    redis = _RecordingRedis()
+    reset_phd2_counts_sync(redis, 0)
+
+    assert len(redis.writes) == 1
+    key, mapping = redis.writes[0]
+    assert key == SCAN_KEY
+    assert mapping["phd2_found"] == 0
+    assert mapping["phd2_state"] == "pending"
+
+
+def test_the_pending_mark_cannot_be_written_without_a_count():
+    """The placeholder zero was a default, and a default is what let a caller
+    that knew the number publish nothing. Requiring the argument makes the
+    omission a TypeError at the call site rather than a silent 0 on screen."""
+    import inspect
+
+    from app.services.scan_state import reset_phd2_counts_sync
+
+    found = inspect.signature(reset_phd2_counts_sync).parameters["found"]
+    assert found.default is inspect.Parameter.empty
+
+
+def test_the_no_new_files_path_marks_the_pass_with_its_own_candidate_count():
+    """run_scan's early return marks the pass pending before publishing the
+    scan as complete, ahead of the _dispatch_phd2_scan call further down. That
+    call site holds the same candidate list and must not fall back to a
+    placeholder just because it is not the dispatch itself."""
+    import inspect
+
+    from app.worker import tasks_scan
+
+    source = inspect.getsource(tasks_scan.run_scan)
+    assert "reset_phd2_counts_sync(_redis, len(phd2_paths))" in source
 
 
 def test_a_guide_log_pass_that_cannot_be_queued_claims_nothing_is_in_flight(monkeypatch):
@@ -477,7 +717,9 @@ def test_a_guide_log_pass_that_cannot_be_queued_claims_nothing_is_in_flight(monk
     monkeypatch.setattr(tasks_scan, "scan_phd2_logs", _Broken)
     tasks_scan._dispatch_phd2_scan(["/logs/a.txt"])
 
-    assert redis.writes[-1] == (SCAN_KEY, ("phd2_state", ""))
+    # The idle write clears the timestamp alongside the flag, so a reader can
+    # never see a stale "pending" age attached to a cleared claim.
+    assert redis.writes[-1] == (SCAN_KEY, {"phd2_state": "", "phd2_state_at": ""})
 
 
 def test_a_scan_pass_flags_the_guide_log_work_in_flight_until_it_stops(monkeypatch):
@@ -514,7 +756,51 @@ def test_a_scan_pass_flags_the_guide_log_work_in_flight_until_it_stops(monkeypat
     assert states == []
 
 
-def test_publishing_the_counters_clears_the_in_flight_flag_in_the_same_write():
+def test_the_phd2_counters_are_reset_before_the_scan_is_called_complete():
+    """run_scan wrote "complete" and only then reset the guide-log counters,
+    so for the length of three apply_async calls a poller could read this
+    scan's completion next to the previous scan's guide-log totals."""
+    import inspect
+
+    from app.worker import tasks_scan
+
+    source = inspect.getsource(tasks_scan.run_scan)
+    reset_at = source.index("reset_phd2_counts_sync(_redis")
+    idle_at = source.index("set_idle_sync(_redis)")
+    assert reset_at < idle_at, (
+        "the guide-log counters must be zeroed before the scan is published "
+        "as complete"
+    )
+
+
+def test_the_pending_flag_carries_the_time_it_was_set():
+    """Only a RAISING apply_async clears the flag. A task queued and then lost
+    (worker down, broker discard) leaves phd2_state at "pending" until the
+    whole scan:state key expires, and a UI waiting on it shows "processing"
+    forever. The timestamp lets the reader age the claim out."""
+    from app.services.scan_state import SCAN_KEY, reset_phd2_counts_sync
+
+    redis = _RecordingRedis()
+    reset_phd2_counts_sync(redis, 25)
+    key, mapping = redis.writes[0]
+    assert key == SCAN_KEY
+    assert mapping["phd2_state"] == "pending"
+    assert isinstance(mapping["phd2_state_at"], float)
+    assert mapping["phd2_state_at"] > 0
+
+
+def test_moving_to_running_refreshes_the_timestamp():
+    from app.services.scan_state import SCAN_KEY, set_phd2_state_sync
+
+    redis = _RecordingRedis()
+    set_phd2_state_sync(redis, "running")
+    key, mapping = redis.writes[0]
+    assert key == SCAN_KEY
+    assert mapping["phd2_state"] == "running"
+    assert isinstance(mapping["phd2_state_at"], float)
+
+
+def test_publishing_the_counters_clears_the_flag_and_its_timestamp_together():
     """A reader that sees the pass finished must see this pass's numbers in the
     same snapshot, never the flag cleared a moment before the totals land."""
     from app.services.scan_state import SCAN_KEY, set_phd2_counts_sync
@@ -526,7 +812,92 @@ def test_publishing_the_counters_clears_the_in_flight_flag_in_the_same_write():
         "phd2_ingested": 19,
         "phd2_failed": 0,
         "phd2_state": "",
+        "phd2_state_at": "",
     })]
+
+
+def test_the_timestamp_reaches_the_scan_status_response():
+    from app.schemas.scan import ScanStateResponse
+    from app.services.scan_state import parse_snapshot
+
+    snap = parse_snapshot({
+        "state": "complete", "total": "0", "completed": "0", "failed": "0",
+        "phd2_state": "pending", "phd2_state_at": "1753800000.0",
+    })
+    assert snap.phd2_state_at == 1753800000.0
+    assert "phd2_state_at" in snap.to_dict()
+    assert "phd2_state_at" in ScanStateResponse.model_fields
+
+
+def test_a_hash_written_before_this_field_existed_reads_back_none():
+    from app.services.scan_state import parse_snapshot
+
+    snap = parse_snapshot({
+        "state": "complete", "total": "0", "completed": "0", "failed": "0",
+        "phd2_state": "pending",
+    })
+    assert snap.phd2_state_at is None
+
+
+def test_the_candidate_total_can_be_published_before_the_pass_finishes():
+    """The scan UI counts "N of M" while the pass runs. M is known as soon as
+    the candidate list is, and publishing it only at the end means the UI has
+    nothing to count against for the whole pass."""
+    from app.services.scan_state import SCAN_KEY, set_phd2_found_sync
+
+    redis = _RecordingRedis()
+    set_phd2_found_sync(redis, 25)
+    assert redis.writes == [(SCAN_KEY, ("phd2_found", 25))]
+
+
+def test_per_file_progress_increments_rather_than_overwrites():
+    """hincrby, not hset: the pass has no running total of its own to write,
+    and re-deriving one per file would race the end-of-pass write."""
+    from app.services.scan_state import SCAN_KEY, increment_phd2_progress_sync
+
+    redis = _RecordingRedis()
+    increment_phd2_progress_sync(redis, ingested=1)
+    increment_phd2_progress_sync(redis, failed=1)
+    assert redis.increments == [
+        (SCAN_KEY, "phd2_ingested", 1),
+        (SCAN_KEY, "phd2_failed", 1),
+    ]
+
+
+def test_progress_renews_the_state_timestamp():
+    """phd2_state_at is otherwise stamped only at the pending and running
+    transitions, so a consumer that ages "running" out on the same window it
+    uses for "pending" calls a healthy pass stalled as soon as it runs longer
+    than that window. Per-file progress renewing the timestamp means a
+    timestamp that stopped moving is evidence the pass stopped moving."""
+    from app.services.scan_state import SCAN_KEY, increment_phd2_progress_sync
+
+    redis = _RecordingRedis()
+    increment_phd2_progress_sync(redis, ingested=1)
+    assert redis.increments == [(SCAN_KEY, "phd2_ingested", 1)]
+    assert len(redis.writes) == 1
+    key, args = redis.writes[0]
+    assert key == SCAN_KEY
+    assert args[0] == "phd2_state_at"
+    assert isinstance(args[1], float)
+    assert args[1] > 0
+
+    redis = _RecordingRedis()
+    increment_phd2_progress_sync(redis, failed=1)
+    assert redis.writes[0][1][0] == "phd2_state_at"
+
+
+def test_a_no_op_progress_call_writes_nothing():
+    """A file that was unchanged or empty is neither ingested nor failed, and
+    must not cost a Redis round trip per file in a scan of hundreds. It also
+    must not renew phd2_state_at: a pass that is hung rather than busy would
+    then keep looking alive to anything aging the claim out."""
+    from app.services.scan_state import increment_phd2_progress_sync
+
+    redis = _RecordingRedis()
+    increment_phd2_progress_sync(redis)
+    assert redis.increments == []
+    assert redis.writes == []
 
 
 def test_a_remap_pass_never_purges(db, log_file, monkeypatch):

@@ -295,6 +295,16 @@ export interface FrameRecord {
   guiding_rms_arcsec: number | null;
   guiding_rms_ra_arcsec: number | null;
   guiding_rms_dec_arcsec: number | null;
+  // Which pipeline produced the three guiding_rms_* values on this row:
+  // "csv" for the NINA CSV sidecar, "phd2" for the guide-log correlation
+  // pass, null for rows ingested before provenance was recorded.
+  // Kept optional even though the schema now declares it: the FrameRecord
+  // fixtures in lib/wbppQualityFilter.test.ts and components/wbpp/
+  // WbppQualityPanel.test.tsx construct rows without it, and a required
+  // field would cost a fixture rewrite to say nothing new. The generated
+  // schema types it as a plain string; this mirror narrows it to the three
+  // values the column actually holds.
+  guiding_rms_source?: "csv" | "phd2" | null;
   adu_stdev: number | null;
   adu_mean: number | null;
   adu_median: number | null;
@@ -438,6 +448,30 @@ export interface ScanStatus {
   changed_files: number;
   removed: number;
   skipped_calibration: number;
+  // PHD2 guide-log pass, reported through the same scan:state hash as the
+  // image counters (backend services/scan_state.py:75-85). "" is idle,
+  // "pending" is queued behind the image scan, "running" is the pass itself.
+  // The generated ScanStateResponse types phd2_state as a plain `string`
+  // with a "" default; this mirror narrows it because store/scan.ts branches
+  // on the literal values and an unnarrowed string would let a typo through.
+  // All five are optional so a status snapshot from a backend that predates
+  // them still satisfies the type, same reasoning as `percent` below.
+  phd2_state?: "" | "pending" | "running";
+  phd2_found?: number;
+  phd2_ingested?: number;
+  phd2_failed?: number;
+  // Epoch seconds, same unit as started_at: the LAST guide-log state
+  // transition. Written when the pass is marked pending at dispatch,
+  // rewritten when it reaches running, cleared in the same write that clears
+  // the flag. The stall guard in store/scan.ts prefers this over every other
+  // reference, so a pass whose worker died between transitions stops being
+  // reported as in flight, while a pass that is genuinely progressing gets
+  // its window restarted once, at the running transition.
+  // Kept optional so a status snapshot from a backend that predates the
+  // field still satisfies the type; store/scan.ts then measures from a
+  // client-observed timestamp instead, which is the degraded path because it
+  // does not survive a page reload.
+  phd2_state_at?: number | null;
   failed_files?: FailedFile[];
   task?: string;
   step?: number;

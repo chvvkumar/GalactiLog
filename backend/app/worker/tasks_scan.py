@@ -32,7 +32,7 @@ from app.worker.tasks_common import _sync_engine, _redis, _activity_session, _in
 from app.worker.tasks_thumbnails import generate_reference_thumbnails
 from app.worker.tasks_target_dedup import detect_duplicate_targets
 from app.worker.tasks_sessions import backfill_dark_hours
-from app.worker.tasks_phd2 import scan_phd2_logs
+from app.worker.tasks_phd2 import correlate_phd2_images, scan_phd2_logs
 from app.services.scan_state import (
     increment_completed_sync, increment_failed_sync, increment_csv_enriched_sync,
     increment_skipped_calibration_sync,
@@ -95,8 +95,15 @@ def _dispatch_phd2_scan(
     scan:state would still be publishing the previous scan's guide-log totals
     next to a state of "complete", and a caller polling for completeness would
     read them as this run's.
+
+    The candidate count goes with them, for the same reason and with the
+    opposite sign: the pass is claimed here but does not start for another 50
+    seconds, so the denominator the task publishes when it starts arrives long
+    after the job row is on screen. The number is already in hand here, so the
+    row can carry "0 of N logs" from its first render rather than showing an
+    unlabelled bar for the whole countdown.
     """
-    reset_phd2_counts_sync(_redis)
+    reset_phd2_counts_sync(_redis, len(paths))
     try:
         scan_phd2_logs.apply_async(
             countdown=50,
@@ -306,6 +313,15 @@ def run_scan(self, include_calibration: bool = True, force_orphan_cleanup: bool 
 
         total_queued = len(new_files) + len(changed_files)
         if not total_queued:
+            # Zero the guide-log counters, publish this pass's candidate count
+            # and flag the pass as queued BEFORE the scan is published as
+            # complete. scan:state survives a
+            # finished scan, so between set_idle_sync and this reset a poller
+            # could read `state == "complete"` next to the previous run's
+            # phd2_* totals and take them for this run's. The dispatch itself
+            # still happens after the activity row exists, because it wants
+            # that row as its parent.
+            reset_phd2_counts_sync(_redis, len(phd2_paths))
             set_idle_sync(_redis)
             cataloged = len(known_paths) - removed
             msg = f"Scan complete: no new files found ({cataloged} already cataloged)"
@@ -322,6 +338,21 @@ def run_scan(self, include_calibration: bool = True, force_orphan_cleanup: bool 
             detect_duplicate_targets.apply_async(countdown=30, kwargs={"parent_activity_id": scan_activity_id})
             backfill_dark_hours.apply_async(countdown=45, kwargs={"parent_activity_id": scan_activity_id})
             _dispatch_phd2_scan(phd2_paths, scan_activity_id, force_orphan_cleanup)
+            # Incremental fill for frames ingested by an earlier scan whose
+            # guide logs only arrived later. The countdown clears the guide-log
+            # pass above (dispatched at 50 s), which re-derives the nights it
+            # writes; running before it would do the same work twice and the
+            # second pass would find nothing.
+            try:
+                correlate_phd2_images.apply_async(
+                    countdown=120,
+                    kwargs={"parent_activity_id": scan_activity_id},
+                )
+            except Exception:
+                logger.warning(
+                    "run_scan: could not dispatch the guiding correlation pass",
+                    exc_info=True,
+                )
             return {"status": "complete", "new_files_queued": 0, "already_known": cataloged, "removed": removed, "phd2_found": len(phd2_paths)}
 
         # Transition to ingesting with final total - ingest tasks are already running
@@ -552,6 +583,7 @@ def _do_ingest(fits_path: str, include_calibration: bool = True) -> dict:
                 guiding_rms_arcsec=meta.get("guiding_rms_arcsec"),
                 guiding_rms_ra_arcsec=meta.get("guiding_rms_ra_arcsec"),
                 guiding_rms_dec_arcsec=meta.get("guiding_rms_dec_arcsec"),
+                guiding_rms_source=meta.get("guiding_rms_source"),
                 adu_stdev=meta.get("adu_stdev"),
                 adu_mean=meta.get("adu_mean"),
                 adu_median=meta.get("adu_median"),

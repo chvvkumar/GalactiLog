@@ -52,6 +52,33 @@ def local_to_utc(naive: datetime, tz_name: str) -> datetime:
     return localized.astimezone(timezone.utc)
 
 
+def _windows_from_pairs(
+    pairs: list[tuple[str, float]], last_time_offset: float | None
+) -> list[tuple[float, float]]:
+    """The dither/settle window rule, over (event type, time offset) pairs.
+
+    Factored out so the rule has exactly one implementation. Phase 2 needs it
+    against events read back from the stored JSONB rather than against parser
+    objects, and two implementations of "which frames does an RMS exclude"
+    would eventually disagree - at which point a per-image figure and the
+    session figure printed beside it stop describing the same thing.
+    """
+    windows: list[tuple[float, float]] = []
+    open_at: float | None = None
+    for kind, t in pairs:
+        if kind in ("dither", "settle_start"):
+            if open_at is None:
+                open_at = t
+        elif kind in ("settle_done", "settle_failed"):
+            if open_at is not None:
+                windows.append((open_at, t))
+                open_at = None
+    if open_at is not None:
+        end = last_time_offset if last_time_offset is not None else open_at
+        windows.append((open_at, max(end, open_at)))
+    return windows
+
+
 def dither_settle_windows(section) -> list[tuple[float, float]]:
     """Return [(start_t, end_t)] intervals to exclude from RMS.
 
@@ -60,20 +87,31 @@ def dither_settle_windows(section) -> list[tuple[float, float]]:
     window left open at the end of the section closes at the last frame,
     because PHD2 was still settling when the section ended.
     """
-    windows: list[tuple[float, float]] = []
-    open_at: float | None = None
-    for event in section.events:
-        if event.type in ("dither", "settle_start"):
-            if open_at is None:
-                open_at = event.time_offset
-        elif event.type in ("settle_done", "settle_failed"):
-            if open_at is not None:
-                windows.append((open_at, event.time_offset))
-                open_at = None
-    if open_at is not None:
-        end = section.frames[-1].time_offset if section.frames else open_at
-        windows.append((open_at, max(end, open_at)))
-    return windows
+    last_t = section.frames[-1].time_offset if section.frames else None
+    return _windows_from_pairs(
+        [(e.type, e.time_offset) for e in section.events], last_t
+    )
+
+
+def dither_settle_windows_from_stored(
+    events: list[dict], last_time_offset: float | None
+) -> list[tuple[float, float]]:
+    """dither_settle_windows for events read back from Phd2Session.events.
+
+    The stored shape is [{"type": ..., "t": ..., "detail": ...}] (written by
+    compute_session_metrics); the parser shape is Phd2Event objects. Both
+    reduce to the same (type, time offset) pairs, and the rule they feed has
+    to stay identical in both directions: the phase-2 per-image RMS must
+    exclude exactly the frames the session RMS excluded, or PHD2's own
+    displayed figure matches one of ours and not the other.
+    """
+    return _windows_from_pairs(
+        [
+            (str(e.get("type") or ""), float(e.get("t") or 0.0))
+            for e in (events or [])
+        ],
+        last_time_offset,
+    )
 
 
 def _in_windows(t: float, windows: list[tuple[float, float]]) -> bool:

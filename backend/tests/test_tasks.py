@@ -1,4 +1,3 @@
-import sys
 import pytest
 import numpy as np
 from pathlib import Path
@@ -33,17 +32,13 @@ def _bootstrap_tasks(modname="app.worker.tasks"):
     re-exports the same function object. Callers pass e.g.
     modname="app.worker.tasks_scan" for _do_ingest/reingest_changed_file, or
     "app.worker.tasks_thumbnails" for the chunked thumbnail tasks.
+
+    See conftest.bootstrap_worker_module for why the mocked engine must not be
+    left behind in sys.modules.
     """
-    import sys as _sys
-    mod = _sys.modules.get(modname)
-    if mod is not None and not isinstance(mod, MagicMock):
-        return mod
-    _sys.modules.pop(modname, None)
-    mock_engine = MagicMock()
-    with patch("sqlalchemy.create_engine", return_value=mock_engine):
-        import importlib
-        mod = importlib.import_module(modname)
-    return mod
+    from tests.conftest import bootstrap_worker_module
+
+    return bootstrap_worker_module(modname)
 
 
 def _make_partition_result(chunks: list[list]):
@@ -517,6 +512,116 @@ class TestDuplicateIngestPreservesThumbnail:
         )
         assert isinstance(raised, RuntimeError)
         assert thumb_path.exists(), "shared thumbnail must not be deleted"
+
+
+# ---------------------------------------------------------------------------
+# Provenance columns must survive the ingest constructor.
+#
+# _do_ingest builds the Image row from a hand-enumerated kwargs list, so a
+# column merge_csv_metrics writes into the metadata dict reaches the DB only
+# if someone remembered to add the kwarg. eccentricity_source shipped that way
+# and guiding_rms_source was silently dropped for a whole review round. These
+# pin the row the ingest actually inserts, not the metadata dict it built.
+# ---------------------------------------------------------------------------
+
+class _CapturingSession:
+    """Session stand-in that keeps whatever was added, and commits cleanly."""
+
+    def __init__(self, added):
+        self._added = added
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def get(self, *a, **kw):
+        return None
+
+    def add(self, obj):
+        self._added.append(obj)
+
+    def execute(self, *a, **kw):
+        return MagicMock()
+
+    def commit(self):
+        pass
+
+
+class TestIngestPersistsProvenanceColumns:
+    def _ingest(self, tmp_path, extra_meta):
+        """Run _do_ingest over a stub file, returning the inserted Image."""
+        import contextlib
+
+        from app.models import Image
+
+        tasks_mod = _bootstrap_tasks("app.worker.tasks_scan")
+
+        fits_root = tmp_path / "fits"
+        thumbs = tmp_path / "thumbs"
+        fits_root.mkdir()
+        thumbs.mkdir()
+        fits_path = fits_root / "M31" / "Light_M31_001.fits"
+        fits_path.parent.mkdir(parents=True)
+        fits_path.write_bytes(b"stub")
+
+        meta = {
+            "file_path": str(fits_path),
+            "file_name": fits_path.name,
+            "object_name": "M31",
+            "image_type": "LIGHT",
+            "raw_headers": {},
+            "capture_date": None,
+        }
+        meta.update(extra_meta)
+
+        added: list = []
+        patchers = [
+            patch.object(tasks_mod.settings, "fits_data_path", str(fits_root)),
+            patch.object(tasks_mod.settings, "thumbnails_path", str(thumbs)),
+            patch.object(tasks_mod, "fitsio", MagicMock()),
+            patch.object(tasks_mod, "extract_metadata", MagicMock(return_value=meta)),
+            patch.object(tasks_mod, "generate_thumbnail", MagicMock(return_value=None)),
+            patch.object(tasks_mod, "resolve_target", MagicMock(return_value=None)),
+            patch.object(tasks_mod, "Session", lambda *a, **kw: _CapturingSession(added)),
+            patch.object(tasks_mod, "_redis", MagicMock()),
+            patch.object(tasks_mod, "increment_completed_sync", MagicMock()),
+            patch.object(tasks_mod, "increment_csv_enriched_sync", MagicMock()),
+        ]
+
+        with contextlib.ExitStack() as stack:
+            for p in patchers:
+                stack.enter_context(p)
+            tasks_mod._do_ingest(str(fits_path), include_calibration=True)
+
+        images = [obj for obj in added if isinstance(obj, Image)]
+        assert len(images) == 1
+        return images[0]
+
+    def test_ingest_persists_csv_provenance_stamps(self, tmp_path):
+        """Both provenance labels the CSV merge writes must reach the row."""
+        image = self._ingest(tmp_path, {
+            "eccentricity": 0.42,
+            "eccentricity_source": "csv",
+            "guiding_rms_arcsec": 0.78,
+            "guiding_rms_ra_arcsec": 0.52,
+            "guiding_rms_dec_arcsec": 0.58,
+            "guiding_rms_source": "csv",
+            "detected_stars": 312,
+        })
+
+        assert image.guiding_rms_arcsec == 0.78
+        assert image.guiding_rms_source == "csv"
+        assert image.eccentricity_source == "csv"
+
+    def test_ingest_leaves_provenance_null_without_csv(self, tmp_path):
+        """A frame the CSV never spoke about carries no provenance label."""
+        image = self._ingest(tmp_path, {})
+
+        assert image.guiding_rms_arcsec is None
+        assert image.guiding_rms_source is None
+        assert image.eccentricity_source is None
 
 
 # ---------------------------------------------------------------------------
