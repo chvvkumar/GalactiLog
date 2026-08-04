@@ -50,15 +50,22 @@ the half-hour zones (India, Newfoundland, parts of Australia) are misread as
 whole-hour neighbours far more often than as each other. 0.5 h catches every
 realistic error and nothing else.
 
-`SIDEREAL_MAX_SPREAD_HOURS = 0.25` on the interquartile range is what stops
-the check crying wolf. A timezone error is a constant: every section of every
-night is displaced by the same amount, so real evidence looks like a tight
-cluster. A drifting mount clock, a profile carried between two sites, a mount
-reporting apparent rather than mean coordinates, or a stale pointing line
-copied from an earlier target all produce scatter. Scatter means the premises
-failed, so no verdict is emitted rather than a confident wrong one. The
-quartile range rather than the full range keeps one bad section from
-suppressing a real finding.
+`SIDEREAL_MAX_SPREAD_HOURS = 0.25` is what stops the check crying wolf. A
+timezone error is a constant: every section of every night is displaced by the
+same amount, so real evidence looks like a tight cluster. A drifting mount
+clock, a profile carried between two sites, a mount reporting apparent rather
+than mean coordinates, or a stale pointing line copied from an earlier target
+all produce scatter. Scatter means the premises failed, so no verdict is
+emitted rather than a confident wrong one.
+
+The spread is measured two ways, deliberately. At four or more samples it is
+the interquartile range, so one bad section cannot suppress a real finding. At
+exactly three, the smallest set that passes `MIN_SIDEREAL_SECTIONS`, the
+interquartile range of `statistics.quantiles(n=4, method="inclusive")` reduces
+to half the full range, which would quietly let a 0.5 h span through a bound
+documented as 0.25 h. Three samples have no outlier to reject anyway, so the
+full range is used there and the constant means what it says at every sample
+count.
 
 `MIN_SIDEREAL_SECTIONS = 3` keeps a single bad pointing line from generating a
 warning at all, and is what makes the spread guard meaningful: a spread over
@@ -82,6 +89,46 @@ coordinates are incoherent and no timezone verdict may be drawn from them.
 everywhere else), the 0.1 degree write precision, and ordinary pointing-model
 error, while still catching a mount that is set up for the wrong hemisphere or
 is reporting a stale position.
+
+Reporting the answer
+--------------------
+The check measures a difference, but a user acts on an offset. Quoting a
+rounded difference is a trap: every real IANA offset is a multiple of 15
+minutes, including the 45-minute zones `Asia/Kathmandu` (+5:45) and
+`Australia/Eucla` (+8:45), so rounding a difference to whole hours can point a
+user at an offset no zone has. A rig truly on UTC+8 labelled `Asia/Kolkata`
+(+5:30) is 2.5 h out, and "three hours behind" would move it to UTC+8:30.
+
+So `SidVerdict` quotes `implied_utc_offset_hours` where it can: the caller
+passes the offset the configured zone was actually using that night, and the
+verdict returns the offset the pointing implies, quantised to
+`OFFSET_QUANTUM_HOURS = 0.25`. That is a real offset the user can select
+rather than a correction to apply. `nearest_quarter_hours` is the same
+quantisation applied to the difference, for callers with no configured offset
+to hand.
+
+Both are computed from the difference divided by `SIDEREAL_TO_SOLAR_RATIO`.
+The measurement is in sidereal hours, so a 12 h clock error reads as 12.033
+sidereal hours; dividing removes that systematic before rounding rather than
+spending a quarter of the rounding half-width on it.
+
+`DIRECTION_AMBIGUOUS_ABOVE_HOURS = 11.5` marks where the direction stops
+meaning anything. Local sidereal time is circular modulo 24, so a configured
+zone 12 h ahead and one 12 h behind are genuinely indistinguishable from
+pointing alone, and the sidereal inflation pushes a true 12 h error past the
+fold so it is reported with the sign reversed. `SidVerdict.direction_known` is
+False there. The magnitude is still worth stating; the direction is not, and
+wording must not say "ahead" or "behind" when the flag is False.
+
+The same circularity leaves a narrower residual: pointing determines the
+offset only modulo 24 h, so an implied offset of X is equally consistent with
+X plus or minus 24. Real offsets run from -12:00 to +14:00, so both members of
+a pair are valid only when the implied offset falls in -12 to -10, whose alias
+is +12 to +14. Outside that band the alias is not a zone anyone can select and
+the answer is unique. The threshold above does not cover this case, because
+the fold happens in the caller's configured offset rather than in the
+measurement, so a wording author quoting an implied offset in that band must
+say the rig is on that offset or its twelve-hour counterpart.
 """
 from __future__ import annotations
 
@@ -99,6 +146,15 @@ SIDEREAL_TOLERANCE_HOURS = 0.5
 SIDEREAL_MAX_SPREAD_HOURS = 0.25
 SIDEREAL_NO_SITE_TOLERANCE_HOURS = 3.0
 POINTING_MAX_ALT_RESIDUAL_DEG = 3.0
+DIRECTION_AMBIGUOUS_ABOVE_HOURS = 11.5
+
+# Sidereal hours per solar hour. A clock error of N hours displaces sidereal
+# time by N times this, so the measurement is divided by it before rounding.
+SIDEREAL_TO_SOLAR_RATIO = 1.00273790935
+
+# Every real IANA UTC offset is a multiple of 15 minutes, so user-facing
+# offsets are quantised to this and never to whole hours.
+OFFSET_QUANTUM_HOURS = 0.25
 
 # Tier 1: the profile carries its own longitude, so the site is known and the
 # finding is unambiguous.
@@ -123,20 +179,48 @@ _SECONDS_PER_DAY = 86400.0
 class SidVerdict:
     """One profile's sidereal disagreement, when there is enough evidence.
 
-    `median_error_hours` follows the module sign convention: positive means
-    the configured setup runs ahead of what the pointing implies.
-    `nearest_whole_hours` is the roundable form for user-facing wording.
-    `confident` is False on the standard-meridian tier, where the wording must
-    say "probable" rather than stating the finding as fact.
+    Which field to put in front of a user, in order:
+
+    1. `implied_utc_offset_hours` when it is not None. This is a real UTC
+       offset, already quantised to a quarter hour, so the message can name an
+       offset the user can actually select. Available on the site-known tier
+       when the caller supplied the configured offset. It is determined modulo
+       24 h, so a value between -12 and -10 also admits its counterpart 24 h
+       away, between +12 and +14; only in that band must the wording offer
+       both. See the module docstring.
+    2. `nearest_quarter_hours`, the disagreement itself on the same quarter-
+       hour grid, when there is no configured offset to anchor it.
+
+    `median_error_hours` is the raw median of the values handed in, in sidereal
+    hours and uncorrected for the sidereal rate. It is a diagnostic. Do not
+    build a message out of it: the other two fields exist precisely because
+    rounding this one produces offsets no timezone has.
+
+    Two flags constrain the wording, and both are mandatory:
+
+    - `direction_known` False means the sign carries no information, because
+       the disagreement is near the 12 h fold where ahead and behind are
+       indistinguishable from pointing alone. State the magnitude if useful,
+       but the words "ahead", "behind", "east" and "west" are forbidden, and
+       so is `implied_utc_offset_hours`, which is None in that case for the
+       same reason.
+    - `confident` False is the standard-meridian tier, where the comparison is
+       against a whole timezone rather than a known site. Say "probable"; do
+       not state the finding as fact.
+
+    `median_error_hours` follows the module sign convention: positive means the
+    configured setup runs ahead of what the pointing implies.
     """
 
     median_error_hours: float
-    nearest_whole_hours: int
+    nearest_quarter_hours: float
     sample_count: int
     tier: str
     tolerance_hours: float
     confident: bool
+    direction_known: bool
     implied_longitude_deg: float | None = None
+    implied_utc_offset_hours: float | None = None
 
 
 def wrap12(hours: float) -> float:
@@ -328,11 +412,31 @@ def _unwrap_around_first(samples: Sequence[float]) -> list[float]:
     return [reference + wrap12(value - reference) for value in samples]
 
 
-def _interquartile_spread(samples: Sequence[float]) -> float:
+def _sample_spread(samples: Sequence[float]) -> float:
+    """Spread of a sample set against `SIDEREAL_MAX_SPREAD_HOURS`.
+
+    The interquartile range at four or more samples, so one bad section cannot
+    suppress a real finding. The full range below that: at three samples the
+    inclusive quartile method returns exactly half the full range, which would
+    let a 0.5 h span pass a bound documented as 0.25 h, and three samples have
+    no outlier to reject in the first place. See the module docstring.
+    """
     if len(samples) < 2:
         return 0.0
+    if len(samples) < 4:
+        return max(samples) - min(samples)
     q1, _, q3 = statistics.quantiles(samples, n=4, method="inclusive")
     return q3 - q1
+
+
+def _quantise_offset(hours: float) -> float:
+    """Round a solar-hour offset to the nearest `OFFSET_QUANTUM_HOURS`.
+
+    Half-way values round away from zero rather than to even, so the result
+    does not depend on which side of a quarter a sample happens to land.
+    """
+    steps = math.floor(abs(hours) / OFFSET_QUANTUM_HOURS + 0.5)
+    return math.copysign(steps * OFFSET_QUANTUM_HOURS, hours) + 0.0
 
 
 def verdict(
@@ -340,17 +444,26 @@ def verdict(
     *,
     tier: str = TIER_SITE_KNOWN,
     implied_longitudes_hours: Sequence[float] | None = None,
+    configured_offset_hours: float | None = None,
 ) -> SidVerdict | None:
     """One profile's verdict from its per-section offset errors.
 
     Returns None, meaning say nothing, whenever the evidence is thin: fewer
-    than `MIN_SIDEREAL_SECTIONS` samples, an interquartile spread above
+    than `MIN_SIDEREAL_SECTIONS` samples, a spread above
     `SIDEREAL_MAX_SPREAD_HOURS`, or a median inside the tier's tolerance.
     Silence is the correct output in all three cases; a confidently wrong
     accusation about the user's configuration is worse than no message.
 
     `implied_longitudes_hours`, when given, supplies the median longitude the
     pointing implies, which tier 2 quotes as a value to enter on the profile.
+
+    `configured_offset_hours` is the UTC offset the configured zone was
+    actually using on the nights measured. Supplying it turns the verdict from
+    a difference into a real offset the user can select, in
+    `implied_utc_offset_hours`. It is only honoured on the site-known tier:
+    on the standard-meridian tier the disagreement mixes clock error with zone
+    geography, so no offset may be quoted from it, and the actionable output
+    there is `implied_longitude_deg` instead.
     """
     if tier not in _TOLERANCE_BY_TIER:
         raise ValueError(f"unknown sidereal tier: {tier!r}")
@@ -361,12 +474,20 @@ def verdict(
         return None
 
     unwrapped = _unwrap_around_first(samples)
-    if _interquartile_spread(unwrapped) > SIDEREAL_MAX_SPREAD_HOURS:
+    if _sample_spread(unwrapped) > SIDEREAL_MAX_SPREAD_HOURS:
         return None
 
     median = wrap12(statistics.median(unwrapped))
     if abs(median) < tolerance:
         return None
+
+    # The measurement is in sidereal hours; the user's clock is not.
+    solar_error = median / SIDEREAL_TO_SOLAR_RATIO
+    direction_known = abs(median) <= DIRECTION_AMBIGUOUS_ABOVE_HOURS
+
+    implied_offset = None
+    if direction_known and tier == TIER_SITE_KNOWN and configured_offset_hours is not None:
+        implied_offset = _quantise_offset(configured_offset_hours - solar_error)
 
     suggested = None
     if implied_longitudes_hours:
@@ -376,10 +497,12 @@ def verdict(
 
     return SidVerdict(
         median_error_hours=median,
-        nearest_whole_hours=int(round(median)),
+        nearest_quarter_hours=_quantise_offset(solar_error),
         sample_count=len(samples),
         tier=tier,
         tolerance_hours=tolerance,
         confident=tier == TIER_SITE_KNOWN,
+        direction_known=direction_known,
         implied_longitude_deg=suggested,
+        implied_utc_offset_hours=implied_offset,
     )

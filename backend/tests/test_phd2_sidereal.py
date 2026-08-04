@@ -25,14 +25,17 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from app.services.phd2_sidereal import (
+    DIRECTION_AMBIGUOUS_ABOVE_HOURS,
     MIN_SIDEREAL_SECTIONS,
     POINTING_MAX_ALT_RESIDUAL_DEG,
     SIDEREAL_MAX_SPREAD_HOURS,
     SIDEREAL_NO_SITE_TOLERANCE_HOURS,
+    SIDEREAL_TO_SOLAR_RATIO,
     SIDEREAL_TOLERANCE_HOURS,
     TIER_SITE_KNOWN,
     TIER_ZONE_MERIDIAN,
     SidVerdict,
+    _quantise_offset,
     gmst_hours,
     implied_longitude_deg,
     implied_longitude_hours,
@@ -366,18 +369,19 @@ def test_verdict_is_emitted_for_a_tight_six_hour_cluster():
     got = verdict(_tight(6.0))
     assert isinstance(got, SidVerdict)
     assert got.median_error_hours == pytest.approx(6.0, abs=0.02)
-    assert got.nearest_whole_hours == 6
+    assert got.nearest_quarter_hours == 6.0
     assert got.sample_count == 6
     assert got.tier == TIER_SITE_KNOWN
     assert got.tolerance_hours == SIDEREAL_TOLERANCE_HOURS
     assert got.confident is True
+    assert got.direction_known is True
 
 
 def test_verdict_keeps_the_sign_of_the_median_error():
     got = verdict(_tight(-6.0))
     assert got is not None
     assert got.median_error_hours == pytest.approx(-6.0, abs=0.02)
-    assert got.nearest_whole_hours == -6
+    assert got.nearest_quarter_hours == -6.0
 
 
 def test_verdict_is_none_when_the_samples_are_scattered():
@@ -396,19 +400,157 @@ def test_verdict_spread_guard_uses_the_documented_constant():
     assert verdict(outside) is None
 
 
+def test_verdict_spread_guard_holds_at_three_samples():
+    # The inclusive quartile method returns half the full range at n=3, so
+    # without the small-sample branch this 0.5 h span would pass a 0.25 h
+    # bound. The constant must mean the same thing at every sample count.
+    assert verdict([6.0, 6.25, 6.5]) is None
+    assert verdict([6.0, 6.1, 6.2]) is not None
+
+
 def test_verdict_handles_a_cluster_straddling_the_twelve_hour_wrap():
     # +11.98 and -11.98 are 0.04 h apart, not 23.96 h apart.
     straddling = [11.98, -11.98, 11.99, -11.99, 12.0, -11.97]
     got = verdict(straddling)
     assert got is not None
     assert abs(got.median_error_hours) == pytest.approx(12.0, abs=0.05)
-    assert abs(got.nearest_whole_hours) == 12
+    assert abs(got.nearest_quarter_hours) == pytest.approx(12.0, abs=0.001)
 
 
-def test_verdict_rounds_to_the_nearest_whole_hour():
-    got = verdict(_tight(5.51))
+# --------------------------------------------------------------------------
+# reporting a real offset rather than a rounded difference
+# --------------------------------------------------------------------------
+
+def _sidereal(clock_hours):
+    """The disagreement a clock error of `clock_hours` actually measures."""
+    return clock_hours * SIDEREAL_TO_SOLAR_RATIO
+
+
+def test_verdict_reports_a_real_offset_for_a_half_hour_zone():
+    # A rig truly on UTC+8 labelled Asia/Kolkata (+5:30) is 2.5 h out. Rounding
+    # that difference to a whole hour would tell the user to move to UTC+8:30,
+    # which is not an offset any timezone has.
+    got = verdict(_tight(_sidereal(-2.5)), configured_offset_hours=5.5)
     assert got is not None
-    assert got.nearest_whole_hours == 6
+    assert got.implied_utc_offset_hours == pytest.approx(8.0, abs=1e-9)
+    assert got.nearest_quarter_hours == pytest.approx(-2.5, abs=1e-9)
+    assert got.direction_known is True
+
+
+def test_verdict_reports_a_real_offset_for_a_forty_five_minute_zone():
+    # Asia/Kathmandu is +5:45. A profile labelled Europe/London in winter
+    # (+0... here +1) is 4.75 h out, and the quarter-hour grid recovers it.
+    got = verdict(_tight(_sidereal(-4.75)), configured_offset_hours=1.0)
+    assert got is not None
+    assert got.implied_utc_offset_hours == pytest.approx(5.75, abs=1e-9)
+    assert got.nearest_quarter_hours == pytest.approx(-4.75, abs=1e-9)
+
+
+def test_verdict_offset_grid_survives_the_sidereal_inflation_at_eleven_hours():
+    # The raw measurement of an 11.5 h error is 11.5315 h, which rounds to a
+    # whole 12. On the quarter grid, after the sidereal rate is divided out,
+    # it comes back as 11.5.
+    got = verdict(_tight(_sidereal(11.5)), configured_offset_hours=-2.0)
+    assert got is not None
+    assert got.median_error_hours == pytest.approx(11.5315, abs=0.01)
+    assert got.nearest_quarter_hours == pytest.approx(11.5, abs=1e-9)
+
+
+def test_verdict_quantises_clock_hours_not_sidereal_hours():
+    # 5.625 sits exactly on a quarter boundary in SIDEREAL hours, so the two
+    # readings disagree: dividing the sidereal rate out first gives 5.6106,
+    # which belongs to 5.5, while rounding the raw measurement would claim
+    # 5.75. The grid is a grid of clock offsets, so it must be the former.
+    got = verdict(_tight(5.625), configured_offset_hours=0.0)
+    assert got is not None
+    assert got.nearest_quarter_hours == pytest.approx(5.5, abs=1e-9)
+    assert got.implied_utc_offset_hours == pytest.approx(-5.5, abs=1e-9)
+
+
+def test_verdict_has_no_implied_offset_without_a_configured_offset():
+    got = verdict(_tight(_sidereal(-2.5)))
+    assert got is not None
+    assert got.implied_utc_offset_hours is None
+    assert got.nearest_quarter_hours == pytest.approx(-2.5, abs=1e-9)
+
+
+def test_verdict_meridian_tier_never_quotes_an_offset():
+    # On that tier the disagreement mixes clock error with zone geography, so
+    # no offset may be read out of it.
+    got = verdict(_tight(_sidereal(-6.0)), tier=TIER_ZONE_MERIDIAN,
+                  configured_offset_hours=5.5)
+    assert got is not None
+    assert got.implied_utc_offset_hours is None
+
+
+@pytest.mark.parametrize("hours,expected", [
+    (0.0, 0.0),
+    (0.124, 0.0),
+    (0.125, 0.25),
+    (-0.125, -0.25),
+    (0.375, 0.5),
+    (-0.375, -0.5),
+    (2.49, 2.5),
+    (-5.76, -5.75),
+])
+def test_quantise_offset_rounds_halves_away_from_zero(hours, expected):
+    # Not banker's rounding: an exact half must not depend on which quarter it
+    # happens to sit beside.
+    assert _quantise_offset(hours) == pytest.approx(expected, abs=1e-12)
+
+
+# --------------------------------------------------------------------------
+# direction ambiguity at the twelve hour fold
+# --------------------------------------------------------------------------
+
+def test_direction_is_known_below_the_fold_boundary():
+    got = verdict(_tight(DIRECTION_AMBIGUOUS_ABOVE_HOURS - 0.1))
+    assert got is not None
+    assert got.direction_known is True
+
+
+def test_direction_is_known_exactly_at_the_fold_boundary():
+    got = verdict([DIRECTION_AMBIGUOUS_ABOVE_HOURS] * 3)
+    assert got is not None
+    assert got.median_error_hours == pytest.approx(DIRECTION_AMBIGUOUS_ABOVE_HOURS)
+    assert got.direction_known is True
+
+
+def test_direction_is_unknown_just_past_the_fold_boundary():
+    got = verdict(_tight(DIRECTION_AMBIGUOUS_ABOVE_HOURS + 0.1))
+    assert got is not None
+    assert got.direction_known is False
+
+
+def test_direction_is_unknown_for_a_true_twelve_hour_error():
+    # A clock 12 h AHEAD measures 12.0329 sidereal hours, which wrap12 folds to
+    # -11.9671, inverting the sign. The magnitude survives; the direction must
+    # be declared meaningless rather than reported backwards.
+    got = verdict(_tight(wrap12(_sidereal(12.0))), configured_offset_hours=0.0)
+    assert got is not None
+    assert got.median_error_hours < 0
+    assert got.direction_known is False
+    assert abs(got.nearest_quarter_hours) == pytest.approx(12.0, abs=1e-9)
+
+
+def test_implied_offset_is_determined_only_modulo_twentyfour_hours():
+    # Configured UTC+0 against a rig truly on UTC-12:30 is a 12.5 h difference,
+    # which the pointing cannot tell from -11.5. The module reports the -11.5
+    # reading, so the implied offset is +11.5 rather than -12.5. Here that is
+    # the better answer, because -12.5 is not an offset any zone has, but the
+    # aliasing is real and callers must know it exists.
+    got = verdict(_tight(_sidereal(12.5)), configured_offset_hours=0.0)
+    assert got is not None
+    assert got.median_error_hours == pytest.approx(-11.4658, abs=0.01)
+    assert got.direction_known is True
+    assert got.implied_utc_offset_hours == pytest.approx(11.5, abs=1e-9)
+
+
+def test_no_implied_offset_is_quoted_when_the_direction_is_unknown():
+    # An offset built on an inverted sign would be wrong by 24 hours.
+    got = verdict(_tight(wrap12(_sidereal(12.0))), configured_offset_hours=5.5)
+    assert got is not None
+    assert got.implied_utc_offset_hours is None
 
 
 def test_verdict_meridian_tier_ignores_errors_a_wide_zone_can_explain():
