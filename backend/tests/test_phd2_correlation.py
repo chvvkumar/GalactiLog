@@ -51,6 +51,20 @@ def _write_observer_timezone(Session, value):
     return original
 
 
+def _write_profile_map(Session, mapping):
+    """Set user_settings.general.phd2_profile_map to the given raw value."""
+    from app.models.user_settings import SETTINGS_ROW_ID, UserSettings
+
+    with Session() as s:
+        row = s.get(UserSettings, SETTINGS_ROW_ID)
+        if row is None:
+            row = UserSettings(id=SETTINGS_ROW_ID)
+            s.add(row)
+            s.flush()
+        row.general = {**dict(row.general or {}), "phd2_profile_map": mapping}
+        s.commit()
+
+
 def _restore_general(Session, general):
     from app.models.user_settings import SETTINGS_ROW_ID, UserSettings
 
@@ -351,26 +365,38 @@ def _seed_night(db, *, telescope="140APO", profile="140APO_AM5N_ASI174MM",
                 mapped=True, exposure=60.0, frame_count=120,
                 image_rms=None, image_source=None, second_rig=False,
                 second_rig_rms=None, second_rig_source=None,
-                second_rig_telescope="SVBony 80ED"):
-    """One image and one guiding session covering it, on 2026-07-14."""
+                second_rig_telescope="SVBony 80ED",
+                night=date(2026, 7, 14), tag="a"):
+    """One image and one guiding session covering it, on 2026-07-14.
+
+    `night` and `tag` exist for the tests that need two independent nights in
+    one pass; every other caller takes the defaults and gets exactly the
+    fixture this file has always seeded. `second_rig` only ever applies to the
+    default night, so its file path stays the fixed one `_second_rig_image`
+    looks up.
+    """
     from app.models import Image
     from app.models.phd2 import Phd2Frame, Phd2Log, Phd2Session
 
     log_id = uuid.uuid4()
     session_id = uuid.uuid4()
     image_id = uuid.uuid4()
-    start = datetime(2026, 7, 15, 2, 0, 0, tzinfo=timezone.utc)
+    start = datetime(
+        night.year, night.month, night.day, 2, 0, 0, tzinfo=timezone.utc
+    ) + timedelta(days=1)
 
     with db() as s:
-        s.add(Phd2Log(id=log_id, file_path=f"/{TEST_MARK}/g.txt", parse_status="ok"))
+        s.add(Phd2Log(
+            id=log_id, file_path=f"/{TEST_MARK}/g-{tag}.txt", parse_status="ok"
+        ))
         s.flush()
         s.add(Phd2Session(
             id=session_id, log_id=log_id, run_index=0, section_index=0,
-            started_at_local=datetime(2026, 7, 14, 22, 0, 0),
+            started_at_local=start.replace(tzinfo=None) - timedelta(hours=4),
             started_at_utc=start,
             ended_at_utc=start + timedelta(seconds=frame_count),
             duration_s=float(frame_count),
-            session_date=date(2026, 7, 14),
+            session_date=night,
             equipment_profile=profile,
             telescope=telescope if mapped else None,
             pixel_scale_arcsec=1.0,
@@ -389,8 +415,8 @@ def _seed_night(db, *, telescope="140APO", profile="140APO_AM5N_ASI174MM",
         ])
         s.add(Image(
             id=image_id,
-            file_path=f"/{TEST_MARK}/a.fits", file_name="a.fits",
-            capture_date=start, session_date=date(2026, 7, 14),
+            file_path=f"/{TEST_MARK}/{tag}.fits", file_name=f"{tag}.fits",
+            capture_date=start, session_date=night,
             image_type="LIGHT", exposure_time=exposure,
             telescope=telescope,
             guiding_rms_arcsec=image_rms,
@@ -400,7 +426,7 @@ def _seed_night(db, *, telescope="140APO", profile="140APO_AM5N_ASI174MM",
             s.add(Image(
                 id=uuid.uuid4(),
                 file_path=f"/{TEST_MARK}/b.fits", file_name="b.fits",
-                capture_date=start, session_date=date(2026, 7, 14),
+                capture_date=start, session_date=night,
                 image_type="LIGHT", exposure_time=exposure,
                 telescope=second_rig_telescope,
                 guiding_rms_arcsec=second_rig_rms,
@@ -806,9 +832,11 @@ def test_the_unset_timezone_is_reported_once_per_pass(db):
     severity, category, message = rows[0]
     assert severity == "warning"
     assert category == "scan"
-    # Names the setting to fix, in the spelling the user sees in the API and
-    # the one they can search the guides for.
-    assert "observer_timezone" in message
+    # Names the profile whose guiding was left out, and both places a timezone
+    # can be set for it.
+    assert "140APO_AM5N_ASI174MM" in message
+    assert "Settings > Library > PHD2" in message
+    assert "Observer Location" in message
 
 
 def test_a_configured_timezone_fills_normally(db):
@@ -902,6 +930,32 @@ def test_a_csv_value_survives_the_guard_on_both_paths(db):
         assert image.guiding_rms_source == "csv"
 
 
+def test_a_day_skewed_night_with_no_configured_zone_is_not_cleared(db):
+    """The night the images sit on is excluded, not just the session's own.
+
+    With the observer longitude unset, a guiding session's session_date lands a
+    day after the frames it covers, which is the out-of-the-box arrangement
+    rather than a contrived one. The guard has to recognise the image night as
+    unconfigured from a session filed on the next day, or the clear runs on the
+    night that actually holds the data and the refill, which correctly declines
+    to use an unzoned session, leaves it empty.
+    """
+    from app.models import Image
+    from app.services.phd2_correlation import correlate_dates
+
+    image_id = _seed_day_skewed_orphan(db)
+    _write_observer_timezone(db, "")
+    with db() as s:
+        result = correlate_dates(s, [date(2026, 7, 13), date(2026, 7, 14)])
+        s.commit()
+
+    assert result.cleared == 0
+    with db() as s:
+        image = s.get(Image, image_id)
+        assert image.guiding_rms_arcsec == pytest.approx(0.5)
+        assert image.guiding_rms_source == "phd2"
+
+
 def test_a_pass_with_nothing_to_correlate_says_nothing(db):
     """Incremental correlation is dispatched from the image-scan seams, so it
     runs after every scan. An install with no guide logs can never fill
@@ -917,3 +971,277 @@ def test_a_pass_with_nothing_to_correlate_says_nothing(db):
     assert result.dates == 0
     assert result.timezone_unset is False
     assert _guard_warnings(db) == []
+
+
+# --- per-profile timezones --------------------------------------------------
+#
+# One global zone cannot describe a remote rig, so each equipment profile
+# carries its own and falls back to the global one. The guard follows: it stops
+# being a pass-wide refusal and becomes a per-profile exclusion, so a
+# configured rig keeps filling on a night that also holds an unconfigured one.
+# What must not change is the reason the refusal exists at all - a blank
+# setting may never DESTROY a value that was correct when it was written - so a
+# night on which every overlapping profile resolves to no zone is kept out of
+# the clear as well as out of the fill.
+
+def _seed_two_profile_night(db, *, profile_a="PROFILE_A", rig_a="140APO",
+                            profile_b="PROFILE_B", rig_b="SVBony 80ED",
+                            frame_count=120, exposure=60.0):
+    """Two rigs on one night, each with its own mapped guiding session."""
+    from app.models import Image
+    from app.models.phd2 import Phd2Frame, Phd2Log, Phd2Session
+
+    log_id = uuid.uuid4()
+    start = datetime(2026, 7, 15, 2, 0, 0, tzinfo=timezone.utc)
+    ids = []
+
+    with db() as s:
+        s.add(Phd2Log(
+            id=log_id, file_path=f"/{TEST_MARK}/two.txt", parse_status="ok"
+        ))
+        s.flush()
+        for index, (profile, rig) in enumerate(
+            ((profile_a, rig_a), (profile_b, rig_b))
+        ):
+            session_id = uuid.uuid4()
+            s.add(Phd2Session(
+                id=session_id, log_id=log_id, run_index=0, section_index=index,
+                started_at_local=datetime(2026, 7, 14, 22, 0, 0),
+                started_at_utc=start,
+                ended_at_utc=start + timedelta(seconds=frame_count),
+                duration_s=float(frame_count),
+                session_date=date(2026, 7, 14),
+                equipment_profile=profile,
+                telescope=rig,
+                pixel_scale_arcsec=1.0,
+                frame_count=frame_count,
+                events=[],
+            ))
+            s.flush()
+            s.add_all([
+                Phd2Frame(
+                    session_id=session_id, frame_index=i, time_offset=float(i),
+                    ra_raw=0.4 if i % 2 == 0 else -0.4,
+                    dec_raw=0.3 if i % 2 == 0 else -0.3,
+                    dropped=False,
+                )
+                for i in range(frame_count)
+            ])
+            image_id = uuid.uuid4()
+            ids.append(image_id)
+            s.add(Image(
+                id=image_id,
+                file_path=f"/{TEST_MARK}/two-{index}.fits",
+                file_name=f"two-{index}.fits",
+                capture_date=start, session_date=date(2026, 7, 14),
+                image_type="LIGHT", exposure_time=exposure, telescope=rig,
+            ))
+        s.commit()
+    return ids
+
+
+def test_a_configured_profile_fills_while_an_unconfigured_one_is_named(db):
+    """The whole point of the per-profile guard: a rig whose zone the user has
+    given is no longer starved by a rig whose zone they have not."""
+    from app.models import Image
+    from app.services.phd2_correlation import correlate_dates
+
+    image_a, image_b = _seed_two_profile_night(db)
+    _write_observer_timezone(db, "")
+    _write_profile_map(db, {
+        "PROFILE_A": {"telescope": "140APO", "timezone": "America/Chicago"},
+    })
+    with db() as s:
+        result = correlate_dates(s, [date(2026, 7, 14)])
+        s.commit()
+
+    assert result.filled == 1
+    assert result.timezone_unset_profiles == ["PROFILE_B"]
+    assert result.timezone_unset is True
+    with db() as s:
+        assert s.get(Image, image_a).guiding_rms_source == "phd2"
+        other = s.get(Image, image_b)
+        assert other.guiding_rms_arcsec is None
+        assert other.guiding_rms_source is None
+
+
+def test_the_warning_names_only_the_profiles_that_have_no_zone(db):
+    from app.services.phd2_correlation import correlate_dates
+
+    _seed_two_profile_night(db)
+    _write_observer_timezone(db, "")
+    _write_profile_map(db, {
+        "PROFILE_A": {"telescope": "140APO", "timezone": "America/Chicago"},
+    })
+    with db() as s:
+        correlate_dates(s, [date(2026, 7, 14)])
+        s.commit()
+
+    rows = _guard_warnings(db)
+    assert len(rows) == 1
+    severity, category, message = rows[0]
+    assert severity == "warning"
+    assert category == "scan"
+    assert "PROFILE_B" in message
+    assert "PROFILE_A" not in message
+
+
+def test_a_night_whose_every_profile_lacks_a_zone_keeps_its_stored_values(db):
+    """The property the guard exists for, now decided per night.
+
+    A profile map that names other rigs does not make this night's rig
+    configured, and clearing here would destroy a value that was correct when
+    it was written under a zone nothing records.
+    """
+    from app.models import Image
+    from app.services.phd2_correlation import correlate_dates
+
+    image_id = _seed_night(
+        db, image_rms=0.11, image_source="phd2", exposure=1.0
+    )
+    _write_observer_timezone(db, "")
+    _write_profile_map(db, {
+        "SOME_OTHER_RIG": {"telescope": "X", "timezone": "America/Chicago"},
+    })
+    with db() as s:
+        result = correlate_dates(s, [date(2026, 7, 14)])
+        s.commit()
+
+    assert result.cleared == 0
+    assert result.timezone_unset_profiles == ["140APO_AM5N_ASI174MM"]
+    with db() as s:
+        image = s.get(Image, image_id)
+        assert image.guiding_rms_arcsec == pytest.approx(0.11)
+        assert image.guiding_rms_source == "phd2"
+
+
+def test_one_unconfigured_night_does_not_stop_a_configured_one(db):
+    """Per night, not per pass. The configured night re-derives normally while
+    the unconfigured one is held back from both the clear and the fill."""
+    from app.models import Image
+    from app.services.phd2_correlation import correlate_dates
+
+    configured = _seed_night(
+        db, night=date(2026, 7, 12), tag="cfg", profile="CONFIGURED",
+        image_rms=0.11, image_source="phd2", exposure=1.0,
+    )
+    unconfigured = _seed_night(
+        db, night=date(2026, 7, 14), tag="unc", profile="UNCONFIGURED",
+        image_rms=0.22, image_source="phd2", exposure=1.0,
+    )
+    _write_observer_timezone(db, "")
+    _write_profile_map(db, {
+        "CONFIGURED": {"telescope": "140APO", "timezone": "America/Chicago"},
+    })
+    with db() as s:
+        result = correlate_dates(s, [date(2026, 7, 12), date(2026, 7, 14)])
+        s.commit()
+
+    assert result.cleared == 1
+    assert result.timezone_unset_profiles == ["UNCONFIGURED"]
+    with db() as s:
+        # One second of exposure holds too few samples to re-qualify, so the
+        # cleared value stays gone; the held-back night keeps its own.
+        assert s.get(Image, configured).guiding_rms_arcsec is None
+        assert s.get(Image, unconfigured).guiding_rms_arcsec == pytest.approx(0.22)
+
+
+def test_a_profile_zone_alone_is_enough_to_fill_with_no_global_zone(db):
+    """A user with one rig in another timezone configures that rig and nothing
+    else. The pass must not still be waiting on the global setting."""
+    from app.models import Image
+    from app.services.phd2_correlation import correlate_dates
+
+    image_id = _seed_night(db)
+    _write_observer_timezone(db, "")
+    _write_profile_map(db, {
+        "140APO_AM5N_ASI174MM": {
+            "telescope": "140APO", "timezone": "America/Chicago",
+        },
+    })
+    with db() as s:
+        result = correlate_dates(s, [date(2026, 7, 14)])
+        s.commit()
+
+    assert result.filled == 1
+    assert result.timezone_unset is False
+    assert result.timezone_unset_profiles == []
+    assert _guard_warnings(db) == []
+    with db() as s:
+        assert s.get(Image, image_id).guiding_rms_source == "phd2"
+
+
+def test_a_blank_profile_zone_inherits_the_global_one(db):
+    """Per-profile empty means inherit, not unset. Only both being empty is
+    unset, which is what keeps the existing single-timezone installs working."""
+    from app.models import Image
+    from app.services.phd2_correlation import correlate_dates
+
+    image_id = _seed_night(db)
+    _write_observer_timezone(db, "America/Chicago")
+    _write_profile_map(db, {
+        "140APO_AM5N_ASI174MM": {"telescope": "140APO", "timezone": ""},
+    })
+    with db() as s:
+        result = correlate_dates(s, [date(2026, 7, 14)])
+        s.commit()
+
+    assert result.filled == 1
+    assert result.timezone_unset is False
+    with db() as s:
+        assert s.get(Image, image_id).guiding_rms_source == "phd2"
+
+
+def test_a_legacy_string_entry_carries_no_zone_of_its_own(db):
+    """Every install stored the map as {profile: telescope} before per-rig
+    zones existed. Such an entry is mapped but unzoned, so with no global zone
+    it is named rather than trusted."""
+    from app.services.phd2_correlation import correlate_dates
+
+    _seed_night(db)
+    _write_observer_timezone(db, "")
+    _write_profile_map(db, {"140APO_AM5N_ASI174MM": "140APO"})
+    with db() as s:
+        result = correlate_dates(s, [date(2026, 7, 14)])
+        s.commit()
+
+    assert result.filled == 0
+    assert result.timezone_unset_profiles == ["140APO_AM5N_ASI174MM"]
+
+
+# --- what the resolver reads ------------------------------------------------
+
+def test_the_resolver_prefers_a_profile_zone_and_falls_back_to_the_global(db):
+    from app.services.phd2_correlation import load_zone_resolver
+
+    _write_observer_timezone(db, "UTC")
+    _write_profile_map(db, {
+        "PROFILE_A": {"telescope": "140APO", "timezone": "America/Chicago"},
+        "PROFILE_B": {"telescope": "SVBony 80ED", "timezone": ""},
+    })
+    with db() as s:
+        resolve = load_zone_resolver(s)
+
+    assert resolve("PROFILE_A") == ("America/Chicago", "profile")
+    assert resolve("PROFILE_B") == ("UTC", "global")
+    assert resolve("NEVER_SEEN") == ("UTC", "global")
+    # A section whose header names no profile resolves through the global
+    # value alone.
+    assert resolve(None) == ("UTC", "global")
+
+
+def test_the_resolver_reads_the_raw_json_and_never_raises_on_it(db):
+    """Deliberately not through GeneralSettings: that schema rejects a zone
+    name tzdata cannot load, so a value stored before the validator existed
+    would raise here instead of answering the question asked. An unloadable
+    zone is not a configured zone, and it has its own warning elsewhere."""
+    from app.services.phd2_correlation import load_zone_resolver
+
+    _write_observer_timezone(db, "Mars/Olympus_Mons")
+    _write_profile_map(db, {"PROFILE_A": {"timezone": "Not/AZone"}, "X": 7})
+    with db() as s:
+        resolve = load_zone_resolver(s)
+
+    assert resolve("PROFILE_A") == ("", "unset")
+    assert resolve("X") == ("", "unset")
+    assert resolve(None) == ("", "unset")

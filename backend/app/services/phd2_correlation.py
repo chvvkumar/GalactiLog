@@ -16,8 +16,8 @@ correlate_dates is also the single gate on the whole feature. Every path that
 can write a phd2-sourced value - the three dispatch sites in tasks_phd2
 (orphan cleanup, end of pass, post-scan cascade) and step (c) of the v16 data
 migration - reaches the columns through it and through nothing else, so the
-observer-timezone guard below is stated once rather than repeated at four call
-sites that a fifth caller would then have to remember.
+timezone guard below is stated once rather than repeated at four call sites
+that a fifth caller would then have to remember.
 
 Cost shape. One pass touches a bounded set of imaging nights, and per night
 issues exactly four queries: the night's unfilled images, the night's full
@@ -36,6 +36,7 @@ from __future__ import annotations
 import bisect
 import logging
 import math
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date as date_type, timedelta, timezone
 
@@ -53,6 +54,7 @@ from app.services.phd2_metrics import (
     _in_windows, _rms, dither_settle_windows_from_stored,
     select_phd2_night_rows,
 )
+from app.services.phd2_profiles import profile_zone_resolver
 
 logger = logging.getLogger(__name__)
 
@@ -79,27 +81,44 @@ MIN_CORRELATION_COVERAGE = 0.5
 SESSION_LOOKBACK = timedelta(hours=24)
 
 # The guard on the observer clock. PHD2 writes bare local wall-clock times with
-# no zone, and ingest converts them to UTC with observer_timezone; when that
-# setting is empty the conversion falls back to the server's zone, which in the
-# container is UTC. On a America/Chicago corpus that stores every guiding
-# session six hours early. Most exposures then overlap no guide frames and
-# correctly stay NULL, which is harmless. The damage is the minority that still
-# overlap: on the production clone 172 images were filled with an RMS measured
-# six hours later in the night, stamped "phd2" like any other value, with
-# nothing in the data marking them suspect (smoke report s2-data, finding F1).
-# A NULL means "not known", which is true; a filled value from a shifted window
-# is a false statement about the user's data.
+# no zone, and ingest converts them to UTC with the zone configured for the
+# equipment profile, falling back to observer_timezone; when neither is set the
+# conversion falls back to the server's zone, which in the container is UTC. On
+# a America/Chicago corpus that stores every guiding session six hours early.
+# Most exposures then overlap no guide frames and correctly stay NULL, which is
+# harmless. The damage is the minority that still overlap: on the production
+# clone 172 images were filled with an RMS measured six hours later in the
+# night, stamped "phd2" like any other value, with nothing in the data marking
+# them suspect (smoke report s2-data, finding F1). A NULL means "not known",
+# which is true; a filled value from a shifted window is a false statement about
+# the user's data.
+#
+# The event type is unchanged from the single-timezone version of this guard:
+# activity-feed filters and the guides resolve against the string.
 TIMEZONE_UNSET_EVENT = "phd2_correlation_timezone_unset"
-TIMEZONE_UNSET_MESSAGE = (
-    "PHD2 guiding was not matched to any frame because observer_timezone is "
-    "not set. PHD2 writes local wall-clock times with no timezone, so an unset "
-    "timezone reads them in the server's zone and shifts every guiding session "
-    "by your UTC offset - which would attach guiding measured hours away to "
-    "whichever exposures happened to overlap. Open Settings > Library > "
-    "Observer Location and set Timezone to the timezone of the PC that runs "
-    "PHD2; the guide logs are then re-read and the guiding is matched to your "
-    "frames. Values already stored were left as they are."
-)
+
+# What a guiding section whose header names no equipment profile is called in
+# the warning. Such a section resolves through the global setting alone, and
+# there is no profile name to print, but leaving it out would produce a warning
+# that names nobody.
+UNNAMED_PROFILE = "(no equipment profile)"
+
+
+def timezone_unset_message(profiles: list[str]) -> str:
+    """Why these profiles were left out, and the two places that fixes it."""
+    names = ", ".join(profiles)
+    return (
+        f"Guiding from PHD2 profile(s) {names} was not matched to any frame "
+        "because no timezone is configured for them. PHD2 writes local "
+        "wall-clock times with no timezone, so reading them in the wrong zone "
+        "shifts every guiding session by the difference and would attach "
+        "guiding measured hours away to whichever exposures happened to "
+        "overlap. Open Settings > Library > PHD2 and set the timezone of the "
+        "PC that runs PHD2 for each profile, or set Settings > Library > "
+        "Observer Location > Timezone to cover every profile that has none of "
+        "its own. Other profiles were matched normally. Values already stored "
+        "were left as they are."
+    )
 
 
 @dataclass
@@ -112,7 +131,18 @@ class CorrelationResult:
     cleared: int = 0
     below_gate: int = 0
     unattributed_profiles: list[str] = field(default_factory=list)
-    timezone_unset: bool = False
+    timezone_unset_profiles: list[str] = field(default_factory=list)
+
+    @property
+    def timezone_unset(self) -> bool:
+        """Whether the guard held anything back, for the callers that ask.
+
+        The guard used to be pass-wide and this used to be a stored bool. It
+        stays readable as one so the activity emitter and the existing
+        assertions keep working; the list is what says WHICH rigs were left
+        out, which is the question a user with more than one rig has.
+        """
+        return bool(self.timezone_unset_profiles)
 
     def summary(self) -> str:
         return (
@@ -138,22 +168,25 @@ def load_telescope_alias_map_sync(db: Session) -> dict[str, str]:
     return tel_map
 
 
-def observer_timezone_is_set(db: Session) -> bool:
-    """True when the user has configured an explicit observer timezone.
+def load_zone_resolver(db: Session) -> Callable[[str | None], tuple[str, str]]:
+    """The per-profile zone lookup this pass decides the guard with.
 
-    Empty means "interpret guide-log timestamps in the server's local zone",
-    which phase 1 recorded as a distinct case from a configured zone. A zone
-    the user chose that happens to equal the server's is NOT unset: the first
-    is a default nobody picked and cannot be trusted to describe the PHD2
-    machine, the second is a statement about where that machine is. Only the
-    first trips the guard.
+    Returns phd2_profiles.profile_zone_resolver bound to the stored map and the
+    stored global value, so one profile name resolves to (zone, source) with
+    source one of "profile", "global" or "unset". Empty means "interpret
+    guide-log timestamps in the server's local zone", which phase 1 recorded as
+    a distinct case from a configured zone. A zone the user chose that happens
+    to equal the server's is NOT unset: the first is a default nobody picked
+    and cannot be trusted to describe the PHD2 machine, the second is a
+    statement about where that machine is. Only the first trips the guard.
 
     Read from the raw settings JSON rather than through GeneralSettings: that
     schema's validator rejects an unloadable zone name, so a value stored
     before the validator existed would raise here instead of answering the
-    question asked. A non-empty but unloadable zone is a different failure with
-    its own warning (tasks_phd2's phd2_timezone_invalid) and is out of scope
-    for this guard.
+    question asked. The raw map also still carries the legacy
+    `{"Rig A": "Askar 120"}` form on every install that predates per-rig zones,
+    and normalize_profile_map inside the resolver is what tolerates it, so this
+    function needs no shape handling of its own.
 
     Costs no query of its own on the paths that follow: correlate_dates then
     calls load_telescope_alias_map_sync, which reads the same row out of the
@@ -161,11 +194,13 @@ def observer_timezone_is_set(db: Session) -> bool:
     """
     row = db.get(UserSettings, SETTINGS_ROW_ID)
     general = (row.general if row is not None else None) or {}
-    return bool((general.get("observer_timezone") or "").strip())
+    return profile_zone_resolver(
+        general.get("phd2_profile_map"), general.get("observer_timezone")
+    )
 
 
-def _emit_timezone_unset_warning(db: Session) -> None:
-    """Say why nothing was filled, once per pass, naming the setting to fix.
+def _emit_timezone_unset_warning(db: Session, profiles: list[str]) -> None:
+    """Say what was left out, once per pass, naming the profiles and the fix.
 
     Declining silently would trade one invisible failure for another, so this
     is not optional to the guard.
@@ -193,13 +228,19 @@ def _emit_timezone_unset_warning(db: Session) -> None:
             _emit_activity_sync(
                 adb, redis=redis_client, category="scan", severity="warning",
                 event_type=TIMEZONE_UNSET_EVENT,
-                message=TIMEZONE_UNSET_MESSAGE,
-                details={"setting": "observer_timezone"},
+                message=timezone_unset_message(profiles),
+                details={
+                    # Capped: a corpus can hold more profile names than an
+                    # activity row should carry, and the message already names
+                    # them for the reader.
+                    "profiles": profiles[:50],
+                    "setting": "phd2_profile_map",
+                },
                 actor="system",
             )
     except Exception:  # noqa: BLE001 - same reason
         logger.warning(
-            "phd2 correlation: could not record the observer-timezone warning",
+            "phd2 correlation: could not record the missing-timezone warning",
             exc_info=True,
         )
 
@@ -410,12 +451,104 @@ def _dates_needing_fill(db: Session) -> list[date_type]:
     return sorted(image_dates & guide_dates)
 
 
+def _nights_with_no_configured_zone(
+    db: Session,
+    target_dates: list[date_type],
+    resolve: Callable[[str | None], tuple[str, str]],
+) -> dict[date_type, list[str]]:
+    """The nights where EVERY overlapping profile resolves to no timezone.
+
+    Returns {night: [profile names]}. Those nights are held out of the clear as
+    well as out of the fill, which is the whole point: a blank setting must
+    never DESTROY a value that was correct when it was written, and nothing
+    records which zone a stored value was derived under. A night that mixes a
+    configured profile with an unconfigured one is NOT here - it is processed
+    normally with the unconfigured sessions dropped in _correlate_one_night.
+
+    A night with no guiding session at all is NOT here either, and that is a
+    deliberate non-vacuous reading of "every profile": treating the empty set
+    as unconfigured would stop orphan cleanup from ever clearing the values a
+    deleted log left behind, which is the one case where a stale value can
+    never be re-derived by anything.
+
+    The session side is widened by a day either way for the same reason
+    _dates_needing_fill widens it: a guiding session's own session_date lands a
+    day off the images it covers whenever the longitude behind it is unset,
+    which is the out-of-the-box arrangement. The per-night fill finds such a
+    session anyway, because it looks sessions up by time overlap rather than by
+    date, so the guard has to see it too or it would clear the night that holds
+    the images while refusing to refill it.
+    """
+    if not target_dates:
+        return {}
+    wanted = set(target_dates)
+    lookup = sorted(
+        {d + delta for d in wanted for delta in (-timedelta(days=1),
+                                                 timedelta(days=0),
+                                                 timedelta(days=1))}
+    )
+    by_night: dict[date_type, set[str | None]] = {}
+    for session_date, profile in db.execute(
+        select(Phd2Session.session_date, Phd2Session.equipment_profile)
+        .where(Phd2Session.session_date.in_(lookup))
+        .distinct()
+    ).all():
+        for delta in (-1, 0, 1):
+            night = session_date + timedelta(days=delta)
+            if night in wanted:
+                by_night.setdefault(night, set()).add(profile)
+
+    return {
+        night: sorted({p or UNNAMED_PROFILE for p in found})
+        for night, found in by_night.items()
+        if all(resolve(p)[1] == "unset" for p in found)
+    }
+
+
+def _nights_the_pass_could_write(
+    db: Session, nights: list[date_type], *, re_derive: bool
+) -> set[date_type]:
+    """Of these nights, the ones holding an image this pass could have written.
+
+    Only used to decide whether a held-back night is worth warning about. A
+    profile with no timezone that never meets an image the pass would have
+    touched costs the user nothing, and naming it on every scan interval is how
+    an activity feed stops being read.
+
+    "Could have written" is wider on the re-derive path than on the incremental
+    one: there the clear would have emptied the night's phd2-sourced values
+    first, so keeping them is itself an effect worth explaining.
+    """
+    if not nights:
+        return set()
+    writable = Image.guiding_rms_arcsec.is_(None)
+    if re_derive:
+        writable = or_(
+            writable, Image.guiding_rms_source == GUIDING_RMS_SOURCE_PHD2
+        )
+    return {
+        d for (d,) in db.execute(
+            select(Image.session_date).where(
+                Image.session_date.in_(nights),
+                Image.image_type == "LIGHT",
+                Image.capture_date.isnot(None),
+                Image.exposure_time.isnot(None),
+                Image.exposure_time > 0,
+                writable,
+            ).distinct()
+        ).all()
+    }
+
+
 def _correlate_one_night(
     db: Session,
     night: date_type,
     alias_map: dict[str, str],
     result: CorrelationResult,
     profiles: set[str],
+    *,
+    resolve: Callable[[str | None], tuple[str, str]],
+    unzoned_profiles: set[str],
 ) -> None:
     """Fill every unfilled image on one imaging night. Caller commits."""
     images = db.execute(
@@ -488,8 +621,29 @@ def _correlate_one_night(
     # Frames are loaded only for rigs that have something to fill. night_rigs
     # deliberately includes rigs whose images are all filled already, and
     # reducing their sample streams would be work with no possible output.
+    #
+    # The same pass drops every session whose profile resolves to no timezone.
+    # Its wall-clock times were read in whatever zone the server happens to
+    # run, so the window it describes may sit hours from the exposure it was
+    # matched to, and a plausible arcsec figure derived from the wrong hour is
+    # worse than the NULL that means "not known". Dropping here rather than
+    # before the fill_rigs filter is what keeps the warning honest: a profile
+    # is only named once it has actually met an image this pass would have
+    # written. A rig left with no sessions fills nothing, which is already what
+    # happens to a rig that was not guided.
     fill_rigs = {telescope for (_i, _c, _e, telescope) in images if telescope}
-    relevant = {rig: rows for rig, rows in attributed.items() if rig in fill_rigs}
+    relevant: dict[str, list] = {}
+    for rig, rows in attributed.items():
+        if rig not in fill_rigs:
+            continue
+        keep = []
+        for row in rows:
+            if resolve(row.equipment_profile)[1] == "unset":
+                unzoned_profiles.add(row.equipment_profile or UNNAMED_PROFILE)
+                continue
+            keep.append(row)
+        if keep:
+            relevant[rig] = keep
     if not relevant:
         return
 
@@ -556,16 +710,22 @@ def correlate_dates(
     the nights holding an image with no guiding RMS at all, fill what
     qualifies, re-derive nothing.
 
-    Writes nothing at all - no fill and no clear - while observer_timezone is
-    unset. See TIMEZONE_UNSET_MESSAGE for why a value derived from an
-    unvalidated clock is worse than no value. DECLINING rather than CLEARING is
-    deliberate: whether a stored value is wrong depends on the zone configured
-    when it was derived, and nothing records that, so an empty setting now says
-    nothing about a value written last week under a correct one. Clearing would
-    destroy correct data whenever the field is momentarily blank on the
-    settings screen, and it is not needed to converge - saving a zone forces a
-    re-parse, which re-derives these nights and rewrites every phd2-sourced
-    value on them anyway.
+    Writes nothing for a guiding session whose equipment profile resolves to no
+    timezone, neither its own nor the global fallback. See
+    timezone_unset_message for why a value derived from an unvalidated clock is
+    worse than no value. The exclusion is per profile rather than per pass, so
+    a rig the user has configured keeps filling on a night that also holds one
+    they have not.
+
+    DECLINING rather than CLEARING is deliberate, and it is why a night on
+    which EVERY overlapping profile is unzoned is held out of the clear as well
+    as out of the fill. Whether a stored value is wrong depends on the zone
+    configured when it was derived, and nothing records that, so an empty
+    setting now says nothing about a value written last week under a correct
+    one. Clearing would destroy correct data whenever the field is momentarily
+    blank on the settings screen, and it is not needed to converge - saving a
+    zone forces a re-parse, which re-derives these nights and rewrites every
+    phd2-sourced value on them anyway.
     """
     result = CorrelationResult()
 
@@ -574,25 +734,29 @@ def correlate_dates(
     else:
         target_dates = sorted({d for d in dates if d is not None})
 
-    # Only when the pass had somewhere to go. Incremental correlation is
-    # dispatched from the image-scan seams, so it runs after every scan; on an
-    # install with no guide logs it can never fill anything, and warning there
-    # would add a row to the activity feed on every scan interval, which is how
-    # a feed stops being read.
-    if target_dates and not observer_timezone_is_set(db):
-        result.timezone_unset = True
-        logger.warning("phd2 correlation: %s", TIMEZONE_UNSET_MESSAGE)
-        _emit_timezone_unset_warning(db)
-        return result
-
+    resolve = load_zone_resolver(db)
     if alias_map is None:
         alias_map = load_telescope_alias_map_sync(db)
 
-    if dates is not None and target_dates:
+    held_back = _nights_with_no_configured_zone(db, target_dates, resolve)
+    unzoned_profiles: set[str] = set()
+    if held_back:
+        # Named only for the nights where the exclusion actually cost the user
+        # something. Incremental correlation is dispatched from the image-scan
+        # seams, so it runs after every scan; a profile that is unconfigured
+        # but never meets an image this pass would have touched must not put a
+        # row in the activity feed on every scan interval.
+        for night in _nights_the_pass_could_write(
+            db, list(held_back), re_derive=dates is not None
+        ):
+            unzoned_profiles.update(held_back[night])
+    fill_dates = [d for d in target_dates if d not in held_back]
+
+    if dates is not None and fill_dates:
         cleared = db.execute(
             update(Image)
             .where(
-                Image.session_date.in_(target_dates),
+                Image.session_date.in_(fill_dates),
                 Image.guiding_rms_source == GUIDING_RMS_SOURCE_PHD2,
             )
             .values(
@@ -606,10 +770,20 @@ def correlate_dates(
         result.cleared = cleared or 0
 
     profiles: set[str] = set()
-    for night in target_dates:
+    for night in fill_dates:
         result.dates += 1
-        _correlate_one_night(db, night, alias_map, result, profiles)
+        _correlate_one_night(
+            db, night, alias_map, result, profiles,
+            resolve=resolve, unzoned_profiles=unzoned_profiles,
+        )
 
     result.unattributed_profiles = sorted(profiles)
+    result.timezone_unset_profiles = sorted(unzoned_profiles)
+    if result.timezone_unset_profiles:
+        # One row per pass, whatever the mix of nights and profiles was.
+        # Declining silently would trade one invisible failure for another.
+        message = timezone_unset_message(result.timezone_unset_profiles)
+        logger.warning("phd2 correlation: %s", message)
+        _emit_timezone_unset_warning(db, result.timezone_unset_profiles)
     logger.info("phd2 correlation: %s", result.summary())
     return result
