@@ -174,6 +174,79 @@ def telescope_map(raw: Any) -> dict[str, str]:
     }
 
 
+def _carries_configuration(entry: Mapping) -> bool:
+    """Whether an entry holds anything besides its telescope.
+
+    The coordinate tests are `is not None`, never truth tests. A rig at
+    Greenwich stores longitude 0.0, and a falsy test here would read its entry
+    as empty and delete the site the user configured.
+    """
+    return bool(entry["timezone"]) or (
+        entry["latitude"] is not None or entry["longitude"] is not None
+    )
+
+
+def set_telescope(raw: Any, profile: str, telescope: str | None) -> dict[str, dict]:
+    """The map with one profile's telescope changed, everything else intact.
+
+    Returns a fresh canonical map; the argument is not mutated. Use this
+    instead of assigning into the stored dict, which loses the timezone and
+    the site of any profile it rewrites.
+
+    Clearing the telescope (`None`, `""` or whitespace) keeps the delete-on-
+    empty behaviour the settings UI relies on, but only where deleting is
+    still safe: an entry that carries nothing else disappears from the map as
+    it always has, while an entry that carries a timezone or a coordinate
+    stays with `telescope: None` so that unmapping a rig does not silently
+    discard its zone and site.
+    """
+    normalized = normalize_profile_map(raw)
+    name = _coerce_telescope(telescope)
+    entry = {**normalized.get(profile, _EMPTY_ENTRY), "telescope": name}
+    if name is None and not _carries_configuration(entry):
+        normalized.pop(profile, None)
+        return normalized
+    normalized[profile] = entry
+    return normalized
+
+
+def rewrite_telescopes(
+    raw: Any, rename: Mapping[str, str] | Callable[[str], str | None]
+) -> dict[str, dict]:
+    """The map with every telescope name put through `rename`.
+
+    This is what an equipment regrouping needs: grouping two telescope names
+    turns one into an alias, which strands the map pointing at the alias, so
+    the stored names are folded onto the new canonical ones. `rename` is
+    either a name-to-name mapping or a callable such as
+    `lambda n: normalize_equipment(n, tel_map)`. A name the rename does not
+    recognise, signalled by a missing key or by a `None` or empty return, is
+    left alone, so callers do not need the `or name` fallback they write
+    today. Entries with no telescope are left untouched and `rename` is not
+    called for them.
+
+    Only the `telescope` field moves. The timezone and the site of every entry
+    survive, which is the whole point of this living in the shape owner: the
+    two rewriters that exist today rebuild the map with bare string values and
+    would flatten a configured profile back to a legacy entry.
+
+    Returns a fresh canonical map; the argument is not mutated. Test for a
+    real change with `out != normalize_profile_map(raw)`, NOT `out != raw`: a
+    legacy map always differs from its canonical form, so comparing against
+    the stored value would report a change on every save.
+    """
+    lookup = rename.get if isinstance(rename, Mapping) else rename
+    out = normalize_profile_map(raw)
+    for profile, entry in out.items():
+        current = entry["telescope"]
+        if current is None:
+            continue
+        replacement = _coerce_telescope(lookup(current))
+        if replacement is not None:
+            out[profile] = {**entry, "telescope": replacement}
+    return out
+
+
 def _loadable(zone: str) -> bool:
     """Whether the running tzdata knows this zone name."""
     if not zone:
@@ -271,11 +344,20 @@ def profile_site(
     independently: the profile's own value when it is not None, otherwise the
     global observer value, otherwise None.
 
-    `source` describes the pair: `"profile"` when the profile entry supplied
-    at least one of the two coordinates, `"global"` when it supplied neither
-    and at least one global value is set, `"unset"` when both resolved to
-    None. A caller needing the origin of one field on its own compares against
-    `normalize_profile_map(raw)[profile]` directly.
+    `source` describes the PAIR and is PRESENTATION ONLY. It reads
+    `"profile"` when the entry supplied at least one of the two coordinates,
+    `"global"` when it supplied neither and at least one global value is set,
+    `"unset"` when both resolved to None. Use it to tell a user where the
+    numbers on their screen came from, and for nothing else.
+
+    NEVER BRANCH BEHAVIOUR ON `source`. In particular it must not select the
+    sidereal cross-check's tier. A profile carrying a latitude and no
+    longitude reports `"profile"` while its longitude is the home site's, so a
+    tier chosen here would apply the tight 0.5 h tolerance and a confident
+    verdict to an inherited value, and accuse the user of a misconfiguration
+    on the strength of a coordinate they never entered. Ask
+    `profile_has_own_longitude` or `profile_has_own_latitude` for the one
+    field the decision actually turns on.
 
     The comparisons here are `is not None`, never truth tests. A profile
     standing on the prime meridian stores longitude 0.0, and a falsy check
@@ -288,6 +370,42 @@ def profile_site(
         _coerce_coordinate(global_lat, _LATITUDE_RANGE),
         _coerce_coordinate(global_lon, _LONGITUDE_RANGE),
     )
+
+
+def _own_coordinate(raw: Any, profile: str | None, field: str) -> bool:
+    entry = normalize_profile_map(raw).get(profile or "")
+    return entry is not None and entry[field] is not None
+
+
+def profile_has_own_longitude(raw: Any, profile: str | None) -> bool:
+    """Whether this profile stores a longitude of its own.
+
+    This is the tier input for the sidereal cross-check, and the only correct
+    one. True means the rig's site is known, so an implied longitude can be
+    compared against it under the tight tolerance and the finding stated as
+    fact. False means the longitude in play is inherited from the global
+    observer setting or absent entirely, so the check must fall back to the
+    timezone's standard meridian, widen its tolerance and hedge its wording.
+
+    False for an unknown profile, for a section carrying no profile, for a
+    legacy string entry, and for a stored value that failed range coercion.
+    True for a stored 0.0, which is a rig on the prime meridian.
+
+    Deliberately narrower than `profile_site`'s `source`, which answers about
+    the pair and cannot answer this.
+    """
+    return _own_coordinate(raw, profile, "longitude")
+
+
+def profile_has_own_latitude(raw: Any, profile: str | None) -> bool:
+    """Whether this profile stores a latitude of its own.
+
+    The companion to `profile_has_own_longitude`, for the pointing coherence
+    gate: that gate tests a rig's declination and hour angle against a
+    latitude, and a remote rig tested against the home latitude would reject
+    every section. True for a stored 0.0, a rig on the equator.
+    """
+    return _own_coordinate(raw, profile, "latitude")
 
 
 def longitude_resolver(

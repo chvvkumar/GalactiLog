@@ -13,9 +13,13 @@ from pydantic import BaseModel
 from app.services.phd2_profiles import (
     longitude_resolver,
     normalize_profile_map,
+    profile_has_own_latitude,
+    profile_has_own_longitude,
     profile_site,
     profile_timezone,
     profile_zone_resolver,
+    rewrite_telescopes,
+    set_telescope,
     telescope_map,
 )
 
@@ -375,3 +379,216 @@ def test_longitude_resolver_returns_none_when_nothing_is_configured():
     resolve = longitude_resolver({"Rig A": {"timezone": "America/Chicago"}}, None)
     assert resolve("Rig A") is None
     assert resolve(None) is None
+
+
+# --------------------------------------------------------------------------
+# profile_has_own_longitude / profile_has_own_latitude
+#
+# The sidereal cross-check picks its tier on longitude alone: a profile with
+# its own longitude gets the tight 0.5 h tolerance and a confident verdict, a
+# profile without one gets the 3 h meridian tolerance and hedged wording.
+# profile_site's pair-level `source` cannot answer that question, so these
+# predicates exist to answer it.
+# --------------------------------------------------------------------------
+
+
+def test_latitude_only_profile_does_not_have_its_own_longitude():
+    # The trap this predicate exists to close. `source` reads "profile"
+    # because the latitude is per-rig, but the longitude is the home site's.
+    # A tier decision taken on `source` here applies a 0.5 h tolerance and a
+    # confident verdict to an inherited longitude.
+    raw = {"Rig A": {"latitude": 40.7, "longitude": None}}
+    assert profile_site(raw, "Rig A", 51.48, -0.0015)[2] == "profile"
+    assert profile_has_own_longitude(raw, "Rig A") is False
+    assert profile_has_own_latitude(raw, "Rig A") is True
+
+
+def test_longitude_only_profile_does_not_have_its_own_latitude():
+    raw = {"Rig A": {"longitude": -97.74}}
+    assert profile_has_own_longitude(raw, "Rig A") is True
+    assert profile_has_own_latitude(raw, "Rig A") is False
+
+
+def test_a_zero_coordinate_counts_as_the_profile_having_its_own():
+    raw = {"Greenwich": {"latitude": 0.0, "longitude": 0.0}}
+    assert profile_has_own_longitude(raw, "Greenwich") is True
+    assert profile_has_own_latitude(raw, "Greenwich") is True
+
+
+def test_unknown_and_missing_profiles_have_no_coordinates_of_their_own():
+    raw = {"Rig A": {"latitude": 40.7, "longitude": -97.74}}
+    for profile in ("Rig Z", None, ""):
+        assert profile_has_own_longitude(raw, profile) is False
+        assert profile_has_own_latitude(raw, profile) is False
+
+
+def test_legacy_string_entry_has_no_coordinates_of_its_own():
+    assert profile_has_own_longitude({"Rig A": "140APO"}, "Rig A") is False
+    assert profile_has_own_latitude({"Rig A": "140APO"}, "Rig A") is False
+
+
+def test_an_out_of_range_longitude_does_not_count_as_the_profile_having_one():
+    # It normalizes to None, meaning inherit, so the tier must follow it down.
+    raw = {"Rig A": {"longitude": 500.0}}
+    assert profile_has_own_longitude(raw, "Rig A") is False
+
+
+# --------------------------------------------------------------------------
+# Write side: set_telescope and rewrite_telescopes
+#
+# Both existing rewriters (api/settings.py and data_migrations.py) rebuild the
+# map with bare string values, which flattens an entry and destroys its
+# timezone and site. The rule "rewrite the telescope, preserve everything
+# else" lives here so it is written once.
+# --------------------------------------------------------------------------
+
+
+def test_rewrite_telescopes_preserves_timezone_and_coordinates():
+    raw = {
+        "Rig A": {
+            "telescope": "SVBony SV503 80mm",
+            "timezone": "America/Chicago",
+            "latitude": 30.27,
+            "longitude": -97.74,
+        }
+    }
+    out = rewrite_telescopes(raw, {"SVBony SV503 80mm": "SVBony 80ED"})
+    assert out["Rig A"] == {
+        "telescope": "SVBony 80ED",
+        "timezone": "America/Chicago",
+        "latitude": pytest.approx(30.27),
+        "longitude": pytest.approx(-97.74),
+    }
+
+
+def test_rewrite_telescopes_preserves_a_zero_longitude():
+    raw = {"Greenwich": {"telescope": "140APO", "latitude": 0.0, "longitude": 0.0}}
+    out = rewrite_telescopes(raw, {"140APO": "140 APO"})
+    assert out["Greenwich"]["latitude"] == 0.0
+    assert out["Greenwich"]["longitude"] == 0.0
+
+
+def test_rewrite_telescopes_accepts_a_callable():
+    raw = {"Rig A": "svbony sv503 80mm"}
+    out = rewrite_telescopes(raw, lambda name: name.upper())
+    assert out["Rig A"]["telescope"] == "SVBONY SV503 80MM"
+
+
+def test_rewrite_telescopes_leaves_unlisted_names_alone():
+    # Mirrors the `normalize_equipment(name, tel_map) or name` fallback both
+    # existing call sites write by hand.
+    raw = {"Rig A": "140APO", "Rig B": "RedCat 51"}
+    out = rewrite_telescopes(raw, {"140APO": "140 APO"})
+    assert telescope_map(out) == {"Rig A": "140 APO", "Rig B": "RedCat 51"}
+
+
+def test_rewrite_telescopes_treats_an_empty_result_as_no_change():
+    raw = {"Rig A": "140APO"}
+    assert telescope_map(rewrite_telescopes(raw, lambda name: None)) == {"Rig A": "140APO"}
+    assert telescope_map(rewrite_telescopes(raw, lambda name: "  ")) == {"Rig A": "140APO"}
+
+
+def test_rewrite_telescopes_skips_unmapped_entries():
+    raw = {"Rig A": {"telescope": None, "timezone": "America/Chicago"}}
+    calls = []
+
+    def rename(name):
+        calls.append(name)
+        return name
+
+    out = rewrite_telescopes(raw, rename)
+    assert calls == []
+    assert out["Rig A"]["telescope"] is None
+    assert out["Rig A"]["timezone"] == "America/Chicago"
+
+
+def test_rewrite_telescopes_does_not_mutate_its_input():
+    raw = {"Rig A": {"telescope": "140APO", "timezone": "America/Chicago"}}
+    rewrite_telescopes(raw, {"140APO": "140 APO"})
+    assert raw["Rig A"]["telescope"] == "140APO"
+
+
+def test_rewrite_telescopes_change_detection_ignores_the_shape_upgrade():
+    # The documented gate is `out != normalize_profile_map(raw)`, not
+    # `out != raw`. Comparing against the raw legacy map would report a change
+    # on every save and queue a pointless re-scan.
+    raw = {"Rig A": "140APO"}
+    out = rewrite_telescopes(raw, {"RedCat 51": "RedCat 51 II"})
+    assert out != raw
+    assert out == normalize_profile_map(raw)
+
+
+def test_rewrite_telescopes_of_junk_is_empty():
+    assert rewrite_telescopes(None, {"a": "b"}) == {}
+
+
+def test_set_telescope_preserves_the_rest_of_the_entry():
+    raw = {
+        "Rig A": {
+            "telescope": "140APO",
+            "timezone": "America/Chicago",
+            "latitude": 30.27,
+            "longitude": -97.74,
+        }
+    }
+    out = set_telescope(raw, "Rig A", "RedCat 51")
+    assert out["Rig A"]["telescope"] == "RedCat 51"
+    assert out["Rig A"]["timezone"] == "America/Chicago"
+    assert out["Rig A"]["latitude"] == pytest.approx(30.27)
+    assert out["Rig A"]["longitude"] == pytest.approx(-97.74)
+
+
+def test_set_telescope_creates_a_missing_entry():
+    out = set_telescope({}, "Rig A", "140APO")
+    assert out["Rig A"] == {
+        "telescope": "140APO",
+        "timezone": "",
+        "latitude": None,
+        "longitude": None,
+    }
+
+
+def test_set_telescope_leaves_other_profiles_untouched():
+    raw = {"Rig A": "140APO", "Rig B": {"telescope": "RedCat 51", "timezone": "UTC"}}
+    out = set_telescope(raw, "Rig A", "Askar 120")
+    assert out["Rig B"] == {
+        "telescope": "RedCat 51",
+        "timezone": "UTC",
+        "latitude": None,
+        "longitude": None,
+    }
+
+
+def test_clearing_the_telescope_drops_an_entry_that_carries_nothing_else():
+    # Today's UI deletes the key when the select is cleared. An entry with no
+    # other configuration must keep vanishing, or the map fills with husks.
+    out = set_telescope({"Rig A": "140APO", "Rig B": "RedCat 51"}, "Rig A", "")
+    assert set(out) == {"Rig B"}
+
+
+def test_clearing_the_telescope_keeps_an_entry_that_carries_a_timezone():
+    raw = {"Rig A": {"telescope": "140APO", "timezone": "America/Chicago"}}
+    out = set_telescope(raw, "Rig A", "")
+    assert out["Rig A"]["telescope"] is None
+    assert out["Rig A"]["timezone"] == "America/Chicago"
+
+
+def test_clearing_the_telescope_keeps_an_entry_sited_on_the_prime_meridian():
+    # A falsy emptiness test would read longitude 0.0 as "carries nothing"
+    # and delete the site the user configured.
+    raw = {"Greenwich": {"telescope": "140APO", "latitude": 0.0, "longitude": 0.0}}
+    out = set_telescope(raw, "Greenwich", "")
+    assert "Greenwich" in out
+    assert out["Greenwich"]["latitude"] == 0.0
+    assert out["Greenwich"]["longitude"] == 0.0
+
+
+def test_clearing_a_profile_that_is_absent_is_a_no_op():
+    raw = {"Rig A": "140APO"}
+    assert set_telescope(raw, "Rig Z", "") == normalize_profile_map(raw)
+
+
+def test_set_telescope_does_not_mutate_its_input():
+    raw = {"Rig A": {"telescope": "140APO", "timezone": "America/Chicago"}}
+    set_telescope(raw, "Rig A", "RedCat 51")
+    assert raw["Rig A"]["telescope"] == "140APO"
