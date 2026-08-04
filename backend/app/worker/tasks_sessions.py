@@ -1,5 +1,6 @@
 """Session-date maintenance: backfill_dark_hours, recompute_session_dates."""
 import logging
+from collections.abc import Callable
 from datetime import datetime
 
 from sqlalchemy import func, select, text
@@ -7,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.models import Image
 from app.models.user_settings import UserSettings, SETTINGS_ROW_ID
+from app.services.phd2_profiles import longitude_resolver
 from app.services.session_date import compute_session_date, extract_longitude, warn_imaging_night_fallback
 from app.schemas.settings import GeneralSettings
 from app.worker.celery_app import celery_app
@@ -90,14 +92,32 @@ def backfill_dark_hours(parent_activity_id: int | None = None) -> dict:
         _redis.delete(DARK_HOURS_LOCK)
 
 
-def _rekey_phd2_sessions(session, *, use_night: bool, longitude: float | None) -> int:
+def _rekey_phd2_sessions(session, *, use_night: bool,
+                         resolve_longitude: Callable[[str | None], float | None]) -> int:
     """Recompute session_date for every PHD2 session and calibration row.
 
     Simpler than the image-derived re-keying used for notes and custom values:
     a PHD2 row already carries its own absolute started_at_utc, so the night it
     belongs to is a direct computation rather than a vote among nearby frames.
-    The observer longitude is the configured one - a guide log has no site
-    headers to read a longitude from.
+
+    The longitude is resolved PER EQUIPMENT PROFILE, not once for the whole
+    catalogue. A guide log carries no site headers, but it does name the
+    equipment profile that wrote it, and a profile can hold coordinates of its
+    own. That is what puts a rig taken twelve degrees west of home on the right
+    night: same country, same timezone, forty-eight minutes of night boundary.
+    Both models carry `equipment_profile`, so a calibration resolves exactly as
+    a session does.
+
+    `resolve_longitude` is built once per pass by
+    `phd2_profiles.longitude_resolver`, which normalizes the stored map a
+    single time and answers each lookup from a dict. This function must not
+    normalize anything itself: it runs once per stored row.
+
+    A resolved None means no longitude is known at either level and the row
+    falls back to UTC-midnight grouping. NOTHING HERE TESTS A LONGITUDE FOR
+    TRUTH. Zero is Greenwich, a real site with a real night boundary, and a
+    falsy check would quietly file a prime-meridian rig under the user's own
+    night.
 
     Returns the number of rows whose date changed. Caller commits.
     """
@@ -109,7 +129,7 @@ def _rekey_phd2_sessions(session, *, use_night: bool, longitude: float | None) -
             new_date = compute_session_date(
                 row.started_at_utc,
                 use_imaging_night=use_night,
-                longitude=longitude,
+                longitude=resolve_longitude(row.equipment_profile),
             )
             if row.session_date != new_date:
                 row.session_date = new_date
@@ -132,6 +152,13 @@ def recompute_session_dates(self):
         fallback_lon = general.observer_longitude
         use_night = general.use_imaging_night
         fallback_warned = False  # AUD-021: one warning per run, not per image
+        # Built once here, not once per PHD2 row: it normalizes the stored
+        # profile map and precomputes every profile's answer, so phase 4's
+        # lookup is a dict hit. Images keep resolving from their own headers
+        # with fallback_lon behind them; this is the guide-log equivalent.
+        resolve_phd2_longitude = longitude_resolver(
+            general.phd2_profile_map, fallback_lon
+        )
 
         # Phase 1: Recompute all image session_dates in batches.
         # Keyset pagination (WHERE id > :last ORDER BY id) instead of OFFSET,
@@ -260,9 +287,12 @@ def recompute_session_dates(self):
         # custom_column_values above. Without this phase, toggling
         # imaging-night moves every image to a new night while the guiding
         # sessions stay on the old one, and the session-detail join quietly
-        # returns nothing for every night in the catalog.
+        # returns nothing for every night in the catalog. Editing a single
+        # profile's longitude moves that rig's nights and leaves every other
+        # rig where it stands.
         phd2_rekeyed = _rekey_phd2_sessions(
-            session, use_night=use_night, longitude=fallback_lon
+            session, use_night=use_night,
+            resolve_longitude=resolve_phd2_longitude,
         )
         session.commit()
 
