@@ -438,8 +438,8 @@ def test_verdict_reports_a_real_offset_for_a_half_hour_zone():
 
 
 def test_verdict_reports_a_real_offset_for_a_forty_five_minute_zone():
-    # Asia/Kathmandu is +5:45. A profile labelled Europe/London in winter
-    # (+0... here +1) is 4.75 h out, and the quarter-hour grid recovers it.
+    # Asia/Kathmandu is +5:45. A profile labelled Europe/London on British
+    # Summer Time (+1) is 4.75 h out, and the quarter grid recovers it.
     got = verdict(_tight(_sidereal(-4.75)), configured_offset_hours=1.0)
     assert got is not None
     assert got.implied_utc_offset_hours == pytest.approx(5.75, abs=1e-9)
@@ -449,11 +449,14 @@ def test_verdict_reports_a_real_offset_for_a_forty_five_minute_zone():
 def test_verdict_offset_grid_survives_the_sidereal_inflation_at_eleven_hours():
     # The raw measurement of an 11.5 h error is 11.5315 h, which rounds to a
     # whole 12. On the quarter grid, after the sidereal rate is divided out,
-    # it comes back as 11.5.
-    got = verdict(_tight(_sidereal(11.5)), configured_offset_hours=-2.0)
+    # it comes back as 11.5. No configured offset is passed: this magnitude is
+    # past the fold, so an implied offset would be withheld anyway and the
+    # grid value is the only quotable number here.
+    got = verdict(_tight(_sidereal(11.5)))
     assert got is not None
     assert got.median_error_hours == pytest.approx(11.5315, abs=0.01)
     assert got.nearest_quarter_hours == pytest.approx(11.5, abs=1e-9)
+    assert got.direction_known is False
 
 
 def test_verdict_quantises_clock_hours_not_sidereal_hours():
@@ -465,6 +468,36 @@ def test_verdict_quantises_clock_hours_not_sidereal_hours():
     assert got is not None
     assert got.nearest_quarter_hours == pytest.approx(5.5, abs=1e-9)
     assert got.implied_utc_offset_hours == pytest.approx(-5.5, abs=1e-9)
+
+
+def test_implied_offset_is_folded_into_the_selectable_range_when_too_far_east():
+    # Configured +10 against a 5 h disagreement arrives at +15 before folding,
+    # and no timezone is at +15. The 24 h alias, -9, is the only real answer.
+    got = verdict(_tight(_sidereal(-5.0)), configured_offset_hours=10.0)
+    assert got is not None
+    assert got.implied_utc_offset_hours == pytest.approx(-9.0, abs=1e-9)
+
+
+def test_implied_offset_is_folded_into_the_selectable_range_when_too_far_west():
+    # Configured -10 the other way arrives at -13, whose alias +11 is real.
+    got = verdict(_tight(_sidereal(3.0)), configured_offset_hours=-10.0)
+    assert got is not None
+    assert got.implied_utc_offset_hours == pytest.approx(11.0, abs=1e-9)
+
+
+def test_implied_offset_is_always_inside_the_selectable_range():
+    # No combination of a real configured offset and a real disagreement may
+    # produce an offset a user cannot select.
+    seen = 0
+    for configured in (-12.0, -9.5, -4.0, 0.0, 1.0, 5.75, 8.0, 12.75, 14.0):
+        for clock_error in (-11.0, -6.0, -2.5, 0.75, 2.5, 6.0, 11.0):
+            got = verdict(_tight(_sidereal(clock_error)),
+                          configured_offset_hours=configured)
+            if got is None or got.implied_utc_offset_hours is None:
+                continue
+            seen += 1
+            assert -12.0 <= got.implied_utc_offset_hours < 12.0
+    assert seen > 40
 
 
 def test_verdict_has_no_implied_offset_without_a_configured_offset():
@@ -514,6 +547,20 @@ def test_direction_is_known_exactly_at_the_fold_boundary():
     assert got is not None
     assert got.median_error_hours == pytest.approx(DIRECTION_AMBIGUOUS_ABOVE_HOURS)
     assert got.direction_known is True
+
+
+def test_direction_boundary_is_tested_against_the_raw_sidereal_median():
+    # 11.52 raw is 11.4885 once the sidereal rate is divided out. Testing the
+    # corrected value would call the direction known; testing the raw value,
+    # which is what the field documents, does not. The raw test is deliberate:
+    # this band sits immediately below the fold, the last place to trust a
+    # sign, so it errs toward a vaguer message rather than a reversed one.
+    got = verdict([11.52] * 3, configured_offset_hours=0.0)
+    assert got is not None
+    assert got.median_error_hours == pytest.approx(11.52, abs=1e-9)
+    assert got.median_error_hours / SIDEREAL_TO_SOLAR_RATIO < 11.5
+    assert got.direction_known is False
+    assert got.implied_utc_offset_hours is None
 
 
 def test_direction_is_unknown_just_past_the_fold_boundary():

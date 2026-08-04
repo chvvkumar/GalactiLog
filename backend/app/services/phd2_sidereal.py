@@ -120,15 +120,32 @@ fold so it is reported with the sign reversed. `SidVerdict.direction_known` is
 False there. The magnitude is still worth stating; the direction is not, and
 wording must not say "ahead" or "behind" when the flag is False.
 
+The threshold is tested against `median_error_hours`, the raw sidereal
+reading, and not against the rate-corrected value the offsets are built from.
+The two are not interchangeable: they disagree over the narrow band 11.5 to
+11.5315, where the raw test declares the direction unknown and the corrected
+test would still declare it known. The raw test is deliberate. That band sits
+immediately below the fold, which is the last place to trust a sign, and the
+cost of being wrong is a warning that names the opposite direction while the
+cost of being cautious is only a slightly vaguer message.
+
 The same circularity leaves a narrower residual: pointing determines the
 offset only modulo 24 h, so an implied offset of X is equally consistent with
-X plus or minus 24. Real offsets run from -12:00 to +14:00, so both members of
-a pair are valid only when the implied offset falls in -12 to -10, whose alias
-is +12 to +14. Outside that band the alias is not a zone anyone can select and
-the answer is unique. The threshold above does not cover this case, because
-the fold happens in the caller's configured offset rather than in the
-measurement, so a wording author quoting an implied offset in that band must
-say the rig is on that offset or its twelve-hour counterpart.
+X plus or minus 24. `implied_utc_offset_hours` is therefore folded into
+`[-12, 12)`, where every value is an offset a timezone could actually have.
+Without that fold a configured offset of +10 against a 5 h disagreement would
+return +15, which is not a selectable offset at all, and a wording author would
+quote it verbatim.
+
+The fold cannot make every answer unique, because real offsets run from -12:00
+(`Etc/GMT+12`) to +14:00 (`Pacific/Kiritimati`), a 26 h span wider than the
+24 h period. Two hours of that span overlap: an implied offset in -12 to -10
+has an equally valid alias in +12 to +14. Outside that band the alias is not a
+zone anyone can select and the answer is unique. So a wording author quoting an
+implied offset between -12 and -10 must say the rig is on that offset or its
+counterpart 24 h east; anywhere else the value stands alone. The
+`direction_known` threshold above does not cover this case, because this fold
+happens in the caller's configured offset rather than in the measurement.
 """
 from __future__ import annotations
 
@@ -184,10 +201,11 @@ class SidVerdict:
     1. `implied_utc_offset_hours` when it is not None. This is a real UTC
        offset, already quantised to a quarter hour, so the message can name an
        offset the user can actually select. Available on the site-known tier
-       when the caller supplied the configured offset. It is determined modulo
-       24 h, so a value between -12 and -10 also admits its counterpart 24 h
-       away, between +12 and +14; only in that band must the wording offer
-       both. See the module docstring.
+       when the caller supplied the configured offset. It is folded into
+       `[-12, 12)`, so it is always a selectable offset. It is determined only
+       modulo 24 h, so a value between -12 and -10 also admits its counterpart
+       24 h east, between +12 and +14, and only in that band must the wording
+       offer both. Everywhere else it stands alone. See the module docstring.
     2. `nearest_quarter_hours`, the disagreement itself on the same quarter-
        hour grid, when there is no configured offset to anchor it.
 
@@ -429,6 +447,26 @@ def _sample_spread(samples: Sequence[float]) -> float:
     return q3 - q1
 
 
+def _fold_into_selectable_offsets(hours: float) -> float:
+    """Bring an implied UTC offset into a range a timezone could actually have.
+
+    `configured - error` is unbounded: a configured offset of +10 against a 5 h
+    disagreement arrives at +15, and no zone is at +15. The pointing determines
+    the offset only modulo 24 h, so folding by 24 is not a correction, it is a
+    choice between two equally valid readings of the same evidence.
+
+    Real IANA offsets span -12:00 (`Etc/GMT+12`) to +14:00
+    (`Pacific/Kiritimati`), a 26 h range that is wider than the 24 h period, so
+    there is no fold that makes every answer unique. `[-12, 12)` is chosen
+    because every value in it is a selectable offset, which the raw value is
+    not. The cost is that a rig genuinely east of +12, in the two-hour overlap
+    band, is reported as its counterpart in `[-12, -10]`. That is the residual
+    ambiguity documented in the module docstring, now confined to exactly the
+    band the docstring names.
+    """
+    return wrap12(hours)
+
+
 def _quantise_offset(hours: float) -> float:
     """Round a solar-hour offset to the nearest `OFFSET_QUANTUM_HOURS`.
 
@@ -487,7 +525,9 @@ def verdict(
 
     implied_offset = None
     if direction_known and tier == TIER_SITE_KNOWN and configured_offset_hours is not None:
-        implied_offset = _quantise_offset(configured_offset_hours - solar_error)
+        implied_offset = _fold_into_selectable_offsets(
+            _quantise_offset(configured_offset_hours - solar_error)
+        )
 
     suggested = None
     if implied_longitudes_hours:
