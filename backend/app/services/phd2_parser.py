@@ -37,8 +37,13 @@ CAL_CSV_HEADER = "Direction,Step,dx,dy,x,y,Dist"
 
 _TS = r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})"
 
+# The version and platform tag are one optional unit. Desktop builds write
+# "PHD2 version 2.6.14 [Windows], ..."; the PHD2 embedded in an ASIAIR writes
+# "PHD2 version, ..." with both left out. Ten corpus files use the latter and
+# matched nothing at all until the group was made optional.
 _BANNER_RE = re.compile(
-    r"^PHD2 version (\S+) \[([^\]]*)\], Log version ([\d.]+)\. Log enabled at " + _TS
+    r"^PHD2 version(?: (\S+) \[([^\]]*)\])?, Log version ([\d.]+)\. Log enabled at "
+    + _TS
 )
 _LOG_CLOSED_RE = re.compile(r"^Log closed at " + _TS)
 _LOG_SUMMARY_RE = re.compile(
@@ -85,8 +90,12 @@ _H_HYST_RE = re.compile(r"Hysteresis = ([\d.]+)")
 _H_MINMOVE_RE = re.compile(r"Minimum move = ([\d.]+)")
 _H_AGGR_RE = re.compile(r"Aggression = ([\d.]+)")
 _H_BACKLASH_RE = re.compile(r"^Backlash comp = (\w+)(?:, pulse = ([\d.]+) ms)?")
+# The ASIAIR build prefixes this line with a placeholder calibration step;
+# desktop builds start it at "Max RA duration". Without the optional prefix the
+# whole line was unrecognised and all three fields were dropped.
 _H_MAXDUR_RE = re.compile(
-    r"^Max RA duration = ([\d.]+), Max DEC duration = ([\d.]+)"
+    r"^(?:Calibration step = [^,]+, )?"
+    r"Max RA duration = ([\d.]+), Max DEC duration = ([\d.]+)"
     r"(?:, DEC guide mode = (\w+))?"
 )
 _H_SPEEDS_RE = re.compile(
@@ -95,14 +104,56 @@ _H_SPEEDS_RE = re.compile(
 _H_CALDEC_RE = re.compile(r"Cal Dec = ([-\d.]+)")
 _H_LASTCAL_RE = re.compile(r"Last Cal Issue = ([^,]+)")
 _H_CALTS_RE = re.compile(r"Timestamp = (\d{1,2}/\d{1,2}/\d{4} \d{1,2}:\d{2}:\d{2} [AP]M)")
+# Two shapes in the corpus: the desktop seven-field line, and the ASIAIR line
+# that omits RA, Alt and Az entirely. Both optional groups are greedy, so a
+# desktop line still fills all seven fields rather than stopping at Rotator pos.
+# Anchoring on "Dec = " is safe: it is the only line in any corpus file that
+# starts that way ("Dec Guide Speed" only ever appears mid-line).
 _H_POINTING_RE = re.compile(
-    r"^RA = ([-\d.]+) hr, Dec = ([-\d.]+) deg, Hour angle = ([-\d.]+) hr, "
-    r"Pier side = (\w+), Rotator pos = ([^,]+), Alt = ([-\d.]+) deg, Az = ([-\d.]+) deg"
+    r"^(?:RA = ([-\d.]+) hr, )?"
+    r"Dec = ([-\d.]+) deg, Hour angle = ([-\d.]+) hr, "
+    r"Pier side = (\w+), Rotator pos = ([^,]+)"
+    r"(?:, Alt = ([-\d.]+) deg, Az = ([-\d.]+) deg)?"
 )
 _H_LOCK_RE = re.compile(
     r"^Lock position = ([-\d.]+), ([-\d.]+), "
     r"Star position = ([-\d.]+), ([-\d.]+), HFD = ([-\d.]+) px"
 )
+
+
+# Line prefixes that only ever appear in a PHD2 guide log. Used solely to tell
+# a file the parser could not understand apart from a file with nothing in it;
+# a file carrying any of these is a guide log whatever else is wrong with it.
+_GUIDE_LOG_MARKERS = (
+    "PHD2 version",
+    "Guiding Begins at",
+    "Guiding Ends at",
+    "Calibration Begins at",
+    "Calibration complete,",
+    "Log Summary:",
+    "Log closed at",
+    "Frame,Time",
+    "Direction,Step",
+)
+
+
+class Phd2UnreadableLog(ValueError):
+    """The text is a PHD2 guide log, but no run could be read out of it.
+
+    This exists because "I could not understand this file" and "this file has
+    nothing in it" both used to come back as an empty run list, and the caller
+    recorded both as parse_status="empty". Ten real logs from an ASIAIR sat in
+    that state for a year holding 74 unseen guiding sections, and nothing in
+    the product ever said so.
+
+    Raising rather than returning a flag is deliberate. The ingest task already
+    wraps parse_guide_log in a try/except that records parse_status="failed"
+    with the message in parse_error, so an unreadable log becomes visible with
+    no change at the call site and no way for a future caller to forget to
+    check. It subclasses ValueError so a caller that only cares that the file
+    yielded nothing usable need not import this name; a caller that wants to
+    give it a status of its own can catch it by type.
+    """
 
 
 def _f(value: str | None) -> float | None:
@@ -279,10 +330,15 @@ class Phd2LogSummary:
 
 @dataclass
 class Phd2Run:
-    """One PHD2 process lifetime within a physical log file."""
+    """One PHD2 process lifetime within a physical log file.
 
-    phd2_version: str
-    platform: str
+    `phd2_version` and `platform` are None for the PHD2 build embedded in an
+    ASIAIR, which writes its banner with both left blank. Absent is recorded as
+    absent: nothing else in those files says which build produced them.
+    """
+
+    phd2_version: str | None
+    platform: str | None
     log_version: str
     log_enabled_at: datetime | None
     log_closed_at: datetime | None = None
@@ -555,11 +611,22 @@ def _warn_discarded_rows(runs: list[Phd2Run]) -> None:
                 )
 
 
+def _first_marker_line(text: str) -> str | None:
+    """The first line proving this text is a PHD2 guide log, if there is one."""
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if line.startswith(_GUIDE_LOG_MARKERS):
+            return line
+    return None
+
+
 def parse_guide_log(text: str) -> list[Phd2Run]:
     """Parse a whole guide-log file into its stacked runs.
 
-    Returns an empty list for a file with no `PHD2 version` banner at all;
-    callers treat that as a data-free log rather than an error.
+    Returns an empty list for text carrying no guide-log content at all, which
+    callers treat as a data-free log rather than an error. Text that clearly is
+    a guide log but yields no run raises `Phd2UnreadableLog` instead, so an
+    unreadable file can never again be filed alongside the genuinely empty ones.
     """
     runs: list[Phd2Run] = []
     run: Phd2Run | None = None
@@ -729,6 +796,16 @@ def parse_guide_log(text: str) -> list[Phd2Run]:
             continue
 
     _abandon_section()
+
+    if not runs:
+        marker = _first_marker_line(text)
+        if marker is not None:
+            raise Phd2UnreadableLog(
+                "no PHD2 run could be read from this guide log, yet it carries "
+                "guide-log content. The first line the parser could not place "
+                f"was: {marker[:200]}"
+            )
+
     _warn_discarded_rows(runs)
     _crosscheck_summaries(runs)
     return runs

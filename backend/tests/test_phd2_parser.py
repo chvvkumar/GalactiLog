@@ -7,6 +7,8 @@ exact byte layout PHD2 2.6.13/2.6.14 emits rather than an idealised sample.
 """
 from datetime import datetime
 
+import pytest
+
 from app.services import phd2_parser
 from app.services.phd2_parser import Phd2Header, apply_header_line, parse_guide_log
 
@@ -493,3 +495,228 @@ def test_a_calibration_header_near_miss_is_reported_too():
     )
     runs = parse_guide_log(text)
     assert any("Direction,Step" in w for w in runs[0].warnings), runs[0].warnings
+
+
+# --- TZ-A: the PHD2 build embedded in an ASIAIR ------------------------------
+#
+# Verbatim: W:\Astro\Incoming\2024\Okie-Tex 2024\ASIAIR\log\
+# PHD2_GuideLog_2024-09-16_201229.txt, lines 1-30 and 32-52, joined. The blank
+# line between the two guiding sections is dropped so the second section ends
+# mid-CSV, which is how every one of the ten ASIAIR files in the corpus really
+# ends: the ASIAIR kills PHD2 rather than closing the log.
+#
+# Three shapes here differ from every desktop build, and each one is a silent
+# data loss until the parser is taught about it:
+#   1. the banner carries no version and no platform tag,
+#   2. the pointing line omits RA, Alt and Az,
+#   3. the max-duration line is prefixed with "Calibration step = ".
+# The one departure from the bytes on disk: the file's "Equipment Profile" and
+# "Mount" lines end in a trailing space, dropped here so no editor silently
+# rewrites the fixture. apply_header_line strips every line before matching, so
+# the two forms are indistinguishable to the parser.
+ASIAIR_SAMPLE_LOG = """PHD2 version, Log version 2.5. Log enabled at 2024-09-16 20:12:29
+
+Guiding Begins at 2024-09-16 20:12:31
+Dither = both axes, Dither scale = 1.000, Image noise reduction = none, Guide-frame time lapse = 0, Server enabled
+Pixel scale = 6.45 arc-sec/px, Binning = 1, Focal length = 120 mm
+Search region = 50 px, Star mass tolerance = 50.0%
+Equipment Profile =
+Camera = ZWO ASI120MM Mini, gain = 48, full size = 1280 x 960, have dark, dark dur = 2000, no defect map, pixel size = 3.8 um
+Exposure = 2000 ms
+Mount = iOptron CEM26/GEM28/HEM27,  connected, guiding enabled, xAngle = -76.2, xRate = 0.693, yAngle = 13.3, yRate = 1.180, parity = +/+,
+X guide algorithm = Hysteresis, Hysteresis = 0.100, Aggression = 0.700, Minimum move = 0.100
+Y guide algorithm = Resist Switch, Minimum move = 0.100 Aggression = 100% FastSwitch = enabled
+Backlash comp = disabled, pulse = 0 ms
+Calibration step = phdlab_placeholder, Max RA duration = 2000, Max DEC duration = 2000, DEC guide mode = Auto
+RA Guide Speed = 7.5 a-s/s, Dec Guide Speed = 7.5 a-s/s, Cal Dec = 31.7, Last Cal Issue = None, Timestamp = Unknown
+Dec = 57.6 deg, Hour angle = -2.77 hr, Pier side = West, Rotator pos = N/A
+Lock position = 876.966, 96.832, Star position = 877.037, 96.694, HFD = 5.05 px
+Frame,Time,mount,dx,dy,RARawDistance,DECRawDistance,RAGuideDistance,DECGuideDistance,RADuration,RADirection,DECDuration,DECDirection,XStep,YStep,StarMass,SNR,ErrorCode
+INFO: SETTLING STATE CHANGE, Settling started
+1,2.385,"Mount",0.186,-0.295,0.331,0.108,0.209,0.000,301,W,0,,,,2669,34.05,0
+2,4.265,"Mount",0.142,-0.202,0.230,0.088,0.159,0.000,230,W,0,,,,2504,32.75,0
+3,6.335,"Mount",0.135,-0.277,0.301,0.063,0.201,0.000,290,W,0,,,,2690,34.10,0
+INFO: SETTLING STATE CHANGE, Settling complete
+4,8.353,"Mount",0.166,-0.296,0.327,0.089,0.220,0.000,317,W,0,,,,2577,33.18,0
+5,10.230,"Mount",0.311,-0.119,0.190,0.272,0.135,0.000,195,W,0,,,,2659,34.01,0
+6,12.554,"Mount",0.263,-0.286,0.341,0.185,0.224,0.185,323,W,157,S,,,2669,33.96,0
+7,14.578,"Mount",0.220,-0.366,0.408,0.123,0.273,0.123,393,W,105,S,,,2487,33.17,0
+8,16.559,"Mount",0.245,-0.280,0.330,0.168,0.227,0.168,328,W,143,S,,,2647,33.92,0
+9,18.593,"Mount",0.274,-0.370,0.425,0.174,0.283,0.174,409,W,148,S,,,2665,33.86,0
+Guiding Ends at 2024-09-16 20:12:51
+Guiding Begins at 2024-09-16 20:12:59
+Dither = both axes, Dither scale = 1.000, Image noise reduction = none, Guide-frame time lapse = 0, Server enabled
+Pixel scale = 6.45 arc-sec/px, Binning = 1, Focal length = 120 mm
+Search region = 50 px, Star mass tolerance = 50.0%
+Equipment Profile =
+Camera = ZWO ASI120MM Mini, gain = 48, full size = 1280 x 960, have dark, dark dur = 2000, no defect map, pixel size = 3.8 um
+Exposure = 2000 ms
+Mount = iOptron CEM26/GEM28/HEM27,  connected, guiding enabled, xAngle = -76.2, xRate = 0.693, yAngle = 13.3, yRate = 1.180, parity = +/+,
+X guide algorithm = Hysteresis, Hysteresis = 0.100, Aggression = 0.700, Minimum move = 0.100
+Y guide algorithm = Resist Switch, Minimum move = 0.100 Aggression = 100% FastSwitch = enabled
+Backlash comp = disabled, pulse = 0 ms
+Calibration step = phdlab_placeholder, Max RA duration = 2000, Max DEC duration = 2000, DEC guide mode = Auto
+RA Guide Speed = 7.5 a-s/s, Dec Guide Speed = 7.5 a-s/s, Cal Dec = 31.7, Last Cal Issue = None, Timestamp = Unknown
+Dec = 57.6 deg, Hour angle = -2.76 hr, Pier side = West, Rotator pos = N/A
+Lock position = 877.595, 96.360, Star position = 877.644, 96.201, HFD = 4.61 px
+Frame,Time,mount,dx,dy,RARawDistance,DECRawDistance,RAGuideDistance,DECGuideDistance,RADuration,RADirection,DECDuration,DECDirection,XStep,YStep,StarMass,SNR,ErrorCode
+INFO: SETTLING STATE CHANGE, Settling started
+1,2.297,"Mount",0.158,-0.216,0.248,0.100,0.156,0.000,225,W,0,,,,2831,35.11,0
+2,4.409,"Mount",0.182,-0.376,0.408,0.084,0.268,0.000,387,W,0,,,,2672,34.14,0
+3,6.243,"Mount",0.202,-0.159,0.203,0.156,0.147,0.000,212,W,0,,,,2771,34.70,0
+INFO: SETTLING STATE CHANGE, Settling complete
+"""
+
+# Verbatim pointing line from the same file. No RA, no Alt, no Az.
+ASIAIR_POINTING_LINE = (
+    "Dec = 57.6 deg, Hour angle = -2.77 hr, Pier side = West, Rotator pos = N/A"
+)
+# Verbatim pointing line from PHD2_GuideLog_2026-07-14_201333.txt: all seven
+# fields, which is what all but ten files in the 177-file corpus emit.
+DESKTOP_POINTING_LINE = (
+    "RA = 20.22 hr, Dec = 38.5 deg, Hour angle = -4.02 hr, Pier side = West, "
+    "Rotator pos = N/A, Alt = 43.7 deg, Az = 70.4 deg"
+)
+
+
+def test_asiair_banner_without_version_or_platform_is_parsed():
+    """The ASIAIR writes "PHD2 version, Log version 2.5." with the version left
+    blank and no platform tag. Ten corpus files carry it, and every one of them
+    parsed to zero runs until the banner pattern allowed the omission."""
+    runs = parse_guide_log(ASIAIR_SAMPLE_LOG)
+    assert len(runs) == 1
+    run = runs[0]
+    # Absent, not invented: nothing in the file says which build wrote it.
+    assert run.phd2_version is None
+    assert run.platform is None
+    # Everything the banner does carry survives.
+    assert run.log_version == "2.5"
+    assert run.log_enabled_at == datetime(2024, 9, 16, 20, 12, 29)
+
+
+def test_desktop_banner_still_carries_its_version_and_platform():
+    """Two versions including a dev build, so the optional-version banner
+    pattern cannot quietly start discarding the version it used to capture."""
+    runs = parse_guide_log(EMPTY_STACKED_LOG)
+    assert [r.phd2_version for r in runs] == [
+        "2.6.13dev8", "2.6.14", "2.6.14", "2.6.14", "2.6.14",
+    ]
+    assert [r.platform for r in runs] == ["Windows"] * 5
+    assert parse_guide_log(FULL_SAMPLE_LOG)[0].phd2_version == "2.6.14"
+    assert parse_guide_log(FULL_SAMPLE_LOG)[0].platform == "Windows"
+
+
+def test_pointing_line_without_ra_alt_and_az_is_parsed():
+    header = Phd2Header()
+    assert apply_header_line(header, ASIAIR_POINTING_LINE) is True
+    assert header.dec_deg == 57.6
+    assert header.hour_angle_hr == -2.77
+    assert header.pier_side == "West"
+    assert header.rotator_pos == "N/A"
+    # Absent in the file, so absent here. Nothing is fabricated.
+    assert header.ra_hr is None
+    assert header.alt_deg is None
+    assert header.az_deg is None
+
+
+def test_full_desktop_pointing_line_is_still_parsed_in_full():
+    header = Phd2Header()
+    assert apply_header_line(header, DESKTOP_POINTING_LINE) is True
+    assert header.ra_hr == 20.22
+    assert header.dec_deg == 38.5
+    assert header.hour_angle_hr == -4.02
+    assert header.pier_side == "West"
+    assert header.rotator_pos == "N/A"
+    assert header.alt_deg == 43.7
+    assert header.az_deg == 70.4
+
+
+def test_asiair_max_duration_line_survives_its_calibration_step_prefix():
+    """The ASIAIR prefixes the max-duration line with a placeholder calibration
+    step; desktop builds start the line at "Max RA duration". Without the
+    optional prefix all three fields were dropped on all 74 ASIAIR sections."""
+    header = Phd2Header()
+    assert apply_header_line(
+        header,
+        "Calibration step = phdlab_placeholder, Max RA duration = 2000, "
+        "Max DEC duration = 2000, DEC guide mode = Auto",
+    ) is True
+    assert header.max_ra_duration_ms == 2000.0
+    assert header.max_dec_duration_ms == 2000.0
+    assert header.dec_guide_mode == "Auto"
+
+
+def test_asiair_sample_yields_both_of_its_guiding_sections():
+    run = parse_guide_log(ASIAIR_SAMPLE_LOG)[0]
+    assert len(run.sections) == 2
+    first, second = run.sections
+    assert first.started_at_local == datetime(2024, 9, 16, 20, 12, 31)
+    assert first.ended_at_local == datetime(2024, 9, 16, 20, 12, 51)
+    assert first.truncated is False
+    assert [f.frame_index for f in first.frames] == [1, 2, 3, 4, 5, 6, 7, 8, 9]
+    assert first.header.pixel_scale_arcsec == 6.45
+    assert first.header.guide_camera == "ZWO ASI120MM Mini"
+    assert first.header.dec_deg == 57.6
+    assert first.header.ra_hr is None
+    # The ASIAIR kills PHD2 rather than closing the log, so the last section of
+    # every one of the ten files ends mid-CSV with no "Guiding Ends".
+    assert second.truncated is True
+    assert [f.frame_index for f in second.frames] == [1, 2, 3]
+    assert run.log_closed_at is None
+
+
+# --- TZ-A: unreadable is not the same thing as empty -------------------------
+
+# A guide log whose banner never appeared: the head of the file was lost. It
+# has PHD2 guide-log content but the parser has no run to hang it on.
+HEADLESS_LOG = """Guiding Begins at 2024-09-16 20:12:31
+Pixel scale = 6.45 arc-sec/px, Binning = 1, Focal length = 120 mm
+Frame,Time,mount,dx,dy,RARawDistance,DECRawDistance,RAGuideDistance,DECGuideDistance,RADuration,RADirection,DECDuration,DECDirection,XStep,YStep,StarMass,SNR,ErrorCode
+1,2.385,"Mount",0.186,-0.295,0.331,0.108,0.209,0.000,301,W,0,,,,2669,34.05,0
+Guiding Ends at 2024-09-16 20:12:51
+"""
+
+# A banner shape no released PHD2 writes today. This is the class of defect the
+# ASIAIR banner was for a year: unmatched, zero runs, no complaint.
+UNKNOWN_BANNER_LOG = """PHD2 version 3.0.0 (Windows) :: Log version 3.0 :: enabled 2027-01-01 00:00:00
+Guiding Begins at 2027-01-01 00:00:01
+Guiding Ends at 2027-01-01 00:10:01
+"""
+
+
+def test_a_file_with_no_phd2_content_at_all_is_empty_not_unreadable():
+    assert parse_guide_log("") == []
+    assert parse_guide_log("\n\n   \n") == []
+    assert parse_guide_log("not a guide log at all\n") == []
+
+
+def test_a_banner_only_log_with_no_sections_is_empty_not_unreadable():
+    """Five stacked runs and not one guiding section. The parser understood the
+    file perfectly; there is simply nothing in it."""
+    runs = parse_guide_log(EMPTY_STACKED_LOG)
+    assert len(runs) == 5
+    assert all(r.sections == [] for r in runs)
+
+
+def test_guide_log_content_the_parser_cannot_place_raises_rather_than_reading_empty():
+    with pytest.raises(phd2_parser.Phd2UnreadableLog):
+        parse_guide_log(HEADLESS_LOG)
+
+
+def test_an_unrecognised_banner_shape_raises_rather_than_reading_empty():
+    with pytest.raises(phd2_parser.Phd2UnreadableLog):
+        parse_guide_log(UNKNOWN_BANNER_LOG)
+
+
+def test_the_unreadable_error_quotes_the_line_it_could_not_place():
+    """The message is what reaches the user through parse_error, so it has to
+    name the evidence rather than say "unreadable" and stop."""
+    with pytest.raises(phd2_parser.Phd2UnreadableLog) as excinfo:
+        parse_guide_log(UNKNOWN_BANNER_LOG)
+    assert "PHD2 version 3.0.0 (Windows)" in str(excinfo.value)
+
+
+def test_the_unreadable_error_is_catchable_as_a_value_error():
+    """Callers that only ever want "this file yielded nothing usable" should
+    not have to import the parser's exception to get it."""
+    assert issubclass(phd2_parser.Phd2UnreadableLog, ValueError)
