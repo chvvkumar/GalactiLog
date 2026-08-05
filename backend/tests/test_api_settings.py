@@ -1073,6 +1073,201 @@ async def test_put_general_does_not_remap_on_the_first_save_after_upgrade(monkey
         app.dependency_overrides.clear()
 
 
+def _entry(**overrides):
+    """One canonical profile-map entry, as the API serialises it."""
+    return {
+        "telescope": None, "timezone": "", "latitude": None, "longitude": None,
+        **overrides,
+    }
+
+
+async def _put_general_with_tasks(monkeypatch, stored, payload):
+    """PUT /general against `stored`, returning the two mocked worker tasks.
+
+    Both PHD2 follow-up passes and the session-date recompute are captured, so
+    a test can assert what a save queued AND what it did not.
+    """
+    from app.worker import tasks as worker_tasks
+
+    scan = MagicMock()
+    recompute = MagicMock()
+    monkeypatch.setattr(worker_tasks, "scan_phd2_logs", scan)
+    monkeypatch.setattr(worker_tasks, "recompute_session_dates", recompute)
+
+    mock_session = _mock_settings_session(_make_settings_row(general=stored))
+
+    async def override():
+        yield mock_session
+
+    app.dependency_overrides[get_session] = override
+    _override_admin()
+    try:
+        resp = await _put_general(payload)
+        assert resp.status_code == 200
+    finally:
+        app.dependency_overrides.clear()
+    return scan, recompute
+
+
+@pytest.mark.asyncio
+async def test_put_general_forces_a_reparse_when_only_a_profile_zone_changes(monkeypatch):
+    """A rig's own zone is applied while parsing, exactly like the global one,
+    so changing it has to re-read that rig's logs. The cheap in-place re-key
+    cannot do it: ended_at_utc has no stored local counterpart."""
+    scan, recompute = await _put_general_with_tasks(
+        monkeypatch,
+        stored={
+            "use_imaging_night": True,
+            "observer_timezone": "America/New_York",
+            "phd2_profile_map": {"Rig": _entry(telescope="Askar 120")},
+        },
+        payload={
+            "use_imaging_night": True,
+            "observer_timezone": "America/New_York",
+            "phd2_profile_map": {
+                "Rig": _entry(telescope="Askar 120", timezone="Europe/Berlin"),
+            },
+        },
+    )
+    scan.delay.assert_called_once_with(force=True)
+    recompute.delay.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_put_general_only_remaps_when_a_telescope_changes(monkeypatch):
+    """Which telescope a profile belongs to is a pure re-key: no file is
+    re-read, so the whole-corpus forced pass must not be queued for it."""
+    scan, recompute = await _put_general_with_tasks(
+        monkeypatch,
+        stored={
+            "use_imaging_night": True,
+            "observer_timezone": "America/New_York",
+            "phd2_profile_map": {
+                "Rig": _entry(telescope="Askar 120", timezone="America/Chicago"),
+            },
+        },
+        payload={
+            "use_imaging_night": True,
+            "observer_timezone": "America/New_York",
+            "phd2_profile_map": {
+                "Rig": _entry(telescope="Askar 140", timezone="America/Chicago"),
+            },
+        },
+    )
+    scan.delay.assert_called_once_with(remap_only=True)
+    recompute.delay.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_put_general_queues_only_the_forced_pass_when_both_change(monkeypatch):
+    """The forced pass already re-applies the profile map and re-keys every
+    stored row, so queueing the re-key beside it would repeat that work over
+    the whole session table."""
+    scan, recompute = await _put_general_with_tasks(
+        monkeypatch,
+        stored={
+            "use_imaging_night": True,
+            "observer_timezone": "America/New_York",
+            "phd2_profile_map": {
+                "Rig": _entry(telescope="Askar 120", timezone="America/Chicago"),
+            },
+        },
+        payload={
+            "use_imaging_night": True,
+            "observer_timezone": "America/New_York",
+            "phd2_profile_map": {
+                "Rig": _entry(telescope="Askar 140", timezone="Europe/Berlin"),
+            },
+        },
+    )
+    scan.delay.assert_called_once_with(force=True)
+    recompute.delay.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_put_general_recomputes_when_only_a_profile_longitude_changes(monkeypatch):
+    """Longitude decides where a rig's night breaks, not how its timestamps are
+    read, so it re-keys stored rows and never re-reads a log."""
+    scan, recompute = await _put_general_with_tasks(
+        monkeypatch,
+        stored={
+            "use_imaging_night": True,
+            "observer_timezone": "America/New_York",
+            "phd2_profile_map": {
+                "Rig": _entry(
+                    telescope="Askar 120", timezone="America/Chicago",
+                    longitude=-97.74,
+                ),
+            },
+        },
+        payload={
+            "use_imaging_night": True,
+            "observer_timezone": "America/New_York",
+            "phd2_profile_map": {
+                "Rig": _entry(
+                    telescope="Askar 120", timezone="America/Chicago",
+                    longitude=-70.0,
+                ),
+            },
+        },
+    )
+    recompute.delay.assert_called_once_with()
+    scan.delay.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_put_general_never_queues_two_writers_of_session_date(monkeypatch):
+    """A zone edit that also moves the rig must not run the recompute beside
+    the forced pass: both write session_date, and the forced pass re-keys."""
+    scan, recompute = await _put_general_with_tasks(
+        monkeypatch,
+        stored={
+            "use_imaging_night": True,
+            "observer_timezone": "America/New_York",
+            "phd2_profile_map": {
+                "Rig": _entry(
+                    telescope="Askar 120", timezone="America/Chicago",
+                    longitude=-97.74,
+                ),
+            },
+        },
+        payload={
+            "use_imaging_night": True,
+            "observer_timezone": "America/New_York",
+            "phd2_profile_map": {
+                "Rig": _entry(
+                    telescope="Askar 120", timezone="Europe/Berlin",
+                    longitude=13.4,
+                ),
+            },
+        },
+    )
+    scan.delay.assert_called_once_with(force=True)
+    recompute.delay.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_put_general_queues_nothing_when_a_legacy_map_is_resaved(monkeypatch):
+    """The stored map may still be in the legacy `{"Rig": "Scope"}` form while
+    the payload always arrives canonical. Comparing those raw would report a
+    change on every single save and re-key the whole catalog each time."""
+    scan, recompute = await _put_general_with_tasks(
+        monkeypatch,
+        stored={
+            "use_imaging_night": True,
+            "observer_timezone": "America/New_York",
+            "phd2_profile_map": {"Rig": "Askar 120"},
+        },
+        payload={
+            "use_imaging_night": True,
+            "observer_timezone": "America/New_York",
+            "phd2_profile_map": {"Rig": _entry(telescope="Askar 120")},
+        },
+    )
+    scan.delay.assert_not_called()
+    recompute.delay.assert_not_called()
+
+
 @pytest.mark.asyncio
 async def test_put_general_rejects_an_unknown_timezone():
     """A typo'd zone degrades to the server's zone at ingest, which is silent
