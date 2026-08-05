@@ -23,6 +23,7 @@ from app.services.data_migrations import (
     _migrate_v13_enrich_created_targets,
     _migrate_v14_eccentricity_provenance,
     _migrate_v15_arcsec_per_pixel,
+    _migrate_v17_phd2_profile_map_shape,
 )
 
 
@@ -92,8 +93,14 @@ class TestGetPendingMigrations:
         assert "guiding" in desc.lower()
         assert callable(func)
 
-    def test_data_version_is_16(self):
-        assert DATA_VERSION == 16
+    def test_v17_registered(self):
+        assert 17 in MIGRATIONS
+        desc, func = MIGRATIONS[17]
+        assert func is _migrate_v17_phd2_profile_map_shape
+        assert "timezone" in desc.lower()
+
+    def test_data_version_is_17(self):
+        assert DATA_VERSION == 17
 
 
 def _sync_session_factory():

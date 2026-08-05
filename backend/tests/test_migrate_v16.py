@@ -161,7 +161,91 @@ def test_the_profile_map_is_rekeyed_through_the_current_aliases(db):
             s.commit()
         with db() as s:
             row = s.get(UserSettings, SETTINGS_ROW_ID)
-            assert row.general["phd2_profile_map"]["P_OAG"] == "SVBony 80ED"
+            entry = row.general["phd2_profile_map"]["P_OAG"]
+            # Rewritten through phd2_profiles, so the map comes back in the
+            # canonical per-profile shape rather than the legacy bare name it
+            # went in as. v17 would have converted it anyway.
+            assert entry["telescope"] == "SVBony 80ED"
+            assert s.get(Phd2Session, session_id).telescope == "SVBony 80ED"
+    finally:
+        with db() as s:
+            row = s.get(UserSettings, SETTINGS_ROW_ID)
+            row.general = original_general
+            row.equipment = original_equipment
+            s.commit()
+
+
+def test_the_rekey_keeps_a_profiles_own_timezone_and_site(db):
+    """A map already in the per-profile shape must come out of the re-key with
+    its zone and coordinates intact. Rebuilding the map from bare telescope
+    names, which is what this step used to do, would flatten a remote rig back
+    to the global zone and site and shift every night it ever guided."""
+    from app.models.phd2 import Phd2Log, Phd2Session
+    from app.models.user_settings import SETTINGS_ROW_ID, UserSettings
+    from app.services.data_migrations import _migrate_v16_guiding_rms_provenance
+
+    log_id = uuid.uuid4()
+    session_id = uuid.uuid4()
+    with db() as s:
+        row = s.get(UserSettings, SETTINGS_ROW_ID)
+        if row is None:
+            row = UserSettings(id=SETTINGS_ROW_ID)
+            s.add(row)
+        original_general = dict(row.general or {})
+        original_equipment = dict(row.equipment or {})
+        row.equipment = {
+            "telescopes": {"SVBony 80ED": {"aliases": ["SVBony SV503 80mm"]}}
+        }
+        row.general = {
+            **original_general,
+            "phd2_profile_map": {
+                "P_OAG": {
+                    "telescope": "SVBony SV503 80mm",
+                    "timezone": "America/Chicago",
+                    "latitude": 30.27,
+                    "longitude": -97.74,
+                },
+                "P_GREENWICH": {
+                    "telescope": None,
+                    "timezone": "Europe/London",
+                    "latitude": 0.0,
+                    "longitude": 0.0,
+                },
+            },
+        }
+        s.add(Phd2Log(id=log_id, file_path=f"/{TEST_MARK}/i.txt", parse_status="ok"))
+        s.flush()
+        s.add(Phd2Session(
+            id=session_id, log_id=log_id, run_index=0, section_index=0,
+            started_at_local=datetime(2026, 7, 14, 22, 0, 0),
+            started_at_utc=datetime(2026, 7, 15, 2, 0, 0, tzinfo=timezone.utc),
+            duration_s=1.0, session_date=date(2026, 7, 14),
+            equipment_profile="P_OAG", telescope="SVBony SV503 80mm",
+            events=[],
+        ))
+        s.commit()
+
+    try:
+        with db() as s:
+            _migrate_v16_guiding_rms_provenance(s)
+            s.commit()
+        with db() as s:
+            row = s.get(UserSettings, SETTINGS_ROW_ID)
+            stored = row.general["phd2_profile_map"]
+            assert stored["P_OAG"] == {
+                "telescope": "SVBony 80ED",
+                "timezone": "America/Chicago",
+                "latitude": 30.27,
+                "longitude": -97.74,
+            }
+            # An unmapped profile is not renamed, and a longitude of 0.0 is a
+            # rig on the prime meridian, not an unset value.
+            assert stored["P_GREENWICH"] == {
+                "telescope": None,
+                "timezone": "Europe/London",
+                "latitude": 0.0,
+                "longitude": 0.0,
+            }
             assert s.get(Phd2Session, session_id).telescope == "SVBony 80ED"
     finally:
         with db() as s:
