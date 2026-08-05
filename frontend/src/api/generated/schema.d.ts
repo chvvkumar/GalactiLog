@@ -3422,7 +3422,7 @@ export interface components {
              * @default {}
              */
             phd2_profile_map: {
-                [key: string]: string;
+                [key: string]: components["schemas"]["Phd2ProfileMapping"];
             };
             /**
              * Phd2 Scan Enabled
@@ -4357,6 +4357,44 @@ export interface components {
             pixel_scale_arcsec?: number | null;
             /** Session Count */
             session_count: number;
+        };
+        /**
+         * Phd2ProfileMapping
+         * @description What one PHD2 equipment profile is mapped to.
+         *
+         *     A guide log names the equipment profile that produced it and nothing else
+         *     about the rig, so which telescope it is, which zone its wall-clock
+         *     timestamps are in and where on Earth it stands are all user configuration.
+         *     `app.services.phd2_profiles` owns this shape and every reader goes through
+         *     it; this model is the same shape at the API boundary.
+         *
+         *     `telescope: None` means the profile is not mapped to a telescope, and an
+         *     entry survives without one so that unmapping a rig does not discard its
+         *     zone and site. `timezone: ""` means inherit `observer_timezone`.
+         *     `latitude: None` and `longitude: None` mean inherit the global observer
+         *     coordinates. THE INHERIT MARKER FOR THE COORDINATES IS null, NEVER 0: zero
+         *     is a legal longitude (Greenwich) and a legal latitude (the equator), so a
+         *     falsy test on either field would move such a rig to the user's own site.
+         *
+         *     The range bounds are the declared contract for a coordinate a client
+         *     writes, and they reach the generated OpenAPI so the settings UI can bound
+         *     its own inputs. They are not the whole story on the way in: the map's
+         *     `mode="before"` normalizer on `GeneralSettings` runs first and degrades an
+         *     unusable stored coordinate to None, because that same model is rebuilt from
+         *     stored JSON on every settings read and no stored value may raise there.
+         */
+        Phd2ProfileMapping: {
+            /** Latitude */
+            latitude?: number | null;
+            /** Longitude */
+            longitude?: number | null;
+            /** Telescope */
+            telescope?: string | null;
+            /**
+             * Timezone
+             * @default
+             */
+            timezone: string;
         };
         /** Phd2ProfilesResponse */
         Phd2ProfilesResponse: {

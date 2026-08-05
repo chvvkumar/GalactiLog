@@ -3209,7 +3209,7 @@
           },
           "phd2_profile_map": {
             "additionalProperties": {
-              "type": "string"
+              "$ref": "#/components/schemas/Phd2ProfileMapping"
             },
             "default": {},
             "title": "Phd2 Profile Map",
@@ -5749,6 +5749,55 @@
           "session_count"
         ],
         "title": "Phd2ProfileInfo",
+        "type": "object"
+      },
+      "Phd2ProfileMapping": {
+        "description": "What one PHD2 equipment profile is mapped to.\n\nA guide log names the equipment profile that produced it and nothing else\nabout the rig, so which telescope it is, which zone its wall-clock\ntimestamps are in and where on Earth it stands are all user configuration.\n`app.services.phd2_profiles` owns this shape and every reader goes through\nit; this model is the same shape at the API boundary.\n\n`telescope: None` means the profile is not mapped to a telescope, and an\nentry survives without one so that unmapping a rig does not discard its\nzone and site. `timezone: \"\"` means inherit `observer_timezone`.\n`latitude: None` and `longitude: None` mean inherit the global observer\ncoordinates. THE INHERIT MARKER FOR THE COORDINATES IS null, NEVER 0: zero\nis a legal longitude (Greenwich) and a legal latitude (the equator), so a\nfalsy test on either field would move such a rig to the user's own site.\n\nThe range bounds are the declared contract for a coordinate a client\nwrites, and they reach the generated OpenAPI so the settings UI can bound\nits own inputs. They are not the whole story on the way in: the map's\n`mode=\"before\"` normalizer on `GeneralSettings` runs first and degrades an\nunusable stored coordinate to None, because that same model is rebuilt from\nstored JSON on every settings read and no stored value may raise there.",
+        "properties": {
+          "latitude": {
+            "anyOf": [
+              {
+                "maximum": 90.0,
+                "minimum": -90.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latitude"
+          },
+          "longitude": {
+            "anyOf": [
+              {
+                "maximum": 180.0,
+                "minimum": -180.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Longitude"
+          },
+          "telescope": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Telescope"
+          },
+          "timezone": {
+            "default": "",
+            "title": "Timezone",
+            "type": "string"
+          }
+        },
+        "title": "Phd2ProfileMapping",
         "type": "object"
       },
       "Phd2ProfilesResponse": {

@@ -618,14 +618,25 @@ export interface GeneralSettings {
   wbpp_quality_baseline?: string;
   wbpp_quality_raw_constraints?: { metric: string; value: number }[];
   // IANA zone name used to convert PHD2's local wall-clock timestamps to UTC.
-  // Empty/absent means "use the server's local zone".
+  // Empty/absent means "not configured" -- it no longer means "use the
+  // server's local zone". A profile without a zone of its own falls back to
+  // this one, and when neither is set the correlation guard declines to fill
+  // guiding metrics rather than guess a zone.
   observer_timezone?: string | null;
   // Whether the library scan also collects PHD2_GuideLog_*.txt files.
   // Absent means enabled (the backend default).
   phd2_scan_enabled?: boolean;
-  // Raw PHD2 equipment profile name -> catalog telescope name. Several
-  // profiles may map to one telescope; that is the rig merge mechanism.
-  phd2_profile_map?: Record<string, string>;
+  // Raw PHD2 equipment profile name -> what that rig is. Several profiles may
+  // name one telescope; that is the rig merge mechanism. An entry may carry a
+  // timezone and a site with no telescope, so unmapping a rig keeps where and
+  // when it observes. An empty `timezone` inherits the global
+  // `observer_timezone`. A null `latitude`/`longitude` inherits the global
+  // observer coordinates -- null is the only inherit marker, never 0, because
+  // 0 is a legal stored coordinate (Greenwich, and the equator).
+  phd2_profile_map?: Record<
+    string,
+    { telescope?: string | null; timezone?: string; latitude?: number | null; longitude?: number | null }
+  >;
 }
 
 export interface FilterConfig {
