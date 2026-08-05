@@ -548,23 +548,36 @@ def _sidereal_findings(
     Evidence only. Nothing here writes a stored value, and a profile with no
     verdict simply produces no entry.
 
-    Three gates apply before any arithmetic:
+    Everything is resolved PER PROFILE, which is the whole point of the
+    feature: a rig carrying its own site is checkable whether or not the
+    global observer longitude is set, and that travelling rig is exactly the
+    one worth checking.
 
-    - A profile whose zone resolves to nothing at either level is skipped. Its
-      timestamps were read in the server's own zone, so the instant this check
-      would solve from is not a configured value at all, and the correlation
-      pass already names that profile in its own warning. One cause, one
-      message.
+    - A profile that resolves a longitude - its own, or the global value
+      behind it - is compared against that longitude. The tolerance is the
+      tight one either way, but the WORDING is not: `site_known` is
+      `profile_has_own_longitude` and nothing else, and only a rig standing at
+      a longitude the user entered for it may have its finding stated as fact.
+      An inherited longitude produces the either/or wording, because "this rig
+      is not where you think it is" is then one of the live explanations.
+    - A profile that resolves no longitude at all, but does resolve a
+      timezone, falls back to that zone's standard meridian: wider tolerance,
+      hedged wording, and a suggested longitude as the actionable output.
+    - A profile with neither is skipped. The correlation pass already names it
+      in `phd2_correlation_timezone_unset`, and one cause must not produce two
+      warnings.
     - Each section must pass `pointing_is_coherent(...) is True`. The test is
       against True and never against `is not False`: None means the mount wrote
       no altitude, or no latitude is configured for the rig, and neither is
       evidence that the pointing is sound.
-    - The tier turns on `profile_has_own_longitude`, never on `profile_site`'s
-      pair-level source. A rig that inherits the home longitude has an unknown
-      site, so it is compared against its timezone's standard meridian under
-      the wider tolerance and its finding is hedged.
+
+    The tier never turns on `profile_site`'s pair-level source, which reads
+    "profile" when the entry supplied only a latitude.
     """
     resolve_zone = phd2_profiles.profile_zone_resolver(profile_map, global_tz)
+    resolve_longitude = phd2_profiles.longitude_resolver(
+        profile_map, general.observer_longitude
+    )
     grouped: dict[str | None, list[PointingSample]] = defaultdict(list)
     for sample in pointing:
         grouped[sample.profile].append(sample)
@@ -572,15 +585,19 @@ def _sidereal_findings(
     findings: list[dict] = []
     for profile in sorted(grouped, key=lambda name: (name is None, name or "")):
         zone, _source = resolve_zone(profile)
-        if not zone:
+        longitude = resolve_longitude(profile)
+        if longitude is None and not zone:
             continue
-        latitude, longitude, _site_source = phd2_profiles.profile_site(
+        # profile_site is asked only for the latitude the coherence gate
+        # needs; the longitude comes from the resolver above so that the two
+        # questions this function asks about a site stay separate.
+        latitude, _lat_pair_lon, _site_source = phd2_profiles.profile_site(
             profile_map, profile,
             general.observer_latitude, general.observer_longitude,
         )
         site_known = phd2_profiles.profile_has_own_longitude(profile_map, profile)
         tier = (
-            phd2_sidereal.TIER_SITE_KNOWN if site_known
+            phd2_sidereal.TIER_SITE_KNOWN if longitude is not None
             else phd2_sidereal.TIER_ZONE_MERIDIAN
         )
 
@@ -599,7 +616,7 @@ def _sidereal_findings(
             meridian = phd2_sidereal.zone_meridian_longitude_deg(
                 zone, sample.started_at_utc
             )
-            reference = longitude if site_known else meridian
+            reference = longitude if longitude is not None else meridian
             error = phd2_sidereal.offset_error_hours(implied_hours, reference)
             if error is None or implied_hours is None:
                 continue
@@ -629,20 +646,37 @@ def _sidereal_findings(
             "zone": zone,
             "verdict": outcome,
             "configured_offset_hours": configured_offset,
+            "site_known": site_known,
+            "longitude_deg": longitude,
         })
     return findings
 
 
+def _zone_label(zone: str) -> str:
+    """How a message names the zone a section's timestamps were read in."""
+    if zone:
+        return f"timezone '{zone}'"
+    return "the server's own timezone, which is what GalactiLog fell back to"
+
+
 def _sidereal_clause(finding: dict) -> str:
-    """One profile's sentence inside the sidereal warning."""
+    """One profile's sentence inside the sidereal warning.
+
+    Three shapes, and which one is used turns on `site_known` rather than on
+    the tier alone. A rig compared against a longitude it did not supply is
+    measured just as tightly, but "this rig is not at the configured observer
+    longitude" is then one of the explanations, so its finding may not be
+    stated as fact.
+    """
     outcome = finding["verdict"]
     name = _profile_label(finding["profile"])
+    zone = _zone_label(finding["zone"])
     magnitude = round(abs(outcome.nearest_quarter_hours), 2)
 
-    if outcome.tier == phd2_sidereal.TIER_SITE_KNOWN:
+    if outcome.tier == phd2_sidereal.TIER_SITE_KNOWN and finding["site_known"]:
         clause = (
-            f"{name}: the pointing disagrees with timezone "
-            f"'{finding['zone']}' by about {magnitude:g} hours"
+            f"{name}: the pointing disagrees with {zone} by about "
+            f"{magnitude:g} hours"
         )
         if outcome.implied_utc_offset_hours is not None:
             clause += (
@@ -664,9 +698,38 @@ def _sidereal_clause(finding: dict) -> str:
             "both."
         )
 
+    if outcome.tier == phd2_sidereal.TIER_SITE_KNOWN:
+        # Same arithmetic and the same tolerance, but the longitude was
+        # inherited from Observer Location rather than entered for this rig, so
+        # the site is a premise rather than a fact and the wording says so.
+        clause = (
+            f"{name}: read at the configured observer longitude, the pointing "
+            f"disagrees with {zone} by about {magnitude:g} hours"
+        )
+        if outcome.implied_utc_offset_hours is not None:
+            clause += (
+                f"; if this rig really does stand at that longitude, its clock "
+                f"is on "
+                f"{_offset_with_alias(outcome.implied_utc_offset_hours)} rather "
+                f"than the "
+                f"{_format_offset(finding['configured_offset_hours'])} that "
+                "zone was using"
+            )
+        elif not outcome.direction_known:
+            clause += (
+                " - close enough to 12 hours that which way round it goes "
+                "cannot be told from pointing alone"
+            )
+        return (
+            clause + ". Either the profile timezone is wrong, or this rig is "
+            "not at the configured observer longitude, or the mount clock is "
+            "wrong. Entering this rig's own longitude in Settings > Library > "
+            "PHD2 is what tells those apart."
+        )
+
     clause = (
         f"{name}: probably wrong - the pointing disagrees with the standard "
-        f"meridian of timezone '{finding['zone']}' by about {magnitude:g} "
+        f"meridian of {zone} by about {magnitude:g} "
         "hours, which is more than the width of any timezone explains"
     )
     if outcome.direction_known and outcome.implied_longitude_deg is not None:
@@ -714,6 +777,8 @@ def _sidereal_details(findings: list[dict], general: GeneralSettings) -> dict:
                     else round(f["verdict"].implied_longitude_deg, 3)
                 ),
                 "configured_timezone": f["zone"],
+                "site_known": f["site_known"],
+                "compared_longitude_deg": f["longitude_deg"],
             }
             for f in findings[:10]
         ],
@@ -1013,14 +1078,15 @@ def _run_phd2_pass(
         )
 
     # The sidereal cross-check, over the sections this pass parsed. Never on a
-    # remap (which returned long ago and parsed nothing) and never without a
-    # longitude: with none configured the tier-1 comparison has nothing to
-    # compare against, and the session dates are already falling back, so the
-    # user has a more basic problem to fix first.
+    # remap, which returned long ago and parsed nothing. There is deliberately
+    # no global-longitude gate here: whether a rig can be checked, and how
+    # confidently, is a per-profile question that _sidereal_findings answers
+    # profile by profile. A rig carrying its own site is checkable while the
+    # global longitude is unset, and that travelling rig is the one this whole
+    # feature exists for.
     sidereal = (
         _sidereal_findings(pointing, general, profile_map, tz_name)
-        if pointing and general.observer_longitude is not None
-        else []
+        if pointing else []
     )
 
     # The scan-state counters describe the library scan on the scan screen.

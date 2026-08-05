@@ -1472,6 +1472,8 @@ def test_a_six_hour_pointing_error_raises_exactly_one_warning(
     assert "GalactiLog changed nothing" in message
     # The site is known, so the finding is stated rather than hedged.
     assert "probably wrong" not in message
+    assert "Either the profile timezone is wrong" not in message
+    assert found[0]["details"]["profiles"][0]["site_known"] is True
     profiles = row["details"]["profiles"]
     assert len(profiles) == 1
     assert profiles[0]["profile"] == PROFILE
@@ -1480,14 +1482,14 @@ def test_a_six_hour_pointing_error_raises_exactly_one_warning(
     assert row["details"]["observer_longitude"] == SITE_LON
 
 
-def test_a_pass_with_no_longitude_draws_no_sidereal_verdict(
+def test_a_rig_with_neither_a_site_nor_a_zone_is_left_to_the_other_warning(
     db, log_file, monkeypatch
 ):
-    """With no longitude configured anywhere there is nothing to solve
-    against, and the session dates are already falling back to UTC midnight -
-    a second, louder accusation on top of that helps nobody."""
+    """No longitude and no timezone at either level is a single
+    misconfiguration, and the correlation pass already names the profile for
+    it. One cause, one warning."""
     general = _sidereal_settings(
-        _entry(timezone=ZONE, latitude=SITE_LAT), observer_longitude=None
+        _entry(), observer_longitude=None, observer_timezone="",
     )
     records = _sidereal_pass(
         db, log_file, monkeypatch,
@@ -1495,6 +1497,65 @@ def test_a_pass_with_no_longitude_draws_no_sidereal_verdict(
         general,
     )
     assert _sidereal_records(records) == []
+
+
+def test_a_travelling_rigs_own_site_is_checked_with_no_global_longitude(
+    db, log_file, monkeypatch
+):
+    """The case the per-rig site exists for: the user has not filled in
+    Observer Location, but has told GalactiLog exactly where the remote rig
+    stands. That rig is checkable, and stating its finding as fact is correct
+    because the site is one the user entered for it."""
+    general = _sidereal_settings(
+        _entry(timezone=ZONE, latitude=SITE_LAT, longitude=SITE_LON),
+        observer_longitude=None,
+    )
+    records = _sidereal_pass(
+        db, log_file, monkeypatch,
+        _pointing_log(ZONE, SITE_LON, SITE_LAT, 6.0),
+        general,
+    )
+
+    found = _sidereal_records(records)
+    assert len(found) == 1
+    message = found[0]["message"]
+    assert "UTC-10:00" in message
+    assert "Either the profile timezone is wrong" not in message
+    entry = found[0]["details"]["profiles"][0]
+    assert entry["site_known"] is True
+    assert entry["compared_longitude_deg"] == SITE_LON
+    # The global value is genuinely unset, and the notice says so rather than
+    # implying a site nobody entered.
+    assert found[0]["details"]["observer_longitude"] is None
+
+
+def test_an_inherited_longitude_never_states_the_finding_as_fact(
+    db, log_file, monkeypatch
+):
+    """A rig with no site of its own is compared against the home longitude,
+    which is a premise rather than a fact: the rig may simply not be there.
+    Same tolerance, but the wording has to offer all three explanations."""
+    general = _sidereal_settings(_entry(timezone=ZONE, latitude=SITE_LAT))
+    records = _sidereal_pass(
+        db, log_file, monkeypatch,
+        _pointing_log(ZONE, SITE_LON, SITE_LAT, 6.0),
+        general,
+    )
+
+    found = _sidereal_records(records)
+    assert len(found) == 1
+    message = found[0]["message"]
+    assert (
+        "Either the profile timezone is wrong, or this rig is not at the "
+        "configured observer longitude, or the mount clock is wrong."
+    ) in message
+    # Not stated as fact, and not the hedged standard-meridian tier either.
+    assert "which puts this rig on" not in message
+    assert "probably wrong" not in message
+    entry = found[0]["details"]["profiles"][0]
+    assert entry["tier"] == "site"
+    assert entry["site_known"] is False
+    assert entry["compared_longitude_deg"] == SITE_LON
 
 
 def test_two_pointing_sections_are_not_enough_to_accuse_anyone(
@@ -1602,11 +1663,13 @@ def test_pointing_that_cannot_be_checked_is_not_treated_as_checked(
 def test_a_rig_with_no_site_of_its_own_is_only_probably_wrong(
     db, log_file, monkeypatch
 ):
-    """Without a longitude on the profile the comparison is against a whole
-    timezone, whose real width can be three hours. The tolerance widens, the
-    wording hedges, and the actionable output is a longitude to enter rather
-    than an offset to select."""
-    general = _sidereal_settings(_entry(timezone=ZONE, latitude=SITE_LAT))
+    """With no longitude resolvable at either level the comparison falls back
+    to the timezone's standard meridian, whose real width can be three hours.
+    The tolerance widens, the wording hedges, and the actionable output is a
+    longitude to enter rather than an offset to select."""
+    general = _sidereal_settings(
+        _entry(timezone=ZONE, latitude=SITE_LAT), observer_longitude=None
+    )
     records = _sidereal_pass(
         db, log_file, monkeypatch,
         _pointing_log(ZONE, ZONE_MERIDIAN_DEG, SITE_LAT, 5.0),
@@ -1631,7 +1694,9 @@ def test_a_rig_with_no_site_of_its_own_is_only_probably_wrong(
 def test_a_rig_inside_its_own_zones_width_says_nothing(db, log_file, monkeypatch):
     """Two hours from the standard meridian is ordinary zone geography, not a
     misconfiguration: Spain, western Argentina and Xinjiang all live there."""
-    general = _sidereal_settings(_entry(timezone=ZONE, latitude=SITE_LAT))
+    general = _sidereal_settings(
+        _entry(timezone=ZONE, latitude=SITE_LAT), observer_longitude=None
+    )
     records = _sidereal_pass(
         db, log_file, monkeypatch,
         _pointing_log(ZONE, ZONE_MERIDIAN_DEG, SITE_LAT, 2.0),
