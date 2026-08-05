@@ -1135,23 +1135,25 @@ const WbppExportModal: Component<Props> = (props) => {
               </h3>
               <HelpPopover label="About quality filters" title="Quality filters">
                 <p>
-                  Each chip is an absolute threshold. A frame is excluded when any enabled
-                  chip with a value rejects it. A chip without a value filters nothing. A
-                  frame missing a metric is not judged on that metric; a frame missing all
-                  constrained metrics is counted as unmeasured, not excluded.
+                  Set quality limits above (HFR, eccentricity, and so on). A frame is
+                  excluded from the copy when it breaks at least one limit. A limit without a
+                  number filters nothing. A frame that was never measured for a limit is not
+                  judged on it; a frame with no recorded quality data at all counts as
+                  unmeasured, not excluded.
                 </p>
                 <p>
-                  Eccentricity presets: 0.55 keeps stars that read round (axis ratio 0.84),
-                  0.65 marks the edge of visible elongation (0.76), 0.75 admits clearly
-                  elongated stars (0.66) and suits salvaging poor nights.
+                  The eccentricity presets are starting points: 0.55 keeps stars that look
+                  round, 0.65 sits at the edge of visible stretching, and 0.75 allows clearly
+                  stretched stars, useful for salvaging a poor night.
                 </p>
                 <p>
-                  Cell colors compare each frame to the selected baseline (this session or
-                  the rig catalog) and are informational; only the chips decide the verdict.
+                  Cell colors compare each frame with the selected baseline (this session or
+                  the rig catalog) and are informational only; the limits alone decide the
+                  verdict.
                 </p>
                 <p>
-                  Thresholds are saved per rig and shared with Copy Frame List: changing
-                  them here also changes what that export selects.
+                  The quality limits are saved for each rig and are the same ones Copy Frame
+                  List uses. Changing a limit here also changes what that list selects.
                 </p>
               </HelpPopover>
             </div>

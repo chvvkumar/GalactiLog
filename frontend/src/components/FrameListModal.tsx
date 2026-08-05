@@ -397,23 +397,31 @@ const FrameListModal: Component<Props> = (props) => {
               </h2>
               <HelpPopover label="About the frame list" title="Copy frame list">
                 <p>
-                  The chips decide which frames are good and which are bad; the toggle picks
-                  which set is copied. Bad is only frames a chip rejected. Frames missing all
-                  constrained metrics are unmeasured and join the good list only while the
-                  include unmeasured box is checked. The checkbox on a row overrides its
-                  verdict for this copy, and edits are discarded when a threshold changes.
+                  Set quality limits above (HFR, eccentricity, and so on), then use Good or
+                  Bad to choose which frames go in the list. A frame is bad when it breaks at
+                  least one limit. A frame with no recorded quality data counts as
+                  unmeasured: it is never bad, and it joins the good list only while the
+                  include unmeasured box is checked. The checkbox on each row lets you add or
+                  remove one frame by hand; hand edits are cleared whenever a limit changes.
                 </p>
                 <p>
-                  Explorer search pastes into the Windows search box and works best under a
-                  few dozen names. Names is one file per line for any other tool. Script
-                  finds each name under the base folder and moves it into a _rejected
-                  subfolder after a confirmation prompt; the same name can exist in more than
-                  one place, so the script lists every match first and the base folder is
-                  best pointed at a single session.
+                  Explorer search is for the Windows search box: paste it there and Explorer
+                  finds the listed files. It works best with up to a few dozen files. Names
+                  gives one file name per line for use with any other tool. Script produces a
+                  small PowerShell or Bash script that looks for each file under the base
+                  folder and moves it into a _rejected subfolder, asking for confirmation
+                  before touching anything. File names can repeat across targets, so the
+                  script shows every match first; pointing the base folder at a single
+                  session avoids surprises.
                 </p>
                 <p>
-                  Thresholds are saved per rig and shared with Export For Stacking: changing
-                  them here also changes what that export excludes.
+                  The Move button does the same as the script without leaving the browser:
+                  pick the folder, review the matches, and the files move to _rejected.
+                </p>
+                <p>
+                  The quality limits are saved for each rig and are the same ones Export For
+                  Stacking uses. Changing a limit here also changes which frames that export
+                  leaves out.
                 </p>
               </HelpPopover>
             </div>
