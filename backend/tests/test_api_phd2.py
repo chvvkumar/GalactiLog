@@ -359,6 +359,48 @@ async def test_profiles_endpoint_reports_helper_metadata_and_mapping():
 
 
 @pytest.mark.asyncio
+async def test_profiles_endpoint_maps_a_legacy_and_an_object_map_alike():
+    """`phd2_profile_map` is stored as `{"Rig A": "Askar 120"}` on installs
+    that predate per-rig timezones and as `{"Rig A": {"telescope": ...,
+    "timezone": ..., "latitude": ..., "longitude": ...}}` on ones that have
+    saved through the settings panel since. Both must resolve `mapped_telescope`
+    to the same plain string; routing the object form straight into the
+    response field used to put a dict into a `str | None` and 500."""
+    rows = [(
+        "AM5n_OAG_ASI174M", "ZWO ASI174MM Mini", 784.0, 1.54,
+        412, date(2026, 1, 14), date(2026, 7, 14),
+    )]
+
+    async def _profiles_body(stored_map):
+        settings_row = SimpleNamespace(general={"phd2_profile_map": stored_map})
+        db = AsyncMock()
+        db.execute = AsyncMock(side_effect=[
+            _result_with(all_rows=rows),
+            _result_with(scalar_one=settings_row),
+        ])
+        app.dependency_overrides[get_session] = _override_session(db)
+        app.dependency_overrides[get_current_user] = _override_user(_admin_user())
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.get("/api/phd2/profiles")
+        app.dependency_overrides.clear()
+        assert resp.status_code == 200
+        return resp.json()
+
+    legacy_body = await _profiles_body({"AM5n_OAG_ASI174M": "140APO"})
+    object_body = await _profiles_body({
+        "AM5n_OAG_ASI174M": {
+            "telescope": "140APO",
+            "timezone": "America/Chicago",
+            "latitude": 30.27,
+            "longitude": -97.74,
+        }
+    })
+    assert legacy_body == object_body
+    assert legacy_body["profiles"][0]["mapped_telescope"] == "140APO"
+
+
+@pytest.mark.asyncio
 async def test_profiles_endpoint_requires_authentication():
     app.dependency_overrides.clear()
     transport = ASGITransport(app=app)

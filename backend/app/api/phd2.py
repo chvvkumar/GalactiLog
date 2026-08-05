@@ -22,6 +22,7 @@ from app.schemas.phd2 import (
     Phd2EventPoint, Phd2FramePoint, Phd2FramesResponse, Phd2ProfileInfo,
     Phd2ProfilesResponse, Phd2SessionListResponse, Phd2SessionSummary,
 )
+from app.services import phd2_profiles
 from app.services.normalization import load_telescope_match_set
 from app.services.phd2_metrics import MIN_FRAMES, select_phd2_night_rows
 
@@ -36,7 +37,7 @@ async def _profile_map(session: AsyncSession) -> dict[str, str]:
         )
     ).scalar_one_or_none()
     general = (row.general if row else {}) or {}
-    return general.get("phd2_profile_map") or {}
+    return phd2_profiles.telescope_map(general.get("phd2_profile_map"))
 
 
 @router.get("/sessions", response_model=Phd2SessionListResponse)
