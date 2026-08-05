@@ -193,7 +193,7 @@ describe("observer timezone control", () => {
     await flush();
     const select = getByLabelText("Timezone") as HTMLSelectElement;
     const entry = Array.from(select.options).find((o) => o.textContent?.startsWith("Same as display"));
-    expect(entry!.textContent).toBe("Same as display (Etc/GMT+3)");
+    expect(entry!.textContent).toBe("Same as display timezone (Etc/GMT+3)");
   });
 
   it("preselects a stored zone", async () => {

@@ -174,7 +174,7 @@ const ScanManager: Component = () => {
     const friendly = timezoneFriendlyName(tz);
     return {
       value: tz,
-      label: friendly === tz ? `Same as display (${tz})` : `Same as display (${friendly} - ${tz})`,
+      label: friendly === tz ? `Same as display timezone (${tz})` : `Same as display timezone (${friendly} - ${tz})`,
     };
   };
 
@@ -370,7 +370,8 @@ const ScanManager: Component = () => {
                   </p>
                 </HelpPopover>
               </div>
-              <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
+              <div class="space-y-3">
+              <div class="grid grid-cols-2 lg:grid-cols-3 gap-3">
                 <div class="space-y-1">
                   <label class="text-xs text-theme-text-secondary">Name</label>
                   <input
@@ -462,8 +463,12 @@ const ScanManager: Component = () => {
                     <p class="text-xs text-red-500">{lngError()}</p>
                   </Show>
                 </div>
-                <div class="space-y-1">
-                  <label class="text-xs text-theme-text-secondary" for="observer-timezone">Timezone</label>
+              </div>
+              {/* Its own full-width row rather than a fourth grid column: the
+                  display-timezone convenience option and long IANA names
+                  truncate badly at a quarter-column width. */}
+              <div class="space-y-1">
+                <label class="text-xs text-theme-text-secondary" for="observer-timezone">Timezone</label>
                   <Show
                     when={timezoneList}
                     fallback={
