@@ -40,7 +40,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date as date_type, timedelta, timezone
 
-from sqlalchemy import or_, select, update
+from sqlalchemy import or_, select, text, update
 from sqlalchemy.orm import Session
 
 from app.models import Image
@@ -729,6 +729,13 @@ def correlate_dates(
     phd2-sourced value on them anyway.
     """
     result = CorrelationResult()
+
+    # Two passes running at once (each profile-map save queues one, and the
+    # post-scan cascade queues its own) update overlapping images rows in
+    # different orders and deadlock Postgres. The advisory lock makes the
+    # second pass wait instead; being transaction-scoped, a crashed pass
+    # releases it with its rollback.
+    db.execute(text("SELECT pg_advisory_xact_lock(hashtext('phd2_correlate'))"))
 
     if dates is None:
         target_dates = _dates_needing_fill(db)
