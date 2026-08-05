@@ -9,8 +9,10 @@ frames, and delete-then-insert is the only way to get that right without
 tracking per-section offsets.
 """
 import logging
-from datetime import date as date_type, timedelta
+from collections import defaultdict
+from datetime import date as date_type, datetime, timedelta
 from pathlib import Path
+from typing import NamedTuple
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import func, insert, select
@@ -26,7 +28,9 @@ from app.schemas.settings import GeneralSettings
 # the correlation entry points are resolved at call time, so a test or a data
 # migration can substitute them on the defining module and have the
 # substitution take effect here.
-from app.services import phd2_correlation, phd2_parser
+from app.services import (
+    phd2_correlation, phd2_parser, phd2_profiles, phd2_sidereal,
+)
 from app.services.activity import emit_sync as _emit_activity_sync
 from app.services.phd2_metrics import (
     build_calibration_row, build_frame_rows, compute_session_metrics,
@@ -40,6 +44,11 @@ from app.worker.celery_app import celery_app
 from app.worker.tasks_common import (
     _activity_session, _invalidate_stats_cache, _redis, _sync_engine,
 )
+# The guide-log re-key is shared with recompute_session_dates rather than
+# reimplemented here: both recompute session_date from a row's own
+# started_at_utc and a per-profile longitude, and two implementations of that
+# would eventually disagree about which night a rig's session belongs to.
+from app.worker.tasks_sessions import _rekey_phd2_sessions
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +62,35 @@ MTIME_TOLERANCE_S = 1.0
 # least half the catalogued files have vanished, the likely explanation is an
 # unmounted or unreachable share, not half a library being deleted.
 ORPHAN_MISSING_FRACTION_LIMIT = 0.5
+
+
+class PointingSample(NamedTuple):
+    """One guiding section's pointing, as the sidereal cross-check needs it.
+
+    The first four fields are what the offset solve consumes: the equipment
+    profile it belongs to, the UTC instant the configured zone assigned to the
+    section's wall-clock start, and the RA and hour angle whose sum is local
+    sidereal time. `dec_deg` and `alt_deg` ride along because the coherence
+    gate that licenses that solve reads the same header line, and a sample that
+    reached the pass without them could never be gated - the gate would have to
+    re-open the file to find them.
+
+    A section missing either RA or hour angle produces no sample at all: an
+    ASIAIR-flavoured log writes no RA, so those files can be ingested and can
+    never accuse a timezone.
+    """
+
+    profile: str | None
+    started_at_utc: datetime
+    ra_hr: float
+    hour_angle_hr: float
+    dec_deg: float | None
+    alt_deg: float | None
+
+
+def _profile_label(profile: str | None) -> str:
+    """A profile name as a message may print it."""
+    return profile or "(no equipment profile)"
 
 
 def _read_settings() -> GeneralSettings:
@@ -86,23 +124,34 @@ def _safe_timezone(tz_name: str) -> str:
     return tz_name
 
 
-def apply_profile_map(db: Session, profile_map: dict[str, str]) -> int:
+def apply_profile_map(db: Session, profile_map) -> int:
     """Re-resolve every stored session's telescope from the current map.
 
     The mapping is a user setting, not a property of the log, so editing it
     must not require re-reading files. Returns the number of rows whose
     telescope actually changed. Caller commits.
+
+    The map arrives in whichever form the caller holds: the legacy
+    `{"Rig A": "Askar 120"}`, the current per-profile entry carrying a
+    telescope, a timezone and a site, or the pydantic models `GeneralSettings`
+    builds from either. `phd2_profiles.telescope_map` is the one place that
+    knows the difference, and it projects all of them down to the
+    profile-to-telescope-name dict this function has always assigned from - so
+    every existing caller and test that passes a plain string map keeps working
+    unchanged, and none of them can write a settings object into a String
+    column.
     """
+    telescopes = phd2_profiles.telescope_map(profile_map)
     changed = 0
     rows = db.execute(select(Phd2Session)).scalars().all()
     for row in rows:
-        wanted = profile_map.get(row.equipment_profile or "")
+        wanted = telescopes.get(row.equipment_profile or "")
         if row.telescope != wanted:
             row.telescope = wanted
             changed += 1
     cal_rows = db.execute(select(Phd2Calibration)).scalars().all()
     for row in cal_rows:
-        wanted = profile_map.get(row.equipment_profile or "")
+        wanted = telescopes.get(row.equipment_profile or "")
         if row.telescope != wanted:
             row.telescope = wanted
             changed += 1
@@ -120,12 +169,32 @@ def _stored_log_paths() -> list[str]:
         return [p for (p,) in db.execute(select(Phd2Log.file_path)).all()]
 
 
+def _record_parse_failure(
+    db: Session, existing, path: str, stat, status: str, reason: str
+) -> str:
+    """Store one unusable guide log and say so, without stopping the pass."""
+    if existing is not None:
+        # Flushed before the replacement row is added: file_path is unique
+        # and the unit of work orders same-table inserts ahead of deletes,
+        # so without this the failure row collides with the row it
+        # replaces.
+        db.delete(existing)
+        db.flush()
+    db.add(Phd2Log(
+        file_path=path, file_size=stat.st_size, file_mtime=stat.st_mtime,
+        parse_status=status, parse_error=reason[:2000],
+    ))
+    db.commit()
+    return "failed"
+
+
 def ingest_phd2_log(
     db: Session,
     path: str,
     general: GeneralSettings,
     tz_name: str | None = None,
     force: bool = False,
+    pointing: list | None = None,
 ) -> str:
     """Parse one guide log into the DB. Returns ok | empty | unchanged | failed.
 
@@ -137,8 +206,17 @@ def ingest_phd2_log(
     log, so a file already stored is otherwise never read again and a change
     to the observer timezone could never reach it.
 
-    `tz_name` is the already-resolved zone; the caller resolves it once per
-    pass so a bad value is reported once rather than logged per file.
+    `tz_name` is the already-resolved GLOBAL zone; the caller resolves it once
+    per pass so a bad value is reported once rather than logged per file. It is
+    the fallback behind each profile's own timezone, not the zone the file is
+    read in: one guide log can hold sections from two rigs in two zones, so the
+    zone and the longitude are both resolved per section from the equipment
+    profile that section's header names.
+
+    `pointing`, when given, collects a `PointingSample` per section whose
+    header carries both RA and hour angle. It is evidence for the sidereal
+    cross-check the caller runs at the end of the pass, and this function draws
+    no conclusion from it.
     """
     file_path = Path(path)
     try:
@@ -167,27 +245,35 @@ def ingest_phd2_log(
 
     try:
         runs = phd2_parser.parse_guide_log(text)
+    except phd2_parser.Phd2UnreadableLog as exc:
+        # Caught ahead of the broad handler and given its own status. This is
+        # the parser reporting a file it recognises as a guide log and cannot
+        # read, which is a statement about the file rather than a crash: it
+        # deserves no traceback, and "unreadable" tells it apart from a genuine
+        # parser bug in the same column. parse_status is an unconstrained
+        # String(20), so the new value needs no migration.
+        logger.warning("phd2: unreadable guide log %s: %s", path, exc)
+        return _record_parse_failure(
+            db, existing, path, stat, "unreadable", str(exc)
+        )
     except Exception as exc:  # noqa: BLE001 - one bad file must not stop the scan
         logger.exception("phd2: parse failed for %s", path)
-        if existing is not None:
-            # Flushed before the replacement row is added: file_path is unique
-            # and the unit of work orders same-table inserts ahead of deletes,
-            # so without this the failure row collides with the row it
-            # replaces.
-            db.delete(existing)
-            db.flush()
-        db.add(Phd2Log(
-            file_path=path, file_size=stat.st_size, file_mtime=stat.st_mtime,
-            parse_status="failed", parse_error=str(exc)[:2000],
-        ))
-        db.commit()
-        return "failed"
+        return _record_parse_failure(
+            db, existing, path, stat, "failed", str(exc)
+        )
 
     if tz_name is None:
         tz_name = _safe_timezone(general.observer_timezone)
-    longitude = general.observer_longitude
     use_night = general.use_imaging_night
-    profile_map = general.phd2_profile_map or {}
+    # Normalized once for the file, then handed to the resolvers rather than
+    # re-normalized per section: a log with two hundred sections would
+    # otherwise rebuild the same map two hundred times.
+    profile_map = phd2_profiles.normalize_profile_map(general.phd2_profile_map)
+    resolve_zone = phd2_profiles.profile_zone_resolver(profile_map, tz_name)
+    resolve_longitude = phd2_profiles.longitude_resolver(
+        profile_map, general.observer_longitude
+    )
+    telescopes = phd2_profiles.telescope_map(profile_map)
 
     if existing is not None:
         # Cascades remove this log's sessions, frames and calibrations.
@@ -219,23 +305,39 @@ def ingest_phd2_log(
             # the default app-log capture level and nobody ever saw them.
             logger.warning("phd2: %s: %s", file_path.name, warning)
         for section_index, section in enumerate(run.sections):
+            header = section.header
+            profile = header.equipment_profile
+            zone, _zone_source = resolve_zone(profile)
             metrics = compute_session_metrics(
                 section,
-                tz_name=tz_name,
-                observer_longitude=longitude,
+                tz_name=zone,
+                observer_longitude=resolve_longitude(profile),
                 use_imaging_night=use_night,
             )
             session_row = Phd2Session(
                 log_id=log_row.id,
                 run_index=run_index,
                 section_index=section_index,
-                telescope=profile_map.get(metrics.equipment_profile or ""),
+                telescope=telescopes.get(metrics.equipment_profile or ""),
                 **{
                     k: v for k, v in vars(metrics).items()
                 },
             )
             db.add(session_row)
             db.flush()
+            if (
+                pointing is not None
+                and header.ra_hr is not None
+                and header.hour_angle_hr is not None
+            ):
+                pointing.append(PointingSample(
+                    profile=profile,
+                    started_at_utc=metrics.started_at_utc,
+                    ra_hr=header.ra_hr,
+                    hour_angle_hr=header.hour_angle_hr,
+                    dec_deg=header.dec_deg,
+                    alt_deg=header.alt_deg,
+                ))
             frame_rows = build_frame_rows(section)
             if frame_rows:
                 db.execute(
@@ -243,15 +345,17 @@ def ingest_phd2_log(
                     [{"session_id": session_row.id, **row} for row in frame_rows],
                 )
         for calibration in run.calibrations:
+            cal_profile = calibration.header.equipment_profile
+            cal_zone, _cal_source = resolve_zone(cal_profile)
             row = build_calibration_row(
                 calibration,
-                tz_name=tz_name,
-                observer_longitude=longitude,
+                tz_name=cal_zone,
+                observer_longitude=resolve_longitude(cal_profile),
                 use_imaging_night=use_night,
             )
             db.add(Phd2Calibration(
                 log_id=log_row.id,
-                telescope=profile_map.get(row["equipment_profile"] or ""),
+                telescope=telescopes.get(row["equipment_profile"] or ""),
                 **row,
             ))
 
@@ -397,6 +501,226 @@ def _session_date_sanity_check(
     return suspicious, bool(suspicious) and day_skewed == len(suspicious)
 
 
+def _format_offset(hours: float) -> str:
+    """A UTC offset written the way a user selects one: UTC-04:00, UTC+05:45.
+
+    Never rounded to whole hours. Real zones sit on quarter hours (Kathmandu
+    +5:45, Eucla +8:45), and phd2_sidereal already quantises to a quarter for
+    exactly that reason; printing whole hours here would undo it.
+    """
+    sign = "-" if hours < 0 else "+"
+    minutes = int(round(abs(hours) * 60.0))
+    return f"UTC{sign}{minutes // 60:02d}:{minutes % 60:02d}"
+
+
+def _offset_with_alias(hours: float) -> str:
+    """An implied offset, plus its 24 h alias where that alias is selectable.
+
+    Pointing fixes the offset only modulo 24 h. `phd2_sidereal` folds its
+    answer into [-12, 12) so the value is always one a zone could have, but the
+    two-hour band -12 to -10 overlaps the real +12 to +14 zones, so a value
+    there is equally consistent with its counterpart 24 h east and the wording
+    has to offer both.
+
+    A frame correlation would collapse the pair - an overlapping FITS frame
+    carries true UTC, and a 24 h alias would displace the session a whole
+    calendar day away from it - but this pass holds no per-profile correlation
+    result to test that with, so both readings are offered whenever the band
+    applies. Naming two offsets when one could have been ruled out is the safe
+    side of that trade; naming one wrongly is not.
+    """
+    if -12.0 <= hours < -10.0:
+        return (
+            f"{_format_offset(hours)} (or, equally consistent with the same "
+            f"evidence, {_format_offset(hours + 24.0)})"
+        )
+    return _format_offset(hours)
+
+
+def _sidereal_findings(
+    pointing: list[PointingSample],
+    general: GeneralSettings,
+    profile_map: dict[str, dict],
+    global_tz: str,
+) -> list[dict]:
+    """Per-profile sidereal verdicts from the pointing this pass collected.
+
+    Evidence only. Nothing here writes a stored value, and a profile with no
+    verdict simply produces no entry.
+
+    Three gates apply before any arithmetic:
+
+    - A profile whose zone resolves to nothing at either level is skipped. Its
+      timestamps were read in the server's own zone, so the instant this check
+      would solve from is not a configured value at all, and the correlation
+      pass already names that profile in its own warning. One cause, one
+      message.
+    - Each section must pass `pointing_is_coherent(...) is True`. The test is
+      against True and never against `is not False`: None means the mount wrote
+      no altitude, or no latitude is configured for the rig, and neither is
+      evidence that the pointing is sound.
+    - The tier turns on `profile_has_own_longitude`, never on `profile_site`'s
+      pair-level source. A rig that inherits the home longitude has an unknown
+      site, so it is compared against its timezone's standard meridian under
+      the wider tolerance and its finding is hedged.
+    """
+    resolve_zone = phd2_profiles.profile_zone_resolver(profile_map, global_tz)
+    grouped: dict[str | None, list[PointingSample]] = defaultdict(list)
+    for sample in pointing:
+        grouped[sample.profile].append(sample)
+
+    findings: list[dict] = []
+    for profile in sorted(grouped, key=lambda name: (name is None, name or "")):
+        zone, _source = resolve_zone(profile)
+        if not zone:
+            continue
+        latitude, longitude, _site_source = phd2_profiles.profile_site(
+            profile_map, profile,
+            general.observer_latitude, general.observer_longitude,
+        )
+        site_known = phd2_profiles.profile_has_own_longitude(profile_map, profile)
+        tier = (
+            phd2_sidereal.TIER_SITE_KNOWN if site_known
+            else phd2_sidereal.TIER_ZONE_MERIDIAN
+        )
+
+        errors: list[float] = []
+        implied: list[float] = []
+        zone_offsets: set[float] = set()
+        for sample in grouped[profile]:
+            coherent = phd2_sidereal.pointing_is_coherent(
+                sample.alt_deg, sample.dec_deg, sample.hour_angle_hr, latitude
+            )
+            if coherent is not True:
+                continue
+            implied_hours = phd2_sidereal.implied_longitude_hours(
+                sample.ra_hr, sample.hour_angle_hr, sample.started_at_utc
+            )
+            meridian = phd2_sidereal.zone_meridian_longitude_deg(
+                zone, sample.started_at_utc
+            )
+            reference = longitude if site_known else meridian
+            error = phd2_sidereal.offset_error_hours(implied_hours, reference)
+            if error is None or implied_hours is None:
+                continue
+            errors.append(error)
+            implied.append(implied_hours)
+            if meridian is not None:
+                zone_offsets.add(meridian / 15.0)
+
+        # The offset the configured zone was ACTUALLY using on the nights
+        # measured, which is what turns a difference into an offset the user
+        # can select. Nights that straddle a daylight-saving change have no
+        # single such offset, so none is quoted and the verdict falls back to
+        # naming the disagreement itself.
+        configured_offset = (
+            next(iter(zone_offsets)) if len(zone_offsets) == 1 else None
+        )
+        outcome = phd2_sidereal.verdict(
+            errors,
+            tier=tier,
+            implied_longitudes_hours=implied,
+            configured_offset_hours=configured_offset,
+        )
+        if outcome is None:
+            continue
+        findings.append({
+            "profile": profile,
+            "zone": zone,
+            "verdict": outcome,
+            "configured_offset_hours": configured_offset,
+        })
+    return findings
+
+
+def _sidereal_clause(finding: dict) -> str:
+    """One profile's sentence inside the sidereal warning."""
+    outcome = finding["verdict"]
+    name = _profile_label(finding["profile"])
+    magnitude = round(abs(outcome.nearest_quarter_hours), 2)
+
+    if outcome.tier == phd2_sidereal.TIER_SITE_KNOWN:
+        clause = (
+            f"{name}: the pointing disagrees with timezone "
+            f"'{finding['zone']}' by about {magnitude:g} hours"
+        )
+        if outcome.implied_utc_offset_hours is not None:
+            clause += (
+                f", which puts this rig on "
+                f"{_offset_with_alias(outcome.implied_utc_offset_hours)} rather "
+                f"than the "
+                f"{_format_offset(finding['configured_offset_hours'])} that "
+                "zone was using"
+            )
+        elif not outcome.direction_known:
+            clause += (
+                " - close enough to 12 hours that which way round it goes "
+                "cannot be told from pointing alone"
+            )
+        return (
+            clause + ". The likely cause is a wrong timezone on the profile or "
+            "a wrong clock on the mount. A longitude entered on the profile "
+            "with the wrong sign looks exactly like a timezone error, so check "
+            "both."
+        )
+
+    clause = (
+        f"{name}: probably wrong - the pointing disagrees with the standard "
+        f"meridian of timezone '{finding['zone']}' by about {magnitude:g} "
+        "hours, which is more than the width of any timezone explains"
+    )
+    if outcome.direction_known and outcome.implied_longitude_deg is not None:
+        clause += (
+            f". Taking that timezone as correct, the pointing implies a "
+            f"longitude near {outcome.implied_longitude_deg:+.1f} degrees, in "
+            "the same sign convention as Observer Location; entering it on the "
+            "profile in Settings > Library > PHD2 turns this into a check "
+            "against a known site"
+        )
+    return (
+        clause + ". This profile carries no longitude of its own, so the "
+        "comparison is against a whole timezone rather than a site and only "
+        "gross errors show up in it."
+    )
+
+
+def _sidereal_message(findings: list[dict]) -> str:
+    """The one activity message the whole pass emits about pointing."""
+    names = ", ".join(_profile_label(f["profile"]) for f in findings)
+    clauses = " ".join(_sidereal_clause(f) for f in findings)
+    return (
+        "The guide logs' own pointing disagrees with the configured timezone "
+        f"for PHD2 profile(s) {names}. RA plus hour angle is local sidereal "
+        "time, which together with the site longitude fixes the UTC offset "
+        f"these logs were really written at. {clauses} GalactiLog changed "
+        "nothing on the strength of this: the configured timezone is still "
+        "what was used to read these logs."
+    )
+
+
+def _sidereal_details(findings: list[dict], general: GeneralSettings) -> dict:
+    return {
+        "profiles": [
+            {
+                "profile": f["profile"],
+                "median_error_hours": round(f["verdict"].median_error_hours, 4),
+                "sections": f["verdict"].sample_count,
+                "tier": f["verdict"].tier,
+                "confident": f["verdict"].confident,
+                "direction_known": f["verdict"].direction_known,
+                "implied_utc_offset_hours": f["verdict"].implied_utc_offset_hours,
+                "implied_longitude_deg": (
+                    None if f["verdict"].implied_longitude_deg is None
+                    else round(f["verdict"].implied_longitude_deg, 3)
+                ),
+                "configured_timezone": f["zone"],
+            }
+            for f in findings[:10]
+        ],
+        "observer_longitude": general.observer_longitude,
+    }
+
+
 def _is_scan_pass(paths: list[str] | None, force: bool) -> bool:
     """True when this pass came from a library walk, not from a settings save.
 
@@ -461,7 +785,10 @@ def _run_phd2_pass(
     size/mtime short-circuit. That is what a change to observer_timezone needs:
     the zone is applied while parsing, and PHD2 never rewrites a closed log, so
     without it the stored UTC timestamps stay frozen at the zone configured on
-    the first ingest.
+    the first ingest. It also re-keys every stored row's night afterwards,
+    which is what reaches the rows the re-parse could not: a log whose file has
+    since been deleted or unmounted fails at the stat() and keeps its stored
+    dates otherwise forever.
 
     A pass triggered by a settings save (`remap_only`, or `force` with no
     candidate list) corrects rows already held. It never deletes rows, never
@@ -476,13 +803,18 @@ def _run_phd2_pass(
     """
     general = _read_settings()
 
+    # Normalized once for the whole pass. Every resolver below is built from
+    # this dict rather than from the raw setting, so the stored map is coerced
+    # a single time however many files and rows the pass touches.
+    profile_map = phd2_profiles.normalize_profile_map(general.phd2_profile_map)
+
     # phd2_scan_enabled gates discovery of guide logs on disk. Re-keying and
     # re-parsing rows that are already in the catalog correct data the user
     # already has, so they run whether or not discovery is switched on -
     # otherwise a profile-map or timezone edit is a silent no-op.
     if remap_only:
         with Session(_sync_engine) as db:
-            changed = apply_profile_map(db, general.phd2_profile_map or {})
+            changed = apply_profile_map(db, profile_map)
             db.commit()
             # A remap changes which rig a session belongs to, so every frame
             # whose guiding came from one of these sessions is now potentially
@@ -513,15 +845,22 @@ def _run_phd2_pass(
 
     # AUD-021, guide-log side. Images resolve a longitude per frame from
     # SITELONG, so imaging-night grouping keeps working for them whatever the
-    # settings say. A guide log carries no coordinates at all, so the global
-    # observer_longitude is the only source there is, and leaving it unset
-    # silently drops this whole pass back to UTC-midnight grouping while the
-    # images it should line up with keep the solar-noon boundary. Warned once
-    # per pass, exactly as the image scanner and the session-date recompute
-    # warn for their own paths, rather than once per file.
-    night_fallback = general.use_imaging_night and general.observer_longitude is None
-    if night_fallback and candidates:
-        warn_imaging_night_fallback(logger)
+    # settings say. A guide log carries no coordinates of its own, so the
+    # longitude comes from the equipment profile it names or from the global
+    # observer_longitude behind it, and with neither set the affected sessions
+    # silently drop back to UTC-midnight grouping while the images they should
+    # line up with keep the solar-noon boundary.
+    #
+    # This is now a per-profile question, so the answer is a SET of profile
+    # names rather than one flag: a user who gave the travelling rig its own
+    # site and left the home rig on the global value has one grouped correctly
+    # and one not. The warning is still emitted once per pass, which is what
+    # warn_imaging_night_fallback's own docstring requires of its callers, and
+    # is raised after the ingest loop because only then is it known which
+    # profiles this pass actually saw.
+    resolve_longitude = phd2_profiles.longitude_resolver(
+        profile_map, general.observer_longitude
+    )
 
     found = len(candidates)
     ingested = 0
@@ -530,6 +869,8 @@ def _run_phd2_pass(
     ingested_paths: list[str] = []
     touched_dates: set[date_type] = set()
     orphan_notices: list[tuple[str, str]] = []
+    pointing: list[PointingSample] = []
+    seen_profiles: set[str | None] = set()
 
     # Publish the denominator now rather than at the end. The scan screen
     # counts "N of M" guide logs while the pass runs, and M has been known
@@ -543,9 +884,15 @@ def _run_phd2_pass(
 
     with Session(_sync_engine) as db:
         for path in candidates:
+            # Collected per file and kept only when the file went in whole. A
+            # file that crashed mid-parse has already contributed sections, and
+            # pointing from a log the catalog does not hold is not evidence
+            # about anything the user can see.
+            file_pointing: list[PointingSample] = []
             try:
                 result = ingest_phd2_log(
-                    db, path, general, tz_name=tz_name, force=force
+                    db, path, general, tz_name=tz_name, force=force,
+                    pointing=file_pointing,
                 )
             except Exception:  # noqa: BLE001 - one bad file must not stop the pass
                 logger.exception("phd2: ingest crashed for %s", path)
@@ -557,6 +904,7 @@ def _run_phd2_pass(
             if result == "ok":
                 ingested += 1
                 ingested_paths.append(path)
+                pointing.extend(file_pointing)
                 if scanned:
                     increment_phd2_progress_sync(_redis, ingested=1)
             elif result == "empty":
@@ -568,7 +916,29 @@ def _run_phd2_pass(
 
         # The map may have changed since the last scan; re-applying it here
         # keeps existing rows converged without a second task.
-        apply_profile_map(db, general.phd2_profile_map or {})
+        apply_profile_map(db, profile_map)
+
+        # A forced pass is what a timezone edit dispatches, and it must reach
+        # every stored row - not only the ones it managed to re-parse. A log
+        # whose file has since vanished returns "failed" before any row is
+        # rewritten, and orphan cleanup never runs on a settings-triggered
+        # pass, so without this its session_date stays frozen under whatever
+        # site was configured when it was first read. session_date is derived
+        # from started_at_utc, which no longitude affects, so re-keying needs
+        # no file at all. Re-keying a row this pass has just written compares
+        # equal and writes nothing, which is what makes it safe to run over
+        # both.
+        if force:
+            rekeyed = _rekey_phd2_sessions(
+                db,
+                use_night=general.use_imaging_night,
+                resolve_longitude=resolve_longitude,
+            )
+            if rekeyed:
+                logger.info(
+                    "phd2: %d stored guide-log row(s) moved to another night",
+                    rekeyed,
+                )
         db.commit()
 
         # Purging is a scan's conclusion, never a settings save's. Saving the
@@ -598,10 +968,60 @@ def _run_phd2_pass(
                     .distinct()
                 ).all()
             }
+            # Which rigs this pass saw. Both the imaging-night fallback and the
+            # unmapped-profile notice below are questions about the profiles in
+            # play, and calibrations name a profile exactly as sessions do, so
+            # a file holding only calibrations still answers them.
+            for model in (Phd2Session, Phd2Calibration):
+                seen_profiles.update(
+                    p for (p,) in db.execute(
+                        select(model.equipment_profile)
+                        .join(Phd2Log, model.log_id == Phd2Log.id)
+                        .where(Phd2Log.file_path.in_(ingested_paths))
+                        .distinct()
+                    ).all()
+                )
         suspicious, day_skewed = (
             _session_date_sanity_check(db, touched_dates)
             if touched_dates else ([], False)
         )
+
+    # The profiles this pass saw that resolved to no longitude at either
+    # level, which is what actually decides whether grouping fell back.
+    night_fallback = sorted(
+        _profile_label(profile) for profile in seen_profiles
+        if general.use_imaging_night and resolve_longitude(profile) is None
+    )
+    if night_fallback:
+        warn_imaging_night_fallback(logger)
+
+    # Risk the per-rig site introduced: a profile renamed in PHD2, or one that
+    # was never mapped, inherits the home longitude silently and is filed under
+    # the home night while looking entirely normal. Naming the profiles this
+    # pass saw with no entry at all is what makes that visible; it rides on the
+    # pass's own report rather than becoming a warning of its own, because the
+    # correlation pass already warns about unattributed profiles and one cause
+    # must not produce two messages.
+    unmapped_profiles = sorted(
+        profile for profile in seen_profiles
+        if profile and profile not in profile_map
+    )
+    if unmapped_profiles:
+        logger.info(
+            "phd2: profile(s) with no entry in the PHD2 profile map: %s",
+            ", ".join(unmapped_profiles),
+        )
+
+    # The sidereal cross-check, over the sections this pass parsed. Never on a
+    # remap (which returned long ago and parsed nothing) and never without a
+    # longitude: with none configured the tier-1 comparison has nothing to
+    # compare against, and the session dates are already falling back, so the
+    # user has a more basic problem to fix first.
+    sidereal = (
+        _sidereal_findings(pointing, general, profile_map, tz_name)
+        if pointing and general.observer_longitude is not None
+        else []
+    )
 
     # The scan-state counters describe the library scan on the scan screen.
     # A settings save is not a scan, and writing them from one made the panel
@@ -638,6 +1058,7 @@ def _run_phd2_pass(
             details={
                 "found": found, "ingested": ingested, "empty": empty,
                 "failed": failed, "removed": removed,
+                "unmapped_profiles": unmapped_profiles[:20],
             },
             actor="system", parent_id=parent_activity_id,
         )
@@ -671,15 +1092,19 @@ def _run_phd2_pass(
                 message=(
                     f"Guiding sessions on {len(suspicious)} night(s) landed "
                     "one day after the images they belong with. This happens "
-                    "when the observer longitude is not set: guide sessions "
-                    "are then grouped by UTC midnight while images are "
-                    "grouped by local solar noon. Open Settings > Library > "
-                    "Observer Location and set Longitude to the longitude of "
-                    "your imaging site."
+                    "when no observer longitude is set for the PHD2 profile(s) "
+                    f"{', '.join(night_fallback[:10])}: guide sessions are "
+                    "then grouped by UTC midnight while images are grouped by "
+                    "local solar noon. Open Settings > Library > Observer "
+                    "Location and set Longitude to the longitude of your "
+                    "imaging site, or, for a rig that stands somewhere else, "
+                    "set a longitude on its profile in Settings > Library > "
+                    "PHD2."
                 ),
                 details={
                     "session_dates": suspicious[:50],
-                    "observer_longitude": None,
+                    "observer_longitude": general.observer_longitude,
+                    "profiles": night_fallback[:10],
                     "use_imaging_night": True,
                 },
                 actor="system", parent_id=parent_activity_id,
@@ -695,9 +1120,22 @@ def _run_phd2_pass(
                     "timezone of the PC that runs PHD2, because PHD2 writes "
                     "local wall-clock time with no zone. Open Settings > "
                     "Library > Observer Location and set Timezone to the "
-                    "timezone of the PC that runs PHD2."
+                    "timezone of the PC that runs PHD2, or set a timezone on "
+                    "the profile in Settings > Library > PHD2 for a rig that "
+                    "runs on a clock of its own."
                 ),
                 details={"session_dates": suspicious[:50]},
+                actor="system", parent_id=parent_activity_id,
+            )
+        if sidereal:
+            # One row for the whole pass however many profiles it names: this
+            # is a statement about the configuration, and a row per profile per
+            # scan is how a feed stops being read.
+            _emit_activity_sync(
+                adb, redis=_redis, category="scan", severity="warning",
+                event_type="phd2_timezone_sidereal_mismatch",
+                message=_sidereal_message(sidereal),
+                details=_sidereal_details(sidereal, general),
                 actor="system", parent_id=parent_activity_id,
             )
 
@@ -706,6 +1144,7 @@ def _run_phd2_pass(
         "status": "complete", "found": found, "ingested": ingested,
         "empty": empty, "failed": failed, "removed": removed,
         "timezone_warnings": len(suspicious),
+        "sidereal_warnings": len(sidereal),
     }
 
 
