@@ -4573,6 +4573,20 @@ export interface components {
             /** Task Id */
             task_id?: string | null;
         };
+        /**
+         * ScanFailedFile
+         * @description One entry of the per-scan failed-file list.
+         *
+         *     Key names must match what ``increment_failed_sync`` pushes onto
+         *     ``SCAN_FAILED_KEY`` (app/services/scan_state.py):
+         *     ``json.dumps({"file": file_path, "error": error})``.
+         */
+        ScanFailedFile: {
+            /** Error */
+            error: string;
+            /** File */
+            file: string;
+        };
         /** ScanFiltersIn */
         ScanFiltersIn: {
             /** Exclude Paths */
@@ -4672,7 +4686,7 @@ export interface components {
             /** Failed */
             failed: number;
             /** Failed Files */
-            failed_files?: string[] | null;
+            failed_files?: components["schemas"]["ScanFailedFile"][] | null;
             /**
              * Message
              * @default

@@ -42,6 +42,17 @@ class RegenerateThumbnailsResponse(BaseModel):
     queued: int | None = None
 
 
+class ScanFailedFile(BaseModel):
+    """One entry of the per-scan failed-file list.
+
+    Key names must match what ``increment_failed_sync`` pushes onto
+    ``SCAN_FAILED_KEY`` (app/services/scan_state.py):
+    ``json.dumps({"file": file_path, "error": error})``.
+    """
+    file: str
+    error: str
+
+
 class ScanStateResponse(BaseModel):
     """Response for /scan/status - scan state snapshot with optional failed_files."""
     state: str
@@ -69,7 +80,7 @@ class ScanStateResponse(BaseModel):
     # consumer that would otherwise wait on the flag forever ages it out on
     # this instead.
     phd2_state_at: float | None = None
-    failed_files: list[str] | None = None
+    failed_files: list[ScanFailedFile] | None = None
     task: str = ""
     step: int = 0
     total_steps: int = 0

@@ -6413,6 +6413,25 @@
         "title": "ScanAcceptResponse",
         "type": "object"
       },
+      "ScanFailedFile": {
+        "description": "One entry of the per-scan failed-file list.\n\nKey names must match what ``increment_failed_sync`` pushes onto\n``SCAN_FAILED_KEY`` (app/services/scan_state.py):\n``json.dumps({\"file\": file_path, \"error\": error})``.",
+        "properties": {
+          "error": {
+            "title": "Error",
+            "type": "string"
+          },
+          "file": {
+            "title": "File",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file",
+          "error"
+        ],
+        "title": "ScanFailedFile",
+        "type": "object"
+      },
       "ScanFiltersIn": {
         "properties": {
           "exclude_paths": {
@@ -6740,7 +6759,7 @@
             "anyOf": [
               {
                 "items": {
-                  "type": "string"
+                  "$ref": "#/components/schemas/ScanFailedFile"
                 },
                 "type": "array"
               },

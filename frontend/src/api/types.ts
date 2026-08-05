@@ -24,10 +24,6 @@
 //     (cameras/telescopes of `{name, grouped}`), not the full `SettingsResponse`/
 //     `EquipmentList` the hand-written type claimed. Slice 3 (SettingsProvider)
 //     must account for this when consuming `getBootstrap`.
-//   - ScanStatus (-> ScanStateResponse): `failed_files` is `string[]` in the
-//     generated schema, not `FailedFile[]` ({file, error}) as hand-written.
-//     `FailedFile` is kept below as a client-only type in case a slice still
-//     needs the richer shape from a different endpoint.
 
 import type { components } from "./generated/schema";
 import type { Baselines } from "../utils/frameQuality";
@@ -430,11 +426,13 @@ export type EquipmentList = Schemas["EquipmentResponse"];
 // === Scan ===
 // generated name: ScanQueueResponse (POST /scan, /scan/reset, /scan/stop, etc.)
 export type ScanResult = Schemas["ScanQueueResponse"];
+// generated name: ScanFailedFile -- one entry of `ScanStatus.failed_files`,
+// as written by the worker's increment_failed_sync.
+export type FailedFile = Schemas["ScanFailedFile"];
 // Hand-written (not a `Schemas[...]` alias): the generated ScanStateResponse
-// flattens `failed_files` to `string[]` and drops the narrow `state` literal
-// union. Moved verbatim from the old `types/index.ts` in Slice 15 (formerly
-// cast at the store/scan.ts fetch boundary); the backend always populates
-// the full shape.
+// drops the narrow `state` literal union. Moved verbatim from the old
+// `types/index.ts` in Slice 15 (formerly cast at the store/scan.ts fetch
+// boundary); the backend always populates the full shape.
 export interface ScanStatus {
   state: "idle" | "scanning" | "ingesting" | "complete" | "stalled";
   total: number;
@@ -898,14 +896,6 @@ export interface ActivityQueryParams {
   limit?: number;
   cursor?: string;
   since?: string;
-}
-
-// Richer failed-file shape ({file, error}) than the generated ScanStateResponse's
-// flattened `failed_files: string[]` -- see the discrepancy note at the top of
-// this file. Kept in case a slice needs it for a differently-shaped endpoint.
-export interface FailedFile {
-  file: string;
-  error: string;
 }
 
 export type AppLogLevel = "debug" | "info" | "warning" | "error" | "critical";
