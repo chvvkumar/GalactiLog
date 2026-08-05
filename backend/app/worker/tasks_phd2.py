@@ -723,8 +723,8 @@ def _sidereal_clause(finding: dict) -> str:
         return (
             clause + ". Either the profile timezone is wrong, or this rig is "
             "not at the configured observer longitude, or the mount clock is "
-            "wrong. Entering this rig's own longitude in Settings > Library > "
-            "PHD2 is what tells those apart."
+            "wrong. Entering this rig's own longitude in Settings > "
+            "Equipment > PHD2 Profiles is what tells those apart."
         )
 
     clause = (
@@ -737,8 +737,8 @@ def _sidereal_clause(finding: dict) -> str:
             f". Taking that timezone as correct, the pointing implies a "
             f"longitude near {outcome.implied_longitude_deg:+.1f} degrees, in "
             "the same sign convention as Observer Location; entering it on the "
-            "profile in Settings > Library > PHD2 turns this into a check "
-            "against a known site"
+            "profile in Settings > Equipment > PHD2 Profiles turns this into a "
+            "check against a known site"
         )
     return (
         clause + ". This profile carries no longitude of its own, so the "
@@ -1164,8 +1164,8 @@ def _run_phd2_pass(
                     "local solar noon. Open Settings > Library > Observer "
                     "Location and set Longitude to the longitude of your "
                     "imaging site, or, for a rig that stands somewhere else, "
-                    "set a longitude on its profile in Settings > Library > "
-                    "PHD2."
+                    "set a longitude on its profile in Settings > Equipment > "
+                    "PHD2 Profiles."
                 ),
                 details={
                     "session_dates": suspicious[:50],
@@ -1187,8 +1187,8 @@ def _run_phd2_pass(
                     "local wall-clock time with no zone. Open Settings > "
                     "Library > Observer Location and set Timezone to the "
                     "timezone of the PC that runs PHD2, or set a timezone on "
-                    "the profile in Settings > Library > PHD2 for a rig that "
-                    "runs on a clock of its own."
+                    "the profile in Settings > Equipment > PHD2 Profiles for a "
+                    "rig that runs on a clock of its own."
                 ),
                 details={"session_dates": suspicious[:50]},
                 actor="system", parent_id=parent_activity_id,
@@ -1299,8 +1299,8 @@ def _emit_correlation_activity(result, parent_activity_id: int | None) -> None:
                     f"Guiding from PHD2 profile(s) {names} was not matched to "
                     "any frame: the night used more than one telescope and the "
                     "profile is not mapped to one of them. Open Settings > "
-                    "Library > PHD2 and map the profile to the telescope it "
-                    "guides."
+                    "Equipment > PHD2 Profiles and map the profile to the "
+                    "telescope it guides."
                 ),
                 details={"profiles": result.unattributed_profiles},
                 actor="system", parent_id=parent_activity_id,

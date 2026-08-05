@@ -113,9 +113,10 @@ def timezone_unset_message(profiles: list[str]) -> str:
         "wall-clock times with no timezone, so reading them in the wrong zone "
         "shifts every guiding session by the difference and would attach "
         "guiding measured hours away to whichever exposures happened to "
-        "overlap. Open Settings > Library > PHD2 and set the timezone of the "
-        "PC that runs PHD2 for each profile, or set Settings > Library > "
-        "Observer Location > Timezone to cover every profile that has none of "
+        "overlap. Open Settings > Equipment > PHD2 Profiles and set the "
+        "timezone of the PC that runs PHD2 for each profile, or set "
+        "Settings > Library > Observer Location > Timezone to cover every "
+        "profile that has none of "
         "its own. Other profiles were matched normally. Values already stored "
         "were left as they are."
     )

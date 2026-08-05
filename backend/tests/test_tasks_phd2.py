@@ -1700,7 +1700,7 @@ def test_a_rig_with_no_site_of_its_own_is_only_probably_wrong(
     message = found[0]["message"]
     assert "probably wrong" in message
     assert "standard meridian" in message
-    assert "Settings > Library > PHD2" in message
+    assert "Settings > Equipment > PHD2 Profiles" in message
     # No offset is quoted from a comparison against a whole zone.
     assert "UTC-" not in message and "UTC+" not in message
     entry = found[0]["details"]["profiles"][0]
@@ -1786,7 +1786,7 @@ def test_the_longitude_notice_names_the_profiles_and_the_profile_remedy(
     assert PROFILE in notice["message"]
     assert "Settings > Library > Observer Location" in notice["message"]
     assert "set Longitude" in notice["message"]
-    assert "Settings > Library > PHD2" in notice["message"]
+    assert "Settings > Equipment > PHD2 Profiles" in notice["message"]
     # The old notice hard-coded a null here even when a longitude was set.
     assert notice["details"]["observer_longitude"] is None
     assert notice["details"]["profiles"] == [PROFILE]
@@ -1837,7 +1837,10 @@ def test_the_timezone_notice_offers_the_per_profile_zone_as_well(
     )
     message = next(m for t, m in events if t == "phd2_timezone_mismatch")
     assert "set Timezone to the timezone of the PC that runs PHD2" in message
-    assert "set a timezone on the profile in Settings > Library > PHD2" in message
+    assert (
+        "set a timezone on the profile in Settings > Equipment > PHD2 Profiles"
+        in message
+    )
 
 
 def test_a_forced_pass_rekeys_a_row_whose_file_has_gone(db, log_file, monkeypatch):

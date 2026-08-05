@@ -835,7 +835,7 @@ def test_the_unset_timezone_is_reported_once_per_pass(db):
     # Names the profile whose guiding was left out, and both places a timezone
     # can be set for it.
     assert "140APO_AM5N_ASI174MM" in message
-    assert "Settings > Library > PHD2" in message
+    assert "Settings > Equipment > PHD2 Profiles" in message
     assert "Observer Location" in message
 
 
