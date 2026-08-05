@@ -491,7 +491,13 @@ export default function WbppQualityPanel(props: WbppQualityPanelProps): JSX.Elem
               <tbody>
                 <For each={sortedVerdicts()}>
                   {(v, i) => (
-                    <tr class="border-b border-theme-border/30 last:border-b-0">
+                    <tr
+                      class="border-b border-theme-border/30 last:border-b-0"
+                      classList={{
+                        "bg-theme-error/10 opacity-60":
+                          props.isIncluded != null && !props.isIncluded(v),
+                      }}
+                    >
                       <Show when={copyColumn()}>
                         <td class="py-0.5 px-1.5 text-center">
                           <input

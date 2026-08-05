@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, fireEvent } from "@solidjs/testing-library";
+import { createSignal } from "solid-js";
 
 // FilePreviewModal (opened from the file column) reads the preview resolution
 // from the settings context; stub it so tests need no provider tree.
@@ -637,6 +638,27 @@ describe("WbppQualityPanel copy column and full path", () => {
       "Verdict", "Filter", "HFR", "Ecc", "FWHM", "Stars", "RMS", "File", "Session",
     ]);
     expect(container.textContent).not.toContain("/data/lights/a.fits");
+    // No skipped-row highlight without the include callback.
+    for (const tr of Array.from(container.querySelectorAll("tbody tr"))) {
+      expect(tr.className).not.toContain("bg-theme-error/10");
+      expect(tr.className).not.toContain("opacity-60");
+    }
+  });
+
+  it("tints exactly the non-included rows and moves the tint when the callback flips", () => {
+    const [included, setIncluded] = createSignal(new Set(["a.fits", "c.fits"]));
+    const { container } = setup({
+      isIncluded: (v) => included().has(v.frame.file_name),
+      onToggleInclude: () => {},
+    });
+    const rowClasses = () =>
+      Array.from(container.querySelectorAll("tbody tr")).map((tr) =>
+        tr.className.includes("bg-theme-error/10") && tr.className.includes("opacity-60"),
+      );
+    // Chronological order a, b, c: only b is skipped.
+    expect(rowClasses()).toEqual([false, true, false]);
+    setIncluded(new Set(["b.fits"]));
+    expect(rowClasses()).toEqual([true, false, true]);
   });
 
   it("no longer hosts the quality help popover (it lives in the export modal)", () => {
