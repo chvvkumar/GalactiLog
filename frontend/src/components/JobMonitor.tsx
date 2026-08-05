@@ -10,7 +10,7 @@ import {
   wireGlobalJobSources,
 } from "../store/jobMonitor";
 import {
-  errorEvents,
+  unseenErrors,
   unseenErrorCount,
   markAllErrorsSeen,
   setActivitySeenAt,
@@ -120,7 +120,7 @@ const JobMonitor: Component = () => {
 
   const chipVisible = () => hasMonitorJobs() || unseenErrorCount() > 0;
   const jobCount = () => monitorJobs().length;
-  const recentErrors = () => errorEvents().slice(0, PANEL_ERROR_LIMIT);
+  const recentErrors = () => unseenErrors().slice(0, PANEL_ERROR_LIMIT);
 
   return (
     <>
