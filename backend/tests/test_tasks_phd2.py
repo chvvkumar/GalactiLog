@@ -1871,6 +1871,51 @@ def test_a_forced_pass_rekeys_a_row_whose_file_has_gone(db, log_file, monkeypatc
     assert _stored_date() == date(2026, 7, 15)
 
 
+def test_a_remap_moves_the_telescope_and_never_the_night(db, log_file, monkeypatch):
+    """Load-bearing for the settings dispatch rule: a profile-map save may
+    co-fire with recompute_session_dates only because the remap pass writes
+    telescope and nothing else. If it ever started writing session_date there
+    would be two writers of that column reachable from one save, racing each
+    other, and the loser would be the more expensive one.
+
+    The stored date here is deliberately wrong for the row's longitude, so a
+    remap that re-derived anything would visibly correct it."""
+    from app.models.phd2 import Phd2Log, Phd2Session
+    from app.worker import tasks_phd2
+
+    _isolate_log_table(db)
+    log_file.write_text(SAMPLE_LOG, encoding="utf-8")
+    with db() as s:
+        assert tasks_phd2.ingest_phd2_log(s, str(log_file), _settings()) == "ok"
+
+    wrong_night = date(2099, 1, 1)
+    with db() as s:
+        row = s.execute(
+            select(Phd2Session).join(Phd2Log)
+            .where(Phd2Log.file_path == str(log_file))
+        ).scalar_one()
+        row.session_date = wrong_night
+        s.commit()
+
+    _capture_dispatch(monkeypatch)
+    # A longitude that would put this session on a different night, and a new
+    # telescope, in the same save.
+    monkeypatch.setattr(tasks_phd2, "_read_settings", lambda: _settings(
+        phd2_profile_map={
+            PROFILE: _entry(telescope="RedCat 51", longitude=170.0)
+        },
+    ))
+    assert tasks_phd2.scan_phd2_logs(remap_only=True)["status"] == "remapped"
+
+    with db() as s:
+        row = s.execute(
+            select(Phd2Session).join(Phd2Log)
+            .where(Phd2Log.file_path == str(log_file))
+        ).scalar_one()
+        assert row.telescope == "RedCat 51"
+        assert row.session_date == wrong_night
+
+
 def test_the_pass_names_profiles_that_carry_no_map_entry(db, log_file, monkeypatch):
     """A profile renamed in PHD2 silently inherits the home site and looks
     entirely normal in the catalog. The pass's own report is where that becomes
