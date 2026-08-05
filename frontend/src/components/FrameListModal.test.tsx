@@ -78,6 +78,7 @@ const buttons = (): HTMLButtonElement[] =>
   Array.from(document.body.querySelectorAll("button"));
 
 const DATE = "2026-07-01";
+const DATE2 = "2026-07-02";
 const QUALITY_KEY = "galactilog.wbppQuality.v1.default";
 
 /**
@@ -120,6 +121,23 @@ function renderModal(cache: Record<string, SessionDetail> = { [DATE]: cacheDetai
       targetId="t-1"
       targetName="M31"
       selectedDates={[DATE]}
+      sessionCache={cache}
+      onClose={() => {}}
+    />
+  ));
+}
+
+// Two sessions carrying IDENTICAL frame names and source_relative paths: the
+// worst case for name dedup and override keying.
+function renderModalMulti(
+  dates: string[] = [DATE, DATE2],
+  cache: Record<string, SessionDetail> = { [DATE]: cacheDetail(), [DATE2]: cacheDetail() },
+) {
+  return render(() => (
+    <FrameListModal
+      targetId="t-1"
+      targetName="M31"
+      selectedDates={dates}
       sessionCache={cache}
       onClose={() => {}}
     />
@@ -471,6 +489,19 @@ describe("FrameListModal browser move", () => {
     expect(bodyText()).toContain("locked");
   });
 
+  it("warns when some selected names were not found under the picked folder", async () => {
+    pickDirectoryMock.mockImplementation(() => Promise.resolve(fakeRoot));
+    scanForNamesMock.mockImplementation(() => Promise.resolve(fakeScan()));
+    renderModal();
+    fireEvent.click(moveButton()!);
+    await flush();
+
+    // 2 unique matched names + 1 missing = 3 selected names scanned for.
+    expect(bodyText()).toContain(
+      "1 of 3 files were not found under picked. Check that you picked the folder that contains this session's frames.",
+    );
+  });
+
   it("a cancelled picker is a silent no-op", async () => {
     pickDirectoryMock.mockImplementation(() => Promise.reject(new CopyCancelledError()));
     renderModal();
@@ -495,5 +526,76 @@ describe("FrameListModal browser move", () => {
     await flush();
     expect(bodyText()).toContain("Good list: 0 of 5 frames");
     expect(moveButton()!.disabled).toBe(true);
+  });
+});
+
+describe("FrameListModal multi-session", () => {
+  const moveButton = (): HTMLButtonElement | undefined =>
+    buttons().find((el) => /^Move \d+ to _rejected$/.test(el.textContent?.trim() ?? ""));
+
+  const failCheckboxes = (): HTMLInputElement[] =>
+    Array.from(
+      document.body.querySelectorAll('input[type="checkbox"][aria-label="b_fail.fits"]'),
+    ) as HTMLInputElement[];
+
+  it("disables the browser move button with more than one session selected and explains why", () => {
+    renderModalMulti();
+    const btn = moveButton();
+    expect(btn).toBeDefined();
+    expect(btn!.disabled).toBe(true);
+    expect(btn!.title).toBe(
+      "Browser move works one session at a time: the browser can only reach files inside the single folder you pick.",
+    );
+  });
+
+  it("keeps the browser move button enabled with a single session selected", () => {
+    renderModal();
+    const btn = moveButton();
+    expect(btn).toBeDefined();
+    expect(btn!.disabled).toBe(false);
+    expect(btn!.title).toBe("");
+  });
+
+  it("dedupes repeated file names across sessions in the copy payload and count", async () => {
+    renderModalMulti();
+    // 4 fail rows across the two sessions, but only 2 unique names.
+    expect(bodyText()).toContain("Bad list: 4 of 10 frames");
+    expect(copyButton().textContent?.trim()).toBe("Copy 2 names");
+    fireEvent.change(formatSelect(), { target: { value: "names" } });
+    await flush();
+    fireEvent.click(copyButton());
+    await flush();
+    expect(writeTextMock).toHaveBeenCalledTimes(1);
+    expect(writeTextMock).toHaveBeenCalledWith("b_fail.fits\nd_fail.fits");
+  });
+
+  it("shows a banner when a session fetch fails and still renders the loaded sessions", async () => {
+    getMock.mockImplementation(() => Promise.reject(new Error("network")));
+    renderModalMulti([DATE, DATE2], { [DATE]: cacheDetail() });
+    await flush();
+
+    expect(bodyText()).toContain(
+      `Could not load 1 of 2 sessions: ${DATE2}. The list below covers only the loaded sessions.`,
+    );
+    // The cached session's frames still render and drive the counts.
+    expect(bodyText()).toContain("Bad list: 2 of 5 frames");
+    expect(rowCheckbox("b_fail.fits").checked).toBe(true);
+  });
+
+  it("scopes a row override to its own session when source_relative repeats across dates", async () => {
+    renderModalMulti();
+    let boxes = failCheckboxes();
+    expect(boxes.length).toBe(2);
+    expect(boxes[0].checked).toBe(true);
+    expect(boxes[1].checked).toBe(true);
+
+    fireEvent.click(boxes[0]);
+    await flush();
+
+    boxes = failCheckboxes();
+    expect(boxes[0].checked).toBe(false);
+    expect(boxes[1].checked).toBe(true);
+    expect(bodyText()).toContain("Bad list: 3 of 10 frames");
+    expect(bodyText()).toContain("(1 overridden)");
   });
 });

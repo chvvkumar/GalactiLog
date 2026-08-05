@@ -21,8 +21,18 @@ export interface FrameSelectionOptions {
   mode: FrameListMode;
   /** Good mode only: whether unmeasured frames join the list. Ignored in bad mode. */
   includeUnmeasured: boolean;
-  /** Sparse per-row override keyed by frame.source_relative; value = final inclusion. */
+  /** Sparse per-row override keyed by overrideKey(verdict); value = final inclusion. */
   overrides: Record<string, boolean>;
+}
+
+/**
+ * Identity of a verdict row for override purposes. Bare source_relative is not
+ * unique across sessions (the same relative path can appear under two selected
+ * dates), so the key pairs it with the verdict's session date: a hand edit on
+ * one row must never flip its twin in another session.
+ */
+export function overrideKey(v: FrameVerdict): string {
+  return `${v.sessionDate}|${v.frame.source_relative}`;
 }
 
 /**
@@ -36,7 +46,7 @@ export function isIncluded(v: FrameVerdict, opts: FrameSelectionOptions): boolea
     opts.mode === "bad"
       ? v.reason === "fail"
       : v.reason === "pass" || (v.reason === "unmeasured" && opts.includeUnmeasured);
-  return opts.overrides[v.frame.source_relative] ?? computed;
+  return opts.overrides[overrideKey(v)] ?? computed;
 }
 
 export function selectedFrames(

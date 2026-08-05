@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   isIncluded,
   selectedFrames,
+  overrideKey,
   explorerSearchString,
   plainNameList,
   moveScript,
@@ -58,13 +59,18 @@ function frame(overrides: Partial<FrameRecord>): FrameRecord {
 
 // Verdict factory: keep/failures/failedBy derived from the reason, since the
 // selection logic keys off `reason` and `frame.source_relative` only.
-function verdict(reason: Verdict, sourceRelative: string, fileName?: string): FrameVerdict {
+function verdict(
+  reason: Verdict,
+  sourceRelative: string,
+  fileName?: string,
+  sessionDate = "2026-03-15",
+): FrameVerdict {
   return {
     frame: frame({
       source_relative: sourceRelative,
       file_name: fileName ?? sourceRelative.split("/").pop()!,
     }),
-    sessionDate: "2026-03-15",
+    sessionDate,
     keep: reason !== "fail",
     reason,
     failures: [],
@@ -107,20 +113,29 @@ describe("isIncluded", () => {
   it("override wins over the computed verdict in both directions", () => {
     const forceOut = opts({
       mode: "bad",
-      overrides: { [fail.frame.source_relative]: false },
+      overrides: { [overrideKey(fail)]: false },
     });
     expect(isIncluded(fail, forceOut)).toBe(false);
 
     const forceIn = opts({
       mode: "bad",
-      overrides: { [pass.frame.source_relative]: true },
+      overrides: { [overrideKey(pass)]: true },
     });
     expect(isIncluded(pass, forceIn)).toBe(true);
   });
 
   it("overrides for other frames do not leak", () => {
-    const o = opts({ mode: "bad", overrides: { "some/other.fits": false } });
+    const o = opts({ mode: "bad", overrides: { "2026-03-15|some/other.fits": false } });
     expect(isIncluded(fail, o)).toBe(true);
+  });
+
+  it("an override is scoped to its session: same source_relative on another date is untouched", () => {
+    const night1 = verdict("fail", "a/twin.fits", undefined, "2026-03-15");
+    const night2 = verdict("fail", "a/twin.fits", undefined, "2026-03-16");
+    const o = opts({ mode: "bad", overrides: { [overrideKey(night1)]: false } });
+    expect(isIncluded(night1, o)).toBe(false);
+    expect(isIncluded(night2, o)).toBe(true);
+    expect(selectedFrames([night1, night2], o)).toEqual([night2]);
   });
 });
 
