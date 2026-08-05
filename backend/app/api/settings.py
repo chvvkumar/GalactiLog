@@ -13,6 +13,7 @@ from app.api.deps import get_current_user, require_admin
 from app.models.user import User
 from app.models.user_settings import UserSettings, SETTINGS_ROW_ID
 from app.models import Image
+from app.services import phd2_profiles
 from app.services.normalization import load_alias_maps, normalize_filter, normalize_equipment, invalidate_alias_cache
 from app.schemas.settings import (
     GeneralSettings, FilterConfig, EquipmentConfig, EquipmentAliases,
@@ -57,6 +58,21 @@ async def _get_or_create_settings(session: AsyncSession) -> UserSettings:
                 await session.flush()
 
     return row
+
+
+def _queue_worker_task(name: str, **kwargs) -> None:
+    """Queue a Celery task by name, tolerating a run with no worker.
+
+    The import is deferred and every failure swallowed because the API process
+    serves fine without a broker in dev; a settings save must not fail because
+    the follow-up pass could not be enqueued.
+    """
+    try:
+        from importlib import import_module
+
+        getattr(import_module("app.worker.tasks"), name).delay(**kwargs)
+    except Exception:
+        pass  # Worker may not be available in dev
 
 
 def _row_to_response(row: UserSettings) -> SettingsResponse:
@@ -226,8 +242,16 @@ async def update_general(
     await session.commit()
     await session.refresh(row)
 
+    # The stored profile map may be in the legacy `{"Rig": "Scope"}` form while
+    # the payload always arrives canonical, so every comparison below is made
+    # against the normalized stored value. Comparing the raw stored dict would
+    # report a change on every single save.
+    old_map = phd2_profiles.normalize_profile_map(old_general.get("phd2_profile_map"))
+    new_map = new_values.get("phd2_profile_map") or {}
+    old_comparable = {**old_general, "phd2_profile_map": old_map}
+
     # Emit a curated event listing which keys changed (no secrets in GeneralSettings).
-    changed_keys = [k for k, v in new_values.items() if old_general.get(k) != v]
+    changed_keys = [k for k, v in new_values.items() if old_comparable.get(k) != v]
     if changed_keys:
         await emit(
             session, category="user_action", severity="info",
@@ -236,17 +260,59 @@ async def update_general(
             details={"keys": changed_keys}, actor=user.username,
         )
 
-    # Trigger session_date recompute if imaging night setting changed
-    old_night = old_general.get("use_imaging_night", False)
-    new_night = payload.use_imaging_night
-    old_lon = old_general.get("observer_longitude")
-    new_lon = payload.observer_longitude
-    if old_night != new_night or (new_night and old_lon != new_lon):
-        try:
-            from app.worker.tasks import recompute_session_dates
-            recompute_session_dates.delay()
-        except Exception:
-            pass  # Worker may not be available in dev
+    # One profile map now carries three kinds of change with three very
+    # different costs, so the follow-up work is decided per kind rather than on
+    # the map as a whole. Each answer is the RESOLVED one: a profile's own
+    # value when it has one and the global value otherwise, so editing the
+    # global setting moves every rig that inherits it and leaves the rest
+    # alone. `None` stands for a log section that names no profile at all.
+    profiles: set[str | None] = {None, *old_map, *new_map}
+
+    old_zone = phd2_profiles.profile_zone_resolver(
+        old_map, old_general.get("observer_timezone", "")
+    )
+    new_zone = phd2_profiles.profile_zone_resolver(new_map, payload.observer_timezone)
+    zone_changed = any(old_zone(p) != new_zone(p) for p in profiles)
+
+    old_longitude = phd2_profiles.longitude_resolver(
+        old_map, old_general.get("observer_longitude")
+    )
+    new_longitude = phd2_profiles.longitude_resolver(new_map, payload.observer_longitude)
+    longitude_changed = any(old_longitude(p) != new_longitude(p) for p in profiles)
+
+    telescopes_changed = (
+        phd2_profiles.telescope_map(old_map) != phd2_profiles.telescope_map(new_map)
+    )
+    night_changed = (
+        old_general.get("use_imaging_night", False) != payload.use_imaging_night
+    )
+
+    if zone_changed:
+        # A zone cannot be re-keyed in place: ended_at_utc has no stored local
+        # counterpart, so it has to be applied while parsing. PHD2 never
+        # rewrites a closed log, so the scan's size/mtime short-circuit would
+        # skip every file forever without the force flag.
+        #
+        # This one pass re-parses, re-applies the profile map and re-keys every
+        # stored session, so it already does the work of both passes below.
+        # They are deliberately not queued alongside it: two of them writing
+        # session_date from a single save would race each other.
+        #
+        # KNOWN GAP: a save that changes a zone AND toggles the night boundary
+        # or moves a longitude leaves the IMAGE side of the recompute undone,
+        # because the forced pass only touches guiding rows. Changing one
+        # setting at a time is unaffected; chaining the two passes is the fix
+        # and it belongs in the worker, not here.
+        _queue_worker_task("scan_phd2_logs", force=True)
+    else:
+        if telescopes_changed:
+            # Which telescope a profile belongs to is a setting, not a property
+            # of the log, so this edit takes effect without re-reading a file.
+            _queue_worker_task("scan_phd2_logs", remap_only=True)
+        if night_changed or (payload.use_imaging_night and longitude_changed):
+            # Longitude decides where a night breaks, for images from their own
+            # headers and for guiding rows from the rig's own site.
+            _queue_worker_task("recompute_session_dates")
 
     return _row_to_response(row)
 
@@ -352,6 +418,43 @@ async def update_equipment(
     await session.commit()
     await session.refresh(row)
     invalidate_alias_cache()
+
+    # Grouping two telescope names together turns one of them into an alias.
+    # The PHD2 profile map's values are telescope names the user picked when
+    # they mapped each profile, and nothing has ever rewritten them, so a
+    # grouping made afterwards strands the map pointing at an alias. Reads
+    # tolerate that through normalization.equipment_match_set; the per-image
+    # guiding correlation does not, because it attributes on the value stored
+    # on the session row. Fold the map onto the new canonical names here,
+    # while the change that caused the drift is being saved.
+    general = dict(row.general or {})
+    profile_map = general.get("phd2_profile_map") or {}
+    if profile_map:
+        from app.services.normalization import (
+            build_equipment_alias_maps, normalize_equipment,
+        )
+
+        _, tel_map = build_equipment_alias_maps(row.equipment or {})
+        # Only the telescope of each entry moves. An entry's timezone and site
+        # are not equipment and must survive a regrouping untouched, so the
+        # rewrite goes through the shape owner rather than rebuilding the map
+        # from bare names, which would flatten a configured rig back to the
+        # legacy form and silently discard the zone its logs are read in.
+        corrected = phd2_profiles.rewrite_telescopes(
+            profile_map, lambda name: normalize_equipment(name, tel_map)
+        )
+        # Against the NORMALIZED stored map, never the raw one: a legacy map
+        # always differs from its canonical form, so comparing against what is
+        # stored would report a move on every equipment save.
+        if corrected != phd2_profiles.normalize_profile_map(profile_map):
+            row.general = {**general, "phd2_profile_map": corrected}
+            await session.commit()
+            await session.refresh(row)
+            # The re-key rewrites every stored guiding session, so it is only
+            # worth queueing when the map actually moved. A telescope is all
+            # that moved here, so the cheap in-place pass covers it.
+            _queue_worker_task("scan_phd2_logs", remap_only=True)
+
     return _row_to_response(row)
 
 

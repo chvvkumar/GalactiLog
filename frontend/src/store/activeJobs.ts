@@ -1,13 +1,57 @@
 import { createSignal } from "solid-js";
 import type { ActiveJob, ScanStatus, RebuildStatus } from "../api/types";
+import { phd2FirstSeenAt, phd2Phase, type Phd2Phase } from "./scan";
 
 const [celeryJobs, setCeleryJobs] = createSignal<Map<string, ActiveJob>>(new Map());
 
-function scanStatusToJob(
+export function scanStatusToJob(
   s: ScanStatus,
-  onStop: () => Promise<void>
+  onStop: () => Promise<void>,
+  phd2: Phd2Phase
 ): ActiveJob | null {
-  if (s.state !== "scanning" && s.state !== "ingesting") return null;
+  const scanActive = s.state === "scanning" || s.state === "ingesting";
+  const phd2Active = phd2 === "processing";
+  if (!scanActive && !phd2Active) return null;
+
+  // phd2_found is published once the candidate list is known, and
+  // phd2_ingested / phd2_failed increment per file as the pass runs, with the
+  // end-of-pass write authoritative. A counted label is therefore the expected
+  // steady state. The countless branch still earns its keep: it covers a
+  // status snapshot from a backend that predates the counters, and the window
+  // between dispatch and the first published count, where printing "0 of 0"
+  // would be worse than saying nothing about totals.
+  const phd2Total = s.phd2_found ?? 0;
+  const phd2Done = (s.phd2_ingested ?? 0) + (s.phd2_failed ?? 0);
+
+  if (!scanActive) {
+    // Elapsed time for this row must count up from when the pass began, so
+    // completed_at comes first here. In this branch the image scan is by
+    // definition finished, which makes completed_at both present and a stable
+    // proxy for dispatch. phd2_state_at cannot lead: the backend renews it on
+    // every per-file progress write, so using it would reset the elapsed
+    // label to zero with each ingested log. The stall guard in store/scan.ts
+    // deliberately keeps the opposite precedence, where that renewal is the
+    // whole point.
+    const startedAt =
+      s.completed_at != null
+        ? s.completed_at * 1000
+        : s.phd2_state_at != null
+        ? s.phd2_state_at * 1000
+        : Date.now();
+
+    return {
+      id: "scan",
+      category: "scan",
+      label: "Processing guide logs",
+      subLabel:
+        phd2Total > 0
+          ? `${phd2Done.toLocaleString()} of ${phd2Total.toLocaleString()} logs`
+          : undefined,
+      progress: phd2Total > 0 ? Math.min(1, phd2Done / phd2Total) : undefined,
+      startedAt,
+      cancelable: false,
+    };
+  }
 
   const startedAt = s.started_at != null ? s.started_at * 1000 : Date.now();
 
@@ -25,18 +69,26 @@ function scanStatusToJob(
       ? Math.min(1, (s.completed + s.failed) / s.total)
       : undefined;
 
-  const subLabel =
+  const fileLabel =
     s.state === "ingesting" && s.total > 0
       ? `${(s.completed + s.failed).toLocaleString()} / ${s.total.toLocaleString()} files`
       : s.discovered > 0
       ? `${s.discovered.toLocaleString()} files found`
       : undefined;
 
+  const guideLabel = !phd2Active
+    ? undefined
+    : phd2Total > 0
+    ? `Guide logs processing (${phd2Done.toLocaleString()} of ${phd2Total.toLocaleString()})`
+    : "Guide logs processing";
+
+  const parts = [fileLabel, guideLabel].filter((p): p is string => !!p);
+
   return {
     id: "scan",
     category: "scan",
     label: s.state === "scanning" ? "Discovering files" : "Ingesting files",
-    subLabel,
+    subLabel: parts.length > 0 ? parts.join(" · ") : undefined,
     progress,
     startedAt,
     cancelable: true,
@@ -108,7 +160,12 @@ export const activeJobs: Accessor<ActiveJob[]> = () => {
   const jobs: ActiveJob[] = [];
 
   if (_scanStatusAccessor && _stopScanFn) {
-    const scanJob = scanStatusToJob(_scanStatusAccessor(), _stopScanFn);
+    const status = _scanStatusAccessor();
+    const scanJob = scanStatusToJob(
+      status,
+      _stopScanFn,
+      phd2Phase(status, Date.now(), phd2FirstSeenAt())
+    );
     if (scanJob) jobs.push(scanJob);
   }
 

@@ -103,6 +103,7 @@ def build_rig_details(
                 guiding_rms_arcsec=img.guiding_rms_arcsec,
                 guiding_rms_ra_arcsec=img.guiding_rms_ra_arcsec,
                 guiding_rms_dec_arcsec=img.guiding_rms_dec_arcsec,
+                guiding_rms_source=img.guiding_rms_source,
                 adu_stdev=img.adu_stdev,
                 adu_mean=img.adu_mean,
                 adu_median=img.adu_median,

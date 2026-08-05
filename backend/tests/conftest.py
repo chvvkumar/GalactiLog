@@ -25,6 +25,53 @@ except ImportError:
 _tasks_mock = MagicMock()
 sys.modules.setdefault("app.worker.tasks", _tasks_mock)
 
+
+def bootstrap_worker_module(modname):
+    """Import a worker module with its sync DB engine mocked out.
+
+    Several test files need the real code of one app.worker.tasks_* module
+    without a live Postgres behind it: they patch the module's own Session or
+    _sync_engine per test. Importing under a patched sqlalchemy.create_engine
+    is how they get that.
+
+    The engine itself lives in app.worker.tasks_common, which builds it once
+    at module import and which every domain module binds by name. That makes
+    the patched import leak: whichever caller imports first pulls
+    tasks_common in under the patch, and the MagicMock-engine copy then STAYS
+    in sys.modules for every module imported afterwards, including ones whose
+    tests do need a real engine. The failure is silent, because a MagicMock
+    result set iterates empty rather than raising, so a DB-reading test on the
+    far side of the leak passes vacuously. Which tests land on the far side
+    depended only on the alphabetical order of the file names.
+
+    So tasks_common is popped on both sides of the import: before, so the
+    patch actually applies to the copy this module will bind; after, so the
+    next importer that wants a real engine builds one. Callers that already
+    hold the mocked copy keep it, which is what they asked for.
+
+    Returns the imported module. A module already present and not a MagicMock
+    is returned as-is, which is what makes repeated calls cheap.
+    """
+    import importlib
+    from unittest.mock import patch
+
+    cached = sys.modules.get(modname)
+    if cached is not None and not isinstance(cached, MagicMock):
+        return cached
+
+    common = "app.worker.tasks_common"
+    sys.modules.pop(modname, None)
+    sys.modules.pop(common, None)
+
+    mock_engine = MagicMock()
+    mock_engine.connect.return_value.__enter__ = MagicMock(return_value=mock_engine)
+    mock_engine.connect.return_value.__exit__ = MagicMock(return_value=False)
+    try:
+        with patch("sqlalchemy.create_engine", return_value=mock_engine):
+            return importlib.import_module(modname)
+    finally:
+        sys.modules.pop(common, None)
+
 import uuid
 import pytest
 from unittest.mock import AsyncMock, MagicMock as _MagicMock

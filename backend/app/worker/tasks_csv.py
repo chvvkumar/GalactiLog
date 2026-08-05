@@ -32,9 +32,11 @@ CSV_MERGE_COLUMNS: tuple[str, ...] = tuple(
 )
 
 # Written by merge_csv_metrics as a consequence of the merge, not read from any
-# CSV column, so it is selected and diffed alongside the mergeable columns but
-# is not one of them.
-_PROVENANCE_COLUMNS: tuple[str, ...] = ("eccentricity_source",)
+# CSV column, so they are selected and diffed alongside the mergeable columns
+# but are not among them. A provenance column the merge can write and this
+# tuple omits is not merely unsaved: the changed-columns diff below looks it up
+# in the pre-image and raises KeyError, failing the whole directory.
+_PROVENANCE_COLUMNS: tuple[str, ...] = ("eccentricity_source", "guiding_rms_source")
 
 
 @celery_app.task(bind=True, name="app.worker.tasks.backfill_csv_metrics")
@@ -109,9 +111,10 @@ def backfill_csv_metrics(self):
                     # never "the value is nothing" -- is exactly what this path
                     # needs, because `values(**dict(img_entry))` used to write
                     # every blank cell as a NULL straight over a real stored
-                    # eccentricity or HFR. It also owns eccentricity_source, so
-                    # a backfilled CSV eccentricity stops being labelled
-                    # "header".
+                    # eccentricity or HFR. It also owns the provenance columns,
+                    # so a backfilled CSV eccentricity stops being labelled
+                    # "header" and backfilled guiding numbers arrive labelled
+                    # "csv" rather than as an unattributed guide-log lookalike.
                     before = {col: getattr(row, col) for col in selected}
                     merged = merge_csv_metrics(dict(before), csv_metrics)
 

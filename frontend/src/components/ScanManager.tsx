@@ -1,4 +1,4 @@
-import { Component, createSignal, createEffect, onCleanup, onMount, Show } from "solid-js";
+import { Component, createSignal, createEffect, onCleanup, onMount, For, Show } from "solid-js";
 import { useScan } from "../store/scan";
 import { useSettingsContext } from "./SettingsProvider";
 import { useAuth } from "./AuthProvider";
@@ -19,6 +19,7 @@ import ScanFiltersOnboarding from "./ScanFiltersOnboarding";
 import { showToast } from "./Toast";
 import HelpPopover from "./HelpPopover";
 import { rebuildStatus, fetchRebuildStatus } from "../store/rebuild";
+import { isValidTimeZone, supportedTimeZones, timezoneFriendlyName } from "../utils/dateTime";
 
 type FrameFilter = "all" | "light_only";
 
@@ -49,6 +50,9 @@ const ScanManager: Component = () => {
   const [observerLongitude, setObserverLongitude] = createSignal<number | null>(null);
   const [latError, setLatError] = createSignal<string | null>(null);
   const [lngError, setLngError] = createSignal<string | null>(null);
+  const [observerTimezone, setObserverTimezone] = createSignal<string>("");
+  const [tzError, setTzError] = createSignal<string | null>(null);
+  const [phd2ScanEnabled, setPhd2ScanEnabled] = createSignal(true);
   const [scanFiltersData, setScanFiltersData] = createSignal<ScanFiltersResponse | null>(null);
 
   // --- Scan filters (shared between ScanFiltersPanel & ScanFiltersOnboarding) ---
@@ -98,9 +102,12 @@ const ScanManager: Component = () => {
       setObserverName(s.general.observer_name ?? null);
       setObserverLatitude(s.general.observer_latitude ?? null);
       setObserverLongitude(s.general.observer_longitude ?? null);
+      setObserverTimezone(s.general.observer_timezone ?? "");
+      setPhd2ScanEnabled(s.general.phd2_scan_enabled ?? true);
       // Clear validation errors when settings are refreshed from the server
       setLatError(null);
       setLngError(null);
+      setTzError(null);
     }
   });
 
@@ -132,6 +139,84 @@ const ScanManager: Component = () => {
         showToast("Failed to save setting", "error");
       }
     }
+  };
+
+  // Same optimistic-signal + rollback shape as handleAutoScanToggle: flip
+  // locally, persist, and restore the previous value if the save fails.
+  const handlePhd2ScanToggle = async () => {
+    const newVal = !phd2ScanEnabled();
+    setPhd2ScanEnabled(newVal);
+    const current = settings()?.general;
+    if (current) {
+      try {
+        await saveGeneral({ ...current, phd2_scan_enabled: newVal });
+        showToast(newVal ? "PHD2 guide log scanning enabled" : "PHD2 guide log scanning disabled");
+      } catch {
+        setPhd2ScanEnabled(!newVal);
+        showToast("Failed to save setting", "error");
+      }
+    }
+  };
+
+  // Read once per mount rather than per render: the answer cannot change
+  // while the page is open, and a null means this runtime cannot enumerate
+  // zones, so the field degrades to free text instead of an empty dropdown.
+  const timezoneList = supportedTimeZones();
+
+  // The zone chosen on the Display tab, read from where that tab stores it
+  // rather than copying its shortlist. Offered as a convenience entry whose
+  // VALUE is the real IANA name, so picking it stores a zone the backend can
+  // load rather than a sentinel that would need interpreting later.
+  const displayTimezone = () => settings()?.general.timezone ?? "";
+  const displayTimezoneOption = () => {
+    const tz = displayTimezone();
+    if (!tz) return null;
+    const friendly = timezoneFriendlyName(tz);
+    return {
+      value: tz,
+      label: friendly === tz ? `Same as display timezone (${tz})` : `Same as display timezone (${friendly} - ${tz})`,
+    };
+  };
+
+  // A stored zone this runtime does not list (an older value, or a name only
+  // Python's zoneinfo knows) still has to be visible. Without its own option
+  // the select would fall back to showing the placeholder, which reads as
+  // "not configured" while the server holds a value and applies it.
+  const unlistedTimezone = () => {
+    const current = observerTimezone();
+    if (!current || current === displayTimezone()) return null;
+    return timezoneList && timezoneList.includes(current) ? null : current;
+  };
+
+  const saveObserverTimezone = async (value: string) => {
+    const current = settings()?.general;
+    if (!current) return;
+    const previous = observerTimezone();
+    setObserverTimezone(value);
+    setTzError(null);
+    try {
+      // Empty string is the stored form of "not configured". The backend
+      // declares observer_timezone as a non-nullable str, so sending null for
+      // a cleared field would fail validation with a 422, and its correlation
+      // guard reads the empty string as a zone nobody picked and declines to
+      // date guide-log rows rather than guessing.
+      await saveGeneral({ ...current, observer_timezone: value });
+    } catch (err) {
+      // The browser's Intl database accepts names Python's zoneinfo rejects,
+      // so the backend gets the last word. Show what it said instead of
+      // leaving the control displaying a value the server never took.
+      setObserverTimezone(previous);
+      const message = err instanceof Error && err.message ? err.message : "Failed to save observer timezone";
+      setTzError(message);
+      showToast(message, "error");
+    }
+  };
+
+  // Free-text fallback only: the dropdown cannot produce an unparseable name,
+  // but a typed one must clear its own client-side error before it is sent.
+  const saveObserverTimezoneText = () => {
+    if (tzError()) return;
+    void saveObserverTimezone(observerTimezone().trim());
   };
 
   // --- Scan trigger ---
@@ -236,6 +321,37 @@ const ScanManager: Component = () => {
               </section>
             </Show>
 
+            <Show when={isAdmin()}>
+              <section class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
+                <div class="flex items-center gap-2">
+                  <h4 class="text-sm font-medium text-theme-text-primary">Guide Logs</h4>
+                  <HelpPopover title="Guide Logs">
+                    <p class="text-sm text-theme-text-secondary">
+                      Collects PHD2 guide logs found anywhere under the library path during the same walk that reads FITS files, and stores per-session guiding statistics alongside your frames.
+                    </p>
+                    <p class="text-sm text-theme-text-secondary">
+                      Only files named PHD2_GuideLog_*.txt are read; PHD2 debug logs are ignored. Turn this off if your library holds guide logs you do not want catalogued.
+                    </p>
+                  </HelpPopover>
+                </div>
+                <div class="flex items-center justify-between">
+                  <label class="text-sm text-theme-text-secondary">Scan PHD2 guide logs</label>
+                  <button
+                    onClick={handlePhd2ScanToggle}
+                    class={`relative w-10 h-5 rounded-full transition-colors ${
+                      phd2ScanEnabled() ? "bg-theme-accent" : "bg-theme-text-tertiary"
+                    }`}
+                  >
+                    <span
+                      class={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full transition-transform ${
+                        phd2ScanEnabled() ? "translate-x-5" : ""
+                      }`}
+                    />
+                  </button>
+                </div>
+              </section>
+            </Show>
+
             <section class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
               <div class="flex items-center gap-2">
                 <h4 class="text-sm font-medium text-theme-text-primary">Observer Location</h4>
@@ -246,9 +362,16 @@ const ScanManager: Component = () => {
                   <p class="text-sm text-theme-text-secondary">
                     Example: with a longitude of -74, frames captured between local noon one day and local noon the next are grouped as one imaging night, so a session that crosses midnight stays together.
                   </p>
+                  <p class="text-sm text-theme-text-secondary">
+                    The timezone is the clock the computer running PHD2 was set to. PHD2 writes guide log timestamps as local wall-clock with no zone marker, so this is what lines those sessions up with your frames.
+                  </p>
+                  <p class="text-sm text-theme-text-secondary">
+                    It is not the server's clock, and it is not the display timezone on the Display tab, which only changes how already-recorded times are shown. The server runs on UTC inside its container no matter which timezone the machine hosting it uses, so there is no sensible value to fall back to. While this is unset, guide logs are still catalogued but their guiding numbers are not applied to individual frames.
+                  </p>
                 </HelpPopover>
               </div>
-              <div class="grid grid-cols-3 gap-3">
+              <div class="space-y-3">
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <div class="space-y-1">
                   <label class="text-xs text-theme-text-secondary">Name</label>
                   <input
@@ -267,6 +390,60 @@ const ScanManager: Component = () => {
                       }
                     }}
                   />
+                </div>
+                <div class="space-y-1">
+                  <label class="text-xs text-theme-text-secondary" for="observer-timezone">Timezone</label>
+                  <Show
+                    when={timezoneList}
+                    fallback={
+                      <input
+                        id="observer-timezone"
+                        type="text"
+                        placeholder="America/New_York"
+                        class={`w-full px-3 py-1.5 bg-theme-input border rounded-[var(--radius-sm)] text-sm text-theme-text-primary focus:ring-1 outline-none ${
+                          tzError()
+                            ? "border-red-500 focus:ring-red-500 focus:border-red-500"
+                            : "border-theme-border focus:ring-theme-accent focus:border-theme-accent"
+                        }`}
+                        value={observerTimezone()}
+                        onInput={(e) => {
+                          const raw = e.currentTarget.value;
+                          setObserverTimezone(raw);
+                          setTzError(!raw.trim() || isValidTimeZone(raw.trim()) ? null : "Not a recognized IANA time zone");
+                        }}
+                        onBlur={saveObserverTimezoneText}
+                      />
+                    }
+                  >
+                    {(zones) => (
+                      <select
+                        id="observer-timezone"
+                        class={`w-full px-3 py-1.5 bg-theme-input border rounded-[var(--radius-sm)] text-sm text-theme-text-primary focus:ring-1 outline-none ${
+                          tzError()
+                            ? "border-red-500 focus:ring-red-500 focus:border-red-500"
+                            : "border-theme-border focus:ring-theme-accent focus:border-theme-accent"
+                        }`}
+                        value={observerTimezone()}
+                        onChange={(e) => saveObserverTimezone(e.currentTarget.value)}
+                      >
+                        {/* Deliberately first and deliberately empty: saving this
+                            field forces a re-parse of every guide log, so the
+                            control must never arrive pre-set to a zone the user
+                            did not choose. */}
+                        <option value="">Select a timezone</option>
+                        <Show when={displayTimezoneOption()}>
+                          {(opt) => <option value={opt().value}>{opt().label}</option>}
+                        </Show>
+                        <Show when={unlistedTimezone()}>
+                          {(zone) => <option value={zone()}>{zone()}</option>}
+                        </Show>
+                        <For each={zones()}>{(zone) => <option value={zone}>{zone}</option>}</For>
+                      </select>
+                    )}
+                  </Show>
+                  <Show when={tzError()}>
+                    <p class="text-xs text-red-500">{tzError()}</p>
+                  </Show>
                 </div>
                 <div class="space-y-1">
                   <label class="text-xs text-theme-text-secondary">Latitude</label>
@@ -340,6 +517,7 @@ const ScanManager: Component = () => {
                     <p class="text-xs text-red-500">{lngError()}</p>
                   </Show>
                 </div>
+              </div>
               </div>
             </section>
 

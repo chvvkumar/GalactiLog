@@ -142,7 +142,15 @@ class SessionStatusUpdate(BaseModel):
     exclude: list[str] = []
 
 
-class StatusResponse(BaseModel):
+class MosaicStatusResponse(BaseModel):
+    """Single-field status response for the mosaic mutation routes.
+
+    Named for its module rather than sharing the generic name in
+    schemas/common.py: FastAPI derives OpenAPI component names from the class
+    name, so two identically named models produce module-qualified names in
+    the generated client for some routes and a bare one for others.
+    """
+
     status: str
 
 

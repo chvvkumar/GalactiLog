@@ -23,6 +23,7 @@ from app.services.data_migrations import (
     _migrate_v13_enrich_created_targets,
     _migrate_v14_eccentricity_provenance,
     _migrate_v15_arcsec_per_pixel,
+    _migrate_v17_phd2_profile_map_shape,
 )
 
 
@@ -79,12 +80,27 @@ class TestGetPendingMigrations:
         assert func is _migrate_v14_eccentricity_provenance
         assert "eccentricity" in desc.lower()
 
-    def test_v15_is_arcsec_per_pixel_backfill(self):
+    def test_v15_registered(self):
         assert 15 in MIGRATIONS
         desc, func = MIGRATIONS[15]
         assert func is _migrate_v15_arcsec_per_pixel
-        assert "arcsec_per_pixel" in desc
-        assert DATA_VERSION == 15
+        assert "arcsec_per_pixel" in desc or "plate scale" in desc
+        assert callable(func)
+
+    def test_v16_registered(self):
+        assert 16 in MIGRATIONS
+        desc, func = MIGRATIONS[16]
+        assert "guiding" in desc.lower()
+        assert callable(func)
+
+    def test_v17_registered(self):
+        assert 17 in MIGRATIONS
+        desc, func = MIGRATIONS[17]
+        assert func is _migrate_v17_phd2_profile_map_shape
+        assert "timezone" in desc.lower()
+
+    def test_data_version_is_17(self):
+        assert DATA_VERSION == 17
 
 
 def _sync_session_factory():

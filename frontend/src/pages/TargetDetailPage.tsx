@@ -20,6 +20,7 @@ import { showToast } from "../components/Toast";
 import FilterBadges from "../components/FilterBadges";
 import TargetMetricsChart from "../components/TargetMetricsChart";
 import WbppExportModal from "../components/WbppExportModal";
+import FrameListModal from "../components/FrameListModal";
 import AladinViewer from "../components/AladinViewer";
 import { useSettingsContext } from "../components/SettingsProvider";
 import { isFieldVisible } from "../utils/displaySettings";
@@ -229,6 +230,7 @@ const TargetDetailPage: Component = () => {
 
   const [showMerge, setShowMerge] = createSignal(false);
   const [showWbppExport, setShowWbppExport] = createSignal(false);
+  const [showFrameList, setShowFrameList] = createSignal(false);
   const [expandedSessions, setExpandedSessions] = createSignal<Set<string>>(new Set());
   const [sessionCache, setSessionCache] = createSignal<Record<string, SessionDetail>>({});
   const [targetChartExpanded, setTargetChartExpanded] = createSignal(graphSettings().target_chart_expanded);
@@ -654,6 +656,16 @@ const TargetDetailPage: Component = () => {
         />
       </Show>
 
+      <Show when={showFrameList() && targetDetail()}>
+        <FrameListModal
+          targetId={params.targetId}
+          targetName={targetDetail()!.primary_name}
+          selectedDates={selectedChartDates()}
+          sessionCache={sessionCache()}
+          onClose={() => setShowFrameList(false)}
+        />
+      </Show>
+
       <Show when={targetDetail()}>
         {(detail) => (
           <div class="px-4 sm:px-6 py-4 sm:py-5">
@@ -719,7 +731,7 @@ const TargetDetailPage: Component = () => {
                         <li><strong class="text-theme-text-primary">Integration summary</strong> shows total exposure time, frame counts, and filter breakdown.</li>
                         <li><strong class="text-theme-text-primary">Charts</strong> visualize quality metrics (HFR, FWHM, guiding RMS, etc.) across sessions. Click the chart header to expand or collapse it.</li>
                         <li><strong class="text-theme-text-primary">Sessions</strong> are listed as expandable cards. Each card shows per-session metrics, and expanding it reveals individual frame details with all recorded FITS header data.</li>
-                        <li>Use the <strong class="text-theme-text-primary">Export</strong> menu in the Sessions section to copy an AstroBin-compatible CSV or generate a WBPP export for the selected sessions.</li>
+                        <li>Use the <strong class="text-theme-text-primary">Export</strong> menu in the Sessions section to copy an AstroBin-compatible CSV, generate a WBPP export, or copy a good/bad frame name list for the selected sessions.</li>
                       </ul>
                     </HelpPopover>
                   </div>
@@ -1095,6 +1107,22 @@ const TargetDetailPage: Component = () => {
                           {selectedChartDates().length > 0
                             ? `Export For Stacking (${selectedChartDates().length})`
                             : "Export For Stacking"}
+                        </button>
+                        <button
+                          type="button"
+                          role="menuitem"
+                          disabled={selectedChartDates().length === 0}
+                          title={selectedChartDates().length === 0 ? "Select one or more sessions first" : undefined}
+                          class="w-full text-left px-3 py-1.5 text-sm text-theme-text-primary hover:bg-theme-hover transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+                          onClick={() => {
+                            if (selectedChartDates().length === 0) return;
+                            close();
+                            setShowFrameList(true);
+                          }}
+                        >
+                          {selectedChartDates().length > 0
+                            ? `Copy Frame List (${selectedChartDates().length})`
+                            : "Copy Frame List"}
                         </button>
                       </>
                     )}

@@ -10,6 +10,11 @@
 // infer a stable, literal key type.
 import type { ActiveFilters } from "./types";
 
+// The prefix every phd2 key starts with. store/scan.ts invalidates through
+// this constant when a guide-log pass settles, so the invalidation and the
+// key factories cannot drift apart; queryKeys.test.ts asserts the relation.
+export const PHD2_QUERY_PREFIX = ["phd2"] as const;
+
 export const queryKeys = {
   // Auth
   me: () => ["me"] as const,
@@ -99,4 +104,10 @@ export const queryKeys = {
   timeseries: (params: unknown) => ["analysis", "timeseries", params] as const,
   matrix: (params: unknown) => ["analysis", "matrix", params] as const,
   compare: (params: unknown) => ["analysis", "compare", params] as const,
+
+  // PHD2 guiding
+  phd2Profiles: () => ["phd2", "profiles"] as const,
+  phd2Sessions: (sessionDate: string, telescope?: string | null) =>
+    ["phd2", "sessions", "list", sessionDate, telescope ?? null] as const,
+  phd2Frames: (sessionId: string) => ["phd2", "sessions", sessionId, "frames"] as const,
 };

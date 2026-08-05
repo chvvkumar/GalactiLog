@@ -19,7 +19,12 @@ from app.config import settings
 from app.models import Target, Image
 from app.models.catalog_membership import TargetCatalogMembership
 from app.models.session_note import SessionNote
-from app.services.normalization import load_alias_maps, normalize_filter, normalize_equipment
+from app.models.phd2 import Phd2Session
+from app.schemas.phd2 import Phd2NightSummary
+from app.services.phd2_metrics import aggregate_night, select_phd2_night_rows
+from app.services.normalization import (
+    load_alias_maps, load_telescope_match_set, normalize_filter, normalize_equipment,
+)
 from app.services.wbpp_export import fits_relative_path
 from app.schemas.target import (
     SessionDetailResponse, TargetDetailResponse, SessionOverview,
@@ -540,6 +545,31 @@ async def get_target_detail(target_id: str, session: AsyncSession) -> TargetDeta
     )
 
 
+async def build_phd2_night_summary(session, session_date_val, telescopes: set[str]):
+    """Return the Phd2NightSummary for this night+rig, or None when there is none.
+
+    `telescopes` holds raw `images.telescope` strings and is resolved here, not
+    by the caller. Both sides of the comparison are user data written at
+    different times: a rig catalogued as "SVBony SV503 80mm" is grouped under
+    "SVBony 80ED", while the PHD2 profile map holds whichever of the two names
+    was on offer when the profile was mapped, and grouping equipment later
+    never rewrites that map. So the frame's name is expanded to the canonical
+    name plus every alias of it, and a row matches on any of them. Resolving
+    inside this function rather than at its one call site means a second caller
+    cannot reintroduce the raw-string comparison.
+    """
+    wanted = await load_telescope_match_set(session, telescopes)
+    rows = (
+        await session.execute(
+            select(Phd2Session).where(Phd2Session.session_date == session_date_val)
+        )
+    ).scalars().all()
+    selected = select_phd2_night_rows(rows, wanted)
+    if not selected:
+        return None
+    return Phd2NightSummary(**aggregate_night(selected))
+
+
 async def get_session_detail(target_id: str, date: str, session: AsyncSession) -> SessionDetailResponse:
     """Return detailed session data for a target on a specific date.
 
@@ -693,6 +723,7 @@ async def get_session_detail(target_id: str, date: str, session: AsyncSession) -
             guiding_rms_arcsec=img.guiding_rms_arcsec,
             guiding_rms_ra_arcsec=img.guiding_rms_ra_arcsec,
             guiding_rms_dec_arcsec=img.guiding_rms_dec_arcsec,
+            guiding_rms_source=img.guiding_rms_source,
             adu_stdev=img.adu_stdev,
             adu_mean=img.adu_mean,
             adu_median=img.adu_median,
@@ -945,6 +976,16 @@ async def get_session_detail(target_id: str, date: str, session: AsyncSession) -
     # because the session median it compares against moves with the bad frames.
     insights.extend(session_ecc_vs_rig_insights(session_baselines, rig_baselines))
 
+    # PHD2 guiding for this night on this rig. Attribution is by session_date
+    # plus telescope, because a guide log carries no target: PHD2 does not know
+    # what the imaging camera was pointed at. Raw telescope strings go in; the
+    # helper folds them onto canonical names itself.
+    phd2_summary = await build_phd2_night_summary(
+        session,
+        session_date_val,
+        {img.telescope for img in images if img.telescope},
+    )
+
     return SessionDetailResponse(
         target_name=target_name,
         session_date=date,
@@ -992,4 +1033,5 @@ async def get_session_detail(target_id: str, date: str, session: AsyncSession) -
         custom_values=custom_values_list,
         session_baselines=session_baselines,
         rig_baselines=rig_baselines,
+        phd2=phd2_summary,
     )

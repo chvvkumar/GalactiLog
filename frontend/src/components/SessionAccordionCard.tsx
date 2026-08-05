@@ -12,6 +12,8 @@ import ReferenceThumbnail from "./ReferenceThumbnail";
 import RawHeaderAccordion from "./RawHeaderAccordion";
 import FilterBadges from "./FilterBadges";
 import SessionMetricsChart from "./SessionMetricsChart";
+import Phd2GuidingPanel from "./Phd2GuidingPanel";
+import Phd2GuideGraph from "./Phd2GuideGraph";
 import { rigColor } from "./RigTogglePills";
 import { useSettingsContext } from "./SettingsProvider";
 import { isFieldVisible, isColumnVisible } from "../utils/displaySettings";
@@ -53,6 +55,55 @@ const INSIGHT_ICONS: Record<InsightLevel, string> = {
 // in one place so the call sites can't drift.
 export const ASTROBIN_BUTTON_CLASS =
   "text-tiny px-1.5 py-0.5 bg-theme-accent/15 text-theme-accent border border-theme-accent/30 rounded font-medium hover:bg-theme-accent/25 transition-colors cursor-pointer";
+
+/** Marker on a guiding RMS value that the PHD2 correlation pass produced
+ *  rather than the NINA CSV sidecar. A dagger, because the quality columns
+ *  already spend colour on banding and a second colour language in the same
+ *  row would read as a grade rather than a source. CSV values carry no
+ *  marker: they are the historical default and the majority. */
+export const RMS_PHD2_GLYPH = "†";
+
+/** Tooltip for one guiding RMS cell. Undefined, not an empty string, when the
+ *  row predates provenance: an empty title still opens a blank tooltip box. */
+export function rmsSourceTitle(
+  label: string,
+  source: FrameRecord["guiding_rms_source"],
+): string | undefined {
+  if (source === "phd2") return `${label} from PHD2 guide log`;
+  if (source === "csv") return `${label} from NINA CSV sidecar`;
+  return undefined;
+}
+
+/** Which pipelines produced the guiding values across a set of frames. CSV
+ *  wins per row, so a session can legitimately hold both: rows the sidecar
+ *  covered and rows the correlation pass filled. */
+export function summarizeRmsSources(
+  frames: Pick<FrameRecord, "guiding_rms_source">[],
+): "csv" | "phd2" | "mixed" | null {
+  let csv = false;
+  let phd2 = false;
+  for (const frame of frames) {
+    if (frame.guiding_rms_source === "csv") csv = true;
+    else if (frame.guiding_rms_source === "phd2") phd2 = true;
+  }
+  if (csv && phd2) return "mixed";
+  if (phd2) return "phd2";
+  if (csv) return "csv";
+  return null;
+}
+
+/** Tooltip for the session median cell, whose value is an aggregate over
+ *  frames that may not share a source. */
+export function sessionRmsSourceTitle(
+  summary: "csv" | "phd2" | "mixed" | null,
+): string | undefined {
+  if (summary === "phd2") return "Median RMS from PHD2 guide logs";
+  if (summary === "csv") return "Median RMS from NINA CSV sidecars";
+  if (summary === "mixed") {
+    return "Median RMS from a mix of NINA CSV sidecars and PHD2 guide logs";
+  }
+  return undefined;
+}
 
 interface VisibleColumns {
   hfr: boolean;
@@ -119,6 +170,19 @@ const SessionAccordionCard: Component<{
 
   const isMultiRig = () => (props.detail?.rigs.length ?? 0) > 1;
   const rigLabels = () => props.detail?.rigs.map(r => r.rig_label) ?? [];
+
+  // Provenance for the header row's median cell. SessionOverview carries no
+  // source field, so this is derived from the loaded frames. The gate is
+  // `props.isExpanded`, not the presence of `props.detail`: the parent keeps a
+  // session cache that it passes down unconditionally, never clears on
+  // collapse, and also fills from the chart checkbox and the Astrobin CSV
+  // paths with no expand at all. Reading `props.detail` alone would therefore
+  // put the marker on collapsed rows whose night someone happened to load, and
+  // its absence would stop meaning "this value came from the CSV". Provenance
+  // belongs to expanded cards only; collapsed rows show the value exactly as
+  // they always have.
+  const detailRmsSummary = () =>
+    props.isExpanded ? summarizeRmsSources(props.detail?.frames ?? []) : null;
 
   // Sync when detail loads
   createEffect(() => {
@@ -403,7 +467,9 @@ const SessionAccordionCard: Component<{
         thumbnailUrl: f.thumbnail_url,
       })),
     );
+    const rmsSummary = createMemo(() => summarizeRmsSources(frames));
     return (
+    <>
     <table class="w-full text-label">
       <thead class="sticky top-0 z-10 glass-popover">
         <tr class="text-theme-text-secondary border-b border-theme-border">
@@ -541,18 +607,36 @@ const SessionAccordionCard: Component<{
                 >{frame.detected_stars ?? "\u2014"}</td>
               </Show>
               <Show when={visible("guiding", "rms_total")}>
-                <td class="py-1 px-2 text-theme-text-primary text-right">
+                <td
+                  class="py-1 px-2 text-theme-text-primary text-right"
+                  title={rmsSourceTitle("RMS", frame.guiding_rms_source)}
+                >
                   {frame.guiding_rms_arcsec !== null ? formatArcsec(frame.guiding_rms_arcsec) : "\u2014"}
+                  <Show when={frame.guiding_rms_arcsec !== null && frame.guiding_rms_source === "phd2"}>
+                    <span class="text-theme-text-tertiary">{RMS_PHD2_GLYPH}</span>
+                  </Show>
                 </td>
               </Show>
               <Show when={visible("guiding", "rms_ra")}>
-                <td class="py-1 px-2 text-theme-text-primary text-right">
+                <td
+                  class="py-1 px-2 text-theme-text-primary text-right"
+                  title={rmsSourceTitle("RMS RA", frame.guiding_rms_source)}
+                >
                   {frame.guiding_rms_ra_arcsec !== null ? formatArcsec(frame.guiding_rms_ra_arcsec) : "\u2014"}
+                  <Show when={frame.guiding_rms_ra_arcsec !== null && frame.guiding_rms_source === "phd2"}>
+                    <span class="text-theme-text-tertiary">{RMS_PHD2_GLYPH}</span>
+                  </Show>
                 </td>
               </Show>
               <Show when={visible("guiding", "rms_dec")}>
-                <td class="py-1 px-2 text-theme-text-primary text-right">
+                <td
+                  class="py-1 px-2 text-theme-text-primary text-right"
+                  title={rmsSourceTitle("RMS Dec", frame.guiding_rms_source)}
+                >
                   {frame.guiding_rms_dec_arcsec !== null ? formatArcsec(frame.guiding_rms_dec_arcsec) : "\u2014"}
+                  <Show when={frame.guiding_rms_dec_arcsec !== null && frame.guiding_rms_source === "phd2"}>
+                    <span class="text-theme-text-tertiary">{RMS_PHD2_GLYPH}</span>
+                  </Show>
                 </td>
               </Show>
               <Show when={visible("adu", "mean")}>
@@ -643,6 +727,12 @@ const SessionAccordionCard: Component<{
         </For>
       </tbody>
     </table>
+    <Show when={rmsSummary() === "phd2" || rmsSummary() === "mixed"}>
+      <div class="text-tiny text-theme-text-tertiary px-2 pt-1">
+        {RMS_PHD2_GLYPH} Guiding RMS derived from PHD2 guide logs
+      </div>
+    </Show>
+    </>
     );
   };
 
@@ -697,8 +787,14 @@ const SessionAccordionCard: Component<{
           <td class="py-3 px-2 text-right text-metric-stars tabular-nums whitespace-nowrap">{props.session.median_detected_stars?.toFixed(0) ?? "—"}</td>
         </Show>
         <Show when={props.visibleColumns?.guiding_rms ?? false}>
-          <td class="py-3 px-2 text-right text-metric-guiding tabular-nums whitespace-nowrap">
+          <td
+            class="py-3 px-2 text-right text-metric-guiding tabular-nums whitespace-nowrap"
+            title={sessionRmsSourceTitle(detailRmsSummary())}
+          >
             {props.session.median_guiding_rms_arcsec !== null ? formatArcsec(props.session.median_guiding_rms_arcsec) : "—"}
+            <Show when={props.session.median_guiding_rms_arcsec !== null && detailRmsSummary() === "phd2"}>
+              <span class="text-theme-text-tertiary">{RMS_PHD2_GLYPH}</span>
+            </Show>
           </td>
         </Show>
         <For each={(settingsCtx.customColumns() ?? []).filter(c => c.applies_to === "session")}>
@@ -1089,6 +1185,11 @@ const SessionAccordionCard: Component<{
                 </div>
                 </div>
 
+                {/* Guiding (PHD2) - absent entirely when no guide log covered this night */}
+                <Show when={detail().phd2}>
+                  {(phd2) => <Phd2GuidingPanel summary={phd2()} />}
+                </Show>
+
                 {/* Session Insights */}
                 <Show when={detail().insights.length > 0}>
                   <div class="bg-theme-elevated border border-theme-border-em rounded-[var(--radius-sm)]">
@@ -1128,6 +1229,18 @@ const SessionAccordionCard: Component<{
                 <div class="tab-fade-in">
                   <SessionMetricsChart detail={detail()} enabledRigs={enabledRigs()} onToggleRig={toggleRig} />
                 </div>
+
+                {/* PHD2 guide graph. On a multi-rig night the card's reference
+                    telescope names only one of the rigs, so the query is left
+                    unfiltered and the selector distinguishes by profile. */}
+                <Show when={detail().phd2}>
+                  <div class="tab-fade-in">
+                    <Phd2GuideGraph
+                      sessionDate={detail().session_date}
+                      telescope={isMultiRig() ? null : detail().equipment.telescope}
+                    />
+                  </div>
+                </Show>
 
                 {/* Row 4: Per-Frame Table (collapsed) */}
                 <div class="bg-theme-elevated border border-theme-border-em rounded-[var(--radius-sm)]">

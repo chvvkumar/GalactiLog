@@ -2885,6 +2885,17 @@
             ],
             "title": "Guiding Rms Ra Arcsec"
           },
+          "guiding_rms_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Guiding Rms Source"
+          },
           "hfr_stdev": {
             "anyOf": [
               {
@@ -3124,6 +3135,17 @@
             "title": "Filter Style",
             "type": "string"
           },
+          "frame_list_base_folder": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Frame List Base Folder"
+          },
           "include_calibration": {
             "default": false,
             "title": "Include Calibration",
@@ -3190,6 +3212,24 @@
               }
             ],
             "title": "Observer Name"
+          },
+          "observer_timezone": {
+            "default": "",
+            "title": "Observer Timezone",
+            "type": "string"
+          },
+          "phd2_profile_map": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/Phd2ProfileMapping"
+            },
+            "default": {},
+            "title": "Phd2 Profile Map",
+            "type": "object"
+          },
+          "phd2_scan_enabled": {
+            "default": true,
+            "title": "Phd2 Scan Enabled",
+            "type": "boolean"
           },
           "preview_cache_mb": {
             "default": 2048,
@@ -4236,6 +4276,20 @@
           "panel_label"
         ],
         "title": "MosaicPanelCreate",
+        "type": "object"
+      },
+      "MosaicStatusResponse": {
+        "description": "Single-field status response for the mosaic mutation routes.\n\nNamed for its module rather than sharing the generic name in\nschemas/common.py: FastAPI derives OpenAPI component names from the class\nname, so two identically named models produce module-qualified names in\nthe generated client for some routes and a bare one for others.",
+        "properties": {
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "MosaicStatusResponse",
         "type": "object"
       },
       "MosaicSuggestionResponse": {
@@ -5364,6 +5418,645 @@
         "title": "PasswordChangeRequest",
         "type": "object"
       },
+      "Phd2EventPoint": {
+        "description": "A marker on the guide graph.\n\n`type` is one of: dither, settle_start, settle_done, settle_failed,\nstar_lost, param_change, lock_shift.",
+        "properties": {
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "t": {
+            "title": "T",
+            "type": "number"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "t",
+          "detail"
+        ],
+        "title": "Phd2EventPoint",
+        "type": "object"
+      },
+      "Phd2FramePoint": {
+        "description": "One guide-graph point. ra/dec are arcsec, converted from stored pixels.",
+        "properties": {
+          "dec": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dec"
+          },
+          "dec_dir": {
+            "title": "Dec Dir",
+            "type": "string"
+          },
+          "dec_pulse_ms": {
+            "title": "Dec Pulse Ms",
+            "type": "integer"
+          },
+          "dropped": {
+            "title": "Dropped",
+            "type": "boolean"
+          },
+          "mass": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mass"
+          },
+          "ra": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ra"
+          },
+          "ra_dir": {
+            "title": "Ra Dir",
+            "type": "string"
+          },
+          "ra_pulse_ms": {
+            "title": "Ra Pulse Ms",
+            "type": "integer"
+          },
+          "snr": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snr"
+          },
+          "t": {
+            "title": "T",
+            "type": "number"
+          }
+        },
+        "required": [
+          "t",
+          "ra_pulse_ms",
+          "ra_dir",
+          "dec_pulse_ms",
+          "dec_dir",
+          "dropped"
+        ],
+        "title": "Phd2FramePoint",
+        "type": "object"
+      },
+      "Phd2FramesResponse": {
+        "properties": {
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/Phd2EventPoint"
+            },
+            "title": "Events",
+            "type": "array"
+          },
+          "frames": {
+            "items": {
+              "$ref": "#/components/schemas/Phd2FramePoint"
+            },
+            "title": "Frames",
+            "type": "array"
+          },
+          "pixel_scale_arcsec": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pixel Scale Arcsec"
+          },
+          "started_at": {
+            "format": "date-time",
+            "title": "Started At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "started_at",
+          "frames",
+          "events"
+        ],
+        "title": "Phd2FramesResponse",
+        "type": "object"
+      },
+      "Phd2NightSummary": {
+        "description": "Night+rig guiding rollup attached to a session-detail response.\n\nRMS figures are frame-count weighted across the sessions long enough to\nmean anything; gated_session_count reports how many were left out. Event\ncounts include every session regardless of length. settle_median_s is the\nmedian of the per-session medians, not a pooled median over every settle\nin the night.",
+        "properties": {
+          "cal_issues": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Cal Issues",
+            "type": "array"
+          },
+          "dither_count": {
+            "title": "Dither Count",
+            "type": "integer"
+          },
+          "drop_count": {
+            "title": "Drop Count",
+            "type": "integer"
+          },
+          "frame_count": {
+            "title": "Frame Count",
+            "type": "integer"
+          },
+          "gated_session_count": {
+            "title": "Gated Session Count",
+            "type": "integer"
+          },
+          "max_drop_run": {
+            "title": "Max Drop Run",
+            "type": "integer"
+          },
+          "profiles": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Profiles",
+            "type": "array"
+          },
+          "rms_dec_arcsec": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rms Dec Arcsec"
+          },
+          "rms_ra_arcsec": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rms Ra Arcsec"
+          },
+          "rms_total_arcsec": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rms Total Arcsec"
+          },
+          "session_count": {
+            "title": "Session Count",
+            "type": "integer"
+          },
+          "settle_failed_count": {
+            "title": "Settle Failed Count",
+            "type": "integer"
+          },
+          "settle_median_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Settle Median S"
+          },
+          "unguided_seconds": {
+            "title": "Unguided Seconds",
+            "type": "number"
+          }
+        },
+        "required": [
+          "session_count",
+          "gated_session_count",
+          "frame_count",
+          "drop_count",
+          "max_drop_run",
+          "unguided_seconds",
+          "dither_count",
+          "settle_failed_count"
+        ],
+        "title": "Phd2NightSummary",
+        "type": "object"
+      },
+      "Phd2ProfileInfo": {
+        "description": "A PHD2 equipment profile as seen in the corpus, for the mapping UI.\n\nThe guide camera, focal length and pixel scale are echoed from the log\nheaders so a user can tell two similarly named profiles apart without\nopening a log.",
+        "properties": {
+          "first_seen": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Seen"
+          },
+          "focal_length_mm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Focal Length Mm"
+          },
+          "guide_camera": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Guide Camera"
+          },
+          "last_seen": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Seen"
+          },
+          "mapped_telescope": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mapped Telescope"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "pixel_scale_arcsec": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pixel Scale Arcsec"
+          },
+          "session_count": {
+            "title": "Session Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "session_count"
+        ],
+        "title": "Phd2ProfileInfo",
+        "type": "object"
+      },
+      "Phd2ProfileMapping": {
+        "description": "What one PHD2 equipment profile is mapped to.\n\nA guide log names the equipment profile that produced it and nothing else\nabout the rig, so which telescope it is, which zone its wall-clock\ntimestamps are in and where on Earth it stands are all user configuration.\n`app.services.phd2_profiles` owns this shape and every reader goes through\nit; this model is the same shape at the API boundary.\n\n`telescope: None` means the profile is not mapped to a telescope, and an\nentry survives without one so that unmapping a rig does not discard its\nzone and site. `timezone: \"\"` means inherit `observer_timezone`.\n`latitude: None` and `longitude: None` mean inherit the global observer\ncoordinates. THE INHERIT MARKER FOR THE COORDINATES IS null, NEVER 0: zero\nis a legal longitude (Greenwich) and a legal latitude (the equator), so a\nfalsy test on either field would move such a rig to the user's own site.\n\nThe range bounds are the declared contract for a coordinate a client\nwrites, and they reach the generated OpenAPI so the settings UI can bound\nits own inputs. They are not the whole story on the way in: the map's\n`mode=\"before\"` normalizer on `GeneralSettings` runs first and degrades an\nunusable stored coordinate to None, because that same model is rebuilt from\nstored JSON on every settings read and no stored value may raise there.",
+        "properties": {
+          "latitude": {
+            "anyOf": [
+              {
+                "maximum": 90.0,
+                "minimum": -90.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latitude"
+          },
+          "longitude": {
+            "anyOf": [
+              {
+                "maximum": 180.0,
+                "minimum": -180.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Longitude"
+          },
+          "telescope": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Telescope"
+          },
+          "timezone": {
+            "default": "",
+            "title": "Timezone",
+            "type": "string"
+          }
+        },
+        "title": "Phd2ProfileMapping",
+        "type": "object"
+      },
+      "Phd2ProfilesResponse": {
+        "properties": {
+          "profiles": {
+            "items": {
+              "$ref": "#/components/schemas/Phd2ProfileInfo"
+            },
+            "title": "Profiles",
+            "type": "array"
+          }
+        },
+        "required": [
+          "profiles"
+        ],
+        "title": "Phd2ProfilesResponse",
+        "type": "object"
+      },
+      "Phd2SessionListResponse": {
+        "properties": {
+          "sessions": {
+            "items": {
+              "$ref": "#/components/schemas/Phd2SessionSummary"
+            },
+            "title": "Sessions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "sessions"
+        ],
+        "title": "Phd2SessionListResponse",
+        "type": "object"
+      },
+      "Phd2SessionSummary": {
+        "description": "One guiding session as shown on a session card or in the guide list.\n\nRMS values are returned even for gated sessions; `gated` says the sample\nis too small to compare (frame_count < phd2_metrics.MIN_FRAMES) so the UI\ncan show the number with a caveat rather than hiding it.",
+        "properties": {
+          "dither_count": {
+            "title": "Dither Count",
+            "type": "integer"
+          },
+          "drop_count": {
+            "title": "Drop Count",
+            "type": "integer"
+          },
+          "duration_s": {
+            "title": "Duration S",
+            "type": "number"
+          },
+          "ended_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ended At"
+          },
+          "equipment_profile": {
+            "title": "Equipment Profile",
+            "type": "string"
+          },
+          "frame_count": {
+            "title": "Frame Count",
+            "type": "integer"
+          },
+          "gated": {
+            "title": "Gated",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "last_cal_issue": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Cal Issue"
+          },
+          "max_drop_run": {
+            "title": "Max Drop Run",
+            "type": "integer"
+          },
+          "peak_dec_arcsec": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Peak Dec Arcsec"
+          },
+          "peak_ra_arcsec": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Peak Ra Arcsec"
+          },
+          "pier_side": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pier Side"
+          },
+          "pixel_scale_arcsec": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pixel Scale Arcsec"
+          },
+          "rms_dec_arcsec": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rms Dec Arcsec"
+          },
+          "rms_ra_arcsec": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rms Ra Arcsec"
+          },
+          "rms_total_arcsec": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rms Total Arcsec"
+          },
+          "settle_count": {
+            "title": "Settle Count",
+            "type": "integer"
+          },
+          "settle_failed_count": {
+            "title": "Settle Failed Count",
+            "type": "integer"
+          },
+          "settle_median_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Settle Median S"
+          },
+          "snr_mean": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snr Mean"
+          },
+          "star_mass_mean": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Star Mass Mean"
+          },
+          "started_at": {
+            "format": "date-time",
+            "title": "Started At",
+            "type": "string"
+          },
+          "telescope": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Telescope"
+          },
+          "unguided_seconds": {
+            "title": "Unguided Seconds",
+            "type": "number"
+          }
+        },
+        "required": [
+          "id",
+          "started_at",
+          "duration_s",
+          "frame_count",
+          "equipment_profile",
+          "drop_count",
+          "max_drop_run",
+          "unguided_seconds",
+          "dither_count",
+          "settle_count",
+          "settle_failed_count",
+          "gated"
+        ],
+        "title": "Phd2SessionSummary",
+        "type": "object"
+      },
       "RebuildStatusResponse": {
         "properties": {
           "completed_at": {
@@ -5731,6 +6424,25 @@
         "title": "ScanAcceptResponse",
         "type": "object"
       },
+      "ScanFailedFile": {
+        "description": "One entry of the per-scan failed-file list.\n\nKey names must match what ``increment_failed_sync`` pushes onto\n``SCAN_FAILED_KEY`` (app/services/scan_state.py):\n``json.dumps({\"file\": file_path, \"error\": error})``.",
+        "properties": {
+          "error": {
+            "title": "Error",
+            "type": "string"
+          },
+          "file": {
+            "title": "File",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file",
+          "error"
+        ],
+        "title": "ScanFailedFile",
+        "type": "object"
+      },
       "ScanFiltersIn": {
         "properties": {
           "exclude_paths": {
@@ -6058,7 +6770,7 @@
             "anyOf": [
               {
                 "items": {
-                  "type": "string"
+                  "$ref": "#/components/schemas/ScanFailedFile"
                 },
                 "type": "array"
               },
@@ -6082,6 +6794,37 @@
             "default": 0.0,
             "title": "Percent",
             "type": "number"
+          },
+          "phd2_failed": {
+            "default": 0,
+            "title": "Phd2 Failed",
+            "type": "integer"
+          },
+          "phd2_found": {
+            "default": 0,
+            "title": "Phd2 Found",
+            "type": "integer"
+          },
+          "phd2_ingested": {
+            "default": 0,
+            "title": "Phd2 Ingested",
+            "type": "integer"
+          },
+          "phd2_state": {
+            "default": "",
+            "title": "Phd2 State",
+            "type": "string"
+          },
+          "phd2_state_at": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phd2 State At"
           },
           "removed": {
             "default": 0,
@@ -6539,6 +7282,16 @@
               }
             ],
             "title": "Offset"
+          },
+          "phd2": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Phd2NightSummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "raw_reference_header": {
             "anyOf": [
@@ -7104,6 +7857,7 @@
         "type": "object"
       },
       "StatusResponse": {
+        "description": "Generic single-field status response, e.g. {\"status\": \"ok\"}.",
         "properties": {
           "status": {
             "title": "Status",
@@ -8091,6 +8845,20 @@
         "title": "TargetSearchResultFuzzy",
         "type": "object"
       },
+      "TargetStatusResponse": {
+        "description": "Single-field status response for the target and merge mutation routes.\n\nNamed for its module rather than sharing the generic name in\nschemas/common.py; see MosaicStatusResponse for why.",
+        "properties": {
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "TargetStatusResponse",
+        "type": "object"
+      },
       "TaskStatusResponse": {
         "properties": {
           "result": {
@@ -8944,33 +9712,6 @@
         ],
         "title": "WbppSessionPreview",
         "type": "object"
-      },
-      "app__schemas__common__StatusResponse": {
-        "description": "Generic single-field status response, e.g. {\"status\": \"ok\"}.",
-        "properties": {
-          "status": {
-            "title": "Status",
-            "type": "string"
-          }
-        },
-        "required": [
-          "status"
-        ],
-        "title": "StatusResponse",
-        "type": "object"
-      },
-      "app__schemas__mosaic__StatusResponse": {
-        "properties": {
-          "status": {
-            "title": "Status",
-            "type": "string"
-          }
-        },
-        "required": [
-          "status"
-        ],
-        "title": "StatusResponse",
-        "type": "object"
       }
     }
   },
@@ -9008,7 +9749,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/app__schemas__common__StatusResponse"
+                  "$ref": "#/components/schemas/StatusResponse"
                 }
               }
             },
@@ -10194,7 +10935,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/app__schemas__common__StatusResponse"
+                  "$ref": "#/components/schemas/StatusResponse"
                 }
               }
             },
@@ -10302,7 +11043,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/app__schemas__common__StatusResponse"
+                  "$ref": "#/components/schemas/StatusResponse"
                 }
               }
             },
@@ -10351,7 +11092,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/app__schemas__common__StatusResponse"
+                  "$ref": "#/components/schemas/StatusResponse"
                 }
               }
             },
@@ -11265,7 +12006,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/app__schemas__common__StatusResponse"
+                  "$ref": "#/components/schemas/StatusResponse"
                 }
               }
             },
@@ -11325,7 +12066,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/app__schemas__common__StatusResponse"
+                  "$ref": "#/components/schemas/StatusResponse"
                 }
               }
             },
@@ -11385,7 +12126,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/app__schemas__common__StatusResponse"
+                  "$ref": "#/components/schemas/StatusResponse"
                 }
               }
             },
@@ -11618,7 +12359,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/app__schemas__common__StatusResponse"
+                  "$ref": "#/components/schemas/StatusResponse"
                 }
               }
             },
@@ -12307,7 +13048,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/app__schemas__mosaic__StatusResponse"
+                  "$ref": "#/components/schemas/MosaicStatusResponse"
                 }
               }
             },
@@ -12366,7 +13107,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/app__schemas__mosaic__StatusResponse"
+                  "$ref": "#/components/schemas/MosaicStatusResponse"
                 }
               }
             },
@@ -12490,7 +13231,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/app__schemas__mosaic__StatusResponse"
+                  "$ref": "#/components/schemas/MosaicStatusResponse"
                 }
               }
             },
@@ -12848,7 +13589,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/app__schemas__mosaic__StatusResponse"
+                  "$ref": "#/components/schemas/MosaicStatusResponse"
                 }
               }
             },
@@ -12996,7 +13737,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/app__schemas__mosaic__StatusResponse"
+                  "$ref": "#/components/schemas/MosaicStatusResponse"
                 }
               }
             },
@@ -13093,6 +13834,196 @@
         "summary": "Get Panel Thumbnail Image",
         "tags": [
           "mosaics"
+        ]
+      }
+    },
+    "/api/phd2/profiles": {
+      "get": {
+        "description": "Every equipment profile seen in the ingested logs, with mapping status.\n\nDrives the settings screen where profiles are mapped onto telescope names.\nThe helper metadata (guide camera, focal length, pixel scale) is a\nper-column maximum across the profile's sessions, not one representative\nsession: the columns are near-constant for a given profile, and an\naggregate needs no correlated subquery to pick a row.",
+        "operationId": "list_phd2_profiles_api_phd2_profiles_get",
+        "parameters": [
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Phd2ProfilesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Phd2 Profiles",
+        "tags": [
+          "phd2"
+        ]
+      }
+    },
+    "/api/phd2/sessions": {
+      "get": {
+        "description": "Guiding sessions for one night, optionally narrowed to one rig.\n\nSessions are never merged: two PHD2 instances on two rigs produce\noverlapping wall-clock sessions with different pixel scales, and a caller\nthat wants one rig says so.\n\n`telescope` is the value the session detail reports under\n`equipment.telescope`, and is resolved against the equipment alias map\nbefore matching: the profile map holds whichever name was on offer when\nthe profile was mapped, which is not necessarily the canonical one, and\ngrouping equipment later never rewrites it.\n\nNarrowing uses the same rule as the session-detail night summary: rows\nmapped to this telescope, or, when the night's sole profile is unmapped,\nthat profile's rows. A profile mapped to a different rig is never returned\nhere; the user already said where it belongs. A strict equality filter\ndisagreed with that rule for every install whose profile map is still\nempty: the summary strip rendered through the fallback while this route\nreturned nothing, so the card showed guiding numbers above an empty graph.",
+        "operationId": "list_phd2_sessions_api_phd2_sessions_get",
+        "parameters": [
+          {
+            "description": "Imaging night, YYYY-MM-DD",
+            "in": "query",
+            "name": "session_date",
+            "required": true,
+            "schema": {
+              "description": "Imaging night, YYYY-MM-DD",
+              "format": "date",
+              "title": "Session Date",
+              "type": "string"
+            }
+          },
+          {
+            "description": "images.telescope value",
+            "in": "query",
+            "name": "telescope",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "images.telescope value",
+              "title": "Telescope"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Phd2SessionListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Phd2 Sessions",
+        "tags": [
+          "phd2"
+        ]
+      }
+    },
+    "/api/phd2/sessions/{id}/frames": {
+      "get": {
+        "description": "The full frame series and event markers for one guiding session.\n\nPixels are converted to arcsec here using the session's own pixel scale.\nFrames are stored in pixels precisely so a corrected pixel scale changes\nthis response without touching a single stored row.",
+        "operationId": "get_phd2_session_frames_api_phd2_sessions__id__frames_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Phd2FramesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Phd2 Session Frames",
+        "tags": [
+          "phd2"
         ]
       }
     },
@@ -16085,7 +17016,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/StatusResponse"
+                  "$ref": "#/components/schemas/TargetStatusResponse"
                 }
               }
             },
@@ -16209,7 +17140,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/StatusResponse"
+                  "$ref": "#/components/schemas/TargetStatusResponse"
                 }
               }
             },
@@ -16269,7 +17200,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/StatusResponse"
+                  "$ref": "#/components/schemas/TargetStatusResponse"
                 }
               }
             },
@@ -16926,7 +17857,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/StatusResponse"
+                  "$ref": "#/components/schemas/TargetStatusResponse"
                 }
               }
             },
@@ -17129,7 +18060,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/StatusResponse"
+                  "$ref": "#/components/schemas/TargetStatusResponse"
                 }
               }
             },
@@ -17189,7 +18120,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/StatusResponse"
+                  "$ref": "#/components/schemas/TargetStatusResponse"
                 }
               }
             },

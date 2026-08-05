@@ -119,11 +119,15 @@
   --color-filter-r: var(--color-filter-r);
   --color-filter-g: var(--color-filter-g);
   --color-filter-b: var(--color-filter-b);
-  /* Text size tiers - rem-based so they scale with the root font-size preset */
-  --font-size-micro: 0.5rem;    /* 7px  at 14px root */
-  --font-size-tiny: 0.643rem;   /* 9px  at 14px root */
-  --font-size-caption: 0.714rem; /* 10px at 14px root */
-  --font-size-label: 0.786rem;  /* 11px at 14px root */
+  /* Text size tiers - rem-based so they scale with the root font-size preset.
+     The namespace has to be --text-*: that is the prefix Tailwind v4 reads for
+     font-size utilities. Declared as --font-size-* these emitted no CSS at
+     all, so text-micro, text-tiny, text-caption and text-label were inert and
+     every element wearing one rendered at the inherited size. */
+  --text-micro: 0.5rem;    /* 7px  at 14px root */
+  --text-tiny: 0.643rem;   /* 9px  at 14px root */
+  --text-caption: 0.714rem; /* 10px at 14px root */
+  --text-label: 0.786rem;  /* 11px at 14px root */
   --shadow-sm: var(--shadow-sm);
   --shadow-md: var(--shadow-md);
   --shadow-lg: var(--shadow-lg);

@@ -94,19 +94,13 @@ def _bootstrap_real_tasks(modname="app.worker.tasks_scan"):
     targets whichever module actually owns the function under test (a
     patch.object() on the app.worker.tasks facade would not affect a function
     whose __globals__ point at a different, real module).
+
+    See conftest.bootstrap_worker_module for why the mocked engine must not be
+    left behind in sys.modules.
     """
-    import sys as _sys
-    mod = _sys.modules.get(modname)
-    if mod is not None and not isinstance(mod, MagicMock):
-        return mod
-    _sys.modules.pop(modname, None)
-    mock_engine = MagicMock()
-    mock_engine.connect.return_value.__enter__ = MagicMock(return_value=mock_engine)
-    mock_engine.connect.return_value.__exit__ = MagicMock(return_value=False)
-    with patch("sqlalchemy.create_engine", return_value=mock_engine):
-        import importlib
-        mod = importlib.import_module(modname)
-    return mod
+    from tests.conftest import bootstrap_worker_module
+
+    return bootstrap_worker_module(modname)
 
 
 def test_enrichment_query_failed_emits_after_rebuild():

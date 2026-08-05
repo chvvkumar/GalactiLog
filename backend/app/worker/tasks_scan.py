@@ -32,6 +32,7 @@ from app.worker.tasks_common import _sync_engine, _redis, _activity_session, _in
 from app.worker.tasks_thumbnails import generate_reference_thumbnails
 from app.worker.tasks_target_dedup import detect_duplicate_targets
 from app.worker.tasks_sessions import backfill_dark_hours
+from app.worker.tasks_phd2 import correlate_phd2_images, scan_phd2_logs
 from app.services.scan_state import (
     increment_completed_sync, increment_failed_sync, increment_csv_enriched_sync,
     increment_skipped_calibration_sync,
@@ -40,6 +41,7 @@ from app.services.scan_state import (
     check_complete_sync,
     add_skipped_path_sync, get_skipped_paths_sync, clear_skipped_paths_sync,
     rebuild_skipped_paths_sync,
+    reset_phd2_counts_sync, set_phd2_state_sync, PHD2_STATE_IDLE,
 )
 from app.services.activity import emit_sync as _emit_activity_sync
 
@@ -67,6 +69,60 @@ _imaging_night_fallback_warned = False
 _general_settings_cache: "GeneralSettings | None" = None
 _general_settings_cache_ts: float = 0.0
 _GENERAL_SETTINGS_CACHE_TTL = 30.0
+
+
+def _dispatch_phd2_scan(
+    paths: list[str],
+    parent_activity_id=None,
+    force_orphan_cleanup: bool = False,
+) -> None:
+    """Queue the PHD2 guide-log pass at the tail of a scan, best effort.
+
+    The guide-log pass is auxiliary to the image scan: by the time it is
+    dispatched the ingest tasks are already queued and the orphan cleanup is
+    already committed, so a broker problem at this one call must not raise out
+    of run_scan and mark an otherwise-complete scan as failed. The candidates
+    are rediscovered by the next walk either way.
+
+    `force_orphan_cleanup` is forwarded so an admin who asked to reflect a
+    deliberate bulk deletion gets it applied to guide logs as well as to
+    images. Without it the guide-log side has no route past its own
+    missing-share guard, and a genuinely emptied log directory could never be
+    cleared from the catalog.
+
+    The scan-state counters for this pass are zeroed here rather than in the
+    task, because the task only starts running a minute later: until then
+    scan:state would still be publishing the previous scan's guide-log totals
+    next to a state of "complete", and a caller polling for completeness would
+    read them as this run's.
+
+    The candidate count goes with them, for the same reason and with the
+    opposite sign: the pass is claimed here but does not start for another 50
+    seconds, so the denominator the task publishes when it starts arrives long
+    after the job row is on screen. The number is already in hand here, so the
+    row can carry "0 of N logs" from its first render rather than showing an
+    unlabelled bar for the whole countdown.
+    """
+    reset_phd2_counts_sync(_redis, len(paths))
+    try:
+        scan_phd2_logs.apply_async(
+            countdown=50,
+            kwargs={
+                "paths": paths,
+                "parent_activity_id": parent_activity_id,
+                "force_orphan_cleanup": force_orphan_cleanup,
+            },
+        )
+    except Exception:
+        # Nothing will run, so nothing may claim to be in flight: leaving the
+        # flag set would strand a poller waiting on a task that was never
+        # queued.
+        set_phd2_state_sync(_redis, PHD2_STATE_IDLE)
+        logger.warning(
+            "run_scan: could not dispatch the PHD2 guide-log pass (%d candidates); "
+            "they will be picked up by the next scan",
+            len(paths), exc_info=True,
+        )
 
 
 def _get_cached_general_settings() -> GeneralSettings:
@@ -155,6 +211,15 @@ def run_scan(self, include_calibration: bool = True, force_orphan_cleanup: bool 
         # symlinks resolving two roots onto the same tree).
         queued_paths: set[str] = set()
 
+        # PHD2 guide logs discovered by the same walk. Collected rather than
+        # dispatched per file: the whole set is needed at once so the ingest
+        # task can tell a deleted log from one that simply moved out of this
+        # run's roots.
+        phd2_paths: list[str] = []
+
+        def _queue_phd2_file(path: Path) -> None:
+            phd2_paths.append(str(path))
+
         def _queue_file(path: Path) -> None:
             key = str(path)
             if key in queued_paths:
@@ -197,6 +262,7 @@ def run_scan(self, include_calibration: bool = True, force_orphan_cleanup: bool 
                 on_changed_file=_queue_changed_file,
                 filter_config=filter_config,
                 fits_root=fits_root,
+                on_phd2_file=_queue_phd2_file,
             )
             new_files.extend(nf)
             changed_files.extend(cf)
@@ -247,6 +313,15 @@ def run_scan(self, include_calibration: bool = True, force_orphan_cleanup: bool 
 
         total_queued = len(new_files) + len(changed_files)
         if not total_queued:
+            # Zero the guide-log counters, publish this pass's candidate count
+            # and flag the pass as queued BEFORE the scan is published as
+            # complete. scan:state survives a
+            # finished scan, so between set_idle_sync and this reset a poller
+            # could read `state == "complete"` next to the previous run's
+            # phd2_* totals and take them for this run's. The dispatch itself
+            # still happens after the activity row exists, because it wants
+            # that row as its parent.
+            reset_phd2_counts_sync(_redis, len(phd2_paths))
             set_idle_sync(_redis)
             cataloged = len(known_paths) - removed
             msg = f"Scan complete: no new files found ({cataloged} already cataloged)"
@@ -262,7 +337,23 @@ def run_scan(self, include_calibration: bool = True, force_orphan_cleanup: bool 
             generate_reference_thumbnails.apply_async(countdown=20, kwargs={"parent_activity_id": scan_activity_id})
             detect_duplicate_targets.apply_async(countdown=30, kwargs={"parent_activity_id": scan_activity_id})
             backfill_dark_hours.apply_async(countdown=45, kwargs={"parent_activity_id": scan_activity_id})
-            return {"status": "complete", "new_files_queued": 0, "already_known": cataloged, "removed": removed}
+            _dispatch_phd2_scan(phd2_paths, scan_activity_id, force_orphan_cleanup)
+            # Incremental fill for frames ingested by an earlier scan whose
+            # guide logs only arrived later. The countdown clears the guide-log
+            # pass above (dispatched at 50 s), which re-derives the nights it
+            # writes; running before it would do the same work twice and the
+            # second pass would find nothing.
+            try:
+                correlate_phd2_images.apply_async(
+                    countdown=120,
+                    kwargs={"parent_activity_id": scan_activity_id},
+                )
+            except Exception:
+                logger.warning(
+                    "run_scan: could not dispatch the guiding correlation pass",
+                    exc_info=True,
+                )
+            return {"status": "complete", "new_files_queued": 0, "already_known": cataloged, "removed": removed, "phd2_found": len(phd2_paths)}
 
         # Transition to ingesting with final total - ingest tasks are already running
         set_ingesting_sync(_redis, total=total_queued, removed=removed, new_files=len(new_files), changed_files=len(changed_files))
@@ -271,6 +362,12 @@ def run_scan(self, include_calibration: bool = True, force_orphan_cleanup: bool 
 
         # Post-scan tasks (smart_rebuild, detect_mosaic, detect_duplicates, backfill_dark_hours,
         # generate_reference_thumbnails) are dispatched from check_complete_sync with parent_activity_id.
+
+        # Dispatched from here rather than from check_complete_sync's post-scan
+        # cascade because the candidate path list only exists in this scope;
+        # the PHD2 pass is independent of image ingest and need not wait for it.
+        _dispatch_phd2_scan(phd2_paths, force_orphan_cleanup=force_orphan_cleanup)
+
         _invalidate_stats_cache()
 
         return {
@@ -279,6 +376,7 @@ def run_scan(self, include_calibration: bool = True, force_orphan_cleanup: bool 
             "changed_files_queued": len(changed_files),
             "already_known": len(known_paths),
             "removed": removed,
+            "phd2_found": len(phd2_paths),
         }
     finally:
         _redis.delete(SCAN_RUN_LOCK)
@@ -485,6 +583,7 @@ def _do_ingest(fits_path: str, include_calibration: bool = True) -> dict:
                 guiding_rms_arcsec=meta.get("guiding_rms_arcsec"),
                 guiding_rms_ra_arcsec=meta.get("guiding_rms_ra_arcsec"),
                 guiding_rms_dec_arcsec=meta.get("guiding_rms_dec_arcsec"),
+                guiding_rms_source=meta.get("guiding_rms_source"),
                 adu_stdev=meta.get("adu_stdev"),
                 adu_mean=meta.get("adu_mean"),
                 adu_median=meta.get("adu_median"),

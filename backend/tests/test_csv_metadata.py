@@ -7,6 +7,7 @@ import pytest
 from app.services import csv_metadata
 from app.services.csv_metadata import (
     get_csv_metrics,
+    merge_csv_metrics,
     parse_image_metadata_csv,
     parse_weather_csv,
 )
@@ -187,6 +188,61 @@ class TestGetCsvMetrics:
         fits_path = tmp_path / "no_such_file.fits"
         result = get_csv_metrics(fits_path)
         assert result == {}
+
+
+class TestMergeCsvMetricsGuidingSource:
+    """Guiding RMS provenance is decided by the merge, like eccentricity's.
+
+    Two writers can produce a frame's guiding RMS: the N.I.N.A. CSV and the
+    PHD2 guide log. The one-shot history backfill can only label rows that
+    exist when it runs, so the ingest path has to label its own.
+    """
+
+    GUIDING_KEYS = (
+        "guiding_rms_arcsec",
+        "guiding_rms_ra_arcsec",
+        "guiding_rms_dec_arcsec",
+    )
+
+    def test_csv_guiding_values_stamp_csv_source(self):
+        metadata = {}
+        merge_csv_metrics(metadata, {
+            "guiding_rms_arcsec": 0.78,
+            "guiding_rms_ra_arcsec": 0.52,
+            "guiding_rms_dec_arcsec": 0.58,
+        })
+        assert metadata["guiding_rms_arcsec"] == 0.78
+        assert metadata["guiding_rms_source"] == "csv"
+
+    def test_partial_guiding_values_still_stamp_csv_source(self):
+        # A CSV that reports only the RA axis still sourced what it wrote.
+        metadata = {}
+        merge_csv_metrics(metadata, {
+            "guiding_rms_arcsec": None,
+            "guiding_rms_ra_arcsec": 0.52,
+            "guiding_rms_dec_arcsec": None,
+        })
+        assert metadata["guiding_rms_ra_arcsec"] == 0.52
+        assert metadata["guiding_rms_source"] == "csv"
+
+    def test_csv_without_guiding_columns_does_not_stamp(self):
+        metadata = {"median_hfr": 2.5}
+        merge_csv_metrics(metadata, {"median_hfr": 1.8, "detected_stars": 312})
+        assert "guiding_rms_source" not in metadata
+
+    def test_blank_guiding_cells_do_not_stamp(self):
+        metadata = {}
+        merge_csv_metrics(metadata, {key: None for key in self.GUIDING_KEYS})
+        assert "guiding_rms_source" not in metadata
+
+    def test_blank_csv_leaves_existing_value_and_its_source(self):
+        # A guide-log-sourced value with blank CSV cells: neither the number
+        # nor its label may be touched, or the frame would claim a CSV
+        # measurement it never had.
+        metadata = {"guiding_rms_arcsec": 0.61, "guiding_rms_source": "phd2"}
+        merge_csv_metrics(metadata, {key: None for key in self.GUIDING_KEYS})
+        assert metadata["guiding_rms_arcsec"] == 0.61
+        assert metadata["guiding_rms_source"] == "phd2"
 
 
 class TestFilenameExtraction:
