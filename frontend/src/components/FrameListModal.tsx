@@ -101,7 +101,9 @@ const FrameListModal: Component<Props> = (props) => {
   // survive a semantics change it was not made under.
   const [overrides, setOverrides] = createSignal<Record<string, boolean>>({});
   const [format, setFormat] = createSignal<FrameListFormat>("explorer");
-  const [baseFolder, setBaseFolder] = createSignal(general()?.frame_list_base_folder ?? "");
+  const [baseFolder, setBaseFolder] = createSignal(
+    general()?.frame_list_base_folder ?? general()?.wbpp_library_root ?? "",
+  );
 
   // Set by the change handlers only, never by hydration. Decides who wins a
   // rig transition: the user's in-session edits, or the rig's stored state.
@@ -423,20 +425,30 @@ const FrameListModal: Component<Props> = (props) => {
             value={format()}
             onChange={(e) => setFormat(e.currentTarget.value as FrameListFormat)}
           >
-            <option value="explorer">Explorer search string</option>
-            <option value="names">Names, one per line</option>
-            <option value="script">Move script</option>
+            <option value="explorer">Windows Explorer search (paste into search box)</option>
+            <option value="names">File name list (one per line)</option>
+            <option value="script">
+              {scriptOs() === "windows" ? "PowerShell" : "Bash"} script (move to _rejected)
+            </option>
           </select>
-          <Show when={format() === "script"}>
+          <div
+            class="flex-1 min-w-48"
+            title={
+              format() !== "script"
+                ? "Base folder is used only by the move script format"
+                : undefined
+            }
+          >
             <input
               type="text"
               aria-label="Base folder"
-              class={`${FIELD_CLASS} font-mono flex-1 min-w-48`}
+              class={`${FIELD_CLASS} font-mono w-full disabled:opacity-50`}
               placeholder="D:\Staging\M31 or /mnt/staging"
+              disabled={format() !== "script"}
               value={baseFolder()}
               onInput={(e) => setBaseFolder(e.currentTarget.value)}
             />
-          </Show>
+          </div>
           <div class="ml-auto shrink-0">
             <Button variant="primary" size="sm" disabled={copyDisabled()} onClick={() => void doCopy()}>
               {copyLabel()}

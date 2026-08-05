@@ -216,6 +216,8 @@ describe("FrameListModal copy", () => {
   });
 
   it("disables Copy in script format while the base folder is blank", async () => {
+    // No stored base folder AND no library root, so the input seeds blank.
+    general = { frame_list_base_folder: null, wbpp_default_os: null, wbpp_library_root: null };
     renderModal();
     fireEvent.change(formatSelect(), { target: { value: "script" } });
     await flush();
@@ -231,5 +233,35 @@ describe("FrameListModal copy", () => {
     fireEvent.input(base, { target: { value: "D:\\Staging\\M31" } });
     await flush();
     expect(copyButton().disabled).toBe(false);
+  });
+});
+
+describe("FrameListModal base folder row", () => {
+  const baseInput = (): HTMLInputElement =>
+    document.body.querySelector('input[aria-label="Base folder"]') as HTMLInputElement;
+
+  it("shows a disabled, explained base folder input in explorer format", () => {
+    renderModal();
+    const base = baseInput();
+    expect(base).not.toBe(null);
+    expect(base.disabled).toBe(true);
+    expect(base.parentElement?.getAttribute("title")).toBe(
+      "Base folder is used only by the move script format",
+    );
+  });
+
+  it("enables the base folder input in script format", async () => {
+    renderModal();
+    fireEvent.change(formatSelect(), { target: { value: "script" } });
+    await flush();
+    const base = baseInput();
+    expect(base.disabled).toBe(false);
+    expect(base.parentElement?.getAttribute("title")).toBe(null);
+  });
+
+  it("seeds a never-set base folder from the WBPP library root", () => {
+    general = { frame_list_base_folder: null, wbpp_default_os: null, wbpp_library_root: "Z:\\Astro" };
+    renderModal();
+    expect(baseInput().value).toBe("Z:\\Astro");
   });
 });
