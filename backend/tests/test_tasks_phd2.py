@@ -812,6 +812,9 @@ def test_publishing_the_counters_clears_the_flag_and_its_timestamp_together():
         "phd2_found": 25,
         "phd2_ingested": 19,
         "phd2_failed": 0,
+        # A finished pass has checked everything it found; the final write is
+        # what settles the batched checked counter at the exact total.
+        "phd2_checked": 25,
         "phd2_state": "",
         "phd2_state_at": "",
     })]
@@ -863,6 +866,32 @@ def test_per_file_progress_increments_rather_than_overwrites():
         (SCAN_KEY, "phd2_ingested", 1),
         (SCAN_KEY, "phd2_failed", 1),
     ]
+
+
+def test_checked_batches_increment_and_renew_the_timestamp():
+    """The scan screen's numerator counts files LOOKED AT, not files ingested:
+    a routine rescan short-circuits nearly everything as unchanged, and an
+    ingested+failed numerator sat at 0 of N for the whole pass. `checked` is
+    flushed in caller-side batches, is real progress (a stat walk advancing),
+    and so renews phd2_state_at like the other counters."""
+    from app.services.scan_state import SCAN_KEY, increment_phd2_progress_sync
+
+    redis = _RecordingRedis()
+    increment_phd2_progress_sync(redis, checked=25)
+    increment_phd2_progress_sync(redis, ingested=1, checked=25)
+    assert redis.increments == [
+        (SCAN_KEY, "phd2_checked", 25),
+        (SCAN_KEY, "phd2_ingested", 1),
+        (SCAN_KEY, "phd2_checked", 25),
+    ]
+    assert len(redis.writes) == 2  # one phd2_state_at renewal per flush
+
+    # Nothing to report still writes nothing: a no-op call must not keep a
+    # genuinely hung pass looking alive.
+    redis2 = _RecordingRedis()
+    increment_phd2_progress_sync(redis2, checked=0)
+    assert redis2.increments == []
+    assert redis2.writes == []
 
 
 def test_progress_renews_the_state_timestamp():

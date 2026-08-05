@@ -458,6 +458,11 @@ export interface ScanStatus {
   phd2_found?: number;
   phd2_ingested?: number;
   phd2_failed?: number;
+  // Files looked at so far, whatever the verdict (ingested, unchanged,
+  // empty, failed). The progress numerator; ingested+failed is only the
+  // fallback for a backend that predates it, and undercounts on a rescan
+  // where nearly every log short-circuits as unchanged.
+  phd2_checked?: number;
   // Epoch seconds, same unit as started_at: the LAST guide-log state
   // transition. Written when the pass is marked pending at dispatch,
   // rewritten when it reaches running, cleared in the same write that clears

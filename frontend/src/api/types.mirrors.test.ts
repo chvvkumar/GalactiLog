@@ -4,18 +4,19 @@ import type { FrameRecord, ScanStatus } from "./types";
 
 type GeneratedScanState = components["schemas"]["ScanStateResponse"];
 
-// Compile-time guard: the four PHD2 counters this mirror declares must be the
-// four the generated ScanStateResponse actually reports. If the backend
+// Compile-time guard: the PHD2 counters this mirror declares must be the
+// ones the generated ScanStateResponse actually reports. If the backend
 // renames one, this object stops compiling and tsc names the field, instead
 // of the UI silently reading undefined forever.
 const generatedPhd2Fields: Pick<
   GeneratedScanState,
-  "phd2_state" | "phd2_found" | "phd2_ingested" | "phd2_failed"
+  "phd2_state" | "phd2_found" | "phd2_ingested" | "phd2_failed" | "phd2_checked"
 > = {
   phd2_state: "running",
   phd2_found: 3,
   phd2_ingested: 2,
   phd2_failed: 1,
+  phd2_checked: 3,
 };
 
 describe("ScanStatus mirror", () => {
@@ -37,6 +38,7 @@ describe("ScanStatus mirror", () => {
       phd2_found: 3,
       phd2_ingested: 2,
       phd2_failed: 1,
+      phd2_checked: 3,
       phd2_state_at: 1_753_800_000,
     };
 
@@ -44,6 +46,7 @@ describe("ScanStatus mirror", () => {
     expect(status.phd2_found).toBe(generatedPhd2Fields.phd2_found);
     expect(status.phd2_ingested).toBe(2);
     expect(status.phd2_failed).toBe(1);
+    expect(status.phd2_checked).toBe(generatedPhd2Fields.phd2_checked);
     expect(status.phd2_state_at).toBe(1_753_800_000);
   });
 

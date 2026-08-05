@@ -947,6 +947,15 @@ def _run_phd2_pass(
     if scanned:
         set_phd2_found_sync(_redis, found)
 
+    # The scan screen's numerator counts files LOOKED AT, not files ingested:
+    # on a routine rescan nearly everything short-circuits as unchanged, and a
+    # numerator of ingested+failed reads "0 of 179" for the whole pass and
+    # then jumps to done. Flushed in batches because a Redis round trip per
+    # unchanged file is the overhead increment_phd2_progress_sync's contract
+    # promises to avoid; the end-of-pass counts write settles the remainder.
+    checked_batch = 0
+    CHECKED_FLUSH_EVERY = 25
+
     with Session(_sync_engine) as db:
         for path in candidates:
             # Collected per file and kept only when the file went in whole. A
@@ -954,6 +963,10 @@ def _run_phd2_pass(
             # pointing from a log the catalog does not hold is not evidence
             # about anything the user can see.
             file_pointing: list[PointingSample] = []
+            checked_batch += 1
+            flush = 0
+            if checked_batch >= CHECKED_FLUSH_EVERY:
+                flush, checked_batch = checked_batch, 0
             try:
                 result = ingest_phd2_log(
                     db, path, general, tz_name=tz_name, force=force,
@@ -964,20 +977,25 @@ def _run_phd2_pass(
                 db.rollback()
                 failed += 1
                 if scanned:
-                    increment_phd2_progress_sync(_redis, failed=1)
+                    increment_phd2_progress_sync(_redis, failed=1, checked=flush)
                 continue
             if result == "ok":
                 ingested += 1
                 ingested_paths.append(path)
                 pointing.extend(file_pointing)
                 if scanned:
-                    increment_phd2_progress_sync(_redis, ingested=1)
+                    increment_phd2_progress_sync(_redis, ingested=1, checked=flush)
             elif result == "empty":
                 empty += 1
+                if scanned and flush:
+                    increment_phd2_progress_sync(_redis, checked=flush)
+            elif result == "unchanged":
+                if scanned and flush:
+                    increment_phd2_progress_sync(_redis, checked=flush)
             elif result == "failed":
                 failed += 1
                 if scanned:
-                    increment_phd2_progress_sync(_redis, failed=1)
+                    increment_phd2_progress_sync(_redis, failed=1, checked=flush)
 
         # The map may have changed since the last scan; re-applying it here
         # keeps existing rows converged without a second task.

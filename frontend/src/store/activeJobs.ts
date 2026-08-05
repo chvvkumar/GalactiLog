@@ -15,14 +15,18 @@ export function scanStatusToJob(
   if (!scanActive && !phd2Active) return null;
 
   // phd2_found is published once the candidate list is known, and
-  // phd2_ingested / phd2_failed increment per file as the pass runs, with the
-  // end-of-pass write authoritative. A counted label is therefore the expected
-  // steady state. The countless branch still earns its keep: it covers a
-  // status snapshot from a backend that predates the counters, and the window
-  // between dispatch and the first published count, where printing "0 of 0"
-  // would be worse than saying nothing about totals.
+  // phd2_checked advances (in batches) as the pass looks at each file, with
+  // the end-of-pass write authoritative. A counted label is therefore the
+  // expected steady state. ingested+failed is the fallback for a backend
+  // that predates phd2_checked; it undercounts on a routine rescan, where
+  // nearly every log short-circuits as unchanged and the counter used to
+  // sit at 0 of N until the pass finished. The countless branch still earns
+  // its keep: it covers a status snapshot from a backend that predates the
+  // counters, and the window between dispatch and the first published count,
+  // where printing "0 of 0" would be worse than saying nothing about totals.
   const phd2Total = s.phd2_found ?? 0;
-  const phd2Done = (s.phd2_ingested ?? 0) + (s.phd2_failed ?? 0);
+  const phd2Done =
+    s.phd2_checked ?? (s.phd2_ingested ?? 0) + (s.phd2_failed ?? 0);
 
   if (!scanActive) {
     // Elapsed time for this row must count up from when the pass began, so

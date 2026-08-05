@@ -70,6 +70,11 @@ class ScanStateResponse(BaseModel):
     phd2_found: int = 0
     phd2_ingested: int = 0
     phd2_failed: int = 0
+    # Files the pass has looked at so far, whatever the verdict (ingested,
+    # unchanged, empty, failed). The scan screen's numerator: most files in a
+    # rescan are unchanged, so counting only ingested+failed read "0 of N"
+    # for the whole pass.
+    phd2_checked: int = 0
     # "" | pending | running. The guide-log pass outlives the image scan, so
     # ``state == "complete"`` alone does not mean the scan is finished. A
     # caller that needs everything done waits for this to be "" as well; the

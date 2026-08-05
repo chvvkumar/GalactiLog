@@ -4742,6 +4742,11 @@ export interface components {
              */
             percent: number;
             /**
+             * Phd2 Checked
+             * @default 0
+             */
+            phd2_checked: number;
+            /**
              * Phd2 Failed
              * @default 0
              */
