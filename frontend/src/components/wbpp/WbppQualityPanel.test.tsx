@@ -304,6 +304,24 @@ describe("WbppQualityPanel stat pill", () => {
     expect(p.querySelector(".text-theme-success")!.textContent).toBe("3");
     expect(p.querySelector(".text-theme-error")!.textContent).toBe("0");
   });
+
+  it("does not render the tally when the host provides isIncluded (its own counts line owns the numbers)", () => {
+    const { container } = setup({
+      isIncluded: () => true,
+      onToggleInclude: () => {},
+    });
+    expect(pill(container)).toBe(null);
+    expect(container.textContent).not.toContain("kept");
+    expect(container.textContent).not.toContain("skipped");
+  });
+
+  it("keeps the tally when isIncluded is absent (the WBPP export path)", () => {
+    const { container } = setup();
+    const p = pill(container);
+    expect(p).not.toBe(null);
+    expect(p.textContent).toContain("kept");
+    expect(p.textContent).toContain("skipped");
+  });
 });
 
 describe("WbppQualityPanel baseline control", () => {

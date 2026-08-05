@@ -389,19 +389,28 @@ export default function WbppQualityPanel(props: WbppQualityPanelProps): JSX.Elem
               }}
             </For>
 
-            {/* Right-aligned pair: live tally, then the baseline control. */}
-            <span class="ml-auto inline-flex items-baseline gap-1.5 bg-theme-input border border-theme-border rounded-full px-3 py-0.5 text-tiny text-theme-text-tertiary whitespace-nowrap">
-              <span class="tabular-nums font-semibold text-theme-success">{keptCount()}</span>
-              <span>kept</span>
-              <span class="text-theme-border">/</span>
-              <span class="tabular-nums font-semibold text-theme-error">{skippedCount()}</span>
-              <span>skipped</span>
-              <span class="text-theme-text-secondary">
-                of <span class="tabular-nums">{props.verdicts.length}</span>
+            {/* Right-aligned pair: live tally, then the baseline control. A
+                host that drives per-row inclusion (isIncluded) renders its own
+                mode-aware counts line, so the kept/skipped tally would show a
+                second, disagreeing set of numbers -- suppress it there and let
+                the baseline control take over the right edge. */}
+            <Show when={props.isIncluded === undefined}>
+              <span class="ml-auto inline-flex items-baseline gap-1.5 bg-theme-input border border-theme-border rounded-full px-3 py-0.5 text-tiny text-theme-text-tertiary whitespace-nowrap">
+                <span class="tabular-nums font-semibold text-theme-success">{keptCount()}</span>
+                <span>kept</span>
+                <span class="text-theme-border">/</span>
+                <span class="tabular-nums font-semibold text-theme-error">{skippedCount()}</span>
+                <span>skipped</span>
+                <span class="text-theme-text-secondary">
+                  of <span class="tabular-nums">{props.verdicts.length}</span>
+                </span>
               </span>
-            </span>
+            </Show>
 
-            <div class="inline-flex border border-theme-border rounded-[var(--radius-sm)] overflow-hidden shrink-0">
+            <div
+              class="inline-flex border border-theme-border rounded-[var(--radius-sm)] overflow-hidden shrink-0"
+              classList={{ "ml-auto": props.isIncluded !== undefined }}
+            >
               <For
                 each={[
                   {

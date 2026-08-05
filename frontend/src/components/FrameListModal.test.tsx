@@ -199,7 +199,10 @@ describe("FrameListModal selection", () => {
     renderModal();
     // 2 fails of 5 frames; the unmeasured frame was never rejected by a gate,
     // so it must not appear in the bad list.
-    expect(bodyText()).toContain("2 of 5 frames selected");
+    expect(bodyText()).toContain("Bad list: 2 of 5 frames");
+    expect(bodyText()).toContain("graded 2 good / 2 bad / 1 unmeasured");
+    expect(bodyText()).not.toContain("overridden");
+    expect(bodyText()).not.toContain("unmeasured, included");
     expect(rowCheckbox("b_fail.fits").checked).toBe(true);
     expect(rowCheckbox("d_fail.fits").checked).toBe(true);
     expect(rowCheckbox("c_unmeasured.fits").checked).toBe(false);
@@ -210,8 +213,10 @@ describe("FrameListModal selection", () => {
     renderModal();
     fireEvent.click(modeButton("Good"));
     await flush();
-    // 2 passes + 1 unmeasured (include unmeasured defaults ON).
-    expect(bodyText()).toContain("3 of 5 frames selected");
+    // 2 passes + 1 unmeasured (include unmeasured defaults ON). The counts
+    // line flags the unmeasured segment as included in the good list.
+    expect(bodyText()).toContain("Good list: 3 of 5 frames");
+    expect(bodyText()).toContain("graded 2 good / 2 bad / 1 unmeasured, included");
     expect(rowCheckbox("c_unmeasured.fits").checked).toBe(true);
 
     const include = document.body.querySelector(
@@ -221,16 +226,21 @@ describe("FrameListModal selection", () => {
     fireEvent.click(include);
     await flush();
 
-    expect(bodyText()).toContain("2 of 5 frames selected");
+    expect(bodyText()).toContain("Good list: 2 of 5 frames");
+    expect(bodyText()).toContain("graded 2 good / 2 bad / 1 unmeasured");
+    expect(bodyText()).not.toContain("unmeasured, included");
     expect(rowCheckbox("c_unmeasured.fits").checked).toBe(false);
   });
 
   it("a row checkbox flips a fail frame out of the bad list and the count decrements", async () => {
     renderModal();
-    expect(bodyText()).toContain("2 of 5 frames selected");
+    expect(bodyText()).toContain("Bad list: 2 of 5 frames");
+    expect(bodyText()).not.toContain("overridden");
     fireEvent.click(rowCheckbox("b_fail.fits"));
     await flush();
-    expect(bodyText()).toContain("1 of 5 frames selected");
+    expect(bodyText()).toContain("Bad list: 1 of 5 frames");
+    // The hand edit is called out next to the graded tally.
+    expect(bodyText()).toContain("(1 overridden)");
     expect(rowCheckbox("b_fail.fits").checked).toBe(false);
   });
 
@@ -238,7 +248,8 @@ describe("FrameListModal selection", () => {
     renderModal();
     fireEvent.click(rowCheckbox("b_fail.fits"));
     await flush();
-    expect(bodyText()).toContain("1 of 5 frames selected");
+    expect(bodyText()).toContain("Bad list: 1 of 5 frames");
+    expect(bodyText()).toContain("(1 overridden)");
 
     // Loosen the gate to 2.5: b_fail (3.0) and d_fail (3.5) still fail, so the
     // computed set is unchanged -- only the override must be discarded.
@@ -248,7 +259,8 @@ describe("FrameListModal selection", () => {
     fireEvent.input(input, { target: { value: "2.5" } });
     await flush();
 
-    expect(bodyText()).toContain("2 of 5 frames selected");
+    expect(bodyText()).toContain("Bad list: 2 of 5 frames");
+    expect(bodyText()).not.toContain("overridden");
     expect(rowCheckbox("b_fail.fits").checked).toBe(true);
   });
 });
@@ -481,7 +493,7 @@ describe("FrameListModal browser move", () => {
     fireEvent.click(rowCheckbox("e_pass.fits"));
     fireEvent.click(rowCheckbox("c_unmeasured.fits"));
     await flush();
-    expect(bodyText()).toContain("0 of 5 frames selected");
+    expect(bodyText()).toContain("Good list: 0 of 5 frames");
     expect(moveButton()!.disabled).toBe(true);
   });
 });

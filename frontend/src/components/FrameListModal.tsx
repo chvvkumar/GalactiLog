@@ -486,15 +486,27 @@ const FrameListModal: Component<Props> = (props) => {
               </label>
             </Show>
 
+            {/* Mode-aware tally: the headline is the list being copied (the
+                same count the Copy/Move buttons carry), the graded segment is
+                the chips' verdict split, with the unmeasured slice flagged
+                when the include checkbox pulls it into the good list and any
+                hand edits counted at the end. */}
             <span class="ml-auto text-tiny text-theme-text-tertiary whitespace-nowrap">
+              {mode() === "bad" ? "Bad list: " : "Good list: "}
               <span class="tabular-nums font-semibold text-theme-text-primary">
                 {selected().length}
               </span>{" "}
-              of <span class="tabular-nums">{totals().total}</span> frames selected
+              of <span class="tabular-nums">{totals().total}</span> frames
               <span class="text-theme-text-secondary">
-                {" "}· <span class="tabular-nums">{totals().copy}</span> pass /{" "}
-                <span class="tabular-nums">{totals().fail}</span> fail /{" "}
+                {" "}· graded <span class="tabular-nums">{totals().copy}</span> good /{" "}
+                <span class="tabular-nums">{totals().fail}</span> bad /{" "}
                 <span class="tabular-nums">{totals().unmeasured}</span> unmeasured
+                <Show when={mode() === "good" && includeUnmeasured() && totals().unmeasured > 0}>
+                  , included
+                </Show>
+                <Show when={Object.keys(overrides()).length > 0}>
+                  {" "}({Object.keys(overrides()).length} overridden)
+                </Show>
               </span>
             </span>
           </div>
