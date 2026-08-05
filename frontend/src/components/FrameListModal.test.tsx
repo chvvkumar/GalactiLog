@@ -28,7 +28,47 @@ vi.mock("./SettingsProvider", () => ({
 
 vi.mock("./Toast", () => ({ showToast: vi.fn() }));
 
+// Browser-native move support: the modal reads isFsAccessSupported at render
+// time, calls pickDirectory on click, then scanForNames/moveMatches. All four
+// are stubbed so the tests drive the flow without real handles.
+let fsSupported = true;
+const pickDirectoryMock = vi.fn((_mode: string, _id: string) => Promise.resolve({} as any));
+
+vi.mock("../lib/wbppBrowserCopy", () => {
+  class CopyCancelledError extends Error {
+    constructor() {
+      super("cancelled");
+      this.name = "CopyCancelledError";
+    }
+  }
+  return {
+    isFsAccessSupported: () => fsSupported,
+    pickDirectory: (mode: string, id: string) => pickDirectoryMock(mode, id),
+    CopyCancelledError,
+  };
+});
+
+const scanForNamesMock = vi.fn(
+  (_root: any, _names: string[]): Promise<any> =>
+    Promise.resolve({ root: {}, matches: [], missing: [], collisions: [] }),
+);
+const moveMatchesMock = vi.fn(
+  (
+    _scan: any,
+    _onProgress: (done: number, total: number) => void,
+    _signal: AbortSignal,
+  ): Promise<any> => Promise.resolve({ moved: 0, failed: [] }),
+);
+
+vi.mock("../lib/frameListBrowserMove", () => ({
+  scanForNames: (root: any, names: string[]) => scanForNamesMock(root, names),
+  moveMatches: (scan: any, onProgress: any, signal: AbortSignal) =>
+    moveMatchesMock(scan, onProgress, signal),
+}));
+
 import FrameListModal from "./FrameListModal";
+import { CopyCancelledError } from "../lib/wbppBrowserCopy";
+import { showToast } from "./Toast";
 import type { SessionDetail } from "../api/types";
 
 // Dialog renders through a Portal, so every query runs against document.body.
@@ -142,6 +182,16 @@ beforeEach(() => {
   });
   getMock.mockClear();
   saveGeneralMock.mockClear();
+  fsSupported = true;
+  pickDirectoryMock.mockClear();
+  pickDirectoryMock.mockImplementation((_mode: string, _id: string) => Promise.resolve({} as any));
+  scanForNamesMock.mockClear();
+  scanForNamesMock.mockImplementation(() =>
+    Promise.resolve({ root: {}, matches: [], missing: [], collisions: [] }),
+  );
+  moveMatchesMock.mockClear();
+  moveMatchesMock.mockImplementation(() => Promise.resolve({ moved: 0, failed: [] }));
+  (showToast as ReturnType<typeof vi.fn>).mockClear();
 });
 
 describe("FrameListModal selection", () => {
@@ -263,5 +313,175 @@ describe("FrameListModal base folder row", () => {
     general = { frame_list_base_folder: null, wbpp_default_os: null, wbpp_library_root: "Z:\\Astro" };
     renderModal();
     expect(baseInput().value).toBe("Z:\\Astro");
+  });
+});
+
+describe("FrameListModal browser move", () => {
+  const moveButton = (): HTMLButtonElement | undefined =>
+    buttons().find((el) => /^Move \d+ to _rejected$/.test(el.textContent?.trim() ?? ""));
+
+  const fakeRoot = { name: "picked" } as any;
+
+  // Two hits for b_fail.fits (a collision), one for d_fail.fits, plus one
+  // missing name -- exercises every row style of the confirm panel.
+  const fakeScan = () => ({
+    root: fakeRoot,
+    matches: [
+      { name: "b_fail.fits", relPath: "Ha/b_fail.fits", parent: {} as any },
+      { name: "b_fail.fits", relPath: "Ha2/b_fail.fits", parent: {} as any },
+      { name: "d_fail.fits", relPath: "Ha/d_fail.fits", parent: {} as any },
+    ],
+    missing: ["ghost.fits"],
+    collisions: ["b_fail.fits"],
+  });
+
+  it("hides the move button entirely when the File System Access API is unsupported", () => {
+    fsSupported = false;
+    renderModal();
+    expect(moveButton()).toBeUndefined();
+    // The clipboard path is unaffected.
+    expect(copyButton()).toBeDefined();
+  });
+
+  it("shows the confirm panel with counts, relPaths, collision notes and missing names after pick + scan", async () => {
+    pickDirectoryMock.mockImplementation(() => Promise.resolve(fakeRoot));
+    scanForNamesMock.mockImplementation(() => Promise.resolve(fakeScan()));
+    renderModal();
+
+    const btn = moveButton();
+    expect(btn).toBeDefined();
+    expect(btn!.textContent?.trim()).toBe("Move 2 to _rejected");
+    fireEvent.click(btn!);
+    await flush();
+
+    expect(pickDirectoryMock).toHaveBeenCalledWith("readwrite", "frame-list-base");
+    // The scan searches the SELECTED set (bad mode: the two fail frames).
+    expect(scanForNamesMock).toHaveBeenCalledTimes(1);
+    expect(scanForNamesMock.mock.calls[0][0]).toBe(fakeRoot);
+    expect(scanForNamesMock.mock.calls[0][1]).toEqual(["b_fail.fits", "d_fail.fits"]);
+
+    expect(bodyText()).toContain("3 files matched, 1 missing");
+    expect(bodyText()).toContain("Files move to _rejected inside the picked folder.");
+    expect(bodyText()).toContain("Ha/b_fail.fits");
+    expect(bodyText()).toContain("Ha2/b_fail.fits");
+    expect(bodyText()).toContain("Ha/d_fail.fits");
+    expect(bodyText()).toContain("matches 2 files");
+    expect(bodyText()).toContain("ghost.fits");
+    // Confirm buttons replace the footer actions.
+    expect(buttons().some((el) => el.textContent?.trim() === "Move 3")).toBe(true);
+    expect(buttons().some((el) => el.textContent?.trim() === "Back")).toBe(true);
+  });
+
+  it("Back returns to the normal footer without moving anything", async () => {
+    pickDirectoryMock.mockImplementation(() => Promise.resolve(fakeRoot));
+    scanForNamesMock.mockImplementation(() => Promise.resolve(fakeScan()));
+    renderModal();
+    fireEvent.click(moveButton()!);
+    await flush();
+
+    const back = buttons().find((el) => el.textContent?.trim() === "Back")!;
+    fireEvent.click(back);
+    await flush();
+
+    expect(moveMatchesMock).not.toHaveBeenCalled();
+    expect(moveButton()).toBeDefined();
+    expect(copyButton()).toBeDefined();
+  });
+
+  it("Move runs moveMatches on the scan, toasts the moved count and restores the footer", async () => {
+    const scan = fakeScan();
+    pickDirectoryMock.mockImplementation(() => Promise.resolve(fakeRoot));
+    scanForNamesMock.mockImplementation(() => Promise.resolve(scan));
+    moveMatchesMock.mockImplementation(() => Promise.resolve({ moved: 3, failed: [] }));
+    renderModal();
+    fireEvent.click(moveButton()!);
+    await flush();
+
+    const confirm = buttons().find((el) => el.textContent?.trim() === "Move 3")!;
+    fireEvent.click(confirm);
+    await flush();
+
+    expect(moveMatchesMock).toHaveBeenCalledTimes(1);
+    expect(moveMatchesMock.mock.calls[0][0]).toBe(scan);
+    expect(showToast).toHaveBeenCalledWith(expect.stringContaining("3"));
+    // Back to the normal footer.
+    expect(moveButton()).toBeDefined();
+    expect(copyButton()).toBeDefined();
+  });
+
+  it("shows progress while moving and Stop aborts the run's signal", async () => {
+    pickDirectoryMock.mockImplementation(() => Promise.resolve(fakeRoot));
+    scanForNamesMock.mockImplementation(() => Promise.resolve(fakeScan()));
+    let capturedProgress!: (done: number, total: number) => void;
+    let capturedSignal!: AbortSignal;
+    let finish!: () => void;
+    moveMatchesMock.mockImplementation((_scan: any, onProgress: any, signal: AbortSignal) => {
+      capturedProgress = onProgress;
+      capturedSignal = signal;
+      return new Promise((res) => {
+        finish = () => res({ moved: 1, failed: [] });
+      });
+    });
+    renderModal();
+    fireEvent.click(moveButton()!);
+    await flush();
+    fireEvent.click(buttons().find((el) => el.textContent?.trim() === "Move 3")!);
+    await flush();
+
+    capturedProgress(1, 3);
+    await flush();
+    expect(bodyText()).toContain("1 of 3");
+
+    const stop = buttons().find((el) => el.textContent?.trim() === "Stop")!;
+    expect(stop).toBeDefined();
+    expect(capturedSignal.aborted).toBe(false);
+    fireEvent.click(stop);
+    expect(capturedSignal.aborted).toBe(true);
+
+    finish();
+    await flush();
+    expect(moveButton()).toBeDefined();
+  });
+
+  it("lists per-file failures inline after the run", async () => {
+    pickDirectoryMock.mockImplementation(() => Promise.resolve(fakeRoot));
+    scanForNamesMock.mockImplementation(() => Promise.resolve(fakeScan()));
+    moveMatchesMock.mockImplementation(() =>
+      Promise.resolve({ moved: 2, failed: [{ relPath: "Ha/b_fail.fits", message: "locked" }] }),
+    );
+    renderModal();
+    fireEvent.click(moveButton()!);
+    await flush();
+    fireEvent.click(buttons().find((el) => el.textContent?.trim() === "Move 3")!);
+    await flush();
+
+    expect(bodyText()).toContain("Ha/b_fail.fits");
+    expect(bodyText()).toContain("locked");
+  });
+
+  it("a cancelled picker is a silent no-op", async () => {
+    pickDirectoryMock.mockImplementation(() => Promise.reject(new CopyCancelledError()));
+    renderModal();
+    fireEvent.click(moveButton()!);
+    await flush();
+
+    expect(scanForNamesMock).not.toHaveBeenCalled();
+    expect(bodyText()).not.toContain("cancelled");
+    // Normal footer untouched.
+    expect(copyButton()).toBeDefined();
+  });
+
+  it("disables the move button when nothing is selected", async () => {
+    renderModal();
+    // Good mode with include-unmeasured off leaves 2 passes; flip every row
+    // off via mode: switch to good then uncheck all three included rows.
+    fireEvent.click(modeButton("Good"));
+    await flush();
+    fireEvent.click(rowCheckbox("a_pass.fits"));
+    fireEvent.click(rowCheckbox("e_pass.fits"));
+    fireEvent.click(rowCheckbox("c_unmeasured.fits"));
+    await flush();
+    expect(bodyText()).toContain("0 of 5 frames selected");
+    expect(moveButton()!.disabled).toBe(true);
   });
 });

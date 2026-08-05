@@ -1,5 +1,6 @@
 import {
   Component,
+  For,
   Show,
   createSignal,
   createMemo,
@@ -23,6 +24,17 @@ import {
   type QualityConfig,
 } from "../lib/wbppQualityFilter";
 import { loadWbppQualityState, saveWbppQualityState } from "../lib/wbppQualityStore";
+import {
+  isFsAccessSupported,
+  pickDirectory,
+  CopyCancelledError,
+} from "../lib/wbppBrowserCopy";
+import {
+  scanForNames,
+  moveMatches,
+  type MoveScan,
+  type MoveResult,
+} from "../lib/frameListBrowserMove";
 import {
   isIncluded,
   selectedFrames,
@@ -294,6 +306,77 @@ const FrameListModal: Component<Props> = (props) => {
     }
   };
 
+  // --- Browser-native move to _rejected -------------------------------------
+  //
+  // Chromium-only (File System Access API). The picked handle is NOT persisted
+  // across sessions: every move starts with an explicit pick, keeping consent
+  // obvious for an operation that relocates the user's files. Browsers without
+  // the API render no button at all; the script format covers them.
+  const [moveScan, setMoveScan] = createSignal<MoveScan | null>(null);
+  const [moving, setMoving] = createSignal(false);
+  const [moveProgress, setMoveProgress] = createSignal<{ done: number; total: number } | null>(null);
+  const [moveFailures, setMoveFailures] = createSignal<MoveResult["failed"]>([]);
+  let moveAbort: AbortController | null = null;
+
+  // Per-name hit counts for the confirm panel's collision notes.
+  const matchCounts = createMemo<Map<string, number>>(() => {
+    const counts = new Map<string, number>();
+    const scan = moveScan();
+    if (scan) {
+      for (const m of scan.matches) counts.set(m.name, (counts.get(m.name) ?? 0) + 1);
+    }
+    return counts;
+  });
+
+  // Pick a folder, scan it for the selected names, and show the confirm panel.
+  // A dismissed picker is a silent no-op.
+  const startMovePick = async () => {
+    setMoveFailures([]);
+    let root;
+    try {
+      root = await pickDirectory("readwrite", "frame-list-base");
+    } catch (e) {
+      if (e instanceof CopyCancelledError) return;
+      setError(e instanceof Error ? e.message : "Could not open the folder picker.");
+      return;
+    }
+    try {
+      const names = selected().map((v) => v.frame.file_name);
+      setError(null);
+      setMoveScan(await scanForNames(root, names));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not scan the picked folder.");
+    }
+  };
+
+  const runMove = async () => {
+    const scan = moveScan();
+    if (!scan || moving()) return;
+    moveAbort = new AbortController();
+    setMoving(true);
+    setMoveProgress({ done: 0, total: scan.matches.length });
+    try {
+      const result = await moveMatches(
+        scan,
+        (done, total) => setMoveProgress({ done, total }),
+        moveAbort.signal,
+      );
+      setMoveFailures(result.failed);
+      showToast(
+        `${result.moved} file${result.moved === 1 ? "" : "s"} moved to _rejected`,
+      );
+      setMoveScan(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Move failed.");
+    } finally {
+      setMoving(false);
+      setMoveProgress(null);
+      moveAbort = null;
+    }
+  };
+
+  const stopMove = () => moveAbort?.abort();
+
   const segmentClass = (active: boolean) =>
     active
       ? "bg-theme-accent/20 text-theme-accent font-medium"
@@ -351,6 +434,19 @@ const FrameListModal: Component<Props> = (props) => {
           <Show when={error()}>
             <div class="text-xs text-theme-error bg-theme-error/10 border border-theme-error/30 rounded-[var(--radius-sm)] px-3 py-2">
               {error()}
+            </div>
+          </Show>
+
+          <Show when={moveFailures().length > 0}>
+            <div class="text-xs text-theme-error bg-theme-error/10 border border-theme-error/30 rounded-[var(--radius-sm)] px-3 py-2 space-y-1">
+              <p>Some files could not be moved:</p>
+              <For each={moveFailures()}>
+                {(f) => (
+                  <p class="font-mono text-tiny truncate">
+                    {f.relPath}: {f.message}
+                  </p>
+                )}
+              </For>
             </div>
           </Show>
 
@@ -417,43 +513,120 @@ const FrameListModal: Component<Props> = (props) => {
           />
         </div>
 
-        {/* Footer: format, base folder for the script, and the copy action. */}
-        <div class="shrink-0 px-4 py-3 border-t border-theme-border flex items-center flex-wrap gap-2">
-          <select
-            aria-label="Format"
-            class={`${FIELD_CLASS} cursor-pointer shrink-0`}
-            value={format()}
-            onChange={(e) => setFormat(e.currentTarget.value as FrameListFormat)}
-          >
-            <option value="explorer">Windows Explorer search (paste into search box)</option>
-            <option value="names">File name list (one per line)</option>
-            <option value="script">
-              {scriptOs() === "windows" ? "PowerShell" : "Bash"} script (move to _rejected)
-            </option>
-          </select>
-          <div
-            class="flex-1 min-w-48"
-            title={
-              format() !== "script"
-                ? "Base folder is used only by the move script format"
-                : undefined
+        {/* Footer: format, base folder for the script, and the copy action.
+            While a browser-move scan is confirmed or running, the confirm
+            panel replaces the whole row. */}
+        <div class="shrink-0 px-4 py-3 border-t border-theme-border">
+          <Show
+            when={moveScan()}
+            fallback={
+              <div class="flex items-center flex-wrap gap-2">
+                <select
+                  aria-label="Format"
+                  class={`${FIELD_CLASS} cursor-pointer shrink-0`}
+                  value={format()}
+                  onChange={(e) => setFormat(e.currentTarget.value as FrameListFormat)}
+                >
+                  <option value="explorer">Windows Explorer search (paste into search box)</option>
+                  <option value="names">File name list (one per line)</option>
+                  <option value="script">
+                    {scriptOs() === "windows" ? "PowerShell" : "Bash"} script (move to _rejected)
+                  </option>
+                </select>
+                <div
+                  class="flex-1 min-w-48"
+                  title={
+                    format() !== "script"
+                      ? "Base folder is used only by the move script format"
+                      : undefined
+                  }
+                >
+                  <input
+                    type="text"
+                    aria-label="Base folder"
+                    class={`${FIELD_CLASS} font-mono w-full disabled:opacity-50`}
+                    placeholder="D:\Staging\M31 or /mnt/staging"
+                    disabled={format() !== "script"}
+                    value={baseFolder()}
+                    onInput={(e) => setBaseFolder(e.currentTarget.value)}
+                  />
+                </div>
+                <div class="ml-auto shrink-0 flex items-center gap-2">
+                  <Show when={isFsAccessSupported()}>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      disabled={nameCount() === 0}
+                      onClick={() => void startMovePick()}
+                    >
+                      Move {nameCount()} to _rejected
+                    </Button>
+                  </Show>
+                  <Button variant="primary" size="sm" disabled={copyDisabled()} onClick={() => void doCopy()}>
+                    {copyLabel()}
+                  </Button>
+                </div>
+              </div>
             }
           >
-            <input
-              type="text"
-              aria-label="Base folder"
-              class={`${FIELD_CLASS} font-mono w-full disabled:opacity-50`}
-              placeholder="D:\Staging\M31 or /mnt/staging"
-              disabled={format() !== "script"}
-              value={baseFolder()}
-              onInput={(e) => setBaseFolder(e.currentTarget.value)}
-            />
-          </div>
-          <div class="ml-auto shrink-0">
-            <Button variant="primary" size="sm" disabled={copyDisabled()} onClick={() => void doCopy()}>
-              {copyLabel()}
-            </Button>
-          </div>
+            {(scan) => (
+              <div class="space-y-2">
+                <p class="text-xs text-theme-text-primary">
+                  <span class="tabular-nums font-semibold">{scan().matches.length}</span> files
+                  matched, <span class="tabular-nums">{scan().missing.length}</span> missing.{" "}
+                  <span class="text-theme-text-secondary">
+                    Files move to _rejected inside the picked folder.
+                  </span>
+                </p>
+                <div class="max-h-40 overflow-y-auto border border-theme-border rounded-[var(--radius-sm)] text-tiny font-mono">
+                  <For each={scan().matches}>
+                    {(m) => (
+                      <div class="px-2 py-0.5 truncate text-theme-text-primary">
+                        {m.relPath}
+                        <Show when={(matchCounts().get(m.name) ?? 0) > 1}>
+                          <span class="text-theme-warning font-sans">
+                            {" "}matches {matchCounts().get(m.name)} files
+                          </span>
+                        </Show>
+                      </div>
+                    )}
+                  </For>
+                  <For each={scan().missing}>
+                    {(n) => (
+                      <div class="px-2 py-0.5 truncate text-theme-text-tertiary">missing: {n}</div>
+                    )}
+                  </For>
+                </div>
+                <Show
+                  when={moving()}
+                  fallback={
+                    <div class="flex items-center gap-2">
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        disabled={scan().matches.length === 0}
+                        onClick={() => void runMove()}
+                      >
+                        Move {scan().matches.length}
+                      </Button>
+                      <Button variant="secondary" size="sm" onClick={() => setMoveScan(null)}>
+                        Back
+                      </Button>
+                    </div>
+                  }
+                >
+                  <div class="flex items-center gap-3">
+                    <span class="text-xs text-theme-text-secondary tabular-nums">
+                      Moving {moveProgress()?.done ?? 0} of {moveProgress()?.total ?? 0}
+                    </span>
+                    <Button variant="secondary" size="sm" onClick={stopMove}>
+                      Stop
+                    </Button>
+                  </div>
+                </Show>
+              </div>
+            )}
+          </Show>
         </div>
       </div>
     </Dialog>
