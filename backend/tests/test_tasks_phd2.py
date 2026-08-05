@@ -1499,6 +1499,25 @@ def test_a_rig_with_neither_a_site_nor_a_zone_is_left_to_the_other_warning(
     assert _sidereal_records(records) == []
 
 
+def test_a_rig_with_a_site_but_no_zone_is_left_to_the_other_warning(
+    db, log_file, monkeypatch
+):
+    """A site of its own is not enough. With no timezone configured at either
+    level the sections were read in the server's own zone, so an offset error
+    measured against that would be manufactured out of an input already known
+    to be wrong - and the correlation pass is the single reporter for a
+    profile with no zone."""
+    general = _sidereal_settings(
+        _entry(latitude=SITE_LAT, longitude=SITE_LON), observer_timezone=""
+    )
+    records = _sidereal_pass(
+        db, log_file, monkeypatch,
+        _pointing_log(ZONE, SITE_LON, SITE_LAT, 6.0),
+        general,
+    )
+    assert _sidereal_records(records) == []
+
+
 def test_a_travelling_rigs_own_site_is_checked_with_no_global_longitude(
     db, log_file, monkeypatch
 ):

@@ -563,8 +563,9 @@ def _sidereal_findings(
     - A profile that resolves no longitude at all, but does resolve a
       timezone, falls back to that zone's standard meridian: wider tolerance,
       hedged wording, and a suggested longitude as the actionable output.
-    - A profile with neither is skipped. The correlation pass already names it
-      in `phd2_correlation_timezone_unset`, and one cause must not produce two
+    - A profile that resolves no timezone is skipped whatever site it carries.
+      The correlation pass already names it in
+      `phd2_correlation_timezone_unset`, and one cause must not produce two
       warnings.
     - Each section must pass `pointing_is_coherent(...) is True`. The test is
       against True and never against `is not False`: None means the mount wrote
@@ -586,7 +587,12 @@ def _sidereal_findings(
     for profile in sorted(grouped, key=lambda name: (name is None, name or "")):
         zone, _source = resolve_zone(profile)
         longitude = resolve_longitude(profile)
-        if longitude is None and not zone:
+        if not zone:
+            # No configured zone, whatever site the profile carries. Besides
+            # the one-warning rule above: the comparison is only meaningful
+            # against the offset of a zone the user chose, and these sections
+            # were read in the server's own zone, so an error measured here
+            # would be manufactured out of a known-broken input.
             continue
         # profile_site is asked only for the latitude the coherence gate
         # needs; the longitude comes from the resolver above so that the two
@@ -652,13 +658,6 @@ def _sidereal_findings(
     return findings
 
 
-def _zone_label(zone: str) -> str:
-    """How a message names the zone a section's timestamps were read in."""
-    if zone:
-        return f"timezone '{zone}'"
-    return "the server's own timezone, which is what GalactiLog fell back to"
-
-
 def _sidereal_clause(finding: dict) -> str:
     """One profile's sentence inside the sidereal warning.
 
@@ -670,7 +669,8 @@ def _sidereal_clause(finding: dict) -> str:
     """
     outcome = finding["verdict"]
     name = _profile_label(finding["profile"])
-    zone = _zone_label(finding["zone"])
+    # Never empty: a profile with no configured zone never reaches a finding.
+    zone = f"timezone '{finding['zone']}'"
     magnitude = round(abs(outcome.nearest_quarter_hours), 2)
 
     if outcome.tier == phd2_sidereal.TIER_SITE_KNOWN and finding["site_known"]:
