@@ -371,7 +371,7 @@ const ScanManager: Component = () => {
                 </HelpPopover>
               </div>
               <div class="space-y-3">
-              <div class="grid grid-cols-2 lg:grid-cols-3 gap-3">
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <div class="space-y-1">
                   <label class="text-xs text-theme-text-secondary">Name</label>
                   <input
@@ -390,6 +390,60 @@ const ScanManager: Component = () => {
                       }
                     }}
                   />
+                </div>
+                <div class="space-y-1">
+                  <label class="text-xs text-theme-text-secondary" for="observer-timezone">Timezone</label>
+                  <Show
+                    when={timezoneList}
+                    fallback={
+                      <input
+                        id="observer-timezone"
+                        type="text"
+                        placeholder="America/New_York"
+                        class={`w-full px-3 py-1.5 bg-theme-input border rounded-[var(--radius-sm)] text-sm text-theme-text-primary focus:ring-1 outline-none ${
+                          tzError()
+                            ? "border-red-500 focus:ring-red-500 focus:border-red-500"
+                            : "border-theme-border focus:ring-theme-accent focus:border-theme-accent"
+                        }`}
+                        value={observerTimezone()}
+                        onInput={(e) => {
+                          const raw = e.currentTarget.value;
+                          setObserverTimezone(raw);
+                          setTzError(!raw.trim() || isValidTimeZone(raw.trim()) ? null : "Not a recognized IANA time zone");
+                        }}
+                        onBlur={saveObserverTimezoneText}
+                      />
+                    }
+                  >
+                    {(zones) => (
+                      <select
+                        id="observer-timezone"
+                        class={`w-full px-3 py-1.5 bg-theme-input border rounded-[var(--radius-sm)] text-sm text-theme-text-primary focus:ring-1 outline-none ${
+                          tzError()
+                            ? "border-red-500 focus:ring-red-500 focus:border-red-500"
+                            : "border-theme-border focus:ring-theme-accent focus:border-theme-accent"
+                        }`}
+                        value={observerTimezone()}
+                        onChange={(e) => saveObserverTimezone(e.currentTarget.value)}
+                      >
+                        {/* Deliberately first and deliberately empty: saving this
+                            field forces a re-parse of every guide log, so the
+                            control must never arrive pre-set to a zone the user
+                            did not choose. */}
+                        <option value="">Select a timezone</option>
+                        <Show when={displayTimezoneOption()}>
+                          {(opt) => <option value={opt().value}>{opt().label}</option>}
+                        </Show>
+                        <Show when={unlistedTimezone()}>
+                          {(zone) => <option value={zone()}>{zone()}</option>}
+                        </Show>
+                        <For each={zones()}>{(zone) => <option value={zone}>{zone}</option>}</For>
+                      </select>
+                    )}
+                  </Show>
+                  <Show when={tzError()}>
+                    <p class="text-xs text-red-500">{tzError()}</p>
+                  </Show>
                 </div>
                 <div class="space-y-1">
                   <label class="text-xs text-theme-text-secondary">Latitude</label>
@@ -464,63 +518,6 @@ const ScanManager: Component = () => {
                   </Show>
                 </div>
               </div>
-              {/* Its own full-width row rather than a fourth grid column: the
-                  display-timezone convenience option and long IANA names
-                  truncate badly at a quarter-column width. */}
-              <div class="space-y-1">
-                <label class="text-xs text-theme-text-secondary" for="observer-timezone">Timezone</label>
-                  <Show
-                    when={timezoneList}
-                    fallback={
-                      <input
-                        id="observer-timezone"
-                        type="text"
-                        placeholder="America/New_York"
-                        class={`w-full px-3 py-1.5 bg-theme-input border rounded-[var(--radius-sm)] text-sm text-theme-text-primary focus:ring-1 outline-none ${
-                          tzError()
-                            ? "border-red-500 focus:ring-red-500 focus:border-red-500"
-                            : "border-theme-border focus:ring-theme-accent focus:border-theme-accent"
-                        }`}
-                        value={observerTimezone()}
-                        onInput={(e) => {
-                          const raw = e.currentTarget.value;
-                          setObserverTimezone(raw);
-                          setTzError(!raw.trim() || isValidTimeZone(raw.trim()) ? null : "Not a recognized IANA time zone");
-                        }}
-                        onBlur={saveObserverTimezoneText}
-                      />
-                    }
-                  >
-                    {(zones) => (
-                      <select
-                        id="observer-timezone"
-                        class={`w-full px-3 py-1.5 bg-theme-input border rounded-[var(--radius-sm)] text-sm text-theme-text-primary focus:ring-1 outline-none ${
-                          tzError()
-                            ? "border-red-500 focus:ring-red-500 focus:border-red-500"
-                            : "border-theme-border focus:ring-theme-accent focus:border-theme-accent"
-                        }`}
-                        value={observerTimezone()}
-                        onChange={(e) => saveObserverTimezone(e.currentTarget.value)}
-                      >
-                        {/* Deliberately first and deliberately empty: saving this
-                            field forces a re-parse of every guide log, so the
-                            control must never arrive pre-set to a zone the user
-                            did not choose. */}
-                        <option value="">Select a timezone</option>
-                        <Show when={displayTimezoneOption()}>
-                          {(opt) => <option value={opt().value}>{opt().label}</option>}
-                        </Show>
-                        <Show when={unlistedTimezone()}>
-                          {(zone) => <option value={zone()}>{zone()}</option>}
-                        </Show>
-                        <For each={zones()}>{(zone) => <option value={zone}>{zone}</option>}</For>
-                      </select>
-                    )}
-                  </Show>
-                  <Show when={tzError()}>
-                    <p class="text-xs text-red-500">{tzError()}</p>
-                  </Show>
-                </div>
               </div>
             </section>
 
