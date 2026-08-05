@@ -1,6 +1,7 @@
 import { createSignal } from "solid-js";
 import type { ActiveJob, ScanStatus, RebuildStatus } from "../api/types";
 import { phd2FirstSeenAt, phd2Phase, type Phd2Phase } from "./scan";
+import { serverJobs } from "./serverJobs";
 
 const [celeryJobs, setCeleryJobs] = createSignal<Map<string, ActiveJob>>(new Map());
 
@@ -174,7 +175,15 @@ export const activeJobs: Accessor<ActiveJob[]> = () => {
     if (rebuildJob) jobs.push(rebuildJob);
   }
 
-  celeryJobs().forEach((job) => jobs.push(job));
+  const tracked = celeryJobs();
+  tracked.forEach((job) => jobs.push(job));
+
+  // Registry rows share the `celery:<task_id>` key with track()'s rows, so a
+  // task the current tab is already watching (with its richer callbacks)
+  // appears once, from the tracker.
+  serverJobs().forEach((job) => {
+    if (!tracked.has(job.id)) jobs.push(job);
+  });
 
   return jobs;
 };

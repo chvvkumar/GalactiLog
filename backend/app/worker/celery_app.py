@@ -102,6 +102,9 @@ from app.worker import drain_logs as _drain_logs  # noqa: E402,F401
 from app.metrics import register_celery_signals
 register_celery_signals()
 
+from app.worker.job_registry import register_job_signals
+register_job_signals()
+
 
 # ---------------------------------------------------------------------------
 # Backend log capture: install RedisLogHandler in worker and beat processes.

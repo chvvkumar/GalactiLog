@@ -880,7 +880,7 @@ export type ActivityCategory =
 // widget); not a server response shape.
 export interface ActiveJob {
   id: string;
-  category: "scan" | "rebuild" | "thumbnail" | "enrichment" | "mosaic" | "wbpp_copy";
+  category: "scan" | "rebuild" | "thumbnail" | "enrichment" | "mosaic" | "wbpp_copy" | "task";
   label: string;
   subLabel?: string;
   progress?: number;
@@ -888,6 +888,12 @@ export interface ActiveJob {
   detail?: string;
   cancelable: boolean;
   onCancel?: () => Promise<void>;
+  // "waiting" = queued server-side but not yet started (from /api/jobs).
+  // Absent means running; only the generic task rows ever carry "waiting".
+  state?: "running" | "waiting";
+  // When a waiting task was dispatched with a countdown/eta, its scheduled
+  // start in epoch ms, for a "starts in Ns" label.
+  etaMs?: number;
 }
 
 // Query-param bag for GET /activity -- the OpenAPI spec flattens these into
