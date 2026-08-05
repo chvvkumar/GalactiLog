@@ -3379,6 +3379,8 @@ export interface components {
              * @default text-only
              */
             filter_style: string;
+            /** Frame List Base Folder */
+            frame_list_base_folder?: string | null;
             /**
              * Include Calibration
              * @default false

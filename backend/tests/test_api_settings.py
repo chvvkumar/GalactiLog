@@ -848,6 +848,7 @@ async def test_put_general_persists_wbpp_fields():
                     "wbpp_default_os": "windows",
                     "wbpp_staging_path": "Z:\\Staging",
                     "wbpp_exclusions": ["WBPP", "masters"],
+                    "frame_list_base_folder": "D:\\Staging\\M31",
                 },
             )
 
@@ -857,6 +858,7 @@ async def test_put_general_persists_wbpp_fields():
         assert general["wbpp_default_os"] == "windows"
         assert general["wbpp_staging_path"] == "Z:\\Staging"
         assert general["wbpp_exclusions"] == ["WBPP", "masters"]
+        assert general["frame_list_base_folder"] == "D:\\Staging\\M31"
         assert mock_session.commit.called
     finally:
         app.dependency_overrides.clear()

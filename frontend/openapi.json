@@ -3135,6 +3135,17 @@
             "title": "Filter Style",
             "type": "string"
           },
+          "frame_list_base_folder": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Frame List Base Folder"
+          },
           "include_calibration": {
             "default": false,
             "title": "Include Calibration",

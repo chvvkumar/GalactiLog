@@ -150,6 +150,8 @@ class GeneralSettings(BaseModel):
     wbpp_library_root: str | None = None
     wbpp_default_os: str | None = None          # "windows" | "posix" | None (auto-detect)
     wbpp_staging_path: str | None = None
+    # Base folder the Copy Frame List move script searches for frame names.
+    frame_list_base_folder: str | None = None
     wbpp_exclusions: list[str] = Field(
         default_factory=lambda: [
             "WBPP", "PixInsight", "finals", "WORK_AREA",

@@ -605,6 +605,8 @@ export interface GeneralSettings {
   wbpp_default_os?: string | null;
   wbpp_staging_path?: string | null;
   wbpp_exclusions?: string[];
+  // Base folder the Copy Frame List move script searches for frame names.
+  frame_list_base_folder?: string | null;
   // WBPP export quality filter, persisted so tuning survives a modal close.
   // `metric` is deliberately `string` rather than the lib's `RawMetric` union:
   // this describes what the wire carries, and an older install's stored config

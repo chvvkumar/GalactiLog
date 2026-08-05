@@ -1129,9 +1129,32 @@ const WbppExportModal: Component<Props> = (props) => {
 
           {/* Zone 4: Options */}
           <div class={CARD_CLASS}>
-            <h3 class={ZONE_TITLE_CLASS}>
-              <span class="text-theme-text-tertiary">Step 3 · </span>Options
-            </h3>
+            <div class="flex items-center gap-2">
+              <h3 class={ZONE_TITLE_CLASS}>
+                <span class="text-theme-text-tertiary">Step 3 · </span>Options
+              </h3>
+              <HelpPopover label="About quality filters" title="Quality filters">
+                <p>
+                  Each chip is an absolute threshold. A frame is excluded when any enabled
+                  chip with a value rejects it. A chip without a value filters nothing. A
+                  frame missing a metric is not judged on that metric; a frame missing all
+                  constrained metrics is counted as unmeasured, not excluded.
+                </p>
+                <p>
+                  Eccentricity presets: 0.55 keeps stars that read round (axis ratio 0.84),
+                  0.65 marks the edge of visible elongation (0.76), 0.75 admits clearly
+                  elongated stars (0.66) and suits salvaging poor nights.
+                </p>
+                <p>
+                  Cell colors compare each frame to the selected baseline (this session or
+                  the rig catalog) and are informational; only the chips decide the verdict.
+                </p>
+                <p>
+                  Thresholds are saved per rig and shared with Copy Frame List: changing
+                  them here also changes what that export selects.
+                </p>
+              </HelpPopover>
+            </div>
 
             <div class="mt-3">
               <WbppQualityPanel

@@ -24,7 +24,6 @@ import {
   type RawConstraint,
 } from "../../lib/wbppQualityFilter";
 import { bandForZ, bandToCellClass } from "../../utils/frameQuality";
-import HelpPopover from "../HelpPopover";
 import { ClickableFilePath } from "../ClickableFilePath";
 import type { PreviewFile, PreviewMetaEntry } from "../FilePreviewModal";
 import type { FrameRecord, SessionDetail } from "../../api/types";
@@ -40,6 +39,12 @@ export interface WbppQualityPanelProps {
   // against. The parent's cache is sparse and populates lazily, so a date may
   // be absent -- an absent detail renders its row uncolored.
   sessionDetails: Record<string, SessionDetail>;
+  /** When provided, the preview table gains a leading checkbox column; checked = row is in the copy list. */
+  isIncluded?: (v: FrameVerdict) => boolean;
+  /** Checkbox toggle callback; presence of BOTH props enables the column. */
+  onToggleInclude?: (v: FrameVerdict) => void;
+  /** When true, the file cell shows v.frame.file_path under the name in a text-theme-text-tertiary truncated line. */
+  showFullPath?: boolean;
 }
 
 // Chip order is the table's metric-column order; both read from this one list
@@ -138,6 +143,10 @@ export default function WbppQualityPanel(props: WbppQualityPanelProps): JSX.Elem
   // With the master toggle off every frame copies, so the table and the tally
   // must say so rather than keep grading against a filter that is not running.
   const effectiveKeep = (v: FrameVerdict): boolean => !props.enabled || v.keep;
+
+  // The copy column exists only when the host wires both sides of it: a read
+  // callback without a toggle would render checkboxes that do nothing.
+  const copyColumn = () => props.isIncluded != null && props.onToggleInclude != null;
 
   const keptCount = () => props.verdicts.filter(effectiveKeep).length;
   const skippedCount = () => props.verdicts.length - keptCount();
@@ -262,23 +271,6 @@ export default function WbppQualityPanel(props: WbppQualityPanelProps): JSX.Elem
             />
             <span class="text-xs text-theme-text-primary">Enable filters</span>
           </label>
-          <HelpPopover label="About quality filters" title="Quality filters">
-            <p>
-              Each chip is an absolute threshold. A frame is excluded when any enabled
-              chip with a value rejects it. A chip without a value filters nothing. A
-              frame missing a metric is not judged on that metric; a frame missing all
-              constrained metrics is counted as unmeasured, not excluded.
-            </p>
-            <p>
-              Eccentricity presets: 0.55 keeps stars that read round (axis ratio 0.84),
-              0.65 marks the edge of visible elongation (0.76), 0.75 admits clearly
-              elongated stars (0.66) and suits salvaging poor nights.
-            </p>
-            <p>
-              Cell colors compare each frame to the selected baseline (this session or
-              the rig catalog) and are informational; only the chips decide the verdict.
-            </p>
-          </HelpPopover>
 
           {/* Everything except the master checkbox goes inert while the filter
               is off; the checkbox stays live so it can turn things back on. */}
@@ -466,6 +458,12 @@ export default function WbppQualityPanel(props: WbppQualityPanelProps): JSX.Elem
             <table class="w-full text-tiny whitespace-nowrap">
               <thead>
                 <tr>
+                  {/* Not sortable: inclusion is a per-row decision, not a metric. */}
+                  <Show when={copyColumn()}>
+                    <th class="sticky top-0 z-20 bg-theme-elevated py-1.5 px-1.5 font-normal text-center select-none shadow-[inset_0_-1px_0_var(--color-border-default)] text-theme-text-tertiary">
+                      Copy
+                    </th>
+                  </Show>
                   <For each={COLUMNS}>
                     {(col) => (
                       <th
@@ -494,6 +492,17 @@ export default function WbppQualityPanel(props: WbppQualityPanelProps): JSX.Elem
                 <For each={sortedVerdicts()}>
                   {(v, i) => (
                     <tr class="border-b border-theme-border/30 last:border-b-0">
+                      <Show when={copyColumn()}>
+                        <td class="py-0.5 px-1.5 text-center">
+                          <input
+                            type="checkbox"
+                            aria-label={v.frame.file_name}
+                            class="w-3.5 h-3.5 rounded-[var(--radius-sm)] border-theme-border cursor-pointer align-middle"
+                            checked={props.isIncluded!(v)}
+                            onChange={() => props.onToggleInclude!(v)}
+                          />
+                        </td>
+                      </Show>
                       {/* Icon-only verdict: the glyph says THAT a frame is
                           dropped; the marked metric cells say which gates
                           fired. Hover carries the full failure sentences.
@@ -559,6 +568,13 @@ export default function WbppQualityPanel(props: WbppQualityPanelProps): JSX.Elem
                           index={i()}
                           class="max-w-full font-mono align-middle"
                         />
+                        {/* Same name can live in several folders; the full path
+                            says which copy this row grades. */}
+                        <Show when={props.showFullPath}>
+                          <div class="text-theme-text-tertiary font-mono truncate">
+                            {v.frame.file_path}
+                          </div>
+                        </Show>
                       </td>
                       <td class="py-0.5 px-1.5 text-right text-theme-text-tertiary tabular-nums">
                         {v.sessionDate}
