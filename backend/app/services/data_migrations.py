@@ -1008,8 +1008,14 @@ def _dispatch_phd2_reparse() -> bool:
         scan_phd2_logs.apply_async(kwargs={"force": True}, countdown=15)
     except Exception:  # noqa: BLE001 - worker may not be available
         logger.warning(
-            "data_migrations: could not queue the forced PHD2 re-parse; run a "
-            "scan or re-save the observer timezone to pick up the guide logs",
+            "data_migrations: could not queue the forced PHD2 re-parse; to "
+            "pick it up by hand, change a timezone to a different value and "
+            "save, then change it back and save again - either Settings > "
+            "Library > Observer Location > Timezone or any PHD2 profile's own "
+            "timezone will do, and each of those two saves queues a forced "
+            "pass. Re-saving the same value queues nothing, and a library "
+            "scan will not do it either: unchanged guide logs short-circuit "
+            "on size and mtime before the new parser is reached",
             exc_info=True,
         )
         return False

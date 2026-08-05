@@ -1,5 +1,38 @@
 # Upgrading GalactiLog
 
+## [version] Per-rig PHD2 timezone and site
+
+This release gives each PHD2 equipment profile its own timezone, latitude and longitude, so a rig at a remote site is no longer read under the one global observer timezone. See the [Configuration Guide](CONFIGURATION.md#per-rig-phd2-profile-settings) for the fields themselves.
+
+### What happens on first start
+
+Two things run automatically. Neither needs an action.
+
+1. The stored PHD2 profile map is rewritten from the old profile-to-telescope form into the richer per-profile form that holds a telescope, a timezone and a pair of coordinates. This is a settings rewrite only. Every upgraded profile keeps its telescope and starts with an empty timezone and empty coordinates, which mean "inherit the global values", which is exactly what the install already did. No stored instant moves and no guiding value changes as a result of the rewrite.
+
+2. A one-time forced re-parse of every catalogued guide log is queued. The guide-log parser changed in the same release: it now reads the ASIAIR banner, the mount pointing fields and the `Calibration step = ` line prefix. Logs already stored under the old parser are stale by construction, and the worst affected are held with an empty parse result and an unchanged size and modification time, so an ordinary scan would short-circuit past them. The forced pass is what recovers them. It takes one to three minutes in the background on a typical library and needs no interaction. Guide logs an earlier release could not parse, ASIAIR logs in particular, appear after it finishes.
+
+This release carries a data version bump to 17 and no new alembic revision.
+
+### After the upgrade
+
+Set a timezone. An empty Observer Timezone now means "not configured" rather than "use the server's zone", and guiding from a profile with no timezone is catalogued but never matched to frames. Set **Settings > Library > Observer Location > Timezone** to the zone of the PC that runs PHD2, and set a per-profile timezone for any rig that runs on a clock of its own. The activity feed reports profiles it had to skip as `phd2_correlation_timezone_unset`.
+
+Each timezone change queues its own full re-parse, and those passes write no scan state, so the job monitor shows nothing while they run. Configuring several rigs one field at a time queues one pass per change. The passes are idempotent and run in sequence; the numbers settle a few minutes after the last save.
+
+### Rollback
+
+Rolling back to a pre-upgrade image after this release requires restoring the database. "No schema change means rollback is safe" does not hold here.
+
+The rewritten `general.phd2_profile_map` value is a format the older releases cannot read. Running an older image against a database that has been through this upgrade fails on every settings read, which takes the settings screen, library scanning, session grouping and all PHD2 processing with it.
+
+To downgrade:
+
+1. Restore the database from a backup taken before the upgrade, then start the older image.
+2. Or, with no backup, edit `general.phd2_profile_map` in the `user_settings` row by hand back to the flat profile-name-to-telescope-name form the older release expects, dropping the per-profile timezone and coordinates.
+
+Reverting the value by hand is not durable. Any later settings save on the new build writes the per-profile form again, so an install that has run this release is one settings save away from the same state whether or not the migration is undone. Take a database backup before upgrading if a rollback needs to stay available.
+
 ## [version] Non-root container execution
 
 Starting with this release, the container runs as a non-root `galactilog` user (UID/GID 1000 by default) instead of root. The in-container user is remapped at entrypoint time to match `PUID` and `PGID` environment variables, following the LinuxServer.io convention. This resolves cases where nginx, previously running as `www-data`, could not read bind-mounted thumbnail directories owned by a different host user (see issue #162).
