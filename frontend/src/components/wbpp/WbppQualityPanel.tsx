@@ -503,8 +503,8 @@ export default function WbppQualityPanel(props: WbppQualityPanelProps): JSX.Elem
                     <tr
                       class="border-b border-theme-border/30 last:border-b-0"
                       classList={{
-                        "bg-theme-error/10 opacity-60":
-                          props.isIncluded != null && !props.isIncluded(v),
+                        "bg-theme-error/10": props.isIncluded != null && v.reason === "fail",
+                        "opacity-60": props.isIncluded != null && !props.isIncluded(v),
                       }}
                     >
                       <Show when={copyColumn()}>

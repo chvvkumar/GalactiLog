@@ -663,20 +663,30 @@ describe("WbppQualityPanel copy column and full path", () => {
     }
   });
 
-  it("tints exactly the non-included rows and moves the tint when the callback flips", () => {
+  it("ties the tint to the fail verdict and the dim to non-inclusion, independently", () => {
     const [included, setIncluded] = createSignal(new Set(["a.fits", "c.fits"]));
     const { container } = setup({
       isIncluded: (v) => included().has(v.frame.file_name),
       onToggleInclude: () => {},
     });
-    const rowClasses = () =>
+    const tinted = () =>
       Array.from(container.querySelectorAll("tbody tr")).map((tr) =>
-        tr.className.includes("bg-theme-error/10") && tr.className.includes("opacity-60"),
+        tr.className.includes("bg-theme-error/10"),
       );
-    // Chronological order a, b, c: only b is skipped.
-    expect(rowClasses()).toEqual([false, true, false]);
+    const dimmed = () =>
+      Array.from(container.querySelectorAll("tbody tr")).map((tr) =>
+        tr.className.includes("opacity-60"),
+      );
+    // Chronological order a (pass), b (fail), c (unmeasured); b excluded.
+    // Tint follows the verdict: only the fail row.
+    expect(tinted()).toEqual([false, true, false]);
+    // Dim follows inclusion: only the excluded row.
+    expect(dimmed()).toEqual([false, true, false]);
     setIncluded(new Set(["b.fits"]));
-    expect(rowClasses()).toEqual([true, false, true]);
+    // b is now fail plus included: still tinted, no longer dimmed.
+    // a and c are pass/unmeasured plus non-included: dimmed, never tinted.
+    expect(tinted()).toEqual([false, true, false]);
+    expect(dimmed()).toEqual([true, false, true]);
   });
 
   it("no longer hosts the quality help popover (it lives in the export modal)", () => {
