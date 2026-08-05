@@ -38,6 +38,7 @@ import {
 import {
   isIncluded,
   selectedFrames,
+  overrideKey,
   explorerSearchString,
   plainNameList,
   moveScript,
@@ -79,6 +80,9 @@ const FrameListModal: Component<Props> = (props) => {
   const [sessionDetails, setSessionDetails] = createSignal<Record<string, SessionDetail>>({});
   const [loading, setLoading] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
+  // Selected dates whose detail fetch failed: the table silently covering only
+  // part of the selection would misrepresent what the copy/move acts on.
+  const [failedDates, setFailedDates] = createSignal<string[]>([]);
 
   /**
    * The rig the selected sessions were shot on: the first non-null
@@ -107,7 +111,9 @@ const FrameListModal: Component<Props> = (props) => {
 
   const [mode, setMode] = createSignal<FrameListMode>("bad");
   const [includeUnmeasured, setIncludeUnmeasured] = createSignal(true);
-  // Sparse per-row overrides keyed by source_relative. Cleared on ANY change
+  // Sparse per-row overrides keyed by the lib's overrideKey (session date +
+  // source_relative, since the same source_relative can appear under two
+  // selected dates). Cleared on ANY change
   // that alters what the computed verdicts mean (constraints, baseline, the
   // enable flag, mode, include-unmeasured): a hand edit must never silently
   // survive a semantics change it was not made under.
@@ -184,7 +190,10 @@ const FrameListModal: Component<Props> = (props) => {
       else missing.push(date);
     }
     setSessionDetails(seeded);
-    if (missing.length === 0) return;
+    if (missing.length === 0) {
+      setFailedDates([]);
+      return;
+    }
     setLoading(true);
     Promise.all(
       missing.map((date) =>
@@ -193,16 +202,17 @@ const FrameListModal: Component<Props> = (props) => {
             params: { path: { target_id: props.targetId, date } },
           })
           .then(unwrap) as Promise<SessionDetail>)
-          .then((detail) => [date, detail] as const)
-          .catch(() => null),
+          .then((detail) => ({ date, detail: detail as SessionDetail | null }))
+          .catch(() => ({ date, detail: null as SessionDetail | null })),
       ),
     )
       .then((results) => {
         setSessionDetails((prev) => {
           const next = { ...prev };
-          for (const r of results) if (r) next[r[0]] = r[1];
+          for (const r of results) if (r.detail) next[r.date] = r.detail;
           return next;
         });
+        setFailedDates(results.filter((r) => r.detail == null).map((r) => r.date));
       })
       .finally(() => setLoading(false));
   });
@@ -227,25 +237,39 @@ const FrameListModal: Component<Props> = (props) => {
     qualityFilterOn() ? verdicts() : verdicts().map(neutralize),
   );
 
-  const opts = (): FrameSelectionOptions => ({
+  const selectionOpts = (): FrameSelectionOptions => ({
     mode: mode(),
     includeUnmeasured: includeUnmeasured(),
     overrides: overrides(),
   });
 
-  const selected = createMemo<FrameVerdict[]>(() => selectedFrames(effectiveVerdicts(), opts()));
+  const rowIncluded = (v: FrameVerdict): boolean => isIncluded(effective(v), selectionOpts());
 
-  const rowIncluded = (v: FrameVerdict): boolean => isIncluded(effective(v), opts());
+  const selected = createMemo<FrameVerdict[]>(() =>
+    selectedFrames(effectiveVerdicts(), selectionOpts()),
+  );
+
+  // The clipboard formats and the browser move address files by bare name, so
+  // a name shared by frames across the selected sessions must appear once:
+  // duplicating it would double-count the button and double-list the payload.
+  // First-seen order is preserved.
+  const uniqueNames = createMemo<string[]>(() => {
+    const seen = new Set<string>();
+    const names: string[] = [];
+    for (const v of selected()) {
+      const n = v.frame.file_name;
+      if (seen.has(n)) continue;
+      seen.add(n);
+      names.push(n);
+    }
+    return names;
+  });
 
   // Flip the row to the opposite of its current answer; when that lands back
-  // on the computed value, drop the key so the override map stays sparse.
+  // on the computed (override-free) value, drop the key so the map stays sparse.
   const toggleInclude = (v: FrameVerdict) => {
-    const key = v.frame.source_relative;
-    const computed = isIncluded(effective(v), {
-      mode: mode(),
-      includeUnmeasured: includeUnmeasured(),
-      overrides: {},
-    });
+    const key = overrideKey(v);
+    const computed = isIncluded(effective(v), { ...selectionOpts(), overrides: {} });
     const next = !rowIncluded(v);
     setOverrides((prev) => {
       const map = { ...prev };
@@ -263,7 +287,7 @@ const FrameListModal: Component<Props> = (props) => {
   const copyDisabled = () =>
     selected().length === 0 || (format() === "script" && baseFolder().trim() === "");
 
-  const nameCount = () => selected().length;
+  const nameCount = () => uniqueNames().length;
   const namesWord = () => (nameCount() === 1 ? "name" : "names");
   const copyLabel = () =>
     format() === "script"
@@ -271,7 +295,7 @@ const FrameListModal: Component<Props> = (props) => {
       : `Copy ${nameCount()} ${namesWord()}`;
 
   const doCopy = async () => {
-    const names = selected().map((v) => v.frame.file_name);
+    const names = uniqueNames();
     let text: string;
     if (format() === "explorer") text = explorerSearchString(names);
     else if (format() === "names") text = plainNameList(names);
@@ -318,6 +342,19 @@ const FrameListModal: Component<Props> = (props) => {
   const [moveFailures, setMoveFailures] = createSignal<MoveResult["failed"]>([]);
   let moveAbort: AbortController | null = null;
 
+  // The browser move acts on ONE picked folder, so it only works one session
+  // at a time: with several sessions selected the picked folder cannot reach
+  // them all, and a partial move would look complete.
+  const multiSession = () => props.selectedDates.length > 1;
+
+  // How many distinct names a scan searched for: unique matched names plus the
+  // names with zero hits. Denominators the missing warning can cite.
+  const scannedNameCount = (scan: MoveScan): number => {
+    const matched = new Set<string>();
+    for (const m of scan.matches) matched.add(m.name);
+    return matched.size + scan.missing.length;
+  };
+
   // Per-name hit counts for the confirm panel's collision notes.
   const matchCounts = createMemo<Map<string, number>>(() => {
     const counts = new Map<string, number>();
@@ -341,9 +378,8 @@ const FrameListModal: Component<Props> = (props) => {
       return;
     }
     try {
-      const names = selected().map((v) => v.frame.file_name);
       setError(null);
-      setMoveScan(await scanForNames(root, names));
+      setMoveScan(await scanForNames(root, uniqueNames()));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not scan the picked folder.");
     }
@@ -519,6 +555,13 @@ const FrameListModal: Component<Props> = (props) => {
             </span>
           </div>
 
+          <Show when={failedDates().length > 0}>
+            <div class="text-xs text-theme-error bg-theme-error/10 border border-theme-error/30 rounded-[var(--radius-sm)] px-3 py-2">
+              Could not load {failedDates().length} of {props.selectedDates.length} sessions:{" "}
+              {failedDates().join(", ")}. The list below covers only the loaded sessions.
+            </div>
+          </Show>
+
           <WbppQualityPanel
             enabled={qualityFilterOn()}
             onEnabledChange={changeQualityEnabled}
@@ -576,7 +619,12 @@ const FrameListModal: Component<Props> = (props) => {
                     <Button
                       variant="secondary"
                       size="sm"
-                      disabled={nameCount() === 0}
+                      disabled={nameCount() === 0 || multiSession()}
+                      title={
+                        multiSession()
+                          ? "Browser move works one session at a time: the browser can only reach files inside the single folder you pick."
+                          : undefined
+                      }
                       onClick={() => void startMovePick()}
                     >
                       Move {nameCount()} to _rejected
@@ -598,6 +646,13 @@ const FrameListModal: Component<Props> = (props) => {
                     Files move to _rejected inside the picked folder.
                   </span>
                 </p>
+                <Show when={scan().missing.length > 0}>
+                  <div class="text-xs text-theme-error bg-theme-error/10 border border-theme-error/30 rounded-[var(--radius-sm)] px-3 py-2">
+                    {scan().missing.length} of {scannedNameCount(scan())} files were not found
+                    under {scan().root.name}. Check that you picked the folder that contains this
+                    session's frames.
+                  </div>
+                </Show>
                 <div class="max-h-40 overflow-y-auto border border-theme-border rounded-[var(--radius-sm)] text-tiny font-mono">
                   <For each={scan().matches}>
                     {(m) => (
