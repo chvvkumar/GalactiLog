@@ -24,6 +24,14 @@ export const monitorJobs = (): ActiveJob[] => {
   return jobs;
 };
 
+// Panel sections. A job with no state field predates the queued concept and
+// is by construction running.
+export const runningJobs = (): ActiveJob[] =>
+  monitorJobs().filter((j) => j.state !== "waiting");
+
+export const waitingJobs = (): ActiveJob[] =>
+  monitorJobs().filter((j) => j.state === "waiting");
+
 export const hasMonitorJobs = (): boolean => monitorJobs().length > 0;
 
 // Aggregate strip progress: mean of the determinate jobs' fractions, or null
@@ -36,4 +44,7 @@ export function aggregateProgress(jobs: ActiveJob[]): number | null {
   return Math.max(0, Math.min(1, sum / determinate.length));
 }
 
-export const stripProgress = (): number | null => aggregateProgress(monitorJobs());
+// The strip reflects work in motion: waiting jobs are excluded, otherwise a
+// queue of countdown tasks would run the indeterminate shimmer with nothing
+// actually executing.
+export const stripProgress = (): number | null => aggregateProgress(runningJobs());

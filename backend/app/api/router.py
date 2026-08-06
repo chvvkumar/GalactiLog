@@ -19,6 +19,7 @@ from .mosaics import router as mosaics_router
 from .custom_columns import router as custom_columns_router
 from .filename_resolution import router as filename_resolution_router
 from .tasks import router as tasks_router
+from .jobs import router as jobs_router
 from .backup import router as backup_router
 from .bootstrap import router as bootstrap_router
 from .preview import router as preview_router
@@ -49,6 +50,7 @@ api_router.include_router(mosaics_router)
 api_router.include_router(custom_columns_router)
 api_router.include_router(filename_resolution_router)
 api_router.include_router(tasks_router)
+api_router.include_router(jobs_router)
 api_router.include_router(backup_router)
 api_router.include_router(bootstrap_router)
 api_router.include_router(preview_router)

@@ -597,6 +597,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Jobs */
+        get: operations["list_jobs_api_jobs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/logs": {
         parameters: {
             query?: never;
@@ -3572,6 +3589,26 @@ export interface components {
             /** Ok */
             ok: boolean;
         };
+        /** JobEntry */
+        JobEntry: {
+            /** Eta */
+            eta?: string | null;
+            /** Name */
+            name: string;
+            /** Queued At */
+            queued_at?: number | null;
+            /** Started At */
+            started_at?: number | null;
+            /** State */
+            state: string;
+            /** Task Id */
+            task_id: string;
+        };
+        /** JobsResponse */
+        JobsResponse: {
+            /** Jobs */
+            jobs: components["schemas"]["JobEntry"][];
+        };
         /** LoginRequest */
         LoginRequest: {
             /** Password */
@@ -4704,6 +4741,11 @@ export interface components {
              * @default 0
              */
             percent: number;
+            /**
+             * Phd2 Checked
+             * @default 0
+             */
+            phd2_checked: number;
             /**
              * Phd2 Failed
              * @default 0
@@ -6945,6 +6987,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["IntegrationResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_jobs_api_jobs_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobsResponse"];
                 };
             };
             /** @description Validation Error */

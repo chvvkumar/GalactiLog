@@ -458,6 +458,11 @@ export interface ScanStatus {
   phd2_found?: number;
   phd2_ingested?: number;
   phd2_failed?: number;
+  // Files looked at so far, whatever the verdict (ingested, unchanged,
+  // empty, failed). The progress numerator; ingested+failed is only the
+  // fallback for a backend that predates it, and undercounts on a rescan
+  // where nearly every log short-circuits as unchanged.
+  phd2_checked?: number;
   // Epoch seconds, same unit as started_at: the LAST guide-log state
   // transition. Written when the pass is marked pending at dispatch,
   // rewritten when it reaches running, cleared in the same write that clears
@@ -880,7 +885,7 @@ export type ActivityCategory =
 // widget); not a server response shape.
 export interface ActiveJob {
   id: string;
-  category: "scan" | "rebuild" | "thumbnail" | "enrichment" | "mosaic" | "wbpp_copy";
+  category: "scan" | "rebuild" | "thumbnail" | "enrichment" | "mosaic" | "wbpp_copy" | "task";
   label: string;
   subLabel?: string;
   progress?: number;
@@ -888,6 +893,12 @@ export interface ActiveJob {
   detail?: string;
   cancelable: boolean;
   onCancel?: () => Promise<void>;
+  // "waiting" = queued server-side but not yet started (from /api/jobs).
+  // Absent means running; only the generic task rows ever carry "waiting".
+  state?: "running" | "waiting";
+  // When a waiting task was dispatched with a countdown/eta, its scheduled
+  // start in epoch ms, for a "starts in Ns" label.
+  etaMs?: number;
 }
 
 // Query-param bag for GET /activity -- the OpenAPI spec flattens these into

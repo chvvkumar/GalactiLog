@@ -75,6 +75,12 @@ class ScanStateSnapshot:
     phd2_found: int = 0
     phd2_ingested: int = 0
     phd2_failed: int = 0
+    # Files the pass has looked at so far, whatever the verdict (ingested,
+    # unchanged, empty, failed). This is the scan screen's numerator: on a
+    # routine rescan nearly every log short-circuits as unchanged, so a
+    # numerator built from ingested+failed sat at 0 against a denominator of
+    # hundreds and then jumped straight to done.
+    phd2_checked: int = 0
     # "" | pending | running. The guide-log pass is dispatched by run_scan and
     # then runs on its own, so `state` can read "complete" while it is still
     # working. Without this field a caller polling for completeness reads the
@@ -118,6 +124,7 @@ class ScanStateSnapshot:
             "phd2_found": self.phd2_found,
             "phd2_ingested": self.phd2_ingested,
             "phd2_failed": self.phd2_failed,
+            "phd2_checked": self.phd2_checked,
             "phd2_state": self.phd2_state,
             "phd2_state_at": self.phd2_state_at,
             "task": self.task,
@@ -160,6 +167,7 @@ def parse_snapshot(data: dict | None) -> ScanStateSnapshot:
         phd2_found=int(data.get("phd2_found", 0)),
         phd2_ingested=int(data.get("phd2_ingested", 0)),
         phd2_failed=int(data.get("phd2_failed", 0)),
+        phd2_checked=int(data.get("phd2_checked", 0)),
         phd2_state=data.get("phd2_state", "") or "",
         phd2_state_at=(
             float(data["phd2_state_at"]) if data.get("phd2_state_at") else None
@@ -588,6 +596,7 @@ def reset_phd2_counts_sync(r: sync_redis.Redis, found: int) -> None:
         "phd2_found": found,
         "phd2_ingested": 0,
         "phd2_failed": 0,
+        "phd2_checked": 0,
         "phd2_state": PHD2_STATE_PENDING,
         "phd2_state_at": time.time(),
     })
@@ -622,7 +631,7 @@ def set_phd2_found_sync(r: sync_redis.Redis, found: int) -> None:
 
 
 def increment_phd2_progress_sync(
-    r: sync_redis.Redis, ingested: int = 0, failed: int = 0
+    r: sync_redis.Redis, ingested: int = 0, failed: int = 0, checked: int = 0
 ) -> None:
     """Advance the per-file guide-log counters, following increment_csv_enriched_sync.
 
@@ -635,7 +644,9 @@ def increment_phd2_progress_sync(
 
     A call with nothing to report writes nothing. Most files in a rescan are
     unchanged, and a Redis round trip per unchanged file in a library of
-    hundreds of logs is pure overhead.
+    hundreds of logs is pure overhead - which is why `checked` (files looked
+    at, whatever the verdict) is flushed by the caller in batches rather than
+    reported one file at a time.
 
     Real progress also renews phd2_state_at. The timestamp is what lets a
     reader age a stuck claim out, and a consumer that applies its staleness
@@ -646,17 +657,20 @@ def increment_phd2_progress_sync(
     evidence it is merely slow. Only a call that has progress to report
     renews it: a no-op must not keep a genuinely hung pass looking alive.
     """
-    if not ingested and not failed:
+    if not ingested and not failed and not checked:
         return
     if ingested:
         r.hincrby(SCAN_KEY, "phd2_ingested", ingested)
     if failed:
         r.hincrby(SCAN_KEY, "phd2_failed", failed)
+    if checked:
+        r.hincrby(SCAN_KEY, "phd2_checked", checked)
     r.hset(SCAN_KEY, "phd2_state_at", time.time())
 
 
 def set_phd2_counts_sync(
-    r: sync_redis.Redis, found: int, ingested: int, failed: int
+    r: sync_redis.Redis, found: int, ingested: int, failed: int,
+    checked: int | None = None,
 ) -> None:
     """Publish the PHD2 pass's totals in one write and clear the in-flight flag.
 
@@ -672,6 +686,9 @@ def set_phd2_counts_sync(
         "phd2_found": found,
         "phd2_ingested": ingested,
         "phd2_failed": failed,
+        # A finished pass has by definition checked everything it found; this
+        # also settles the partial batch the per-file flush had not sent yet.
+        "phd2_checked": found if checked is None else checked,
         "phd2_state": PHD2_STATE_IDLE,
         "phd2_state_at": "",
     })
