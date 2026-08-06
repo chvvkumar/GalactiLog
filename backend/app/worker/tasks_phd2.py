@@ -951,8 +951,8 @@ def _run_phd2_pass(
     # on a routine rescan nearly everything short-circuits as unchanged, and a
     # numerator of ingested+failed reads "0 of 179" for the whole pass and
     # then jumps to done. Flushed in batches because a Redis round trip per
-    # unchanged file is the overhead increment_phd2_progress_sync's contract
-    # promises to avoid; the end-of-pass counts write settles the remainder.
+    # unchanged file is the overhead the progress counters' contract promises
+    # to avoid; the end-of-pass counts write settles the remainder.
     checked_batch = 0
     CHECKED_FLUSH_EVERY = 25
 
