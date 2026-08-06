@@ -42,6 +42,17 @@ class RegenerateThumbnailsResponse(BaseModel):
     queued: int | None = None
 
 
+class ScanFailedFile(BaseModel):
+    """One entry of the per-scan failed-file list.
+
+    Key names must match what ``increment_failed_sync`` pushes onto
+    ``SCAN_FAILED_KEY`` (app/services/scan_state.py):
+    ``json.dumps({"file": file_path, "error": error})``.
+    """
+    file: str
+    error: str
+
+
 class ScanStateResponse(BaseModel):
     """Response for /scan/status - scan state snapshot with optional failed_files."""
     state: str
@@ -56,7 +67,25 @@ class ScanStateResponse(BaseModel):
     skipped_calibration: int = 0
     new_files: int = 0
     changed_files: int = 0
-    failed_files: list[str] | None = None
+    phd2_found: int = 0
+    phd2_ingested: int = 0
+    phd2_failed: int = 0
+    # Files the pass has looked at so far, whatever the verdict (ingested,
+    # unchanged, empty, failed). The scan screen's numerator: most files in a
+    # rescan are unchanged, so counting only ingested+failed read "0 of N"
+    # for the whole pass.
+    phd2_checked: int = 0
+    # "" | pending | running. The guide-log pass outlives the image scan, so
+    # ``state == "complete"`` alone does not mean the scan is finished. A
+    # caller that needs everything done waits for this to be "" as well; the
+    # phd2_* counters above only describe the current pass once it is.
+    phd2_state: str = ""
+    # Unix time phd2_state was last written, or null. A "pending" claim has no
+    # expiry of its own - a task queued and then lost never clears it - so a
+    # consumer that would otherwise wait on the flag forever ages it out on
+    # this instead.
+    phd2_state_at: float | None = None
+    failed_files: list[ScanFailedFile] | None = None
     task: str = ""
     step: int = 0
     total_steps: int = 0

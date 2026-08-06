@@ -4,6 +4,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
+from app.schemas.phd2 import Phd2NightSummary
+
 
 class NotesUpdate(BaseModel):
     notes: str | None = None
@@ -152,6 +154,11 @@ class FrameRecord(BaseModel):
     guiding_rms_arcsec: float | None = None
     guiding_rms_ra_arcsec: float | None = None
     guiding_rms_dec_arcsec: float | None = None
+    # "csv" | "phd2" | None. Which measurement produced the three values
+    # above. Two sources write them and they are not interchangeable, so a
+    # frame table that shows the number without the source invites the user
+    # to compare a N.I.N.A. figure against a PHD2 figure as if they were one.
+    guiding_rms_source: str | None = None
     adu_stdev: float | None = None
     adu_mean: float | None = None
     adu_median: float | None = None
@@ -329,6 +336,10 @@ class SessionDetailResponse(BaseModel):
     custom_values: list[dict] | None = None
     session_baselines: dict[str, GroupBaseline] = {}
     rig_baselines: dict[str, GroupBaseline] = {}
+    # Night+rig PHD2 guiding rollup, or None when no guide log covers this
+    # night for this rig. Optional rather than an empty object so the client
+    # can tell "no PHD2 data" from "PHD2 data showing zero problems".
+    phd2: Phd2NightSummary | None = None
 
 
 class EquipmentOption(BaseModel):
@@ -458,7 +469,13 @@ class TargetIdentityResponse(BaseModel):
     name_locked: bool
 
 
-class StatusResponse(BaseModel):
+class TargetStatusResponse(BaseModel):
+    """Single-field status response for the target and merge mutation routes.
+
+    Named for its module rather than sharing the generic name in
+    schemas/common.py; see MosaicStatusResponse for why.
+    """
+
     status: str
 
 

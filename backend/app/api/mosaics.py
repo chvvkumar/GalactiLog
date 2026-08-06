@@ -23,7 +23,7 @@ from app.schemas.mosaic import (
     MosaicSummary, MosaicDetailResponse, PanelStats, MosaicSuggestionResponse,
     PanelThumbnail,
     PanelSessionsResponse, PanelSessionInfo, SessionStatusUpdate,
-    StatusResponse, OkResponse, PanelCreateResponse,
+    MosaicStatusResponse, OkResponse, PanelCreateResponse,
     DetectionStartedResponse, DetectionStatusResponse,
 )
 from app.api.deps import get_current_user, require_admin
@@ -146,7 +146,7 @@ async def accept_suggestion(
     )
 
 
-@router.post("/suggestions/{suggestion_id}/dismiss", response_model=StatusResponse)
+@router.post("/suggestions/{suggestion_id}/dismiss", response_model=MosaicStatusResponse)
 async def dismiss_suggestion(
     suggestion_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
@@ -487,7 +487,7 @@ async def get_panel_thumbnail_image(
     return Response(content=jpeg_bytes, media_type="image/jpeg")
 
 
-@router.put("/{mosaic_id}", response_model=StatusResponse)
+@router.put("/{mosaic_id}", response_model=MosaicStatusResponse)
 async def update_mosaic(
     mosaic_id: uuid.UUID,
     body: MosaicUpdate,
@@ -509,7 +509,7 @@ async def update_mosaic(
     return {"status": "ok"}
 
 
-@router.delete("/{mosaic_id}", response_model=StatusResponse)
+@router.delete("/{mosaic_id}", response_model=MosaicStatusResponse)
 async def delete_mosaic(
     mosaic_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
@@ -644,7 +644,7 @@ async def batch_update_panels(
     return result
 
 
-@router.delete("/{mosaic_id}/panels/{panel_id}", response_model=StatusResponse)
+@router.delete("/{mosaic_id}/panels/{panel_id}", response_model=MosaicStatusResponse)
 async def remove_panel(
     mosaic_id: uuid.UUID,
     panel_id: uuid.UUID,
@@ -754,7 +754,7 @@ async def get_panel_sessions(
     )
 
 
-@router.put("/{mosaic_id}/panels/{panel_id}/sessions", response_model=StatusResponse)
+@router.put("/{mosaic_id}/panels/{panel_id}/sessions", response_model=MosaicStatusResponse)
 async def update_panel_sessions(
     mosaic_id: uuid.UUID,
     panel_id: uuid.UUID,

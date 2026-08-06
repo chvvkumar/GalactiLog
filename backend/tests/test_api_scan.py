@@ -133,6 +133,56 @@ async def test_scan_status_ingesting():
 
 
 @pytest.mark.asyncio
+async def test_scan_status_returns_failed_file_objects():
+    """A scan with failures must still serialize.
+
+    ``increment_failed_sync`` pushes ``{"file": ..., "error": ...}`` onto the
+    failed list, so ``failed_files`` is a list of objects, never a list of
+    plain strings. Cancelling a scan marks every queued file failed at once,
+    which is how this surfaced in production: the response model declared
+    ``list[str]`` and /scan/status 500'd with a ResponseValidationError for
+    every poll until the state was reset.
+    """
+    import json as _json
+
+    admin = _admin_user()
+    app.dependency_overrides[get_current_user] = lambda: admin
+    try:
+        with patch("app.api.scan.async_redis") as mock_redis_cm:
+            import time as _time
+            mock_redis = AsyncMock()
+            mock_redis.hgetall = AsyncMock(return_value={
+                "state": "complete",
+                "total": "2",
+                "completed": "0",
+                "failed": "2",
+                "started_at": str(_time.time()),
+                "completed_at": str(_time.time()),
+            })
+            mock_redis.get = AsyncMock(return_value=None)
+            mock_redis.exists = AsyncMock(return_value=0)
+            mock_redis.lrange = AsyncMock(return_value=[
+                _json.dumps({"file": "/data/M31_001.fits", "error": "Scan cancelled"}),
+                _json.dumps({"file": "/data/M31_002.fits", "error": "Scan cancelled"}),
+            ])
+            mock_redis_cm.side_effect = _mock_async_redis(mock_redis)
+
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://test") as client:
+                resp = await client.get("/api/scan/status")
+
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+        assert data["failed"] == 2
+        assert data["failed_files"] == [
+            {"file": "/data/M31_001.fits", "error": "Scan cancelled"},
+            {"file": "/data/M31_002.fits", "error": "Scan cancelled"},
+        ]
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
 async def test_scan_rejects_when_already_running():
     settings_result = MagicMock()
     settings_result.scalar_one_or_none.return_value = None  # no existing row

@@ -33,15 +33,13 @@ def _bootstrap_tasks(modname="app.worker.tasks"):
     bootstrap the module that actually owns the task under test, since a
     patch.object() on the facade does not affect a function whose __globals__
     point at a different, real module.
+
+    See conftest.bootstrap_worker_module for why the mocked engine must not be
+    left behind in sys.modules.
     """
-    mod = sys.modules.get(modname)
-    if mod is not None and not isinstance(mod, MagicMock):
-        return mod
-    sys.modules.pop(modname, None)
-    with patch("sqlalchemy.create_engine", return_value=MagicMock()):
-        import importlib
-        mod = importlib.import_module(modname)
-    return mod
+    from tests.conftest import bootstrap_worker_module
+
+    return bootstrap_worker_module(modname)
 
 
 # ---------------------------------------------------------------------------

@@ -19,6 +19,7 @@ from .mosaics import router as mosaics_router
 from .custom_columns import router as custom_columns_router
 from .filename_resolution import router as filename_resolution_router
 from .tasks import router as tasks_router
+from .jobs import router as jobs_router
 from .backup import router as backup_router
 from .bootstrap import router as bootstrap_router
 from .preview import router as preview_router
@@ -26,6 +27,7 @@ from .activity import router as activity_router
 from .logs import router as logs_router
 from .integrations import router as integrations_router
 from .wbpp import router as wbpp_router
+from .phd2 import router as phd2_router
 from app.database import async_session
 from app.config import async_redis
 from app.services.version_check import (
@@ -48,6 +50,7 @@ api_router.include_router(mosaics_router)
 api_router.include_router(custom_columns_router)
 api_router.include_router(filename_resolution_router)
 api_router.include_router(tasks_router)
+api_router.include_router(jobs_router)
 api_router.include_router(backup_router)
 api_router.include_router(bootstrap_router)
 api_router.include_router(preview_router)
@@ -55,6 +58,7 @@ api_router.include_router(activity_router)
 api_router.include_router(logs_router)
 api_router.include_router(integrations_router)
 api_router.include_router(wbpp_router)
+api_router.include_router(phd2_router)
 
 
 @api_router.get("/version")

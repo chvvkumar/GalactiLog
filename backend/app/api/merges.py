@@ -12,7 +12,7 @@ from app.models.user import User
 from app.models.target import Target
 from app.models.image import Image
 from app.models.merge_candidate import MergeCandidate
-from app.schemas.target import MergeCandidateResponse, MergedTargetResponse, MergeRequest, OrphanPreviewRequest, OrphanPreviewResponse, OrphanCreateRequest, MergePreviewRequest, MergePreviewResponse, TargetIdentityRequest, TargetIdentityResponse, StatusResponse, DuplicateDetectionResponse, OrphanCreateResponse, CustomTargetCreateRequest, CustomTargetCreateResponse
+from app.schemas.target import MergeCandidateResponse, MergedTargetResponse, MergeRequest, OrphanPreviewRequest, OrphanPreviewResponse, OrphanCreateRequest, MergePreviewRequest, MergePreviewResponse, TargetIdentityRequest, TargetIdentityResponse, TargetStatusResponse, DuplicateDetectionResponse, OrphanCreateResponse, CustomTargetCreateRequest, CustomTargetCreateResponse
 from app.services.simbad import normalize_catalog_id, normalize_object_name
 from app.config import async_redis
 from app.models.merge_manifest import MergeManifest
@@ -28,7 +28,7 @@ from app.services.mosaic_detection import recompute_panel_membership_for_images
 router = APIRouter(prefix="/targets", tags=["merges"])
 
 
-@router.post("/merge", response_model=StatusResponse)
+@router.post("/merge", response_model=TargetStatusResponse)
 async def merge_targets(
     body: MergeRequest,
     session: AsyncSession = Depends(get_session),
@@ -56,7 +56,7 @@ async def trigger_duplicate_detection(user: User = Depends(require_admin)):
     return {"status": "queued", "task_id": task.id}
 
 
-@router.post("/{target_id}/unmerge", response_model=StatusResponse)
+@router.post("/{target_id}/unmerge", response_model=TargetStatusResponse)
 async def unmerge_target(
     target_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
@@ -509,7 +509,7 @@ async def get_merge_history(
     ]
 
 
-@router.post("/merge-candidates/{candidate_id}/revert", response_model=StatusResponse)
+@router.post("/merge-candidates/{candidate_id}/revert", response_model=TargetStatusResponse)
 async def revert_merge_candidate(
     candidate_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
@@ -738,7 +738,7 @@ async def update_target_identity(
     )
 
 
-@router.post("/merge-candidates/{candidate_id}/dismiss", response_model=StatusResponse)
+@router.post("/merge-candidates/{candidate_id}/dismiss", response_model=TargetStatusResponse)
 async def dismiss_merge_candidate(
     candidate_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),

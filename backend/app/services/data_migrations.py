@@ -9,7 +9,7 @@ import math
 from typing import Callable
 
 from celery.exceptions import SoftTimeLimitExceeded
-from sqlalchemy import or_, select, text
+from sqlalchemy import or_, select, text, update
 from sqlalchemy.orm import Session
 
 from app.models.app_metadata import AppMetadata
@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 # Current data version - bump this and add a migration function when
 # code changes affect how stored target data is derived.
-DATA_VERSION = 15
+DATA_VERSION = 17
 
 # Migrations whose per-target loops make external network calls (VizieR, Gaia,
 # SAC, HyperLEDA) with pacing sleeps commit their work every this many queried
@@ -857,6 +857,235 @@ def _migrate_v15_arcsec_per_pixel(session: Session) -> str:
     return "No changes needed"
 
 
+def _migrate_v16_guiding_rms_provenance(session: Session) -> str:
+    """Stamp CSV guiding provenance, re-key the PHD2 profile map, fill history.
+
+    GROUND TRUTH IS NOT raw_headers HERE. v12, v14 and v15 all re-derived an
+    image value from the headers the scanner had captured verbatim. A frame's
+    guiding RMS was never in its FITS header: it arrived from a N.I.N.A.
+    sidecar CSV that this application does not retain, or it did not arrive at
+    all. Two other facts stand in:
+
+    1. Until alembic 0023 there was exactly one writer of guiding_rms_arcsec
+       and its RA/Dec siblings - csv_metadata.IMAGE_COLUMN_MAP, fed by the
+       N.I.N.A. sidecar. So every value already stored is CSV-sourced by
+       construction, and stamping it "csv" is a statement about the code that
+       wrote it, not an inference about the data.
+    2. phd2_sessions and phd2_frames hold the full guide sample stream, which
+       is what services/phd2_correlation reads. Frames still missing a value
+       are exactly the ones the guide logs may be able to supply.
+
+    Three steps, in this order because each depends on the last:
+
+    (a) Re-key phd2_profile_map through the current equipment aliases, and
+        re-point the stored sessions at the corrected values. A profile mapped
+        before its telescope was grouped under a canonical name stores the raw
+        name, and nothing ever rewrote it; query-time expansion
+        (normalization.equipment_match_set) hides that on reads, but the
+        correlation in (c) attributes on the stored value, so it has to be
+        right before it runs. Doing it here means an existing install heals
+        without the user having to re-save the equipment settings.
+
+    (b) Stamp existing guiding values "csv" (see 1 above). Set-based UPDATE.
+
+    (c) Correlate the full history. Only rows whose guiding_rms_arcsec is
+        still NULL after (b) are candidates, so this never competes with the
+        CSV, and correlate_dates in incremental mode visits only the nights
+        holding both an unfilled frame and a guiding session.
+
+    Idempotent: (a) rewrites only map values the alias map actually changes,
+    (b) selects only rows still NULL in guiding_rms_source, and (c) selects
+    only rows still NULL in guiding_rms_arcsec, so a replay does nothing.
+
+    Bounded: (a) and (b) are single statements; (c) is proportional to the
+    guide-log corpus, not to the image catalog - 34k images against 799
+    sessions on the production clone is the sizing reference.
+    """
+    from app.models import Image
+    from app.models.phd2 import Phd2Calibration, Phd2Session
+    from app.models.user_settings import SETTINGS_ROW_ID, UserSettings
+    from app.services.normalization import (
+        build_equipment_alias_maps, normalize_equipment,
+    )
+    from app.services.phd2_correlation import (
+        GUIDING_RMS_SOURCE_CSV, correlate_dates,
+    )
+    from app.services.phd2_profiles import rewrite_telescopes, telescope_map
+
+    parts: list[str] = []
+
+    # --- (a) re-key the profile map and the rows it wrote ---
+    settings_row = session.get(UserSettings, SETTINGS_ROW_ID)
+    rekeyed = 0
+    if settings_row is not None:
+        general = dict(settings_row.general or {})
+        stored_map = general.get("phd2_profile_map") or {}
+        if stored_map:
+            _, tel_map = build_equipment_alias_maps(settings_row.equipment or {})
+            # phd2_profiles owns the stored shape, and a map entry carries a
+            # timezone and a site as well as a telescope. Rebuilding the map
+            # here from bare names, as this step originally did, flattens both
+            # away on an install that has already configured them, so the
+            # rewrite goes through rewrite_telescopes: it moves only the
+            # telescope field and leaves the rest of every entry intact. It
+            # also absorbs the "an unrecognised name is left alone" fallback,
+            # which is why no `or name` is written here.
+            corrected = rewrite_telescopes(
+                stored_map, lambda name: normalize_equipment(name, tel_map)
+            )
+            # Diffed on the telescope projection of both sides, never on the
+            # stored value itself: a map still in the legacy string form always
+            # differs from its canonical form, so comparing the raw shapes
+            # would count a re-key on every install that has never been
+            # normalized and re-point rows that nothing renamed.
+            before = telescope_map(stored_map)
+            for profile, canonical in telescope_map(corrected).items():
+                if before.get(profile) != canonical:
+                    rekeyed += 1
+                    for model in (Phd2Session, Phd2Calibration):
+                        session.execute(
+                            update(model)
+                            .where(model.equipment_profile == profile)
+                            .values(telescope=canonical)
+                            .execution_options(synchronize_session=False)
+                        )
+            if rekeyed:
+                # Whole-value assignment, not a mutation of the stored dict:
+                # SQLAlchemy tracks JSONB changes by identity, so mutating in
+                # place would not be flushed.
+                settings_row.general = {
+                    **general, "phd2_profile_map": corrected,
+                }
+                session.flush()
+                parts.append(f"{rekeyed} PHD2 profile mapping(s) re-keyed")
+
+    # --- (b) stamp the existing CSV-sourced values ---
+    stamped = session.execute(
+        update(Image)
+        .where(
+            Image.guiding_rms_arcsec.isnot(None),
+            Image.guiding_rms_source.is_(None),
+        )
+        .values(guiding_rms_source=GUIDING_RMS_SOURCE_CSV)
+        .execution_options(synchronize_session=False)
+    ).rowcount
+    session.flush()
+    if stamped:
+        parts.append(f"{stamped} guiding RMS value(s) stamped as CSV-sourced")
+
+    # --- (c) fill the remaining history from the guide logs ---
+    result = correlate_dates(session, None)
+    session.flush()
+    if result.filled:
+        parts.append(
+            f"{result.filled} frame(s) given a guiding RMS from PHD2 logs "
+            f"over {result.dates} night(s)"
+        )
+
+    return "; ".join(parts) if parts else "No changes needed"
+
+
+def _dispatch_phd2_reparse() -> bool:
+    """Queue a forced re-parse of every guide log already in the catalog.
+
+    Returns True when the task was handed to the broker. A dev box or a
+    single-container install may have no worker or no broker reachable, and a
+    data migration that has already committed its own work must not fail on
+    that, so the failure is logged and swallowed exactly as the settings
+    endpoints' dispatches do.
+
+    No new Celery task exists for this: `scan_phd2_logs(force=True)` is the
+    same entry point a timezone save uses, and forcing bypasses the size/mtime
+    short-circuit that would otherwise skip every stored log.
+
+    Queued with a countdown rather than immediately because the migration's
+    own transaction has not committed when this runs; the delay keeps the pass
+    from reading the settings row while the rewrite of it is still in flight.
+    """
+    try:
+        from app.worker.tasks import scan_phd2_logs
+
+        scan_phd2_logs.apply_async(kwargs={"force": True}, countdown=15)
+    except Exception:  # noqa: BLE001 - worker may not be available
+        logger.warning(
+            "data_migrations: could not queue the forced PHD2 re-parse; to "
+            "pick it up by hand, change a timezone to a different value and "
+            "save, then change it back and save again - either Settings > "
+            "Library > Observer Location > Timezone or any PHD2 profile's own "
+            "timezone will do, and each of those two saves queues a forced "
+            "pass. Re-saving the same value queues nothing, and a library "
+            "scan will not do it either: unchanged guide logs short-circuit "
+            "on size and mtime before the new parser is reached",
+            exc_info=True,
+        )
+        return False
+    return True
+
+
+def _migrate_v17_phd2_profile_map_shape(session: Session) -> str:
+    """Give each PHD2 profile mapping its own timezone and site slot.
+
+    The stored map used to be `{"Rig A": "Askar 120"}`: a profile name against
+    a telescope name and nothing else, so every rig in the catalog was read
+    under the one global observer timezone and the one global observer
+    location. A user with a remote rig has neither. The map is now one entry
+    per profile::
+
+        {"Rig A": {"telescope": "Askar 120", "timezone": "America/Chicago",
+                   "latitude": 30.27, "longitude": -97.74}}
+
+    `services.phd2_profiles.normalize_profile_map` is the sole owner of that
+    conversion and every reader already calls it, so this migration changes no
+    behaviour on its own: it writes the canonical form into the settings row
+    once, so the settings screen has a field to edit and the stored value stops
+    being coerced on every read.
+
+    Nothing is re-derived from the conversion itself. An upgraded profile
+    carries an empty timezone and null coordinates, which mean "inherit the
+    global values" - exactly what the install already did - so no stored
+    instant moves and there is no correlation to redo.
+
+    THE FORCED RE-PARSE BELOW IS NOT PART OF THAT, AND IS NOT REMOVABLE AS
+    UNNECESSARY. It is here because the guide-log parser itself changed in the
+    same release: it learned the ASIAIR banner, the pointing fields and the
+    `Calibration step = ` prefix. Stored rows are therefore stale by
+    construction, and the ones that suffer most are already held as
+    `parse_status="empty"` with unchanged size and mtime, so ingest
+    short-circuits to "unchanged" and never reaches the new parser. Only a
+    forced pass re-reads them. It re-parses, re-keys and re-applies in the
+    worker; this function performs no correlation of its own.
+
+    Idempotent: the settings row is rewritten only when the stored map is not
+    already canonical, and re-running the forced pass re-derives the same rows
+    from the same files.
+    """
+    from app.models.user_settings import SETTINGS_ROW_ID, UserSettings
+    from app.services.phd2_profiles import normalize_profile_map
+
+    parts: list[str] = []
+
+    settings_row = session.get(UserSettings, SETTINGS_ROW_ID)
+    if settings_row is not None:
+        general = dict(settings_row.general or {})
+        stored_map = general.get("phd2_profile_map") or {}
+        corrected = normalize_profile_map(stored_map)
+        if corrected != stored_map:
+            # Whole-value assignment, not a mutation of the stored dict:
+            # SQLAlchemy tracks JSONB changes by identity, so mutating in
+            # place would not be flushed (same reason as v16 step (a)).
+            settings_row.general = {**general, "phd2_profile_map": corrected}
+            session.flush()
+            parts.append(
+                f"{len(corrected)} PHD2 profile mapping(s) given a timezone "
+                "and site of their own"
+            )
+
+    if _dispatch_phd2_reparse():
+        parts.append("guide logs queued for a forced re-parse")
+
+    return "; ".join(parts) if parts else "No changes needed"
+
+
 def reference_catalogs_are_empty(session: Session) -> bool:
     """Return True if the static OpenNGC catalog table has no rows.
 
@@ -925,6 +1154,8 @@ MIGRATIONS: dict[int, tuple[str, Callable[[Session], str]]] = {
     13: ("Backfill per-target enrichment (constellation, memberships, Gaia, HyperLEDA) for targets created since v11", _migrate_v13_enrich_created_targets),
     14: ("Recover eccentricity provenance and backfill frame altitude from raw_headers", _migrate_v14_eccentricity_provenance),
     15: ("Backfill materialized plate scale (arcsec_per_pixel) from raw_headers", _migrate_v15_arcsec_per_pixel),
+    16: ("Stamp CSV guiding provenance, re-key the PHD2 profile map, and correlate guiding to frames", _migrate_v16_guiding_rms_provenance),
+    17: ("Give each PHD2 profile mapping its own timezone slot", _migrate_v17_phd2_profile_map_shape),
 }
 
 

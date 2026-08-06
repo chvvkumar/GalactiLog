@@ -32,24 +32,14 @@ if "fitsio" not in sys.modules:
 
 def _bootstrap_tasks_module():
     """Import app.worker.tasks_csv (owns backfill_csv_metrics since the
-    Phase 6 Task 3 module split) with the DB engine mocked out."""
-    modname = "app.worker.tasks_csv"
-    # If already imported and it's the real module (not a conftest MagicMock), return it
-    cached = sys.modules.get(modname)
-    if cached is not None and not isinstance(cached, MagicMock):
-        return cached
+    Phase 6 Task 3 module split) with the DB engine mocked out.
 
-    sys.modules.pop(modname, None)
+    This runs at COLLECTION time, so it is usually the first mocked import of
+    the run. See conftest.bootstrap_worker_module for why the mocked engine
+    must not be left behind in sys.modules."""
+    from tests.conftest import bootstrap_worker_module
 
-    # Patch sqlalchemy create_engine to return a mock, preventing DB connection
-    mock_engine = MagicMock()
-    mock_engine.connect.return_value.__enter__ = MagicMock(return_value=mock_engine)
-    mock_engine.connect.return_value.__exit__ = MagicMock(return_value=False)
-
-    with patch("sqlalchemy.create_engine", return_value=mock_engine):
-        import importlib
-        tasks_mod = importlib.import_module(modname)
-    return tasks_mod
+    return bootstrap_worker_module("app.worker.tasks_csv")
 
 
 # Bootstrap once at module level (runs during collection)
@@ -67,8 +57,10 @@ def _make_row(id_="img-001", file_name="Light_001.fits", **existing):
     would make a "None must not erase a real value" test pass for the wrong
     reason. Unspecified columns default to None (the DB's own default).
     """
-    values = {col: None for col in _tasks.CSV_MERGE_COLUMNS}
-    values["eccentricity_source"] = None
+    values = {
+        col: None
+        for col in _tasks.CSV_MERGE_COLUMNS + _tasks._PROVENANCE_COLUMNS
+    }
     values.update(existing)
     return SimpleNamespace(id=id_, file_name=file_name, **values)
 
@@ -388,6 +380,34 @@ def test_backfill_leaves_source_alone_when_csv_has_no_eccentricity(tmp_path):
 
     values = _captured_updates(conn)[0]
     assert values.get("eccentricity_source", "header") == "header"
+
+
+def test_backfill_stamps_guiding_rms_source_when_csv_supplies_guiding(tmp_path):
+    """Replayed CSV guiding values must carry their provenance to the row.
+
+    The guide log is the other writer of these columns, so a backfilled value
+    that arrives unlabelled is indistinguishable from a PHD2-derived one.
+    """
+    row = _make_row()
+    entry = _blank_csv_entry(guiding_rms_arcsec=0.78, guiding_rms_ra_arcsec=0.52)
+
+    _, conn = _run_backfill(tmp_path, {"Light_001.fits": entry}, {}, [row])
+
+    values = _captured_updates(conn)[0]
+    assert values["guiding_rms_arcsec"] == 0.78
+    assert values["guiding_rms_source"] == "csv"
+
+
+def test_backfill_leaves_guiding_source_alone_when_csv_has_no_guiding(tmp_path):
+    """A CSV silent about guiding must not relabel a guide-log value."""
+    row = _make_row(guiding_rms_arcsec=0.61, guiding_rms_source="phd2")
+    entry = _blank_csv_entry(detected_stars=900)
+
+    _, conn = _run_backfill(tmp_path, {"Light_001.fits": entry}, {}, [row])
+
+    values = _captured_updates(conn)[0]
+    assert values.get("guiding_rms_arcsec", 0.61) == 0.61
+    assert values.get("guiding_rms_source", "phd2") == "phd2"
 
 
 def test_backfill_issues_no_update_when_csv_changes_nothing(tmp_path):

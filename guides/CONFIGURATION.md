@@ -95,6 +95,77 @@ Configure from **Settings > General**:
 
 Manual scans can be triggered from **Settings > Library**.
 
+## PHD2 Guide Logs
+
+Guide logs are collected during the normal library scan. Any file named `PHD2_GuideLog_*.txt` under the library path is parsed and catalogued; `PHD2_DebugLog_*` files are ignored.
+
+Configure from **Settings > Library**:
+
+- **Scan PHD2 guide logs** -- Toggles discovery of guide logs on disk. Turning it off leaves already-catalogued logs in place, and does not block corrections applied to stored guiding data (a profile re-key or a timezone re-parse).
+- **Observer Timezone** -- The IANA zone name of the machine that runs PHD2, for example `America/New_York`. Set it under **Settings > Library > Observer Location**. PHD2 writes guide-log timestamps as local wall-clock with no zone marker, so this value decides what absolute time each guiding session is stored at. An empty value means "not configured". It does not fall back to the server's own zone, and nothing is guessed from it. Guiding from a profile that has neither its own timezone nor a global one is still parsed and catalogued, but it is never matched to any frame: reading wall-clock times in the wrong zone would attach guiding measured hours away to whichever exposures happened to overlap, so the correlation pass declines rather than fill. The scan reports that case in the activity feed as `phd2_correlation_timezone_unset` and names the profiles it skipped. Fill this in even when the capture PC runs in the same zone as the server. Saving a different value re-parses every catalogued guide log, so existing sessions are corrected too.
+- **Observer Longitude** -- Required for guide sessions to be grouped by imaging night. See below.
+
+Map PHD2 equipment profiles onto telescope names from **Settings > Equipment > PHD2 Profiles**. The mapping is applied to stored sessions by a background task; no re-scan is required.
+
+### Per-Rig PHD2 Profile Settings
+
+PHD2 records an equipment profile name in every guide log. Each profile gets its own row under **Settings > Equipment > PHD2 Profiles** with four fields:
+
+- **Telescope** -- The telescope this profile's guiding belongs to. Leave it on "Not mapped" to leave the guiding unattributed.
+- **Timezone** -- The zone this rig's guide logs are read in. Leave it empty to inherit the global Observer Timezone.
+- **Latitude** and **Longitude** -- The site this rig stands at, in decimal degrees, east and north positive. Leave them empty to inherit the global Observer Location.
+
+Empty is the only inherit marker for the coordinates. Zero is a real coordinate, not a blank: a longitude of `0` means the Greenwich meridian and a latitude of `0` means the equator, and both are stored and used exactly as entered. Clear the field to go back to inheriting.
+
+Each row reads back what is actually in effect, for example "Reads guide logs in Central Time (America/Chicago), from Observer Location" and "Site: 30.27 deg N, 97.74 deg W". Use that line to confirm inheritance rather than assuming it.
+
+Use the per-profile fields when:
+
+- A rig sits at a remote or travel site in a different timezone or at a different longitude from the home observatory. The site longitude decides which imaging night a session lands on, so a rig several timezones away is grouped wrongly under the global value.
+- The PC running PHD2 for one rig keeps a different clock from the machine used for the rest of the library, for example an ASIAIR set to the site's zone while the desktop stays on home time.
+
+Leave them empty for every rig that runs at the global location on the global clock. Inheriting is the normal case and keeps one value to maintain.
+
+### What Re-Reads Stored Guide Logs
+
+Changing a timezone, global or per-profile, is what re-parses stored guide logs. Each save that changes a resolved zone queues one forced pass over every catalogued log, which re-parses, re-keys and re-correlates. On a typical library that pass takes one to three minutes and runs in the background.
+
+Running a library scan does not re-read them. A guide log whose size and modification time are unchanged is short-circuited as already ingested, whatever state its stored rows are in, so a scan cannot recover logs that were stored wrongly or could not be parsed. If stored guiding needs re-reading and no setting genuinely needs to change, change a timezone to a different value, save, then change it back and save again. Each of those two saves queues a forced pass.
+
+Longitude changes are cheaper: saving a longitude re-keys stored guide sessions onto the correct imaging night without re-parsing anything. A latitude change alone changes no stored value; it is used as evidence on the next pass that parses guide-log sections.
+
+### Sidereal Mismatch Warning
+
+Guide logs that record where the mount was pointing carry their own clock evidence. Right ascension plus hour angle is local sidereal time, which together with the site longitude fixes the UTC offset the log was really written at. When that disagrees with the configured timezone by more than half an hour, the scan raises `phd2_timezone_sidereal_mismatch` in the activity feed and names the profiles involved.
+
+The warning changes nothing. The configured timezone is still what was used to read those logs; the pass reports the disagreement and leaves the data alone.
+
+How strongly it is worded depends on what the profile has configured:
+
+- The profile carries its own longitude. The comparison is against a known site, so the disagreement is stated as fact, usually with the UTC offset the pointing implies. The likely cause is a wrong timezone on the profile or a wrong clock on the mount. A longitude entered with the wrong sign looks exactly like a timezone error, so check both.
+- The profile inherits its longitude from Observer Location. The arithmetic is the same, but the site is an assumption, so the message offers the alternatives: the timezone is wrong, the rig is not at the configured longitude, or the mount clock is wrong. Entering that rig's own longitude is what tells them apart.
+- The profile has no longitude at all, globally or its own. The comparison is against the whole timezone's standard meridian, so only gross errors show up and the message says "probably wrong" rather than stating it. When the direction is unambiguous the message suggests the longitude the pointing implies.
+
+A disagreement close to 12 hours cannot be resolved for direction from pointing alone, and the message says so instead of picking a side.
+
+Acting on the warning does not re-run the check immediately. Entering a longitude re-keys sessions but parses nothing, and entering a latitude dispatches nothing at all, so the warning row stands until the next pass that parses guide-log sections, either the next scan that finds new or changed logs or a forced pass from a timezone change.
+
+### Observer Location and Guiding Nights
+
+Set **Observer Latitude** and **Observer Longitude** under **Settings > Library > Observer Location** if imaging-night grouping is enabled, which it is by default.
+
+Imaging-night grouping puts a whole night's data on one date by cutting the day at local solar noon instead of UTC midnight. Images can work that out on their own, because each FITS file carries the site longitude in its `SITELONG` header. A PHD2 guide log carries no coordinates, so the observer longitude setting is the only source it has.
+
+With the longitude unset, guide sessions fall back to grouping by UTC midnight while images keep grouping by solar noon. West of Greenwich an evening session then lands one day after the frames it belongs with, so the session card for that night shows no guiding data at all. The scan logs a warning when this happens, and the activity feed reports the guiding nights that fall a day off.
+
+Filling in the longitude fixes existing data as well as new: saving it re-keys every stored guide session and calibration onto the correct night. No re-scan is needed.
+
+### Scan Filters and Guide-Log Discovery
+
+Guide logs are tested against the same include and exclude rules as image files. A file-target include rule narrows every file the scan sees, not only images, so a rule such as `include` / `file` / `*.fits` suppresses guide-log discovery completely: no `PHD2_GuideLog_*.txt` name can match it. The scan reports zero guide logs found and raises no error, which is the expected result of the rule rather than a fault.
+
+To keep both, either restrict the library with folder-target rules and include paths instead of a file-target include rule, or add a second file-target include rule for `PHD2_GuideLog_*.txt`.
+
 ## Filter Aliases
 
 Different equipment or N.I.N.A. profiles may record the same filter under different names (e.g. "Ha", "H-alpha", "Hydrogen Alpha"). Aliases map these variants to a single canonical name.

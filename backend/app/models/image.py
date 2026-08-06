@@ -89,6 +89,20 @@ class Image(Base):
     guiding_rms_ra_arcsec: Mapped[float | None] = mapped_column(Float, nullable=True)
     guiding_rms_dec_arcsec: Mapped[float | None] = mapped_column(Float, nullable=True)
 
+    # Which measurement produced the three guiding_rms_* values above:
+    #   "csv"  -- N.I.N.A. Session Metadata CSV, written at ingest
+    #   "phd2" -- computed from the PHD2 guide log's raw sample stream over
+    #             this frame's exposure interval (services/phd2_correlation)
+    # NULL means unknown: rows written before this column existed, or rows
+    # with no guiding data at all. The two sources are close but are not the
+    # same measurement - N.I.N.A. reports what its guider integration saw,
+    # PHD2's own numbers come off the 0.5 s sample series - so a frame table
+    # has to be able to say which one it is showing. The CSV always wins:
+    # correlation only ever writes rows where guiding_rms_arcsec is NULL.
+    # No index -- two values plus NULL is too low-cardinality for a btree to
+    # help, exactly as for eccentricity_source above.
+    guiding_rms_source: Mapped[str | None] = mapped_column(String(20), nullable=True)
+
     # ADU
     adu_stdev: Mapped[float | None] = mapped_column(Float, nullable=True)
     adu_mean: Mapped[float | None] = mapped_column(Float, nullable=True)

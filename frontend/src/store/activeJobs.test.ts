@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { wireActiveJobSources, activeJobs } from "./activeJobs";
+import { wireActiveJobSources, activeJobs, scanStatusToJob } from "./activeJobs";
 import type { ScanStatus, RebuildStatus } from "../api/types";
 
 const baseScanStatus: ScanStatus = {
@@ -102,5 +102,67 @@ describe("activeJobs percent-to-fraction conversion", () => {
     const rebuildJob = activeJobs().find((j) => j.category === "rebuild");
     expect(rebuildJob?.subLabel).toBe("Resolving 5/12 object names...");
     expect(rebuildJob?.progress).toBeCloseTo(0.417, 5);
+  });
+});
+
+describe("guide-log pass in the job monitor", () => {
+  const noop = async () => {};
+
+  it("adds a guide-log line to the running scan job while a pass is queued", () => {
+    const job = scanStatusToJob(
+      { ...baseScanStatus, state: "ingesting", total: 200, completed: 100, phd2_state: "pending" },
+      noop,
+      "processing"
+    );
+
+    expect(job?.label).toBe("Ingesting files");
+    expect(job?.subLabel).toContain("100 / 200 files");
+    expect(job?.subLabel).toContain("Guide logs processing");
+  });
+
+  it("counts the guide logs once the backend publishes totals", () => {
+    const job = scanStatusToJob(
+      {
+        ...baseScanStatus,
+        state: "ingesting",
+        total: 200,
+        completed: 100,
+        phd2_state: "running",
+        phd2_found: 25,
+        phd2_ingested: 7,
+        phd2_failed: 1,
+      },
+      noop,
+      "processing"
+    );
+
+    expect(job?.subLabel).toContain("Guide logs processing (8 of 25)");
+  });
+
+  it("keeps a job on screen for the guide-log tail after the image scan finishes", () => {
+    const job = scanStatusToJob(
+      { ...baseScanStatus, state: "complete", phd2_state: "running", phd2_found: 25, phd2_ingested: 5 },
+      noop,
+      "processing"
+    );
+
+    expect(job?.label).toBe("Processing guide logs");
+    expect(job?.subLabel).toBe("5 of 25 logs");
+    expect(job?.progress).toBeCloseTo(5 / 25, 5);
+    expect(job?.cancelable).toBe(false);
+  });
+
+  it("drops the job when the guard calls a pending pass stalled", () => {
+    const job = scanStatusToJob(
+      { ...baseScanStatus, state: "complete", phd2_state: "pending" },
+      noop,
+      "stalled"
+    );
+
+    expect(job).toBeNull();
+  });
+
+  it("is unchanged for an idle scan with no pass at all", () => {
+    expect(scanStatusToJob({ ...baseScanStatus, state: "idle" }, noop, "idle")).toBeNull();
   });
 });

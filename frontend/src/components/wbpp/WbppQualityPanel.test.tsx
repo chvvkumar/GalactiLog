@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, fireEvent } from "@solidjs/testing-library";
+import { createSignal } from "solid-js";
 
 // FilePreviewModal (opened from the file column) reads the preview resolution
 // from the settings context; stub it so tests need no provider tree.
@@ -111,6 +112,9 @@ function setup(over: Partial<Parameters<typeof WbppQualityPanel>[0]> = {}) {
       verdicts={over.verdicts ?? VERDICTS}
       loading={over.loading ?? false}
       sessionDetails={over.sessionDetails ?? DETAILS}
+      isIncluded={over.isIncluded}
+      onToggleInclude={over.onToggleInclude}
+      showFullPath={over.showFullPath}
     />
   ));
   return { ...result, calls };
@@ -299,6 +303,24 @@ describe("WbppQualityPanel stat pill", () => {
     const p = pill(container);
     expect(p.querySelector(".text-theme-success")!.textContent).toBe("3");
     expect(p.querySelector(".text-theme-error")!.textContent).toBe("0");
+  });
+
+  it("does not render the tally when the host provides isIncluded (its own counts line owns the numbers)", () => {
+    const { container } = setup({
+      isIncluded: () => true,
+      onToggleInclude: () => {},
+    });
+    expect(pill(container)).toBe(null);
+    expect(container.textContent).not.toContain("kept");
+    expect(container.textContent).not.toContain("skipped");
+  });
+
+  it("keeps the tally when isIncluded is absent (the WBPP export path)", () => {
+    const { container } = setup();
+    const p = pill(container);
+    expect(p).not.toBe(null);
+    expect(p.textContent).toContain("kept");
+    expect(p.textContent).toContain("skipped");
   });
 });
 
@@ -587,6 +609,91 @@ describe("WbppQualityPanel file preview", () => {
     const d = openRow(container, "b.fits");
     expect(d.textContent).toContain("Copy");
     expect(d.textContent).not.toContain("Exclude");
+  });
+});
+
+describe("WbppQualityPanel copy column and full path", () => {
+  const rowCheckboxes = (container: HTMLElement): HTMLInputElement[] =>
+    Array.from(container.querySelectorAll('tbody input[type="checkbox"]'));
+
+  it("renders a leading Copy checkbox column when both include props are provided", () => {
+    const toggled: FrameVerdict[] = [];
+    const { container } = setup({
+      isIncluded: (v) => v.frame.file_name === "b.fits",
+      onToggleInclude: (v) => toggled.push(v),
+    });
+    expect(headers(container)).toEqual([
+      "Copy", "Verdict", "Filter", "HFR", "Ecc", "FWHM", "Stars", "RMS", "File", "Session",
+    ]);
+    const boxes = rowCheckboxes(container);
+    expect(boxes.length).toBe(3);
+    // Checked state mirrors isIncluded per verdict (chronological order a, b, c).
+    expect(boxes.map((b) => b.checked)).toEqual([false, true, false]);
+    // Each checkbox is labelled by its file name.
+    expect(boxes.map((b) => b.getAttribute("aria-label"))).toEqual([
+      "a.fits", "b.fits", "c.fits",
+    ]);
+    fireEvent.click(boxes[2]);
+    expect(toggled.length).toBe(1);
+    expect(toggled[0].frame.file_name).toBe("c.fits");
+  });
+
+  it("shows the full path under the file name when showFullPath is set", () => {
+    const { container } = setup({ showFullPath: true });
+    const fileCells = Array.from(
+      container.querySelectorAll("tbody tr td:nth-last-child(2)"),
+    ) as HTMLElement[];
+    expect(fileCells[0].textContent).toContain("/data/lights/a.fits");
+    const pathLine = fileCells[0].querySelector(".text-theme-text-tertiary") as HTMLElement;
+    expect(pathLine).toBeTruthy();
+    expect(pathLine.className).toContain("truncate");
+  });
+
+  it("renders exactly as before when none of the new props are given", () => {
+    const { container } = setup();
+    expect(rowCheckboxes(container).length).toBe(0);
+    expect(headers(container)).toEqual([
+      "Verdict", "Filter", "HFR", "Ecc", "FWHM", "Stars", "RMS", "File", "Session",
+    ]);
+    expect(container.textContent).not.toContain("/data/lights/a.fits");
+    // No skipped-row highlight without the include callback.
+    for (const tr of Array.from(container.querySelectorAll("tbody tr"))) {
+      expect(tr.className).not.toContain("bg-theme-error/10");
+      expect(tr.className).not.toContain("opacity-60");
+    }
+  });
+
+  it("ties the tint to the fail verdict and the dim to non-inclusion, independently", () => {
+    const [included, setIncluded] = createSignal(new Set(["a.fits", "c.fits"]));
+    const { container } = setup({
+      isIncluded: (v) => included().has(v.frame.file_name),
+      onToggleInclude: () => {},
+    });
+    const tinted = () =>
+      Array.from(container.querySelectorAll("tbody tr")).map((tr) =>
+        tr.className.includes("bg-theme-error/10"),
+      );
+    const dimmed = () =>
+      Array.from(container.querySelectorAll("tbody tr")).map((tr) =>
+        tr.className.includes("opacity-60"),
+      );
+    // Chronological order a (pass), b (fail), c (unmeasured); b excluded.
+    // Tint follows the verdict: only the fail row.
+    expect(tinted()).toEqual([false, true, false]);
+    // Dim follows inclusion: only the excluded row.
+    expect(dimmed()).toEqual([false, true, false]);
+    setIncluded(new Set(["b.fits"]));
+    // b is now fail plus included: still tinted, no longer dimmed.
+    // a and c are pass/unmeasured plus non-included: dimmed, never tinted.
+    expect(tinted()).toEqual([false, true, false]);
+    expect(dimmed()).toEqual([true, false, true]);
+  });
+
+  it("no longer hosts the quality help popover (it lives in the export modal)", () => {
+    const { container } = setup();
+    expect(
+      container.querySelector('button[aria-label="About quality filters"]'),
+    ).toBe(null);
   });
 });
 

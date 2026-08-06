@@ -56,6 +56,7 @@ def make_image(date_str, filter_used="Ha", hfr=2.1, ecc=0.38):
     img.guiding_rms_arcsec = None
     img.guiding_rms_ra_arcsec = None
     img.guiding_rms_dec_arcsec = None
+    img.guiding_rms_source = None
     img.detected_stars = None
     img.adu_stdev = None
     img.adu_mean = None
@@ -133,11 +134,15 @@ async def test_session_detail_returns_baselines():
     mock_catalog_frames_result = MagicMock()
     mock_catalog_frames_result.all.return_value = catalog_frame_rows
 
+    # phd2 night sessions; scalars().all(). Empty: no guide log for this night.
+    mock_phd2_result = MagicMock()
+    mock_phd2_result.scalars.return_value.all.return_value = []
+
     mock_session.execute = AsyncMock(
         side_effect=[
             mock_img_result, mock_alias_result,
             mock_all_hfr_result, mock_note_result, mock_cv_result,
-            mock_catalog_frames_result,
+            mock_catalog_frames_result, mock_phd2_result,
         ]
     )
 

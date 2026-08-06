@@ -5,12 +5,15 @@ import { useScan, scanStatus, refreshScanStatus } from "../store/scan";
 import { rebuildStatus, refreshRebuildStatus } from "../store/rebuild";
 import {
   monitorJobs,
+  runningJobs,
+  waitingJobs,
   hasMonitorJobs,
   stripProgress,
   wireGlobalJobSources,
 } from "../store/jobMonitor";
+import { refreshServerJobs } from "../store/serverJobs";
 import {
-  errorEvents,
+  unseenErrors,
   unseenErrorCount,
   markAllErrorsSeen,
   setActivitySeenAt,
@@ -18,6 +21,7 @@ import {
 import type { ActiveJob } from "../api/types";
 
 const IDLE_CHECK_MS = 30_000;
+const JOBS_POLL_MS = 5_000;
 const PANEL_ERROR_LIMIT = 5;
 
 function timeAgo(iso: string): string {
@@ -71,6 +75,25 @@ const JobRow: Component<{ job: ActiveJob }> = (props) => (
   </div>
 );
 
+export function waitingLabel(job: ActiveJob, now: number): string {
+  if (job.etaMs !== undefined && job.etaMs > now) {
+    return `starts in ${Math.round((job.etaMs - now) / 1000)}s`;
+  }
+  const secs = Math.max(0, Math.floor((now - job.startedAt) / 1000));
+  if (secs < 60) return `queued ${secs}s ago`;
+  const mins = Math.floor(secs / 60);
+  return mins < 60 ? `queued ${mins}m ago` : `queued ${Math.floor(mins / 60)}h ago`;
+}
+
+const WaitingRow: Component<{ job: ActiveJob }> = (props) => (
+  <div class="px-4 py-2 flex items-center justify-between gap-2 border-t border-theme-border first:border-t-0">
+    <span class="text-xs text-theme-text-primary truncate">{props.job.label}</span>
+    <span class="text-tiny text-theme-text-tertiary tabular-nums whitespace-nowrap">
+      {waitingLabel(props.job, Date.now())}
+    </span>
+  </div>
+);
+
 /**
  * Ambient job monitor, mounted inside NavBar's right cluster on every page:
  * a 2px aggregate progress strip on the header's bottom edge, an Activity
@@ -105,6 +128,16 @@ const JobMonitor: Component = () => {
   }, IDLE_CHECK_MS);
   onCleanup(() => clearInterval(idleTimer));
 
+  // Server job registry (GET /api/jobs): queued + running Celery tasks the
+  // scan/rebuild sources don't cover. Steady poll rather than idle-gated,
+  // because these jobs start server-side with no client event to react to.
+  void refreshServerJobs();
+  const jobsTimer = setInterval(() => {
+    if (document.visibilityState !== "visible") return;
+    void refreshServerJobs();
+  }, JOBS_POLL_MS);
+  onCleanup(() => clearInterval(jobsTimer));
+
   const [open, setOpen] = createSignal(false);
   let panelRef: HTMLDivElement | undefined;
   let chipRef: HTMLButtonElement | undefined;
@@ -120,7 +153,7 @@ const JobMonitor: Component = () => {
 
   const chipVisible = () => hasMonitorJobs() || unseenErrorCount() > 0;
   const jobCount = () => monitorJobs().length;
-  const recentErrors = () => errorEvents().slice(0, PANEL_ERROR_LIMIT);
+  const recentErrors = () => unseenErrors().slice(0, PANEL_ERROR_LIMIT);
 
   return (
     <>
@@ -166,8 +199,9 @@ const JobMonitor: Component = () => {
         </button>
       </Show>
 
-      {/* Ambient 2px progress strip along the NavBar bottom edge */}
-      <Show when={hasMonitorJobs()}>
+      {/* Ambient 2px progress strip along the NavBar bottom edge. Running
+          work only: a queue of waiting tasks must not animate the strip. */}
+      <Show when={runningJobs().length > 0}>
         <div
           class="absolute left-0 right-0 -bottom-px h-0.5 overflow-hidden bg-theme-accent/15"
           aria-hidden="true"
@@ -199,10 +233,18 @@ const JobMonitor: Component = () => {
             Active jobs
           </div>
           <Show
-            when={monitorJobs().length > 0}
+            when={runningJobs().length > 0}
             fallback={<div class="px-4 py-2 text-xs text-theme-text-tertiary">No jobs running.</div>}
           >
-            <For each={monitorJobs()}>{(j) => <JobRow job={j} />}</For>
+            <For each={runningJobs()}>{(j) => <JobRow job={j} />}</For>
+          </Show>
+
+          <Show when={waitingJobs().length > 0}>
+            <div class="border-t border-theme-border-em mt-2" />
+            <div class="px-4 pt-3 pb-1 text-[11px] font-semibold uppercase tracking-wider text-theme-text-tertiary">
+              Waiting
+            </div>
+            <For each={waitingJobs()}>{(j) => <WaitingRow job={j} />}</For>
           </Show>
 
           <div class="border-t border-theme-border-em mt-2" />

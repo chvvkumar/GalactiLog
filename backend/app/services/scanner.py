@@ -22,11 +22,23 @@ FITS_EXTENSIONS = SUPPORTED_EXTENSIONS
 
 CALIBRATION_FRAME_TYPES = {"BIAS", "DARK", "FLAT", "DARKFLAT", "BIASFLAT"}
 
+# PHD2 writes one guide log per session start, named
+# PHD2_GuideLog_<date>_<time>.txt, anywhere the user pointed it at. The
+# sibling PHD2_DebugLog_* files are deliberately excluded: they are large,
+# unstructured, and carry nothing the guide log does not.
+PHD2_LOG_RE = re.compile(r"^PHD2_GuideLog_.*\.txt$", re.IGNORECASE)
+
+
+def is_phd2_guide_log(name: str) -> bool:
+    """True when a filename is a PHD2 guide log (not a debug log)."""
+    return bool(PHD2_LOG_RE.match(name))
+
 
 def _walk_supported_files(
     root: Path,
     filter_config: "ScanFilterConfig | None" = None,
     fits_root: "Path | None" = None,
+    on_phd2_file: "callable | None" = None,
 ) -> Iterator[Path]:
     """Yield supported image files using os.scandir for better NFS performance.
 
@@ -37,6 +49,12 @@ def _walk_supported_files(
     pruned before descent, and files that fail should_include_file are
     dropped. fits_root is the effective data root used for relative-path
     segment extraction; defaults to root when not provided.
+
+    on_phd2_file, when given, is called with each PHD2 guide log found during
+    the same pass. Guide logs are NOT yielded and SUPPORTED_EXTENSIONS is not
+    widened: routing them through a callback keeps them entirely out of the
+    image ingest pipeline while still reusing this one directory traversal,
+    which is the expensive part on a network filesystem.
     """
     effective_root = fits_root or root
     try:
@@ -50,10 +68,17 @@ def _walk_supported_files(
                         ):
                             continue
                         yield from _walk_supported_files(
-                            sub, filter_config, effective_root
+                            sub, filter_config, effective_root, on_phd2_file
                         )
                     elif entry.is_file(follow_symlinks=True):
                         # entry.name is already cached - no extra stat
+                        if on_phd2_file is not None and is_phd2_guide_log(entry.name):
+                            phd2_path = Path(entry.path)
+                            if not filter_config or filter_config.should_include_file(
+                                phd2_path, effective_root
+                            ):
+                                on_phd2_file(phd2_path)
+                            continue
                         _, ext = os.path.splitext(entry.name)
                         if ext not in SUPPORTED_EXTENSIONS:
                             continue
@@ -80,6 +105,7 @@ def scan_directory(
     on_changed_file: "callable | None" = None,
     filter_config: "ScanFilterConfig | None" = None,
     fits_root: "Path | None" = None,
+    on_phd2_file: "callable | None" = None,
 ) -> tuple[list[Path], list[Path], set[str]]:
     """Walk a directory tree finding new and changed image files.
 
@@ -94,6 +120,9 @@ def scan_directory(
 
     known_file_stats maps file_path -> (file_size, file_mtime) for delta detection.
     on_changed_file(path) is called for each changed file, enabling parallel re-ingest.
+    on_phd2_file(path) is called for each PHD2 guide log found in the same
+    walk. Guide logs never appear in any of the three returned collections -
+    they are not images and must not reach the image ingest pipeline.
     """
     known = known_paths or set()
     file_stats = known_file_stats or {}
@@ -101,7 +130,9 @@ def scan_directory(
     changed_files: list[Path] = []
     all_disk_paths: set[str] = set()
     discovered = 0
-    for path in _walk_supported_files(root, filter_config, fits_root or root):
+    for path in _walk_supported_files(
+        root, filter_config, fits_root or root, on_phd2_file
+    ):
         if is_cancelled and is_cancelled():
             break
         path_str = str(path)

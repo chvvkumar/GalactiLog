@@ -1129,9 +1129,34 @@ const WbppExportModal: Component<Props> = (props) => {
 
           {/* Zone 4: Options */}
           <div class={CARD_CLASS}>
-            <h3 class={ZONE_TITLE_CLASS}>
-              <span class="text-theme-text-tertiary">Step 3 · </span>Options
-            </h3>
+            <div class="flex items-center gap-2">
+              <h3 class={ZONE_TITLE_CLASS}>
+                <span class="text-theme-text-tertiary">Step 3 · </span>Options
+              </h3>
+              <HelpPopover label="About quality filters" title="Quality filters">
+                <p>
+                  Set quality limits above (HFR, eccentricity, and so on). A frame is
+                  excluded from the copy when it breaks at least one limit. A limit without a
+                  number filters nothing. A frame that was never measured for a limit is not
+                  judged on it; a frame with no recorded quality data at all counts as
+                  unmeasured, not excluded.
+                </p>
+                <p>
+                  The eccentricity presets are starting points: 0.55 keeps stars that look
+                  round, 0.65 sits at the edge of visible stretching, and 0.75 allows clearly
+                  stretched stars, useful for salvaging a poor night.
+                </p>
+                <p>
+                  Cell colors compare each frame with the selected baseline (this session or
+                  the rig catalog) and are informational only; the limits alone decide the
+                  verdict.
+                </p>
+                <p>
+                  The quality limits are saved for each rig and are the same ones Copy Frame
+                  List uses. Changing a limit here also changes what that list selects.
+                </p>
+              </HelpPopover>
+            </div>
 
             <div class="mt-3">
               <WbppQualityPanel

@@ -27,11 +27,16 @@ const [activitySeenAt, setActivitySeenAt] = createSignal<string | null>(null);
 
 export { errorEvents, activitySeenAt, setActivitySeenAt };
 
-export const unseenErrorCount = (): number => {
+// Errors newer than the per-user seen marker. Drives both the badge count
+// and the job monitor's recent-errors panel, so "Mark all seen" dismisses
+// rows from the panel while the full feed stays in the Activity log.
+export const unseenErrors = (): ActivityEvent[] => {
   const seenAt = activitySeenAt();
   const seenMs = seenAt ? new Date(seenAt).getTime() : 0;
-  return errorEvents().filter((e) => new Date(e.timestamp).getTime() > seenMs).length;
+  return errorEvents().filter((e) => new Date(e.timestamp).getTime() > seenMs);
 };
+
+export const unseenErrorCount = (): number => unseenErrors().length;
 
 export async function markAllErrorsSeen(): Promise<void> {
   try {

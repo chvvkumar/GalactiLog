@@ -10,6 +10,7 @@ import { showToast } from "../components/Toast";
 import {
   checkErrors,
   errorEvents,
+  unseenErrors,
   unseenErrorCount,
   setActivitySeenAt,
   markAllErrorsSeen,
@@ -59,6 +60,17 @@ describe("activityErrors", () => {
     await markAllErrorsSeen();
     expect(apiClient.POST).toHaveBeenCalledWith("/api/activity/seen", {});
     expect(unseenErrorCount()).toBe(0);
+  });
+
+  it("unseenErrors drops items at or older than activity_seen_at but keeps errorEvents intact", async () => {
+    vi.mocked(apiClient.GET).mockResolvedValue(okResult({ items, next_cursor: null, total: 2 }));
+    setActivitySeenAt("2026-07-18T12:05:00+00:00");
+    await checkErrors();
+    expect(unseenErrors().map((e) => e.id)).toEqual([2]);
+    // The full feed is untouched: only the panel view filters.
+    expect(errorEvents().length).toBe(2);
+    setActivitySeenAt("2026-07-18T12:30:00+00:00");
+    expect(unseenErrors()).toEqual([]);
   });
 
   it("toasts new errors once and never re-toasts on the next poll", async () => {

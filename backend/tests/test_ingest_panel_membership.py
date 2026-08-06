@@ -57,18 +57,13 @@ def _bootstrap_tasks():
     before we swap in the real test-DB engine below (same pattern as
     test_tasks.py). Every patch.object() call in this file must target the
     module that actually owns the function under test -- see
-    test_tasks.py::_bootstrap_tasks for why the facade doesn't work here."""
-    import sys as _sys
-    modname = "app.worker.tasks_scan"
-    mod = _sys.modules.get(modname)
-    if mod is not None and not isinstance(mod, MagicMock):
-        return mod
-    _sys.modules.pop(modname, None)
-    mock_engine = MagicMock()
-    with patch("sqlalchemy.create_engine", return_value=mock_engine):
-        import importlib
-        tasks_mod = importlib.import_module(modname)
-    return tasks_mod
+    test_tasks.py::_bootstrap_tasks for why the facade doesn't work here.
+
+    See conftest.bootstrap_worker_module for why the mocked engine must not be
+    left behind in sys.modules."""
+    from tests.conftest import bootstrap_worker_module
+
+    return bootstrap_worker_module("app.worker.tasks_scan")
 
 
 @pytest.fixture

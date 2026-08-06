@@ -55,6 +55,9 @@ from app.worker.tasks_sessions import (  # noqa: F401
     backfill_dark_hours, recompute_session_dates,
     DARK_HOURS_LOCK, DARK_HOURS_LOCK_TTL,
 )
+from app.worker.tasks_phd2 import (  # noqa: F401
+    scan_phd2_logs, ingest_phd2_log, apply_profile_map, correlate_phd2_images,
+)
 
 # A handful of call sites (mostly tests, plus a couple of production modules
 # that pre-date the split) reach for names that used to live directly in this
