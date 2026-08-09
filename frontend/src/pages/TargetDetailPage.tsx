@@ -197,6 +197,18 @@ const MergeFromDetailFlow: Component<MergeFromDetailFlowProps> = (props) => {
 
 const TargetDetailPage: Component = () => {
   const params = useParams<{ targetId: string }>();
+  // @solidjs/router 0.16 hands back path params still percent-encoded, and
+  // openapi-fetch encodes again on the way out, so an unresolved key like
+  // "obj:Sh2 115" reached the API as "obj%3ASh2%20115" and 400'd. Decode once
+  // here: every request below and the startsWith("obj:") test want the real
+  // key. try/catch because a hand-typed URL with a stray % is not fatal.
+  const targetId = () => {
+    try {
+      return decodeURIComponent(params.targetId);
+    } catch {
+      return params.targetId;
+    }
+  };
   const [searchParams] = useSearchParams();
   const auth = useAuth();
   const ctx = useSettingsContext();
@@ -206,11 +218,11 @@ const TargetDetailPage: Component = () => {
     isFieldVisible(displaySettings(), group, field);
 
   const targetDetailQuery = useQuery(() => ({
-    queryKey: queryKeys.targetDetail(params.targetId),
+    queryKey: queryKeys.targetDetail(targetId()),
     queryFn: () =>
       apiClient
         .GET("/api/targets/{target_id}/detail", {
-          params: { path: { target_id: params.targetId } },
+          params: { path: { target_id: targetId() } },
         })
         .then(unwrap) as Promise<TargetDetailResponse>,
   }));
@@ -237,13 +249,13 @@ const TargetDetailPage: Component = () => {
   const [selectedChartDates, setSelectedChartDates] = createSignal<string[]>([]);
 
   const mergeHistoryQuery = useQuery(() => ({
-    queryKey: queryKeys.targetMergeHistory(params.targetId),
+    queryKey: queryKeys.targetMergeHistory(targetId()),
     queryFn: (): Promise<MergedTargetResponse[]> =>
-      params.targetId.startsWith("obj:")
+      targetId().startsWith("obj:")
         ? Promise.resolve([])
         : apiClient
             .GET("/api/targets/{target_id}/merge-history", {
-              params: { path: { target_id: params.targetId } },
+              params: { path: { target_id: targetId() } },
             })
             .then(unwrap)
             .catch(() => []),
@@ -268,7 +280,7 @@ const TargetDetailPage: Component = () => {
   // endpoint's success body as `unknown` (FastAPI's streaming response isn't
   // declared with a content schema), so the unwrap result is cast to `Blob`.
   const [referenceThumbnailUrl] = createResource(
-    () => (skyViewExpanded() && targetDetail()?.reference_thumbnail_path ? params.targetId : null),
+    () => (skyViewExpanded() && targetDetail()?.reference_thumbnail_path ? targetId() : null),
     async (id: string) => {
       const blob = await apiClient
         .GET("/api/targets/{target_id}/reference-thumbnail", {
@@ -297,7 +309,7 @@ const TargetDetailPage: Component = () => {
     save: async (text) => {
       await apiClient
         .PUT("/api/targets/{target_id}/notes", {
-          params: { path: { target_id: params.targetId } },
+          params: { path: { target_id: targetId() } },
           body: { notes: text || null },
         })
         .then(unwrap);
@@ -447,7 +459,7 @@ const TargetDetailPage: Component = () => {
           missingDates.map((d) =>
             apiClient
               .GET("/api/targets/{target_id}/sessions/{date}", {
-                params: { path: { target_id: params.targetId, date: d } },
+                params: { path: { target_id: targetId(), date: d } },
               })
               .then(unwrap) as Promise<SessionDetail>
           )
@@ -544,7 +556,7 @@ const TargetDetailPage: Component = () => {
       pendingLoads.add(date);
       (apiClient
         .GET("/api/targets/{target_id}/sessions/{date}", {
-          params: { path: { target_id: params.targetId, date } },
+          params: { path: { target_id: targetId(), date } },
         })
         .then(unwrap) as Promise<SessionDetail>)
         .then((detail) => {
@@ -648,7 +660,7 @@ const TargetDetailPage: Component = () => {
 
       <Show when={showWbppExport() && targetDetail()}>
         <WbppExportModal
-          targetId={params.targetId}
+          targetId={targetId()}
           targetName={targetDetail()!.primary_name}
           selectedDates={selectedChartDates()}
           sessionCache={sessionCache()}
@@ -658,7 +670,7 @@ const TargetDetailPage: Component = () => {
 
       <Show when={showFrameList() && targetDetail()}>
         <FrameListModal
-          targetId={params.targetId}
+          targetId={targetId()}
           targetName={targetDetail()!.primary_name}
           selectedDates={selectedChartDates()}
           sessionCache={sessionCache()}
@@ -1197,7 +1209,7 @@ const TargetDetailPage: Component = () => {
                         showCheckbox={true}
                         checked={selectedChartDates().includes(session.session_date)}
                         onCheckChange={() => toggleChartDate(session.session_date)}
-                        targetId={params.targetId}
+                        targetId={targetId()}
                         ra={session.ra ?? detail().ra}
                         dec={session.dec ?? detail().dec}
                         position_angle={session.position_angle ?? detail().position_angle}
