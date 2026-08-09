@@ -47,6 +47,14 @@
 - ADU statistics: mean, median, standard deviation, min, max
 - Session insights with quality warnings and indicators
 
+### PHD2 Guiding
+- Finds PHD2 guide logs during the normal library scan, with no separate import step
+- Maps each PHD2 equipment profile to a telescope, so guiding data lands on the rig that produced it
+- Per-profile timezone and site coordinates for rigs at a remote or second location
+- Fills each frame's guiding RMS from the guide samples that cover the exposure
+- Per-night guiding rollup on the session card: total, RA, and Dec RMS with session counts
+- Guide graph per session with dither, settling, and star-lost markers
+
 ### Statistics Dashboard
 - Total integration time, frame counts, and target summaries
 - Filter usage distribution with per-filter integration hours
@@ -88,6 +96,22 @@
     </td>
   </tr>
 </table>
+
+### PHD2 Guiding
+
+<p align="center">
+  <em>Guide Graph -- RA and Dec error in arcseconds against clock time, with dither lines, settling bands, and star-lost markers; scroll to zoom, drag to pan</em><br>
+  <img src="images/screenshots/phd2-guide-graph.png" alt="PHD2 Guide Graph" width="100%">
+</p>
+
+To use it:
+
+1. Keep the PHD2 guide logs (`PHD2_GuideLog_*.txt`) anywhere inside the directory GalactiLog scans. The scan picks them up on its own; no extra path setting is needed.
+2. Set Observer Location, including the timezone, under Settings > General. PHD2 writes wall-clock timestamps with no zone marker, so without a timezone GalactiLog declines to attach guiding data rather than file a night under the wrong date.
+3. Run a scan. Every equipment profile found in the logs is listed under Settings > Equipment > PHD2 Profiles.
+4. Map each profile to a telescope. Point several profiles at the same telescope when they are the same physical rig under different names. Give a profile its own timezone and coordinates if that rig observes from another site.
+
+Guiding RMS then appears per frame, the Guiding (PHD2) rollup appears on each session card, and the guide graph above is available for any session with a matching log.
 
 ### Mosaics
 
