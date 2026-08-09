@@ -53,6 +53,10 @@ SUPPRESSED_TASKS = frozenset({
     "app.worker.tasks.regenerate_thumbnail",
     "regenerate_missing_thumbnails",
     "purge_and_regenerate_thumbnails",
+    # Housekeeping heartbeat, published every 5s. Never worth a monitor row,
+    # and while a scan holds the worker pool its backlog would otherwise fill
+    # the panel with tens of rows that represent no user-visible work.
+    "app.worker.drain_logs.drain_app_logs",
 })
 
 

@@ -85,6 +85,12 @@ celery_app.conf.update(
         "drain-app-logs": {
             "task": "app.worker.drain_logs.drain_app_logs",
             "schedule": 5.0,
+            # A scan saturates every worker slot for minutes, and beat keeps
+            # publishing this every 5s regardless: without an expiry the
+            # backlog is replayed in one useless burst once the scan ends
+            # (22 queued drains observed after a 1200-file scan). A drain
+            # older than one interval has nothing left to do.
+            "options": {"expires": 15},
         },
     },
 )
