@@ -100,7 +100,7 @@
 ### PHD2 Guiding
 
 <p align="center">
-  <em>Guide Graph -- RA and Dec error in arcseconds against clock time, with dither lines, settling bands, and star-lost markers; scroll to zoom, drag to pan</em><br>
+  <em>Guide Graph -- guiding error across a night</em><br>
   <img src="images/screenshots/phd2-guide-graph.png" alt="PHD2 Guide Graph" width="100%">
 </p>
 
