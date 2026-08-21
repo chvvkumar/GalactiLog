@@ -2,6 +2,7 @@ from __future__ import annotations
 
 """Export/restore user customizations as portable versioned JSON backups."""
 
+import logging
 import secrets
 from collections.abc import Callable
 from datetime import datetime, timezone, date as date_type
@@ -20,6 +21,8 @@ from app.models.user import User, UserRole
 from app.schemas.backup import BackupPayload
 from app.services.auth import hash_password
 from app.services.mosaic_detection import retro_link_panel_images
+
+logger = logging.getLogger(__name__)
 
 CURRENT_BACKUP_SCHEMA_VERSION = 1
 APP_VERSION = "0.1.0"
@@ -278,8 +281,9 @@ def validate_backup(
     # ── Parse with Pydantic for full validation ──
     try:
         parsed = BackupPayload.model_validate(data)
-    except Exception as e:
-        result["error"] = f"Backup file has invalid structure: {e}"
+    except Exception:
+        logger.exception("Backup payload validation failed")
+        result["error"] = "Backup file has invalid structure"
         return result
 
     result["valid"] = True

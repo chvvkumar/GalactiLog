@@ -441,7 +441,10 @@ async def list_targets_aggregated(
             if not re.match(r'^[A-Za-z0-9_-]{1,20}$', key):
                 continue
             pn = f"fits_{idx}"
-            field = f"i.raw_headers->>'{key}'"
+            # The header keyword is bound, never interpolated: `->>` takes the
+            # key as a text operand, so it needs no identifier splicing.
+            kn = f"fits_key_{idx}"
+            field = f"i.raw_headers->>CAST(:{kn} AS text)"
             if op_str == "eq":
                 where_parts.append(f"{field} = :{pn}")
                 params[pn] = val
@@ -460,6 +463,10 @@ async def list_targets_aggregated(
                 esc = val.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
                 where_parts.append(f"{field} ILIKE :{pn}")
                 params[pn] = f"%{esc}%"
+            # Only bind the keyword for ops that actually emitted a clause;
+            # every emitting branch above sets params[pn].
+            if pn in params:
+                params[kn] = key
 
     where_sql = " AND ".join(where_parts)
 

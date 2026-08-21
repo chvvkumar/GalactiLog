@@ -15,13 +15,14 @@ FileResponse (the header is simply ignored by non-nginx clients).
 """
 
 import logging
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 
 from app.config import settings
+from app.services.path_safety import resolve_relative_under
 
 logger = logging.getLogger(__name__)
 
@@ -37,28 +38,23 @@ async def serve_thumbnail(file_path: str) -> FileResponse:
     nginx is not in front.
     """
     # --- Path traversal guard -------------------------------------------
-    # Normalise the requested path and ensure it stays inside the
-    # thumbnails directory.  Reject anything that resolves outside.
+    # The whole URL path segment is attacker-controlled, so it is confined
+    # to the thumbnails root before any filesystem call touches it.
     thumbnails_dir = Path(settings.thumbnails_path).resolve()
-
-    # Use PurePosixPath to normalise forward-slash segments coming from
-    # the URL, then resolve against the thumbnails root.
-    rel = PurePosixPath(file_path)
-    if rel.is_absolute():
-        raise HTTPException(status_code=400, detail="Invalid path")
-
-    full_path = (thumbnails_dir / rel).resolve()
-
-    # Verify the resolved path is still under the thumbnails directory
-    if not full_path.is_relative_to(thumbnails_dir):
+    try:
+        full_path = resolve_relative_under(thumbnails_dir, file_path)
+    except ValueError:
         raise HTTPException(status_code=400, detail="Invalid path")
 
     if not full_path.is_file():
         raise HTTPException(status_code=404, detail="Thumbnail not found")
 
     # Build the internal redirect path preserving sub-directories
-    # (e.g. "reference/abc.jpg" -> "/_thumbnails_internal/reference/abc.jpg")
-    internal_path = f"/_thumbnails_internal/{quote(file_path)}"
+    # (e.g. "reference/abc.jpg" -> "/_thumbnails_internal/reference/abc.jpg").
+    # Derived from the validated path, never from the raw request, so nginx
+    # is handed the same location this handler just authorised.
+    rel_posix = full_path.relative_to(thumbnails_dir).as_posix()
+    internal_path = f"/_thumbnails_internal/{quote(rel_posix)}"
 
     return FileResponse(
         path=full_path,
