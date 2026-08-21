@@ -54,9 +54,19 @@ const DashboardPage: Component = () => {
         <div
           class="hidden lg:flex relative border-r border-theme-border-em h-[calc(100vh-57px)] sticky top-[57px] self-start shrink-0"
           classList={{ "transition-[width] duration-[240ms] ease-[cubic-bezier(0.22,0.61,0.36,1)]": !resizing() }}
-          style={{ width: `${sidebarCollapsed() ? RAIL_WIDTH : sidebarWidth()}px` }}
+          style={{ width: `${RAIL_WIDTH + (sidebarCollapsed() ? 0 : sidebarWidth())}px` }}
         >
-          {sidebarCollapsed() ? <SidebarRail /> : <Sidebar />}
+          <div
+            class="w-12 shrink-0 h-full"
+            classList={{ "border-r border-theme-border-em": !sidebarCollapsed() }}
+          >
+            <SidebarRail />
+          </div>
+          {!sidebarCollapsed() && (
+            <div class="flex-1 min-w-0 h-full">
+              <Sidebar />
+            </div>
+          )}
           {!sidebarCollapsed() && <SidebarResizeHandle />}
         </div>
 
