@@ -275,7 +275,8 @@ def validate_backup(
     try:
         data = apply_migrations(data)
     except ValueError as e:
-        result["error"] = str(e)
+        logger.warning("Backup migration rejected: %s", e)
+        result["error"] = "Backup file has invalid structure"
         return result
 
     # ── Parse with Pydantic for full validation ──
