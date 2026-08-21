@@ -36,7 +36,11 @@ const SidebarRail: Component = () => {
   };
 
   return (
-    <div class="h-full flex flex-col items-center py-3 gap-1">
+    <div
+      class="h-full flex flex-col items-center py-3 gap-1 cursor-pointer"
+      onClick={() => setSidebarCollapsed(false)}
+      title="Expand sidebar"
+    >
       <button
         onClick={() => setSidebarCollapsed(false)}
         class="p-2 text-theme-text-tertiary hover:text-theme-text-primary transition-colors cursor-pointer"
@@ -71,7 +75,7 @@ const SidebarRail: Component = () => {
       <Show when={activeIds().size > 0}>
         <div class="mt-auto w-full border-t border-theme-border-em my-1" />
         <button
-          onClick={resetFilters}
+          onClick={(e) => { e.stopPropagation(); resetFilters(); }}
           title="Reset Filters"
           aria-label="Reset Filters"
           class="p-2 rounded-[var(--radius-sm)] text-theme-text-tertiary hover:text-theme-text-primary hover:bg-theme-elevated transition-colors cursor-pointer"
