@@ -31,7 +31,7 @@ function saveCollapsedState(state: Record<string, boolean>) {
   } catch { /* ignore */ }
 }
 
-const CollapsibleSection: Component<{ id: string; label: string; active?: boolean; children: JSX.Element }> = (props) => {
+const CollapsibleSection: Component<{ id: string; label: string; icon?: () => JSX.Element; active?: boolean; children: JSX.Element }> = (props) => {
   const [collapsed, setCollapsed] = createSignal(false);
   let sectionRef: HTMLElement | undefined;
 
@@ -76,7 +76,15 @@ const CollapsibleSection: Component<{ id: string; label: string; active?: boolea
         onClick={toggle}
         class="flex items-center justify-between w-full text-label font-medium uppercase tracking-wider text-theme-text-tertiary hover:text-theme-text-secondary transition-colors cursor-pointer select-none"
       >
-        <span class="flex items-center gap-1.5">
+        <span class="flex items-center gap-2">
+          <Show when={props.icon}>
+            <span
+              class="shrink-0 [&>svg]:w-4 [&>svg]:h-4"
+              classList={{ "text-theme-accent": props.active }}
+            >
+              {props.icon!()}
+            </span>
+          </Show>
           {props.label}
           <Show when={props.active}>
             <span class="w-1.5 h-1.5 rounded-full bg-theme-accent shrink-0" />
