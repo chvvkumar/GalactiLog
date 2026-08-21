@@ -16,6 +16,7 @@ from app.database import get_session
 from app.models import Image, UserSettings, SETTINGS_ROW_ID
 from app.models.user import User
 from app.schemas.settings import GeneralSettings
+from app.services.path_safety import resolve_relative_under, resolve_under
 from app.services.preview import generate_preview
 from app.services.preview_cache import AsyncPreviewCache
 from app.services.scanner import CALIBRATION_FRAME_TYPES
@@ -45,7 +46,15 @@ async def get_preview(
     if image is None:
         raise HTTPException(status_code=404, detail="Image not found")
 
-    fits_path = Path(image.file_path)
+    # image.file_path is stored by the scanner, which only ingests below the
+    # configured FITS root -- re-check here so a row that was tampered with
+    # or carried over from an older config cannot read arbitrary files.  A
+    # path outside the root reports the same 404 as a missing file so the
+    # response says nothing about the filesystem beyond the root.
+    try:
+        fits_path = resolve_under(settings.fits_data_path, image.file_path)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="File not found on disk")
     if not fits_path.exists():
         raise HTTPException(status_code=404, detail="File not found on disk")
 
@@ -56,7 +65,7 @@ async def get_preview(
     general = GeneralSettings(**(settings_row.general if settings_row and settings_row.general else {}))
     cap_bytes = max(general.preview_cache_mb, 100) * 1024 * 1024
 
-    previews_dir = Path(settings.previews_path)
+    previews_dir = Path(settings.previews_path).resolve()
     previews_dir.mkdir(parents=True, exist_ok=True)
 
     cache_key = f"{image_id}_{resolution}.jpg"
@@ -64,7 +73,10 @@ async def get_preview(
     # TCP connection, no blocking sync calls on the event loop).
     cache = AsyncPreviewCache(get_async_redis(), previews_dir, cap_bytes)
 
-    cached_path = previews_dir / cache_key
+    # cache_key is built from a parsed UUID and a bounded int, so it cannot
+    # carry separators today; confining it anyway keeps the guarantee local
+    # to this line if either ever becomes a free-form string.
+    cached_path = resolve_relative_under(previews_dir, cache_key)
     if await cache.has(cache_key) and cached_path.exists():
         await cache.touch(cache_key)
         return _redirect_response(cache_key, cached_path)
@@ -79,7 +91,7 @@ async def get_preview(
         try:
             path_hash = hashlib.md5(str(fits_path).encode()).hexdigest()[:12]
             thumb_filename = f"{fits_path.stem}_{path_hash}.jpg"
-            thumb_path = Path(settings.thumbnails_path) / thumb_filename
+            thumb_path = resolve_relative_under(settings.thumbnails_path, thumb_filename)
             is_xisf = fits_path.suffix.lower() == ".xisf"
             if is_xisf:
                 await asyncio.to_thread(
@@ -96,7 +108,7 @@ async def get_preview(
 
     # Render preview to temp file (blocking FITS/PIL work off the event loop),
     # then atomically move into the cache directory.
-    temp_path = previews_dir / f".{cache_key}.{_uuid.uuid4().hex[:8]}.tmp"
+    temp_path = resolve_relative_under(previews_dir, f".{cache_key}.{_uuid.uuid4().hex[:8]}.tmp")
     try:
         await asyncio.to_thread(generate_preview, fits_path, temp_path, max_width=resolution)
     except Exception as exc:

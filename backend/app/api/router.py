@@ -169,14 +169,17 @@ async def latest_version():
             "source": "dockerhub",
             "release": release,
         }
-    except Exception as e:
+    except Exception:
+        # Redis/Docker Hub/JSON failures carry internal hosts and library
+        # detail, so the client gets a fixed string (py/stack-trace-exposure).
+        logger.exception("version/latest lookup failed for tag %s", tag)
         return {
             "available": False,
             "running": running,
             "running_sha": running_sha,
             "is_newer": False,
             "source": "dockerhub",
-            "error": str(e),
+            "error": "Version check failed - see server logs for details.",
             "release": release,
         }
 

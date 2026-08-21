@@ -8,6 +8,9 @@ on:
       - dev
       - snd
 
+permissions:
+  contents: read
+
 jobs:
   backend:
     name: Backend tests

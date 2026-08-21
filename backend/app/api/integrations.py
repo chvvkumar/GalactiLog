@@ -19,6 +19,12 @@ router = APIRouter(prefix="/integrations", tags=["integrations"])
 
 TIMEOUT = 5.0
 
+# Exception text never goes back to the browser (py/stack-trace-exposure): an
+# httpx failure carries internal URLs and library detail. The full exception is
+# logged instead, and the log viewer is one page away for an operator.
+_NINA_ERROR = "NINA request failed - see server logs for details."
+_STELLARIUM_ERROR = "Stellarium request failed - see server logs for details."
+
 # Short timeout for the SSRF DNS resolution probe so a slow/hostile resolver
 # cannot hang the request.
 _DNS_TIMEOUT = 2.0
@@ -97,8 +103,13 @@ def _validate_integration_url(url: str) -> None:
                         status_code=400, detail="URL host resolves to a blocked address"
                     )
 
+# `\s*(?:-\s*)?` rather than `\s*-?\s*`: the latter lets two adjacent `\s*`
+# split a run of spaces every possible way when no digit follows, which is
+# quadratic on a caller-supplied name like "M" + 50k spaces (py/polynomial-redos).
+# Requiring the literal "-" before the second `\s*` removes the ambiguity while
+# matching exactly the same strings.
 _CATALOG_RE = re.compile(
-    r"^(NGC|IC|M|Sh2|LDN|LBN|Abell|Ced|vdB|Cr|Mel|Barnard|PGC|UGC|Arp)\s*[-]?\s*\d+",
+    r"^(NGC|IC|M|Sh2|LDN|LBN|Abell|Ced|vdB|Cr|Mel|Barnard|PGC|UGC|Arp)\s*(?:-\s*)?\d+",
     re.IGNORECASE,
 )
 
@@ -155,9 +166,9 @@ async def send_to_nina(req: NinaRequest, current_user: User = Depends(get_curren
                 except Exception as e:
                     logger.warning("NINA set-rotation failed for %s: %s", base, e)
         return {"ok": True}
-    except Exception as e:
-        logger.warning("NINA send-coordinates failed for %s: %s", base, e)
-        return {"ok": False, "error": str(e)}
+    except Exception:
+        logger.exception("NINA send-coordinates failed for %s", base)
+        return {"ok": False, "error": _NINA_ERROR}
 
 
 @router.post("/stellarium/send-coordinates", response_model=IntegrationResponse, response_model_exclude_none=True)
@@ -199,6 +210,6 @@ async def send_to_stellarium(req: StellariumRequest, current_user: User = Depend
             )
 
         return {"ok": True}
-    except Exception as e:
-        logger.warning("Stellarium send-coordinates failed for %s: %s", base, e)
-        return {"ok": False, "error": str(e)}
+    except Exception:
+        logger.exception("Stellarium send-coordinates failed for %s", base)
+        return {"ok": False, "error": _STELLARIUM_ERROR}

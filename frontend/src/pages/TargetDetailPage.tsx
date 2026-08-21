@@ -835,9 +835,10 @@ const TargetDetailPage: Component = () => {
                     <Show when={detail().sac_description || detail().sac_notes}>
                       <span>· {detail().sac_description}{detail().sac_description && detail().sac_notes ? " — " : ""}{detail().sac_notes}</span>
                     </Show>
-                    <span>·</span>
+                  </div>
+                  <div class="text-xs text-theme-text-secondary mt-0.5 flex flex-wrap gap-x-2 items-center">
                     <span>{detail().session_count} sessions</span>
-                    <span class="mx-1.5">·</span>
+                    <span>·</span>
                     <span>{detail().first_session_date} → {detail().last_session_date} ({tzLabel()})</span>
                   </div>
                   <Show when={detail().catalog_memberships?.length}>
