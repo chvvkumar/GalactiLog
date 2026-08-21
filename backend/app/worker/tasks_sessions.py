@@ -66,8 +66,10 @@ def backfill_dark_hours(parent_activity_id: int | None = None) -> dict:
                 logger.info("dark_hours: all %d dates already computed", len(existing_dates))
                 return {"status": "noop", "existing": len(existing_dates)}
 
-            logger.info("dark_hours: computing %d missing dates (lat=%.2f, lon=%.2f)",
-                        len(missing), lat, lon)
+            # Site coordinates are deliberately NOT logged: they are the
+            # observer's home location (py/clear-text-logging-sensitive-data).
+            # Their presence is already implied by reaching this line.
+            logger.info("dark_hours: computing %d missing dates", len(missing))
 
             # Batch compute in chunks to avoid memory issues
             CHUNK = 200

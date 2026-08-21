@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
+from app.services.path_safety import resolve_under
+
 Action = Literal["include", "exclude"]
 RuleType = Literal["glob", "substring", "regex"]
 Target = Literal["file", "folder"]
@@ -74,14 +76,12 @@ class ScanFilterConfig:
         root = fits_root.resolve()
 
         def _validate(path_str: str) -> Path:
-            p = Path(path_str).resolve()
             try:
-                p.relative_to(root)
-            except ValueError as exc:
+                return resolve_under(root, path_str)
+            except (ValueError, OSError, RuntimeError) as exc:
                 raise ValueError(
                     f"path {path_str} is outside configured data path {root}"
                 ) from exc
-            return p
 
         include_paths = [_validate(p) for p in raw.get("include_paths", [])]
         exclude_paths = [_validate(p) for p in raw.get("exclude_paths", [])]
@@ -206,13 +206,17 @@ class ScanFilterConfig:
         on-disk type is used when the path exists; otherwise a trailing
         dot-extension hints at a file, else we treat it as a folder.
         """
-        # Resolve to normalize `..`, drive letters, and symlinks so the
-        # verdict matches what should_include_file would decide. Resolve
-        # does not require the path to exist in modern Python.
+        # Resolve and confine to fits_root BEFORE any filesystem access:
+        # `path` comes straight from an API caller, and exists()/is_dir()
+        # below would otherwise be an existence oracle for arbitrary host
+        # paths. Resolving also normalizes `..`, drive letters, and symlinks
+        # so the verdict matches what should_include_file would decide.
         try:
-            resolved = path.resolve()
-        except (OSError, RuntimeError):
-            resolved = path
+            resolved = resolve_under(fits_root, path)
+        except (ValueError, OSError, RuntimeError):
+            # Outside the configured root (or unresolvable): the walker would
+            # never reach it, so report the same verdict as a path exclusion.
+            return TestResult("excluded_by_path", [])
 
         root = fits_root.resolve()
 

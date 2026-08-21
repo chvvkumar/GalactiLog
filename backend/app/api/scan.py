@@ -29,6 +29,7 @@ from app.schemas.scan import (
     DbSummaryResponse,
     BackfillCsvResponse,
 )
+from app.services.path_safety import resolve_under
 from app.services.scan_filters import ScanFilterConfig
 from app.services.activity import emit as _emit_activity
 from app.services.scan_state import (
@@ -519,14 +520,17 @@ async def browse_folders(
         candidate = FsPath(path)
         if not candidate.is_absolute():
             raise HTTPException(status_code=400, detail="path must be absolute")
-        target = candidate.resolve()
+        # Single choke point: resolve and confine under fits_root before any
+        # filesystem access below touches the caller-supplied path.
+        try:
+            target = resolve_under(fits_root, candidate)
+        except (ValueError, OSError, RuntimeError):
+            raise HTTPException(
+                status_code=400, detail="path outside configured data path"
+            )
     else:
         target = fits_root
 
-    try:
-        target.relative_to(fits_root)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="path outside configured data path")
     if not target.exists() or not target.is_dir():
         raise HTTPException(status_code=404, detail="directory not found")
 
@@ -541,10 +545,9 @@ async def browse_folders(
                         continue
                     # Defence in depth: re-check containment on the resolved
                     # child so a TOCTOU race or mount change cannot escape.
-                    resolved_child = FsPath(entry.path).resolve()
                     try:
-                        resolved_child.relative_to(fits_root)
-                    except ValueError:
+                        resolved_child = resolve_under(fits_root, entry.path)
+                    except (ValueError, OSError, RuntimeError):
                         continue
                     has_children = False
                     try:

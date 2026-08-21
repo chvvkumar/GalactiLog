@@ -21,9 +21,28 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/backup", tags=["backup"])
 
 
+_INVALID_BACKUP_ERROR = "Backup file is not valid - see server logs for details."
+
+
 def _parse_sections(sections: str) -> list[str] | None:
     parsed = [s.strip() for s in sections.split(",") if s.strip()]
     return parsed or None
+
+
+def _reject(result: dict, user: User, action: str) -> str:
+    """Log a failed validation and return the client-facing stand-in message.
+
+    `validate_backup` folds raw exception text into its `error` field (the
+    pydantic ValidationError for a malformed payload, the ValueError from
+    `apply_migrations`), so none of it is handed back to the browser
+    (py/stack-trace-exposure). Both callers below go through here, which keeps
+    the substitution at one choke point rather than per handler.
+    """
+    logger.warning(
+        "backup: %s rejected user=%s error=%s",
+        action, user.username, result.get("error"),
+    )
+    return _INVALID_BACKUP_ERROR
 
 
 @router.post("/create")
@@ -59,7 +78,10 @@ async def validate_backup_endpoint(
 
     section_list = _parse_sections(sections)
     logger.info("backup: validate by user=%s mode=%s sections=%s", user.username, mode, sections or "all")
-    return validate_backup(data, sections=section_list, mode=mode)
+    result = validate_backup(data, sections=section_list, mode=mode)
+    if not result["valid"]:
+        return ValidateResponse(valid=False, error=_reject(result, user, "validate"))
+    return result
 
 
 @router.post("/restore", response_model=RestoreResponse)
@@ -80,10 +102,9 @@ async def restore_backup_endpoint(
     section_list = _parse_sections(sections)
     validation = validate_backup(data, sections=section_list, mode=mode)
     if not validation["valid"]:
-        logger.warning("backup: restore rejected at validate user=%s error=%s", user.username, validation.get("error"))
         raise HTTPException(
             status_code=400,
-            detail=validation.get("error") or "Backup validation failed",
+            detail=_reject(validation, user, "restore"),
         )
 
     logger.info("backup: restore starting user=%s mode=%s sections=%s", user.username, mode, sections or "all")
