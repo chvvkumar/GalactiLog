@@ -279,42 +279,70 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
 
     # Plate scale (arcsec/px) materialized at scan time from the
     # XPIXSZ/FOCALLEN raw headers; NULL when underivable, so multiplying a
-    # pixel metric by it yields NULL and percentile_cont skips the frame.
-    # This keeps the pooled arcsec medians unit-consistent across optical
-    # trains, unlike the raw pixel medians beside them.
+    # pixel metric by it yields NULL and the aggregate skips the frame. This
+    # keeps the pooled arcsec figures unit-consistent across optical trains,
+    # unlike the raw pixel figures beside them.
+    #
+    # HFR is the only pixel-domain metric here. Image.fwhm is ALREADY in
+    # arcseconds (NINA Session Metadata CSV) and must never be multiplied by
+    # this: doing so inflated the Equipment Inventory FWHM by the plate scale,
+    # which is the bug this comment exists to prevent recurring.
     _scale = Image.arcsec_per_pixel
 
-    async def _query_cameras():
+    def _norm_case(col, alias_map: dict[str, str]):
+        """SQL expression mapping a raw equipment name to its canonical form.
+
+        Mirrors normalize_equipment() (an exact-match dict lookup) so a query can
+        group by the SAME normalized (telescope, camera) combo the Python
+        post-processing uses. Empty map -> the column unchanged.
+        """
+        if not alias_map:
+            return col
+        return case(alias_map, value=col, else_=col)
+
+    async def _query_inventory(col, alias_map: dict[str, str]):
+        """Per-canonical-rig inventory over LIGHT frames.
+
+        The canonical name is resolved and grouped on in SQL, so each rig gets
+        ONE percentile_cont over all of its frames rather than a frame-count
+        weighted blend of the medians of its individual spellings. The raw
+        spellings come back as an array so the caller can still flag a row that
+        merged several of them.
+
+        Image.fwhm is already in arcseconds: it is populated only from the NINA
+        Session Metadata CSV, which reports arcsec whenever the profile knows
+        pixel size and focal length. It is never multiplied by the plate scale.
+
+        Calibration frames are excluded (image_type == LIGHT), matching the
+        equipment-performance view; before, flats and darks inflated the counts
+        here but not there.
+        """
+        name_expr = _norm_case(col, alias_map)
+        fwhm_nz = func.nullif(Image.fwhm, 0)
         q = select(
-            Image.camera,
-            func.count(Image.id),
-            func.coalesce(func.sum(Image.exposure_time), 0),
-            func.array_agg(func.distinct(Image.session_date)),
-            func.array_agg(func.distinct(Image.resolved_target_id)),
-            func.percentile_cont(0.5).within_group(func.nullif(Image.fwhm, 0)).label("med_fwhm"),
-            func.percentile_cont(0.5).within_group(func.nullif(Image.guiding_rms_arcsec, 0)).label("med_guide"),
-            func.percentile_cont(0.5).within_group(func.nullif(Image.fwhm, 0) * _scale).label("med_fwhm_arcsec"),
+            name_expr.label("name"),
+            func.count(Image.id).label("frame_count"),
+            func.coalesce(func.sum(Image.exposure_time), 0).label("total_seconds"),
+            func.count(func.distinct(Image.session_date)).label("nights"),
+            func.count(func.distinct(Image.resolved_target_id)).label("target_count"),
+            func.array_agg(func.distinct(col)).label("raw_names"),
+            func.percentile_cont(0.5).within_group(fwhm_nz).label("med_fwhm"),
+            func.count(fwhm_nz).label("fwhm_n"),
+            func.percentile_cont(0.5)
+            .within_group(func.nullif(Image.guiding_rms_arcsec, 0))
+            .label("med_guide"),
         ).where(
-            Image.camera.isnot(None)
-        ).group_by(Image.camera).order_by(func.count(Image.id).desc())
+            col.isnot(None),
+            Image.image_type == "LIGHT",
+        ).group_by(name_expr).order_by(func.count(Image.id).desc())
         async with async_session() as s:
             return (await s.execute(q)).all()
 
+    async def _query_cameras():
+        return await _query_inventory(Image.camera, cam_map)
+
     async def _query_telescopes():
-        q = select(
-            Image.telescope,
-            func.count(Image.id),
-            func.coalesce(func.sum(Image.exposure_time), 0),
-            func.array_agg(func.distinct(Image.session_date)),
-            func.array_agg(func.distinct(Image.resolved_target_id)),
-            func.percentile_cont(0.5).within_group(func.nullif(Image.fwhm, 0)).label("med_fwhm"),
-            func.percentile_cont(0.5).within_group(func.nullif(Image.guiding_rms_arcsec, 0)).label("med_guide"),
-            func.percentile_cont(0.5).within_group(func.nullif(Image.fwhm, 0) * _scale).label("med_fwhm_arcsec"),
-        ).where(
-            Image.telescope.isnot(None)
-        ).group_by(Image.telescope).order_by(func.count(Image.id).desc())
-        async with async_session() as s:
-            return (await s.execute(q)).all()
+        return await _query_inventory(Image.telescope, tel_map)
 
     async def _query_equipment_perf():
         hfr_nz = func.nullif(Image.median_hfr, 0)
@@ -330,7 +358,11 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
             func.percentile_cont(0.5).within_group(hfr_nz).label("med_hfr"),
             func.min(hfr_nz).label("best_hfr"),
             func.percentile_cont(0.5).within_group(ecc_nz).label("med_ecc"),
+            # Per raw (telescope, camera, filter) median, still used for the
+            # per-filter breakdown. The combo-level FWHM median comes from
+            # _query_equipment_mad, which groups on the canonical rig.
             func.percentile_cont(0.5).within_group(fwhm_nz).label("med_fwhm"),
+            func.count(fwhm_nz).label("fwhm_n"),
         ).where(
             Image.image_type == "LIGHT",
             Image.telescope.isnot(None),
@@ -339,22 +371,18 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
         async with async_session() as s:
             return (await s.execute(q)).all()
 
-    def _norm_case(col, alias_map: dict[str, str]):
-        """SQL expression mapping a raw equipment name to its canonical form.
-
-        Mirrors normalize_equipment() (an exact-match dict lookup) so MAD can be
-        grouped by the SAME normalized (telescope, camera) combo the Python
-        post-processing uses. Empty map -> the column unchanged.
-        """
-        if not alias_map:
-            return col
-        return case(alias_map, value=col, else_=col)
-
     async def _query_equipment_mad():
         """Median absolute deviation of hfr/ecc/fwhm per normalized (telescope,
         camera) combo, computed entirely in SQL (two passes of percentile_cont):
         group median, then median of abs(value - median). Replaces shipping every
         frame's raw metric values to Python via array_agg.
+
+        The first pass already computes the true per-combo medians, so all
+        three are carried out to the caller (med_hfr, med_ecc, med_fwhm): each
+        is a single percentile_cont over the whole canonical rig rather than a
+        frame-count weighted blend of its per-filter medians. Equipment
+        Inventory groups the same way, so the two views report identical
+        numbers. Only the per-filter breakdown still blends.
         """
         norm_tel = _norm_case(Image.telescope, tel_map).label("norm_tel")
         norm_cam = _norm_case(Image.camera, cam_map).label("norm_cam")
@@ -400,6 +428,11 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
                 func.percentile_cont(0.5)
                 .within_group(func.abs(base.c.fwhm - med.c.med_fwhm))
                 .label("mad_fwhm"),
+                # Constant within the group (med joins 1:1 on the group keys);
+                # max() just carries them through the aggregate.
+                func.max(med.c.med_hfr).label("med_hfr"),
+                func.max(med.c.med_ecc).label("med_ecc"),
+                func.max(med.c.med_fwhm).label("med_fwhm"),
             )
             .select_from(
                 base.join(
@@ -461,6 +494,30 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
         ).group_by(day_label).order_by(day_label)
         async with async_session() as s:
             return (await s.execute(q)).all()
+
+    async def _query_rigs_per_night():
+        """Distinct rigs that took LIGHT frames on each session_date.
+
+        Feeds the timeline efficiency denominator: two rigs running the same
+        night have two nights' worth of darkness available between them, so
+        their combined exposure must be measured against 2 x dark hours.
+        Alias spellings are folded to the canonical name first, so one rig
+        recorded under two names is still one rig, and a rig that shot only
+        calibration frames does not count at all.
+        """
+        rig = func.concat(
+            _norm_case(Image.telescope, tel_map),
+            "|",
+            _norm_case(Image.camera, cam_map),
+        )
+        q = select(
+            Image.session_date,
+            func.count(func.distinct(rig)),
+        ).where(
+            Image.session_date.isnot(None), Image.image_type == "LIGHT"
+        ).group_by(Image.session_date)
+        async with async_session() as s:
+            return {r[0]: r[1] for r in (await s.execute(q)).all()}
 
     async def _query_top_targets():
         q = select(
@@ -587,6 +644,7 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
         all_frames,
         arcsec_bucket_row,
         ecc_source_rows,
+        rigs_per_night,
     ) = await asyncio.gather(
         _query_overview(),
         _query_cameras(),
@@ -607,6 +665,9 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
         _query_all_frames(),
         _query_hfr_arcsec_buckets(),
         _query_ecc_sources(),
+        # Appended last on purpose: the mocked-session tests index the
+        # async_session() calls positionally, so new queries go on the end.
+        _query_rigs_per_night(),
     )
 
     # --- Post-processing (sequential, CPU-only) ---
@@ -632,58 +693,6 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
         last_capture_date=last_capture_date.isoformat() if last_capture_date else None,
     )
 
-    # Equipment - cameras
-    # Rows are positional: r[0]=name, r[1]=count, r[2]=secs, r[3]=session_dates,
-    # r[4]=target_ids, r[5]=med_fwhm (raw group), r[6]=med_guiding_rms (raw group).
-    raw_cam_counts: dict[str, int] = {}
-    raw_cam_secs: dict[str, float] = {}
-    raw_cam_sessions: dict[str, set] = {}
-    cam_raw_names: dict[str, set[str]] = {}
-    raw_cam_targets: dict[str, set] = {}
-    raw_cam_fwhm: dict[str, list[tuple[float, int]]] = {}
-    raw_cam_guide: dict[str, list[tuple[float, int]]] = {}
-    raw_cam_fwhm_as: dict[str, list[tuple[float, int]]] = {}
-    for r in cam_rows:
-        canonical = normalize_equipment(r[0], cam_map) or r[0]
-        raw_cam_counts[canonical] = raw_cam_counts.get(canonical, 0) + r[1]
-        raw_cam_secs[canonical] = raw_cam_secs.get(canonical, 0) + (r[2] or 0)
-        raw_cam_sessions.setdefault(canonical, set()).update(d for d in (r[3] or []) if d is not None)
-        cam_raw_names.setdefault(canonical, set()).add(r[0])
-        raw_cam_targets.setdefault(canonical, set()).update(t for t in (r[4] or []) if t is not None)
-        if r[5] is not None:
-            raw_cam_fwhm.setdefault(canonical, []).append((r[5], r[1]))
-        if r[6] is not None:
-            raw_cam_guide.setdefault(canonical, []).append((r[6], r[1]))
-        if len(r) > 7 and r[7] is not None:
-            raw_cam_fwhm_as.setdefault(canonical, []).append((r[7], r[1]))
-
-    # Equipment - telescopes
-    raw_tel_counts: dict[str, int] = {}
-    raw_tel_secs: dict[str, float] = {}
-    raw_tel_sessions: dict[str, set] = {}
-    tel_raw_names: dict[str, set[str]] = {}
-    raw_tel_targets: dict[str, set] = {}
-    raw_tel_fwhm: dict[str, list[tuple[float, int]]] = {}
-    raw_tel_guide: dict[str, list[tuple[float, int]]] = {}
-    raw_tel_fwhm_as: dict[str, list[tuple[float, int]]] = {}
-    for r in tel_rows:
-        canonical = normalize_equipment(r[0], tel_map) or r[0]
-        raw_tel_counts[canonical] = raw_tel_counts.get(canonical, 0) + r[1]
-        raw_tel_secs[canonical] = raw_tel_secs.get(canonical, 0) + (r[2] or 0)
-        raw_tel_sessions.setdefault(canonical, set()).update(d for d in (r[3] or []) if d is not None)
-        tel_raw_names.setdefault(canonical, set()).add(r[0])
-        raw_tel_targets.setdefault(canonical, set()).update(t for t in (r[4] or []) if t is not None)
-        if r[5] is not None:
-            raw_tel_fwhm.setdefault(canonical, []).append((r[5], r[1]))
-        if r[6] is not None:
-            raw_tel_guide.setdefault(canonical, []).append((r[6], r[1]))
-        if len(r) > 7 and r[7] is not None:
-            raw_tel_fwhm_as.setdefault(canonical, []).append((r[7], r[1]))
-
-    # EquipmentItem lists (and EquipmentStats) are built after the
-    # weighted_median_approx helper is defined below, since the new median_fwhm /
-    # median_guiding_rms fields depend on it.
-
     # Equipment Performance - aggregate by normalized telescope+camera
     combo_data: dict[tuple[str, str], dict] = {}
     for r in perf_rows:
@@ -697,9 +706,7 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
                 "frame_count": 0,
                 "total_seconds": 0.0,
                 "sessions": set(),
-                "hfr_vals": [],
-                "ecc_vals": [],
-                "fwhm_vals": [],
+                "fwhm_n": 0,
                 "best_hfr": None,
                 "filters": set(),
                 "filter_rows": {},
@@ -716,15 +723,10 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
         if getattr(r, "session_dates", None):
             cd["sessions"].update(d for d in r.session_dates if d is not None)
 
-        if r.med_hfr is not None:
-            cd["hfr_vals"].append((r.med_hfr, r.frame_count))
         if r.best_hfr is not None:
             if cd["best_hfr"] is None or r.best_hfr < cd["best_hfr"]:
                 cd["best_hfr"] = r.best_hfr
-        if r.med_ecc is not None:
-            cd["ecc_vals"].append((r.med_ecc, r.frame_count))
-        if r.med_fwhm is not None:
-            cd["fwhm_vals"].append((r.med_fwhm, r.frame_count))
+        cd["fwhm_n"] += r.fwhm_n
 
         if filt is None:
             continue
@@ -738,6 +740,7 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
                 "hfr_vals": [],
                 "ecc_vals": [],
                 "fwhm_vals": [],
+                "fwhm_n": 0,
                 "best_hfr": None,
             }
             cd["filter_rows"][filt] = fr
@@ -754,6 +757,7 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
             fr["ecc_vals"].append((r.med_ecc, r.frame_count))
         if r.med_fwhm is not None:
             fr["fwhm_vals"].append((r.med_fwhm, r.frame_count))
+        fr["fwhm_n"] += r.fwhm_n
 
     def weighted_median_approx(vals: list[tuple[float, int]]) -> float | None:
         """Approximate median from per-group medians weighted by frame count."""
@@ -769,44 +773,41 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
                 return round(float(val), 2)
         return round(float(vals_sorted[-1][0]), 2)
 
-    # Build equipment lists now that weighted_median_approx exists. nights is the
-    # count of distinct session_date; target_count the distinct resolved targets;
-    # median_fwhm / median_guiding_rms the frame-weighted median of the raw-group
-    # medians via weighted_median_approx (consistent with the rest of stats).
-    cameras = [
-        EquipmentItem(
-            name=name,
-            frame_count=count,
-            integration_seconds=raw_cam_secs[name],
-            avg_session_seconds=(raw_cam_secs[name] / len(raw_cam_sessions[name])) if raw_cam_sessions[name] else None,
-            grouped=len(cam_raw_names[name]) > 1,
-            nights=len(raw_cam_sessions[name]),
-            target_count=len(raw_cam_targets.get(name, set())),
-            median_fwhm=weighted_median_approx(raw_cam_fwhm.get(name, [])),
-            median_fwhm_arcsec=weighted_median_approx(raw_cam_fwhm_as.get(name, [])),
-            median_guiding_rms=weighted_median_approx(raw_cam_guide.get(name, [])),
-        )
-        for name, count in sorted(raw_cam_counts.items(), key=lambda x: x[1], reverse=True)
-    ]
-    telescopes = [
-        EquipmentItem(
-            name=name,
-            frame_count=count,
-            integration_seconds=raw_tel_secs[name],
-            avg_session_seconds=(raw_tel_secs[name] / len(raw_tel_sessions[name])) if raw_tel_sessions[name] else None,
-            grouped=len(tel_raw_names[name]) > 1,
-            nights=len(raw_tel_sessions[name]),
-            target_count=len(raw_tel_targets.get(name, set())),
-            median_fwhm=weighted_median_approx(raw_tel_fwhm.get(name, [])),
-            median_fwhm_arcsec=weighted_median_approx(raw_tel_fwhm_as.get(name, [])),
-            median_guiding_rms=weighted_median_approx(raw_tel_guide.get(name, [])),
-        )
-        for name, count in sorted(raw_tel_counts.items(), key=lambda x: x[1], reverse=True)
-    ]
-    equipment = EquipmentStats(cameras=cameras, telescopes=telescopes)
-
     def safe_round(v: float | None) -> float | None:
         return round(float(v), 2) if v is not None else None
+
+    def _inventory_items(rows) -> list[EquipmentItem]:
+        """One EquipmentItem per canonical rig, straight from _query_inventory.
+
+        median_fwhm and median_fwhm_arcsec carry the same number because the
+        stored FWHM is already in arcseconds. fwhm_frame_count discloses how
+        many of the rig's LIGHT frames actually carry one, since the CSV that
+        supplies them covers only part of the library.
+        """
+        items = []
+        for r in rows:
+            secs = float(r.total_seconds or 0)
+            nights = r.nights or 0
+            med_fwhm = safe_round(r.med_fwhm)
+            items.append(EquipmentItem(
+                name=r.name,
+                frame_count=r.frame_count,
+                integration_seconds=secs,
+                avg_session_seconds=(secs / nights) if nights else None,
+                grouped=len([n for n in (r.raw_names or []) if n is not None]) > 1,
+                nights=nights,
+                target_count=r.target_count or 0,
+                median_fwhm=med_fwhm,
+                median_fwhm_arcsec=med_fwhm,
+                fwhm_frame_count=r.fwhm_n or 0,
+                median_guiding_rms=safe_round(r.med_guide),
+            ))
+        return items
+
+    equipment = EquipmentStats(
+        cameras=_inventory_items(cam_rows),
+        telescopes=_inventory_items(tel_rows),
+    )
 
     def combo_mad(value: float | None) -> float | None:
         return round(float(value), 3) if value is not None else None
@@ -822,22 +823,31 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
                 best_hfr=safe_round(fr["best_hfr"]),
                 median_eccentricity=weighted_median_approx(fr["ecc_vals"]),
                 median_fwhm=weighted_median_approx(fr["fwhm_vals"]),
+                fwhm_frame_count=fr["fwhm_n"],
             ))
         return result
 
     equipment_performance = []
     for (tel, cam), cd in sorted(combo_data.items(), key=lambda x: x[1]["frame_count"], reverse=True):
         mad_row = mad_by_combo.get((tel, cam))
+        # One percentile_cont over the whole canonical rig, not a weighted blend
+        # of the per-filter medians, so the FWHM here equals the Inventory
+        # figure and HFR/eccentricity are true medians rather than estimates.
+        combo_hfr = safe_round(mad_row.med_hfr) if mad_row else None
+        combo_ecc = safe_round(mad_row.med_ecc) if mad_row else None
+        combo_fwhm = safe_round(mad_row.med_fwhm) if mad_row else None
         equipment_performance.append(EquipmentComboMetrics(
             telescope=tel,
             camera=cam,
             frame_count=cd["frame_count"],
             total_integration_seconds=cd["total_seconds"],
             avg_session_seconds=(cd["total_seconds"] / len(cd["sessions"])) if cd["sessions"] else None,
-            median_hfr=weighted_median_approx(cd["hfr_vals"]),
+            median_hfr=combo_hfr,
             best_hfr=safe_round(cd["best_hfr"]),
-            median_eccentricity=weighted_median_approx(cd["ecc_vals"]),
-            median_fwhm=weighted_median_approx(cd["fwhm_vals"]),
+            median_eccentricity=combo_ecc,
+            median_fwhm=combo_fwhm,
+            median_fwhm_arcsec=combo_fwhm,
+            fwhm_frame_count=cd["fwhm_n"],
             mad_hfr=combo_mad(mad_row.mad_hfr if mad_row else None),
             mad_eccentricity=combo_mad(mad_row.mad_ecc if mad_row else None),
             mad_fwhm=combo_mad(mad_row.mad_fwhm if mad_row else None),
@@ -929,26 +939,61 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
     from app.models.site_dark_hours import SiteDarkHours
     import calendar as cal
 
+    def _day(label: str) -> date_type:
+        y, m, d = label.split("-")
+        return date_type(int(y), int(m), int(d))
+
+    # Every row for the site, not a window around the imaging dates. The table
+    # holds one row per calendar day (backfill_dark_hours fills the gaps, see
+    # below), so a decade of observing is a few thousand rows. Windowing it to
+    # min..max(imaging night) used to truncate the month in progress at the
+    # last clear night, which flattered it.
     dark_map: dict[date_type, float] = {}
-    if site_coords and daily_raw:
-        min_date_str = daily_raw[0][0]
-        max_date_str = daily_raw[-1][0]
-        min_date_parts = min_date_str.split("-")
-        max_date_parts = max_date_str.split("-")
-        min_date = date_type(int(min_date_parts[0]), int(min_date_parts[1]), int(min_date_parts[2]))
-        max_date = date_type(int(max_date_parts[0]), int(max_date_parts[1]), int(max_date_parts[2]))
+    if site_coords:
         dark_q = select(SiteDarkHours.date, SiteDarkHours.dark_hours).where(
             SiteDarkHours.latitude == site_coords.latitude,
             SiteDarkHours.longitude == site_coords.longitude,
-            SiteDarkHours.date >= min_date,
-            SiteDarkHours.date <= max_date,
         )
         async with async_session() as s:
             dark_result = await s.execute(dark_q)
             dark_map = {row[0]: row[1] for row in dark_result.all()}
 
+    # Periods are scored only up to the present: a month in progress is judged
+    # on the nights that have happened, not on the ones still to come. A
+    # session dated ahead of the clock (a timezone edge at the date boundary)
+    # extends the horizon rather than being dropped.
+    eff_horizon = max(date_type.today(), _day(daily_raw[-1][0])) if daily_raw else date_type.today()
+
     def _eff_for_dates(dates: list[date_type], integration_secs: float) -> float | None:
-        total_dark = sum(dark_map.get(d, 0.0) for d in dates)
+        """Exposure time as a percentage of the darkness available to the rigs.
+
+        The denominator sums, over every date in the period, that night's
+        astronomical dark hours times the number of distinct rigs that took
+        LIGHT frames on it, with a floor of one rig. Two rigs shooting the same
+        night therefore have 2 x dark hours to fill, and the result stays at or
+        below 100 percent instead of reaching 300 percent on a three-rig night.
+
+        Nights with no imaging keep their dark hours in the denominator at the
+        floor of one rig, so a clouded-out month still reads low; dropping them
+        would make four clear nights out of thirty look like a near-perfect
+        month. That only holds if site_dark_hours has a row for every calendar
+        night, which is why backfill_dark_hours fills the whole span rather
+        than just the imaging dates.
+
+        A period missing even one of its nights returns None rather than a
+        number. Silently treating a missing row as zero darkness is exactly the
+        inflation this function exists to remove: it would drop the cloudy
+        nights back out of the denominator. None is honest and self-correcting,
+        since the next backfill fills the gap. Computing the gap here instead
+        was rejected: astro_night pulls astropy and numpy into the API process
+        and was deliberately taken off the request path.
+        """
+        dates = [d for d in dates if d <= eff_horizon]
+        if not dates or any(d not in dark_map for d in dates):
+            return None
+        total_dark = sum(
+            dark_map[d] * max(1, rigs_per_night.get(d, 0)) for d in dates
+        )
         if total_dark > 0:
             return round((integration_secs / 3600) / total_dark * 100, 1)
         return None
@@ -980,12 +1025,10 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
     # Daily
     timeline_daily: list[TimelineDetailEntry] = []
     for period, secs in daily_raw:
-        parts = period.split("-")
-        d = date_type(int(parts[0]), int(parts[1]), int(parts[2]))
-        dark_h = dark_map.get(d, 0.0)
-        eff = round((secs / 3600) / dark_h * 100, 1) if dark_h > 0 else None
+        d = _day(period)
         timeline_daily.append(TimelineDetailEntry(
-            period=period, integration_seconds=secs, efficiency_pct=eff,
+            period=period, integration_seconds=secs,
+            efficiency_pct=_eff_for_dates([d], secs),
         ))
 
     response = StatsResponse(

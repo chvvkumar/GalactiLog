@@ -57,15 +57,12 @@ const CompareTab: Component<Props> = (props) => {
   const crossTrainVerdict = (): string | null => {
     const d = dataQuery.data;
     if (!d || d.comparable !== false) return null;
-    // The arcsec fields carry whichever pixel metric was requested (hfr or
-    // fwhm), so label them off the currently selected metric.
-    const label = metric() === "fwhm" ? "FWHM" : "HFR";
     const a = d.median_hfr_arcsec_a;
     const b = d.median_hfr_arcsec_b;
     if (a != null && b != null) {
-      return `Different optical trains: pixel ${label} values are not directly comparable. Comparing in arcseconds instead: ${d.group_a.name} median ${formatArcsec(a)} vs ${d.group_b.name} median ${formatArcsec(b)}.`;
+      return `Different optical trains: pixel HFR values are not directly comparable. Comparing in arcseconds instead: ${d.group_a.name} median ${formatArcsec(a)} vs ${d.group_b.name} median ${formatArcsec(b)}.`;
     }
-    return `Different optical trains: pixel ${label} is not comparable between these groups, and arcsecond data is unavailable (plate scale unknown). No improvement figure is shown.`;
+    return `Different optical trains: pixel HFR is not comparable between these groups, and arcsecond data is unavailable (plate scale unknown). No improvement figure is shown.`;
   };
 
   const selectClass = "text-sm bg-theme-elevated border border-theme-border rounded px-2.5 py-1.5 text-theme-text-primary";

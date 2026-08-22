@@ -71,8 +71,10 @@ METRIC_MAP = {
 }
 
 # Metrics measured in pixels, whose values are only comparable across optical
-# trains after conversion to arcsec via each frame's plate scale.
-_PIXEL_METRICS = {"hfr", "fwhm"}
+# trains after conversion to arcsec via each frame's plate scale. HFR is the
+# only one: `fwhm` comes from the N.I.N.A. Session Metadata CSV and is already
+# in arcseconds, so scaling it by the plate scale would be a double conversion.
+_PIXEL_METRICS = {"hfr"}
 
 X_METRICS = [
     "humidity", "wind_speed", "ambient_temp", "dew_point", "pressure",

@@ -2,6 +2,7 @@ import { Component, Show } from "solid-js";
 import type { EquipmentItem } from "../api/types";
 import { formatIntegration, formatArcsec } from "../utils/format";
 import DataTable, { type DataTableColumn } from "./DataTable";
+import FwhmValue from "./FwhmValue";
 
 const EquipmentTable: Component<{ title: string; items: EquipmentItem[] }> = (props) => {
   const columns: DataTableColumn<EquipmentItem>[] = [
@@ -50,16 +51,11 @@ const EquipmentTable: Component<{ title: string; items: EquipmentItem[] }> = (pr
     },
     {
       key: "median_fwhm",
-      label: "Med FWHM",
+      label: "Med FWHM (arcsec)",
       align: "right",
-      // Arcsec (with the arcsecond glyph) only when the plate scale is known;
-      // the raw header FWHM has no guaranteed unit, so it renders unlabeled.
-      render: (item) =>
-        item.median_fwhm_arcsec != null
-          ? formatArcsec(item.median_fwhm_arcsec)
-          : item.median_fwhm != null
-            ? item.median_fwhm.toFixed(2)
-            : "—",
+      render: (item) => (
+        <FwhmValue value={item.median_fwhm_arcsec ?? item.median_fwhm} count={item.fwhm_frame_count} />
+      ),
     },
     {
       key: "median_guiding_rms",

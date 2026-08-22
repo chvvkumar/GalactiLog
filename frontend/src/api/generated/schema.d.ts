@@ -3021,6 +3021,8 @@ export interface components {
             filters: string[];
             /** Frame Count */
             frame_count: number;
+            /** Fwhm Frame Count */
+            fwhm_frame_count: number;
             /** Grouped */
             grouped: boolean;
             /** Mad Eccentricity */
@@ -3033,6 +3035,8 @@ export interface components {
             median_eccentricity: number | null;
             /** Median Fwhm */
             median_fwhm: number | null;
+            /** Median Fwhm Arcsec */
+            median_fwhm_arcsec?: number | null;
             /** Median Hfr */
             median_hfr: number | null;
             /** Telescope */
@@ -3059,6 +3063,8 @@ export interface components {
             filter_name: string;
             /** Frame Count */
             frame_count: number;
+            /** Fwhm Frame Count */
+            fwhm_frame_count: number;
             /** Median Eccentricity */
             median_eccentricity: number | null;
             /** Median Fwhm */
@@ -3074,6 +3080,8 @@ export interface components {
             avg_session_seconds?: number | null;
             /** Frame Count */
             frame_count: number;
+            /** Fwhm Frame Count */
+            fwhm_frame_count: number;
             /**
              * Grouped
              * @default false

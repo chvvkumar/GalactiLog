@@ -147,17 +147,32 @@ def _make_perf_row(tel, cam, filt, hfr_vals, ecc_vals, fwhm_vals):
     row.best_hfr = min(hfr_vals) if hfr_vals else None
     row.med_ecc = statistics.median(ecc_vals) if ecc_vals else None
     row.med_fwhm = statistics.median(fwhm_vals) if fwhm_vals else None
+    # Set explicitly: MagicMock implements __int__, so an unset attribute would
+    # be coerced to 1 by pydantic instead of surfacing as a missing field.
+    row.fwhm_n = len(fwhm_vals)
     return row
 
 
-def _make_mad_row(norm_tel, norm_cam, mad_hfr, mad_ecc, mad_fwhm):
-    """Mimic a row from _query_equipment_mad (MAD computed in SQL)."""
+def _make_mad_row(norm_tel, norm_cam, mad_hfr, mad_ecc, mad_fwhm,
+                  med_hfr=None, med_ecc=None, med_fwhm=None):
+    """Mimic a row from _query_equipment_mad.
+
+    This query returns both the MADs and the per-combo medians: all three of
+    median_hfr, median_eccentricity and median_fwhm on an equipment_performance
+    row now come from here rather than from a weighted blend of the per-filter
+    medians, so all three must be set.
+    """
     row = MagicMock()
     row.norm_tel = norm_tel
     row.norm_cam = norm_cam
     row.mad_hfr = mad_hfr
     row.mad_ecc = mad_ecc
     row.mad_fwhm = mad_fwhm
+    # Set explicitly: MagicMock implements __float__, so an unset attribute
+    # would be coerced to 1.0 rather than surfacing as a missing field.
+    row.med_hfr = med_hfr
+    row.med_ecc = med_ecc
+    row.med_fwhm = med_fwhm
     return row
 
 
@@ -220,7 +235,8 @@ async def test_equipment_combo_has_mad_fields():
     # normalized (telescope, camera). For [2.0,2.4,2.2,2.1] the median is 2.15
     # and median(|x-2.15|) = 0.10.
     mad_rows = [
-        _make_mad_row("Esprit 150", "ASI2600MM", mad_hfr=0.10, mad_ecc=0.025, mad_fwhm=0.15),
+        _make_mad_row("Esprit 150", "ASI2600MM", mad_hfr=0.10, mad_ecc=0.025,
+                      mad_fwhm=0.15, med_hfr=2.15, med_ecc=0.335, med_fwhm=3.15),
     ]
 
     async def override_session():
@@ -250,6 +266,14 @@ async def test_equipment_combo_has_mad_fields():
         # median of |x-2.15| for [2.0,2.4,2.2,2.1] -> |.15,.25,.05,.05| -> median 0.10
         assert combo["mad_hfr"] is not None
         assert abs(combo["mad_hfr"] - 0.10) < 1e-6
+        # All three combo medians come from the mad query, not from a weighted
+        # blend of the per-filter medians. FWHM carries the same number in both
+        # of its fields because the stored value is already arcseconds.
+        assert combo["median_hfr"] == 2.15
+        assert combo["median_eccentricity"] == 0.34  # safe_round to 2 dp
+        assert combo["median_fwhm"] == 3.15
+        assert combo["median_fwhm_arcsec"] == 3.15
+        assert combo["fwhm_frame_count"] == 4
     finally:
         app.dependency_overrides.clear()
 

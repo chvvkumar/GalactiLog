@@ -125,7 +125,8 @@ class CompareResponse(BaseModel):
     metric: str
     mode: str
     verdict: str
-    # Cross-train comparability. For pixel-domain metrics (hfr, fwhm) the two
+    # Cross-train comparability. For pixel-domain metrics (hfr only; `fwhm` is
+    # already arcsec off the NINA CSV) the two
     # groups can only be compared after converting to arcsec via each frame's
     # plate scale; comparable is False when either side lacks enough
     # plate-scaled frames, in which case the verdict carries no % figure.
@@ -133,7 +134,7 @@ class CompareResponse(BaseModel):
     comparable: bool = True
     # Median of the compared metric in arcsec for each group (only set for
     # pixel-domain metrics when plate scale coverage exists). Field names are
-    # part of the frontend contract; they hold whichever pixel metric was
-    # requested (hfr or fwhm).
+    # part of the frontend contract; they hold the requested pixel metric
+    # (hfr).
     median_hfr_arcsec_a: float | None = None
     median_hfr_arcsec_b: float | None = None

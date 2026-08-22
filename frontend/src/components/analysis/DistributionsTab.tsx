@@ -75,12 +75,12 @@ const DistributionsTab: Component<Props> = (props) => {
     placeholderData: keepPreviousData,
   }));
 
-  // Pixel-domain metrics mixed across optical trains are not cross-comparable.
-  // Shown whenever the current scope can span more than one train (no
-  // telescope/camera filter, or the box plot is explicitly grouped by
-  // equipment).
+  // HFR is pixel-domain, so values mixed across optical trains are not
+  // cross-comparable. Shown whenever the current scope can span more than one
+  // train (no telescope/camera filter, or the box plot is explicitly grouped by
+  // equipment). FWHM is always arcseconds and needs no such note.
   const crossTrainNote = (metric: string, groupedByEquipment: boolean): string | null => {
-    if (metric !== "hfr" && metric !== "fwhm") return null;
+    if (metric !== "hfr") return null;
     const singleTrain = props.filters.telescope !== undefined && props.filters.camera !== undefined;
     if (singleTrain && !groupedByEquipment) return null;
     return `Values are per-train pixel-domain units, not comparable across optical trains. ${PIXEL_METRIC_NOTE}`;

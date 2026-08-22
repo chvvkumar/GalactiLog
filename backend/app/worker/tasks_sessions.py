@@ -22,15 +22,37 @@ DARK_HOURS_LOCK_TTL = 300  # 5 minutes
 
 @celery_app.task(name="app.worker.tasks.backfill_dark_hours")
 def backfill_dark_hours(parent_activity_id: int | None = None) -> dict:
-    """Compute astronomical dark hours for all imaging dates missing from site_dark_hours.
+    """Fill site_dark_hours for every calendar night the timeline can render.
 
     Extracts site coordinates from FITS headers, then batch-computes dark hours
-    for every unique capture_date not yet in the table. Runs on startup and after scans.
+    for every date in the catalogue span that is not already in the table.
+
+    The span is EVERY calendar date, not just the imaging dates. The timeline
+    efficiency denominator counts the clouded-out nights too: a month with four
+    clear nights out of thirty must read low, and it can only do that if those
+    other twenty-six nights have a dark-hours row. Filling only the imaging
+    dates made every night in the denominator a night that was actually used,
+    which is how the percentages ran past 100.
+
+    Runs on startup (main.py dispatches it with a 5 second countdown) and 45
+    seconds after every scan completes. Both paths call this same function with
+    no arguments, so the widened span takes effect on the very next invocation:
+    on an existing install the first app restart after deploy backfills the
+    historical gaps, with no manual step and no migration.
+
+    Also on celery beat daily at 13:00 UTC ("backfill-dark-hours"), which is
+    what keeps tonight's row present on a box that is neither restarted nor
+    scanned. The span still runs 35 days into the future as belt and braces:
+    if beat is down, or the worker is busy at 13:00, the rows for the coming
+    month are already there.
+
+    Idempotent: only dates absent from the table are computed, so a re-run on a
+    fully populated table is a single SELECT.
     """
     from app.models.site_dark_hours import SiteDarkHours
     from app.services.astro_night import dark_hours_batch
     from app.api.stats import _extract_site_coords_sync
-    from datetime import date as date_type
+    from datetime import date as date_type, timedelta
 
     # Prevent overlapping runs
     if not _redis.set(DARK_HOURS_LOCK, "1", nx=True, ex=DARK_HOURS_LOCK_TTL):
@@ -53,15 +75,38 @@ def backfill_dark_hours(parent_activity_id: int | None = None) -> dict:
             )
             existing_dates = {row[0] for row in session.execute(existing_q).all()}
 
-            all_dates_q = select(
-                func.distinct(Image.session_date)
-            ).where(
-                Image.session_date.isnot(None),
-                Image.image_type == "LIGHT",
-            )
-            all_imaging_dates = {row[0] for row in session.execute(all_dates_q).all()}
+            first_session, last_session = session.execute(
+                select(
+                    func.min(Image.session_date), func.max(Image.session_date)
+                ).where(
+                    Image.session_date.isnot(None),
+                    Image.image_type == "LIGHT",
+                )
+            ).one()
+            if first_session is None:
+                logger.info("dark_hours: no imaging dates yet, skipping")
+                return {"status": "skipped", "reason": "no imaging dates"}
 
-            missing = sorted(all_imaging_dates - existing_dates)
+            # Back up a week from the first session before snapping to the
+            # first of that month: the ISO week holding the first imaging night
+            # can start in the previous month, and the weekly timeline needs
+            # all seven of its days.
+            #
+            # The end runs 35 days PAST today (or past the last session, if one
+            # is dated ahead of the clock). Beat runs this daily, so "today"
+            # normally advances on its own; the lead is what covers beat being
+            # down or the worker being saturated at 13:00. Without it, the first
+            # midnight after the last run leaves the current day with no row and
+            # the stats timeline blanks the month and week in progress. 35 days
+            # carries a full month plus the longest ISO week overhang. Dark
+            # hours are a deterministic function of date and site, so computing
+            # them ahead of time costs one vectorized batch and can never be
+            # wrong.
+            start = (first_session - timedelta(days=7)).replace(day=1)
+            end = max(date_type.today(), last_session) + timedelta(days=35)
+            wanted = {start + timedelta(days=i) for i in range((end - start).days + 1)}
+
+            missing = sorted(wanted - existing_dates)
             if not missing:
                 logger.info("dark_hours: all %d dates already computed", len(existing_dates))
                 return {"status": "noop", "existing": len(existing_dates)}
@@ -86,7 +131,7 @@ def backfill_dark_hours(parent_activity_id: int | None = None) -> dict:
                 logger.info("dark_hours: %d/%d dates computed", computed, len(missing))
 
             logger.info("dark_hours: backfill complete, %d dates added", computed)
-            return {"status": "complete", "computed": computed, "total": len(all_imaging_dates)}
+            return {"status": "complete", "computed": computed, "total": len(wanted)}
     except Exception:
         logger.exception("dark_hours: backfill failed")
         raise

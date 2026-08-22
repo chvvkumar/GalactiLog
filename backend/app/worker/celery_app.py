@@ -82,6 +82,21 @@ celery_app.conf.update(
             "task": "app.worker.prune_activity.prune_refresh_tokens",
             "schedule": crontab(hour=3, minute=30),
         },
+        # The stats timeline divides exposure time by the astronomical dark
+        # hours of every night in the period, so it needs a site_dark_hours row
+        # for tonight, every night, whether or not anything was imaged or
+        # scanned. The task's other two triggers are app startup and scan
+        # completion; neither is a clock, so on a box that is left running and
+        # not scanning, "today" froze at the last run and the month and week in
+        # progress went blank. 13:00 UTC is after local noon for a western-
+        # hemisphere site, so the imaging-night boundary for the day has passed
+        # and the run cannot race it; it also stays clear of the 03:00 prunes.
+        # Safe to run repeatedly: the task holds a Redis lock while it works and
+        # computes only the dates absent from the table.
+        "backfill-dark-hours": {
+            "task": "app.worker.tasks.backfill_dark_hours",
+            "schedule": crontab(hour=13, minute=0),
+        },
         "drain-app-logs": {
             "task": "app.worker.drain_logs.drain_app_logs",
             "schedule": 5.0,
