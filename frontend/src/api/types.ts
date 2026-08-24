@@ -526,23 +526,20 @@ export type FilenameCandidateResponse = Schemas["FilenameCandidateResponse"];
 
 // === Stats (Admin) ===
 // Arcsec-domain extensions (nullable, optional until the backend ships them):
-// pixel HFR/FWHM are only comparable within one optical train, so the stats
-// surfaces additionally carry plate-scale-derived arcsec values. Extended here
+// pixel HFR is only comparable within one optical train, so the stats surfaces
+// additionally carry plate-scale-derived arcsec values. Extended here
 // (intersection over the generated aliases) rather than in the generated
 // schema, which is regenerated from the backend OpenAPI spec.
-export type EquipmentItem = Schemas["EquipmentItem"] & {
-  median_fwhm_arcsec?: number | null;
-};
+// FWHM is NOT in that family: it is stored in arcseconds already (NINA Session
+// Metadata CSV), so median_fwhm and median_fwhm_arcsec carry the same number.
+export type EquipmentItem = Schemas["EquipmentItem"];
 export type TimelineEntry = Schemas["TimelineEntry"];
 export type TimelineDetailEntry = Schemas["TimelineDetailEntry"];
 export type SiteCoords = Schemas["SiteCoords"];
 export type TopTarget = Schemas["TopTarget"];
 export type HfrBucket = Schemas["HfrBucket"];
-export type EquipmentFilterMetrics = Schemas["EquipmentFilterMetrics"] & {
-  median_fwhm_arcsec?: number | null;
-};
+export type EquipmentFilterMetrics = Schemas["EquipmentFilterMetrics"];
 export type EquipmentComboMetrics = Omit<Schemas["EquipmentComboMetrics"], "filter_breakdown"> & {
-  median_fwhm_arcsec?: number | null;
   filter_breakdown: EquipmentFilterMetrics[];
 };
 export type OverviewStats = Schemas["OverviewStats"];
@@ -768,10 +765,9 @@ export type MatrixCell = Schemas["MatrixCell"];
 export type MatrixResponse = Schemas["MatrixResponse"];
 // Analysis compare: `comparable` is false when either side has fewer than 4
 // plate-scaled frames (applies in both equipment and filter modes) -- pixel
-// HFR/FWHM cannot be compared across optical trains. The two
+// HFR cannot be compared across optical trains. The two
 // `median_hfr_arcsec_a/_b` fields carry the plate-scale-derived arcsec median
-// of whichever pixel metric was requested (hfr or fwhm), despite the "hfr"
-// name. Optional until the regenerated schema includes them.
+// of HFR. Optional until the regenerated schema includes them.
 export type CompareGroupStats = Schemas["CompareGroupStats"];
 export type CompareResponse = Schemas["CompareResponse"] & {
   comparable?: boolean | null;

@@ -81,6 +81,8 @@ class Image(Base):
     # --- CSV metrics (N.I.N.A. ImageMetaData) ---
     # Quality
     hfr_stdev: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Arcseconds. From NINA Session Metadata CSV (Hocus Focus). Never multiply
+    # by plate scale.
     fwhm: Mapped[float | None] = mapped_column(Float, nullable=True)
     detected_stars: Mapped[int | None] = mapped_column(Integer, nullable=True)
 

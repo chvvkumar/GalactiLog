@@ -2,7 +2,8 @@ import { Component, For, Show, createMemo, createSignal } from "solid-js";
 import type { EquipmentComboMetrics, EquipmentFilterMetrics } from "../api/types";
 import FilterBadges from "./FilterBadges";
 
-import { formatIntegration, ARCSEC } from "../utils/format";
+import { formatIntegration } from "../utils/format";
+import FwhmValue from "./FwhmValue";
 import {
   madZ,
   bandForZ,
@@ -23,11 +24,9 @@ function metricClass(val: number | null): string {
 // the combo medians across every combo in the list (median of the combo medians;
 // mad = median(|x - median|); n = count of combos with a non-null value).
 //
-// Deliberately NO baseline for pixel HFR (or raw FWHM): each combo is a
-// different optical train, and pixel-domain sharpness values are only
-// comparable within one train. Cross-combo grading uses the plate-scale-
-// derived arcsec FWHM medians; combos without a known plate scale render
-// ungraded (neutral).
+// Deliberately NO baseline for pixel HFR: each combo is a different optical
+// train, and pixel-domain sharpness values are only comparable within one
+// train. FWHM is already stored in arcseconds, so it grades across combos.
 interface ComboBaselines {
   median_eccentricity: MetricBaseline;
   median_fwhm_arcsec: MetricBaseline;
@@ -50,7 +49,7 @@ function baselineOf(values: (number | null)[]): MetricBaseline {
 function buildComboBaselines(combos: EquipmentComboMetrics[]): ComboBaselines {
   return {
     median_eccentricity: baselineOf(combos.map((c) => c.median_eccentricity)),
-    median_fwhm_arcsec: baselineOf(combos.map((c) => c.median_fwhm_arcsec ?? null)),
+    median_fwhm_arcsec: baselineOf(combos.map((c) => c.median_fwhm_arcsec ?? c.median_fwhm)),
   };
 }
 
@@ -93,9 +92,7 @@ const FilterBreakdownRow: Component<{ row: EquipmentFilterMetrics }> = (props) =
         {formatMetric(props.row.median_eccentricity)}
       </td>
       <td class={`text-right py-1 px-2 tabular-nums ${metricClass(props.row.median_fwhm)}`}>
-        {props.row.median_fwhm_arcsec != null
-          ? formatMetric(props.row.median_fwhm_arcsec, ARCSEC)
-          : formatMetric(props.row.median_fwhm)}
+        <FwhmValue value={props.row.median_fwhm} count={props.row.fwhm_frame_count} />
       </td>
     </tr>
   );
@@ -104,13 +101,7 @@ const FilterBreakdownRow: Component<{ row: EquipmentFilterMetrics }> = (props) =
 const ComboRow: Component<{ combo: EquipmentComboMetrics; baselines: ComboBaselines }> = (props) => {
   const [expanded, setExpanded] = createSignal(false);
   const eccCell = () => deviationCell(props.combo.median_eccentricity, props.baselines.median_eccentricity, "Ecc");
-  // Graded only when this combo has an arcsec FWHM (plate scale known);
-  // otherwise the cell shows the raw per-train value ungraded.
-  const fwhmCell = () => deviationCell(props.combo.median_fwhm_arcsec ?? null, props.baselines.median_fwhm_arcsec, "FWHM");
-  const fwhmValue = () =>
-    props.combo.median_fwhm_arcsec != null
-      ? formatMetric(props.combo.median_fwhm_arcsec, ARCSEC)
-      : formatMetric(props.combo.median_fwhm);
+  const fwhmCell = () => deviationCell(props.combo.median_fwhm_arcsec ?? props.combo.median_fwhm, props.baselines.median_fwhm_arcsec, "FWHM");
   const dist = () => {
     const d: Record<string, number> = {};
     for (const f of props.combo.filter_breakdown) {
@@ -173,7 +164,10 @@ const ComboRow: Component<{ combo: EquipmentComboMetrics; baselines: ComboBaseli
           {formatMetric(props.combo.median_eccentricity)}
         </td>
         <td class={`text-right py-1.5 px-2 tabular-nums ${fwhmCell().class}`} title={fwhmCell().title}>
-          {fwhmValue()}
+          <FwhmValue
+            value={props.combo.median_fwhm_arcsec ?? props.combo.median_fwhm}
+            count={props.combo.fwhm_frame_count}
+          />
         </td>
         <td class="py-1.5 px-2">
           <div class="flex justify-end">
@@ -195,7 +189,7 @@ const ComboRow: Component<{ combo: EquipmentComboMetrics; baselines: ComboBaseli
                       <th class="text-right text-theme-text-secondary font-normal py-1 px-2 text-tiny uppercase tracking-wide">Med HFR (px)</th>
                       <th class="text-right text-theme-text-secondary font-normal py-1 px-2 text-tiny uppercase tracking-wide">Best HFR (px)</th>
                       <th class="text-right text-theme-text-secondary font-normal py-1 px-2 text-tiny uppercase tracking-wide">Med Ecc</th>
-                      <th class="text-right text-theme-text-secondary font-normal py-1 px-2 text-tiny uppercase tracking-wide">Med FWHM</th>
+                      <th class="text-right text-theme-text-secondary font-normal py-1 px-2 text-tiny uppercase tracking-wide">Med FWHM (arcsec)</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -233,7 +227,7 @@ const EquipmentPerformance: Component<{ combos: EquipmentComboMetrics[] }> = (pr
               <th class="text-right text-theme-text-secondary font-normal py-1 px-2 text-tiny uppercase tracking-wide" title="Pixel HFR; only comparable within one optical train">Med HFR (px)</th>
               <th class="text-right text-theme-text-secondary font-normal py-1 px-2 text-tiny uppercase tracking-wide" title="Pixel HFR; only comparable within one optical train">Best HFR (px)</th>
               <th class="text-right text-theme-text-secondary font-normal py-1 px-2 text-tiny uppercase tracking-wide">Med Ecc</th>
-              <th class="text-right text-theme-text-secondary font-normal py-1 px-2 text-tiny uppercase tracking-wide" title="Shown in arcseconds when the rig's plate scale is known; unlabeled values are raw header units">Med FWHM</th>
+              <th class="text-right text-theme-text-secondary font-normal py-1 px-2 text-tiny uppercase tracking-wide">Med FWHM (arcsec)</th>
               <th class="text-right text-theme-text-secondary font-normal py-1 px-2 text-tiny uppercase tracking-wide">Filters</th>
             </tr>
           </thead>

@@ -6,6 +6,7 @@ import { chartFontSize } from "../../utils/chartConfig";
 // Shared metric-label map (with units) so axis titles match select options
 // and stats-card labels everywhere.
 import { METRIC_LABELS } from "../../utils/metricLabels";
+import { ARCSEC } from "../../utils/format";
 
 const METRIC_SHORT: Record<string, string> = {
   humidity: "humidity",
@@ -19,7 +20,7 @@ const METRIC_SHORT: Record<string, string> = {
   airmass: "airmass",
   sensor_temp: "sensor temp",
   hfr: "HFR",
-  fwhm: "FWHM",
+  fwhm: `FWHM (${ARCSEC})`,
   eccentricity: "eccentricity",
   guiding_rms: "guiding RMS",
   guiding_rms_ra: "RA guiding",

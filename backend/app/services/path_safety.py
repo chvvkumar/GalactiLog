@@ -17,7 +17,21 @@ def resolve_under(base: Path | str, candidate: Path | str) -> Path:
     path escapes base.
     """
     base_resolved = Path(base).resolve()
-    candidate_resolved = Path(candidate).resolve()
+    # Pure-string normalisation and prefix check first, so nothing touches
+    # the filesystem (resolve() follows symlinks) on unvetted input. A
+    # startswith on a normalised path is also the sanitizer shape CodeQL
+    # recognises; is_relative_to is not. Both spellings of base are accepted
+    # because stored paths may predate a symlinked data root; the resolve()
+    # re-check below is the real gate. The trailing separator makes base
+    # itself match and stops "/data2" matching "/data".
+    prefixes = tuple(
+        os.path.join(r, "")
+        for r in {os.path.abspath(str(base)), str(base_resolved)}
+    )
+    normalized = os.path.join(os.path.abspath(str(candidate)), "")
+    if not normalized.startswith(prefixes):
+        raise ValueError("path escapes allowed root")
+    candidate_resolved = Path(normalized).resolve()
     if not candidate_resolved.is_relative_to(base_resolved):
         raise ValueError("path escapes allowed root")
     return candidate_resolved
@@ -44,7 +58,15 @@ def resolve_relative_under(base: Path | str, relative: str) -> Path:
 if __name__ == "__main__":
     _base = Path(__file__).parent
     assert resolve_under(_base, _base / "path_safety.py").name == "path_safety.py"
+    assert resolve_under(_base, _base) == _base.resolve()
+    assert resolve_under(_base, str(_base) + "/../services/path_safety.py").name == "path_safety.py"
     assert resolve_relative_under(_base, "path_safety.py").name == "path_safety.py"
+    for _sibling in (str(_base) + "2", str(_base) + "2/x.py", _base.parent / "x"):
+        try:
+            resolve_under(_base, _sibling)
+        except ValueError:
+            continue
+        raise AssertionError(f"not rejected: {_sibling!r}")
     for _bad in ("../secrets", "/etc/passwd", "a/../../b", "", "C:/Windows"):
         try:
             resolve_relative_under(_base, _bad)

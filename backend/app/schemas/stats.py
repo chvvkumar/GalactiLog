@@ -25,11 +25,15 @@ class EquipmentItem(BaseModel):
     grouped: bool = False
     nights: int = 0
     target_count: int = 0
+    # Arcseconds. Image.fwhm comes from the NINA Session Metadata CSV, which
+    # already reports arcsec, so no plate-scale conversion is applied.
     median_fwhm: float | None = None
-    # median_fwhm converted to arcsec via each frame's plate scale
-    # (XPIXSZ/FOCALLEN headers), so values pooled across optical trains share a
-    # unit. None when no frame in the group is plate-scaled.
+    # Identical to median_fwhm. Kept as a separate field so callers that ask
+    # for the arcsec form explicitly keep working.
     median_fwhm_arcsec: float | None = None
+    # LIGHT frames in this group that carry an FWHM. CSV coverage is partial,
+    # so this is normally well below frame_count.
+    fwhm_frame_count: int = 0
     median_guiding_rms: float | None = None
 
 
@@ -103,7 +107,9 @@ class EquipmentFilterMetrics(BaseModel):
     median_hfr: float | None
     best_hfr: float | None
     median_eccentricity: float | None
+    # Arcseconds; see EquipmentItem.median_fwhm.
     median_fwhm: float | None
+    fwhm_frame_count: int = 0
 
 
 class EquipmentComboMetrics(BaseModel):
@@ -115,7 +121,11 @@ class EquipmentComboMetrics(BaseModel):
     median_hfr: float | None
     best_hfr: float | None
     median_eccentricity: float | None
+    # Arcseconds; median_fwhm_arcsec carries the same number. See
+    # EquipmentItem.median_fwhm.
     median_fwhm: float | None
+    median_fwhm_arcsec: float | None = None
+    fwhm_frame_count: int = 0
     mad_hfr: float | None = None
     mad_eccentricity: float | None = None
     mad_fwhm: float | None = None

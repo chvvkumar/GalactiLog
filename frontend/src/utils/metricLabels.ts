@@ -5,9 +5,8 @@
 // Unit notes:
 // - HFR is measured in pixels and is only comparable within a single optical
 //   train. Cross-telescope comparison requires FWHM in arcseconds.
-// - The raw `fwhm` header value has no guaranteed unit (capture-software
-//   dependent), so it carries no unit annotation; the `*_arcsec` fields are
-//   the labeled arcsecond values.
+// - FWHM is stored in arcseconds (sourced from the NINA Session Metadata CSV)
+//   and is comparable across optical trains.
 import { ARCSEC } from "./format";
 
 export const METRIC_LABELS: Record<string, string> = {
@@ -22,7 +21,7 @@ export const METRIC_LABELS: Record<string, string> = {
   airmass: "Airmass",
   sensor_temp: "Sensor Temp (°C)",
   hfr: "HFR (px)",
-  fwhm: "FWHM",
+  fwhm: `FWHM (${ARCSEC})`,
   eccentricity: "Eccentricity",
   guiding_rms: `Guiding RMS (${ARCSEC})`,
   guiding_rms_ra: `Guiding RA RMS (${ARCSEC})`,
@@ -56,8 +55,8 @@ export function metricOptions(keys: string[]): { value: string; label: string }[
   return keys.map((value) => ({ value, label: metricLabel(value) }));
 }
 
-// Disclosure text for surfaces that plot pixel-domain HFR (or raw FWHM) across
-// potentially different optical trains.
+// Disclosure text for surfaces that plot pixel-domain HFR across potentially
+// different optical trains.
 export const PIXEL_METRIC_NOTE =
   "HFR is measured in pixels and is only comparable within a single optical train. " +
   "Use FWHM in arcseconds for cross-telescope comparison.";

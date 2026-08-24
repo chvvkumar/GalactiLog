@@ -4,6 +4,7 @@ import { apiClient } from "../../api/generated/client";
 import { unwrap } from "../../api/unwrap";
 import { queryKeys } from "../../api/queryKeys";
 import type { SharedFilters } from "../../pages/AnalysisPage";
+import { ARCSEC } from "../../utils/format";
 
 const X_LABELS: Record<string, string> = {
   humidity: "Humid.", wind_speed: "Wind", ambient_temp: "Temp",
@@ -12,7 +13,7 @@ const X_LABELS: Record<string, string> = {
 };
 
 const Y_LABELS: Record<string, string> = {
-  hfr: "HFR", fwhm: "FWHM", eccentricity: "Ecc.",
+  hfr: "HFR", fwhm: `FWHM (${ARCSEC})`, eccentricity: "Ecc.",
   guiding_rms: "Guide", guiding_rms_ra: "Guide RA", guiding_rms_dec: "Guide DEC",
   detected_stars: "Stars", adu_mean: "ADU \u03bc", adu_median: "ADU med", adu_stdev: "ADU \u03c3",
 };
