@@ -15,6 +15,7 @@ from app.api.deps import get_current_user
 from app.models.user import User
 from app.models import Image, Target
 from app.services.normalization import load_alias_maps, normalize_filter, normalize_equipment
+from app.services.equipment_aliases import _norm_case
 
 from app.schemas.stats import (
     StatsResponse, OverviewStats, EquipmentStats, EquipmentItem,
@@ -65,7 +66,7 @@ _storage_cache: dict[str, int] = {"fits": 0, "thumbnails": 0}
 _storage_last_update: float = 0
 # No asyncio.Lock here: a module-level Lock binds to the first event loop that
 # uses it and raises RuntimeError on any later loop (test isolation, multi-worker).
-# Concurrent du refreshes are idempotent — the last writer wins, which is fine.
+# Concurrent du refreshes are idempotent: the last writer wins, which is fine.
 _STORAGE_TTL = 300  # refresh every 5 minutes
 
 
@@ -288,17 +289,6 @@ async def get_stats(session: AsyncSession = Depends(get_session), user: User = D
     # this: doing so inflated the Equipment Inventory FWHM by the plate scale,
     # which is the bug this comment exists to prevent recurring.
     _scale = Image.arcsec_per_pixel
-
-    def _norm_case(col, alias_map: dict[str, str]):
-        """SQL expression mapping a raw equipment name to its canonical form.
-
-        Mirrors normalize_equipment() (an exact-match dict lookup) so a query can
-        group by the SAME normalized (telescope, camera) combo the Python
-        post-processing uses. Empty map -> the column unchanged.
-        """
-        if not alias_map:
-            return col
-        return case(alias_map, value=col, else_=col)
 
     async def _query_inventory(col, alias_map: dict[str, str]):
         """Per-canonical-rig inventory over LIGHT frames.

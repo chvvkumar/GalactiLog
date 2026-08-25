@@ -52,6 +52,7 @@ export const queryKeys = {
   // Stats / calendar
   stats: () => ["stats"] as const,
   calendar: (year?: number) => ["stats", "calendar", year ?? null] as const,
+  guidingStats: () => ["stats", "guiding"] as const,
 
   // Scan
   scanStatus: () => ["scan", "status"] as const,

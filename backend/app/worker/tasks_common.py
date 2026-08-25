@@ -40,6 +40,7 @@ def _invalidate_stats_cache():
     try:
         _redis.delete(
             "galactilog:stats:cache",
+            "galactilog:stats:guiding",
             "galactilog:fits_keys",
             "galactilog:rig_baselines:cache",
         )
