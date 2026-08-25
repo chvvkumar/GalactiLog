@@ -502,15 +502,16 @@ describe("Phd2GuideGraph section help", () => {
 
   it("opens the help popover from the section header", async () => {
     built.length = 0;
-    const { getByRole, queryByRole } = render(() => <Harness />);
+    const { getByRole } = render(() => <Harness />);
     fireEvent.click(getByRole("button", { name: "Guide Graph (PHD2)" }));
     await settle();
 
     const glyph = getByRole("button", { name: "About the guide graph" });
-    expect(queryByRole("dialog")).toBeNull();
+    // The help panel is portaled to the body, outside the render container.
+    expect(document.body.querySelector('[role="dialog"]')).toBeNull();
 
     fireEvent.click(glyph);
-    const dialog = getByRole("dialog") as HTMLElement;
+    const dialog = document.body.querySelector('[role="dialog"]') as HTMLElement;
     expect(dialog.textContent).toContain("guiding error in arcseconds");
     expect(dialog.textContent).toContain("Shift+scroll to zoom the arcsecond axis.");
     expect(dialog.textContent).toContain("Click a legend entry to hide or show that series.");
@@ -530,7 +531,7 @@ describe("Phd2GuideGraph section help", () => {
     await settle(2);
     // The glyph stops its own click, so the row's toggle never sees it.
     expect(container.querySelector("canvas")).not.toBeNull();
-    expect(getByRole("dialog")).toBeTruthy();
+    expect(document.body.querySelector('[role="dialog"]')).toBeTruthy();
   });
 });
 
