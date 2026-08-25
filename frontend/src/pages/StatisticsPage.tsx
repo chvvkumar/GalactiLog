@@ -23,6 +23,7 @@ const StatisticsPage: Component = () => {
   const { stats } = useStats();
   const ctx = useSettingsContext();
   const [timelineView, setTimelineView] = createSignal<"timeline" | "calendar">("timeline");
+  const [guidingOpen, setGuidingOpen] = createSignal(false);
   const guidingQuery = useQuery(() => ({
     queryKey: queryKeys.guidingStats(),
     queryFn: ({ signal }) => guidingStats.get(signal),
@@ -76,42 +77,51 @@ const StatisticsPage: Component = () => {
 
             <section class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
               <div class="flex items-center gap-2">
-                <h2 class="text-sm font-semibold text-theme-text-primary">Guiding</h2>
+                <button
+                  class="flex items-center gap-2 text-sm font-semibold text-theme-text-primary cursor-pointer"
+                  aria-expanded={guidingOpen()}
+                  onClick={() => setGuidingOpen(!guidingOpen())}
+                >
+                  <h2>Guiding</h2>
+                  <span class={`text-caption transition-transform ${guidingOpen() ? "" : "-rotate-90"}`}>&#9660;</span>
+                </button>
                 <HelpPopover>
                   <p class="text-sm text-theme-text-secondary">
                     PHD2 guide-log comparisons per rig. A rig is the telescope mapped to the PHD2 profile, so cameras under one telescope share a value. RMS figures are frame-count weighted over sessions with at least 100 samples and are not comparable across different guide exposures. Sessions from unmapped profiles are excluded; map profiles in Settings.
                   </p>
                 </HelpPopover>
               </div>
-              <Show when={guidingQuery.isPending}>
-                <div class="text-center text-theme-text-secondary py-4 text-sm">Loading...</div>
-              </Show>
-              <Show when={guidingQuery.isError}>
-                <div class="text-sm text-theme-error">Failed to load guiding stats</div>
-              </Show>
-              <Show when={guidingQuery.data}>
-                {(g) => (
-                  <Show
-                    when={guidingEmptyMessage(g().rigs.length, g().unmapped_session_count) === null}
-                    fallback={
-                      <p class="text-sm text-theme-text-secondary">
-                        {guidingEmptyMessage(g().rigs.length, g().unmapped_session_count)}
-                      </p>
-                    }
-                  >
-                    <div class="space-y-4">
-                      <GuidingScorecard rigs={g().rigs} />
-                      <GuidingSettingsTable settings={g().settings} />
-                      <GuidingPointing
-                        pierSide={g().pier_side}
-                        altitudeBands={g().altitude_bands}
-                        starLostReasons={g().star_lost_reasons}
-                      />
-                      <GuidingTrend monthly={g().monthly} />
-                      <GuidingCalibrations calibrations={g().calibrations} />
-                    </div>
-                  </Show>
-                )}
+              <Show when={guidingOpen()}>
+                <Show when={guidingQuery.isPending}>
+                  <div class="text-center text-theme-text-secondary py-4 text-sm">Loading...</div>
+                </Show>
+                <Show when={guidingQuery.isError}>
+                  <div class="text-sm text-theme-error">Failed to load guiding stats</div>
+                </Show>
+                <Show when={guidingQuery.data}>
+                  {(g) => (
+                    <Show
+                      when={guidingEmptyMessage(g().rigs.length, g().unmapped_session_count) === null}
+                      fallback={
+                        <p class="text-sm text-theme-text-secondary">
+                          {guidingEmptyMessage(g().rigs.length, g().unmapped_session_count)}
+                        </p>
+                      }
+                    >
+                      <div class="space-y-4">
+                        <GuidingScorecard rigs={g().rigs} />
+                        <GuidingSettingsTable settings={g().settings} />
+                        <GuidingPointing
+                          pierSide={g().pier_side}
+                          altitudeBands={g().altitude_bands}
+                          starLostReasons={g().star_lost_reasons}
+                        />
+                        <GuidingTrend monthly={g().monthly} />
+                        <GuidingCalibrations calibrations={g().calibrations} />
+                      </div>
+                    </Show>
+                  )}
+                </Show>
               </Show>
             </section>
 
