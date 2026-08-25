@@ -669,6 +669,9 @@
             "title": "Settings",
             "type": "object"
           },
+          "setup": {
+            "$ref": "#/components/schemas/BootstrapSetup"
+          },
           "user": {
             "$ref": "#/components/schemas/BootstrapUser"
           }
@@ -679,9 +682,48 @@
           "equipment",
           "fits_keys",
           "object_types",
-          "custom_columns"
+          "custom_columns",
+          "setup"
         ],
         "title": "BootstrapResponse",
+        "type": "object"
+      },
+      "BootstrapSetup": {
+        "properties": {
+          "complete": {
+            "title": "Complete",
+            "type": "boolean"
+          },
+          "fits_root": {
+            "title": "Fits Root",
+            "type": "string"
+          },
+          "fits_root_exists": {
+            "title": "Fits Root Exists",
+            "type": "boolean"
+          },
+          "fits_root_has_entries": {
+            "title": "Fits Root Has Entries",
+            "type": "boolean"
+          },
+          "https_enabled": {
+            "title": "Https Enabled",
+            "type": "boolean"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "complete",
+          "fits_root",
+          "fits_root_exists",
+          "fits_root_has_entries",
+          "https_enabled",
+          "version"
+        ],
+        "title": "BootstrapSetup",
         "type": "object"
       },
       "BootstrapUser": {
@@ -1849,6 +1891,11 @@
             "title": "Frame Count",
             "type": "integer"
           },
+          "fwhm_frame_count": {
+            "default": 0,
+            "title": "Fwhm Frame Count",
+            "type": "integer"
+          },
           "grouped": {
             "title": "Grouped",
             "type": "boolean"
@@ -1907,6 +1954,17 @@
               }
             ],
             "title": "Median Fwhm"
+          },
+          "median_fwhm_arcsec": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Median Fwhm Arcsec"
           },
           "median_hfr": {
             "anyOf": [
@@ -1985,6 +2043,11 @@
             "title": "Frame Count",
             "type": "integer"
           },
+          "fwhm_frame_count": {
+            "default": 0,
+            "title": "Fwhm Frame Count",
+            "type": "integer"
+          },
           "median_eccentricity": {
             "anyOf": [
               {
@@ -2050,6 +2113,11 @@
           },
           "frame_count": {
             "title": "Frame Count",
+            "type": "integer"
+          },
+          "fwhm_frame_count": {
+            "default": 0,
+            "title": "Fwhm Frame Count",
             "type": "integer"
           },
           "grouped": {
@@ -3419,6 +3487,198 @@
           "guiding_rms_arcsec"
         ],
         "title": "GroupBaseline",
+        "type": "object"
+      },
+      "GuidingAltitudeBandRow": {
+        "properties": {
+          "band": {
+            "enum": [
+              "<30",
+              "30-60",
+              ">60"
+            ],
+            "title": "Band",
+            "type": "string"
+          },
+          "rms_dec_arcsec": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rms Dec Arcsec"
+          },
+          "rms_ra_arcsec": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rms Ra Arcsec"
+          },
+          "rms_total_arcsec": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rms Total Arcsec"
+          },
+          "session_count": {
+            "title": "Session Count",
+            "type": "integer"
+          },
+          "telescope": {
+            "title": "Telescope",
+            "type": "string"
+          }
+        },
+        "required": [
+          "telescope",
+          "band",
+          "session_count"
+        ],
+        "title": "GuidingAltitudeBandRow",
+        "type": "object"
+      },
+      "GuidingRig": {
+        "properties": {
+          "exposure_ms_values": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Exposure Ms Values",
+            "type": "array"
+          },
+          "gated_session_count": {
+            "title": "Gated Session Count",
+            "type": "integer"
+          },
+          "guided_hours": {
+            "title": "Guided Hours",
+            "type": "number"
+          },
+          "ra_dec_ratio": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ra Dec Ratio"
+          },
+          "rms_dec_arcsec": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rms Dec Arcsec"
+          },
+          "rms_ra_arcsec": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rms Ra Arcsec"
+          },
+          "rms_total_arcsec": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rms Total Arcsec"
+          },
+          "rms_total_filtered_arcsec": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rms Total Filtered Arcsec"
+          },
+          "session_count": {
+            "title": "Session Count",
+            "type": "integer"
+          },
+          "settle_median_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Settle Median S"
+          },
+          "telescope": {
+            "title": "Telescope",
+            "type": "string"
+          }
+        },
+        "required": [
+          "telescope",
+          "session_count",
+          "gated_session_count",
+          "guided_hours",
+          "exposure_ms_values"
+        ],
+        "title": "GuidingRig",
+        "type": "object"
+      },
+      "GuidingStatsResponse": {
+        "properties": {
+          "altitude_bands": {
+            "items": {
+              "$ref": "#/components/schemas/GuidingAltitudeBandRow"
+            },
+            "title": "Altitude Bands",
+            "type": "array"
+          },
+          "rigs": {
+            "items": {
+              "$ref": "#/components/schemas/GuidingRig"
+            },
+            "title": "Rigs",
+            "type": "array"
+          },
+          "unmapped_session_count": {
+            "title": "Unmapped Session Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "unmapped_session_count",
+          "rigs",
+          "altitude_bands"
+        ],
+        "title": "GuidingStatsResponse",
         "type": "object"
       },
       "HTTPValidationError": {
@@ -9849,7 +10109,7 @@
         ]
       },
       "get": {
-        "description": "Return paginated activity events, newest first.\n\nOnly top-level events (parent_id IS NULL) are returned. Children are\nbatch-loaded and nested under their parent's `children` field.",
+        "description": "Return paginated activity events, newest first.\n\nOnly top-level events (parent_id IS NULL) are returned. Children are\nbatch-loaded and nested under their parent's `children` field.\n\n`attention=true` selects everything that asks the user to do something:\nerrors, plus any severity carrying a `details.action` link. It replaces\nthe `severity` filter rather than narrowing it, since the two halves of\nthat union sit on either side of any single severity value.",
         "operationId": "list_activity_api_activity_get",
         "parameters": [
           {
@@ -9876,6 +10136,16 @@
               },
               "title": "Category",
               "type": "array"
+            }
+          },
+          {
+            "in": "query",
+            "name": "attention",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Attention",
+              "type": "boolean"
             }
           },
           {
@@ -16026,6 +16296,54 @@
         ]
       }
     },
+    "/api/settings/setup-complete": {
+      "post": {
+        "description": "Record that the first-run wizard has been finished or skipped.\n\nStored as a raw key on `general` rather than a GeneralSettings field: the\nwizard writes it while the settings page may be holding a stale copy of\nthe model, and a full-model PUT would clobber it.",
+        "operationId": "mark_setup_complete_api_settings_setup_complete_post",
+        "parameters": [
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Mark Setup Complete",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
     "/api/settings/suggestions/equipment": {
       "get": {
         "description": "Return groups of similar camera/telescope names found in the image library.",
@@ -16240,6 +16558,55 @@
           }
         },
         "summary": "Get Calendar",
+        "tags": [
+          "stats"
+        ]
+      }
+    },
+    "/api/stats/guiding": {
+      "get": {
+        "operationId": "get_guiding_stats_api_stats_guiding_get",
+        "parameters": [
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuidingStatsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Guiding Stats",
         "tags": [
           "stats"
         ]

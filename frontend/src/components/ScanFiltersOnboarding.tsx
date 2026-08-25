@@ -108,7 +108,7 @@ const ScanFiltersOnboarding: Component<Props> = (props) => {
               </Button>
             }
           >
-            <A href="/settings?tab=scan" class={buttonClasses("primary")}>
+            <A href="/settings?tab=scan#scan-filters-panel" class={buttonClasses("primary")}>
               Open scan settings
             </A>
           </Show>

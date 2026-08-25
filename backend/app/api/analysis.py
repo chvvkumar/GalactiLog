@@ -5,12 +5,13 @@ from collections import defaultdict
 from datetime import date as date_type
 
 from fastapi import APIRouter, Depends, Query, HTTPException
-from sqlalchemy import select, func, distinct
+from sqlalchemy import select, func, distinct, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
 from app.services.cache import cached_json
 from app.models import Image, Target, User
+from app.models.phd2 import Phd2Session
 from app.schemas.analysis import (
     BoxPlotGroup,
     BoxPlotResponse,
@@ -30,6 +31,8 @@ from app.schemas.analysis import (
     TrendLine,
 )
 from app.services.normalization import load_alias_maps, expand_canonical, normalize_equipment, normalize_filter
+from app.services.equipment_aliases import _norm_case
+from app.services.phd2_metrics import MIN_FRAMES
 from app.api.auth import get_current_user
 
 router = APIRouter(prefix="/analysis", tags=["analysis"])
@@ -84,6 +87,58 @@ Y_METRICS = [
     "hfr", "fwhm", "eccentricity", "guiding_rms", "guiding_rms_ra",
     "guiding_rms_dec", "detected_stars", "adu_mean", "adu_median", "adu_stdev",
 ]
+
+# PHD2 night metrics: X-only, /correlation-only. Not in METRIC_MAP, so every
+# other endpoint rejects them as unknown, and not in X_METRICS, so the matrix
+# does not try them. Each is a per-(canonical telescope, session_date) figure
+# from phd2_night_subquery, joined to images on strict session_date equality.
+PHD2_X_METRICS = [
+    "phd2_rms_total", "phd2_rms_ra", "phd2_rms_dec",
+    "phd2_star_lost_pct", "phd2_snr_mean",
+]
+
+
+def phd2_night_subquery(tel_map: dict[str, str]):
+    """One row per (canonical telescope, night) of PHD2 guiding.
+
+    The RMS columns mirror phd2_metrics._weighted_rms: frame-count-weighted
+    over sessions with at least MIN_FRAMES samples and a non-null value, so a
+    two-minute test run cannot drag a night's figure around. Star-lost and SNR
+    count every session. RMS columns are arcsec and are never scaled.
+    """
+    tel = _norm_case(Phd2Session.telescope, tel_map)
+    fc = Phd2Session.frame_count
+    long_enough = fc >= MIN_FRAMES
+
+    def weighted_rms(col):
+        eligible = and_(long_enough, col.is_not(None))
+        return func.sqrt(
+            func.sum(col * col * fc).filter(eligible)
+            / func.nullif(func.sum(fc).filter(eligible), 0)
+        )
+
+    snr = Phd2Session.snr_mean
+    return (
+        select(
+            tel.label("telescope_canonical"),
+            Phd2Session.session_date.label("session_date"),
+            weighted_rms(Phd2Session.rms_total_arcsec).label("phd2_rms_total"),
+            weighted_rms(Phd2Session.rms_ra_arcsec).label("phd2_rms_ra"),
+            weighted_rms(Phd2Session.rms_dec_arcsec).label("phd2_rms_dec"),
+            (
+                100.0 * func.sum(Phd2Session.drop_count)
+                / func.nullif(func.sum(fc), 0)
+            ).label("phd2_star_lost_pct"),
+            (
+                func.sum(snr * fc).filter(snr.is_not(None))
+                / func.nullif(func.sum(fc).filter(snr.is_not(None)), 0)
+            ).label("phd2_snr_mean"),
+        )
+        .where(Phd2Session.telescope.is_not(None))
+        .where(Phd2Session.session_date.is_not(None))
+        .group_by(tel, Phd2Session.session_date)
+        .subquery("phd2_night")
+    )
 
 
 # ── Shared helpers ──────────────────────────────────────────────────────
@@ -306,7 +361,7 @@ async def get_correlation(
     session: AsyncSession = Depends(get_session),
     user: User = Depends(get_current_user),
 ):
-    if x_metric not in METRIC_MAP:
+    if x_metric not in METRIC_MAP and x_metric not in PHD2_X_METRICS:
         raise HTTPException(400, f"Unknown x_metric: {x_metric}")
     if y_metric not in METRIC_MAP:
         raise HTTPException(400, f"Unknown y_metric: {y_metric}")
@@ -319,8 +374,14 @@ async def get_correlation(
     )
 
     async def _compute():
-        x_col = METRIC_MAP[x_metric]
         y_col = METRIC_MAP[y_metric]
+        phd2 = None
+        if x_metric in PHD2_X_METRICS:
+            _, _, tel_map = await load_alias_maps(session)
+            phd2 = phd2_night_subquery(tel_map)
+            x_col = getattr(phd2.c, x_metric)
+        else:
+            x_col = METRIC_MAP[x_metric]
 
         q = (
             select(
@@ -329,7 +390,17 @@ async def get_correlation(
                 Image.session_date.label("night"),
                 Image.resolved_target_id,
             )
-            .where(Image.image_type == "LIGHT")
+            .select_from(Image)
+        )
+        if phd2 is not None:
+            # LEFT JOIN plus the x IS NOT NULL filter below: frames whose
+            # (rig, night) has no mapped PHD2 night are dropped from the plot.
+            q = q.outerjoin(phd2, and_(
+                Image.session_date == phd2.c.session_date,
+                _norm_case(Image.telescope, tel_map) == phd2.c.telescope_canonical,
+            ))
+        q = (
+            q.where(Image.image_type == "LIGHT")
             .where(x_col.is_not(None))
             .where(y_col.is_not(None))
             .where(Image.capture_date.is_not(None))

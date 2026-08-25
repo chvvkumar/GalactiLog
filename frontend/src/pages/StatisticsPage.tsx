@@ -1,5 +1,9 @@
 import { Component, Show, createSignal } from "solid-js";
+import { A } from "@solidjs/router";
+import { useQuery } from "@tanstack/solid-query";
 import { useStats } from "../store/stats";
+import { guidingStats } from "../api/guidingStats";
+import { queryKeys } from "../api/queryKeys";
 import { useSettingsContext } from "../components/SettingsProvider";
 import { contentWidthClass } from "../utils/format";
 import HelpPopover from "../components/HelpPopover";
@@ -10,11 +14,18 @@ import FilterUsageChart from "../components/FilterUsageChart";
 import ImagingTimeline from "../components/ImagingTimeline";
 import ImagingCalendar from "../components/ImagingCalendar";
 import TopTargets from "../components/TopTargets";
+import GuidingScorecard, { GuidingEmptyNotice } from "../components/GuidingScorecard";
+import GuidingAltitude from "../components/GuidingAltitude";
 
 const StatisticsPage: Component = () => {
   const { stats } = useStats();
   const ctx = useSettingsContext();
   const [timelineView, setTimelineView] = createSignal<"timeline" | "calendar">("timeline");
+  const [guidingOpen, setGuidingOpen] = createSignal(false);
+  const guidingQuery = useQuery(() => ({
+    queryKey: queryKeys.guidingStats(),
+    queryFn: ({ signal }) => guidingStats.get(signal),
+  }));
 
   return (
     <div class={`page-enter p-4 space-y-4 ${contentWidthClass(ctx.contentWidth())}`}>
@@ -22,7 +33,7 @@ const StatisticsPage: Component = () => {
         <h1 class="text-xl font-semibold tracking-tight text-theme-text-primary">Statistics</h1>
         <HelpPopover>
           <p class="text-sm text-theme-text-secondary">
-            Aggregate metrics across the full catalog. Four sections: Overview, Equipment Performance, Breakdowns, and Imaging Activity. Open the popover next to each section for details.
+            Aggregate metrics across the full catalog. Five sections: Overview, Equipment Performance, Guiding, Breakdowns, and Imaging Activity. Open the popover next to each section for details.
           </p>
         </HelpPopover>
       </div>
@@ -60,6 +71,45 @@ const StatisticsPage: Component = () => {
                 </HelpPopover>
               </div>
               <EquipmentPerformance combos={data().equipment_performance} />
+            </section>
+
+            <section class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
+              <div class="flex items-center gap-2">
+                <button
+                  class="flex items-center gap-2 text-sm font-semibold text-theme-text-primary cursor-pointer"
+                  aria-expanded={guidingOpen()}
+                  onClick={() => setGuidingOpen(!guidingOpen())}
+                >
+                  <h2>Guiding</h2>
+                  <span class={`text-caption transition-transform ${guidingOpen() ? "" : "-rotate-90"}`}>&#9660;</span>
+                </button>
+                <HelpPopover>
+                  <p class="text-sm text-theme-text-secondary">
+                    PHD2 guide-log comparisons per rig, in two panels: a scorecard of RMS, settling and guided hours for each rig, and RMS split by the target altitude band it was captured at. A rig is the telescope mapped to the PHD2 profile, so cameras under one telescope share a value. RMS figures are frame-count weighted over sessions of at least 100 guide frames, and are not comparable across different guide exposures. Sessions from unmapped profiles are excluded; <A href="/settings?tab=equipment#phd2-profiles" class="text-theme-accent hover:underline">map profiles in Settings</A>.
+                  </p>
+                </HelpPopover>
+              </div>
+              <Show when={guidingOpen()}>
+                <Show when={guidingQuery.isPending}>
+                  <div class="text-center text-theme-text-secondary py-4 text-sm">Loading...</div>
+                </Show>
+                <Show when={guidingQuery.isError}>
+                  <div class="text-sm text-theme-error">Failed to load guiding stats</div>
+                </Show>
+                <Show when={guidingQuery.data}>
+                  {(g) => (
+                    <Show
+                      when={g().rigs.length > 0}
+                      fallback={<GuidingEmptyNotice unmapped={g().unmapped_session_count} />}
+                    >
+                      <div class="space-y-4">
+                        <GuidingScorecard rigs={g().rigs} />
+                        <GuidingAltitude altitudeBands={g().altitude_bands} />
+                      </div>
+                    </Show>
+                  )}
+                </Show>
+              </Show>
             </section>
 
             <section class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">

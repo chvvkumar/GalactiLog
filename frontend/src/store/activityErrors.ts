@@ -1,5 +1,5 @@
 // Shared activity-errors store: ONE 10s visibility-gated poll of
-// GET /api/activity?severity=error serves both the background-error toasts
+// GET /api/activity?attention=true serves both the background-error toasts
 // (formerly store/errorToastPoller.ts, behavior unchanged) and the job
 // monitor's recent-errors panel + unseen badge.
 //
@@ -76,16 +76,28 @@ function onVisibilityChange(): void {
 export async function checkErrors(): Promise<void> {
   try {
     const res = await apiClient
-      .GET("/api/activity", { params: { query: { severity: ["error"], limit: FETCH_LIMIT } } })
+      // attention=true returns errors plus warnings that carry a details.action.
+      // Both feed the job monitor panel and the unseen badge; only errors toast
+      // (see below).
+      .GET("/api/activity", {
+        params: {
+          query: { attention: true, limit: FETCH_LIMIT },
+        },
+      })
       .then(unwrap);
     setErrorEvents(res.items);
     if (res.items.length === 0) return;
 
     // Toast behavior unchanged from errorToastPoller: only items newer than
     // the last toasted timestamp, minus those already toasted this session.
+    // Attention warnings are deliberately excluded: a sticky toast is too loud
+    // for them, and they still show in the panel and the unseen count.
     const lastMs = new Date(getLastToastTs()).getTime();
     const unseen = res.items.filter(
-      (item) => new Date(item.timestamp).getTime() > lastMs && !seenIds.has(item.id),
+      (item) =>
+        item.severity === "error" &&
+        new Date(item.timestamp).getTime() > lastMs &&
+        !seenIds.has(item.id),
     );
     if (unseen.length === 0) return;
     setLastToastTs(res.items[0].timestamp);

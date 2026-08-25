@@ -236,6 +236,10 @@ def _emit_timezone_unset_warning(db: Session, profiles: list[str]) -> None:
                     # them for the reader.
                     "profiles": profiles[:50],
                     "setting": "phd2_profile_map",
+                    "action": {
+                        "label": "Set observer timezone",
+                        "href": "/settings?tab=scan#observer-location",
+                    },
                 },
                 actor="system",
             )

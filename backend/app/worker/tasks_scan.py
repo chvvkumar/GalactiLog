@@ -709,10 +709,19 @@ def _is_unrecoverable(exc: Exception) -> bool:
     # PermissionError won't resolve on retry
     if isinstance(exc, PermissionError):
         return True
-    # Other OSError subtypes - check for known unrecoverable messages
+    # Other OSError subtypes - check for known unrecoverable messages.
+    # FITSIO status 107 is a read past the end of the file: the file is
+    # truncated, so every retry re-reads the same short bytes and fails the
+    # same way. Retrying it only delays the scan and the failure report.
     if isinstance(exc, OSError):
         msg = str(exc)
-        return any(s in msg for s in ("SIMPLE card", "not a valid FITS"))
+        return any(s in msg for s in (
+            "SIMPLE card",
+            "not a valid FITS",
+            "status = 107",
+            "move past end of file",
+            "could not interpret primary array header",
+        ))
     return False
 
 

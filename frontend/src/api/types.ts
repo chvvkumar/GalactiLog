@@ -946,3 +946,8 @@ export interface PanelSessionFilter {
   frames: number;
   integration: number;
 }
+
+// === Guiding stats (GET /api/stats/guiding) ===
+export type GuidingRig = Schemas["GuidingRig"];
+export type GuidingAltitudeBandRow = Schemas["GuidingAltitudeBandRow"];
+export type GuidingStatsResponse = Schemas["GuidingStatsResponse"];

@@ -27,6 +27,7 @@ const INTERVALS = [
   { value: 60, label: "1 hour" },
   { value: 120, label: "2 hours" },
   { value: 240, label: "4 hours" },
+  { value: 360, label: "6 hours" },
   { value: 480, label: "8 hours" },
   { value: 720, label: "12 hours" },
   { value: 1440, label: "24 hours" },
@@ -34,7 +35,7 @@ const INTERVALS = [
 
 const ScanManager: Component = () => {
   const { scanStatus, isActive, stopping, startScan, startRegeneration, stopScan, stopPolling } = useScan();
-  const { settings, saveGeneral } = useSettingsContext();
+  const { settings, saveGeneral, openSetupWizard } = useSettingsContext();
   const { isAdmin } = useAuth();
   const { stats } = useStats();
   const [frameFilter, setFrameFilter] = createSignal<FrameFilter>("all");
@@ -274,6 +275,14 @@ const ScanManager: Component = () => {
                   Example: after a night of capture, run a scan to pull the new files from your NAS directory into the catalog.
                 </p>
               </HelpPopover>
+              <Show when={isAdmin()}>
+                <button
+                  class="ml-auto text-xs underline text-theme-text-secondary hover:text-theme-text-primary"
+                  onClick={() => openSetupWizard()}
+                >
+                  Run setup again
+                </button>
+              </Show>
             </div>
 
             <Show when={isAdmin()}>
@@ -322,7 +331,7 @@ const ScanManager: Component = () => {
             </Show>
 
             <Show when={isAdmin()}>
-              <section class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
+              <section id="guide-logs" class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4 scroll-mt-4">
                 <div class="flex items-center gap-2">
                   <h4 class="text-sm font-medium text-theme-text-primary">Guide Logs</h4>
                   <HelpPopover title="Guide Logs">
@@ -352,7 +361,7 @@ const ScanManager: Component = () => {
               </section>
             </Show>
 
-            <section class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
+            <section id="observer-location" class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4 scroll-mt-4">
               <div class="flex items-center gap-2">
                 <h4 class="text-sm font-medium text-theme-text-primary">Observer Location</h4>
                 <HelpPopover title="Observer Location">
@@ -544,7 +553,7 @@ const ScanManager: Component = () => {
         </div>
 
         {/* Right column: activity feed matches left column height */}
-        <div class="relative min-w-0 min-h-[24rem] lg:min-h-0">
+        <div id="activity-feed" class="relative min-w-0 min-h-[24rem] lg:min-h-0 scroll-mt-4">
           <div class="lg:absolute lg:inset-0 lg:flex lg:flex-col">
             <ActivityFeed />
           </div>

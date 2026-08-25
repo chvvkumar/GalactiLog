@@ -18,7 +18,7 @@ services:
     volumes:
       - ${GALACTILOG_POSTGRES_DATA_HOST_PATH:-postgres_data}:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-galactilog} -d ${POSTGRES_DB:-galactilog_catalog}"]
+      test: ["CMD-SHELL", "pg_isready -U ${GALACTILOG_POSTGRES_USER:-galactilog} -d ${GALACTILOG_POSTGRES_DB:-galactilog_catalog}"]
       interval: 5s
       timeout: 3s
       retries: 5

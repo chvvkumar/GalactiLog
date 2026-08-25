@@ -34,6 +34,15 @@ class BootstrapCustomColumn(BaseModel):
     created_at: str | None = None
 
 
+class BootstrapSetup(BaseModel):
+    complete: bool
+    fits_root: str
+    fits_root_exists: bool
+    fits_root_has_entries: bool
+    https_enabled: bool
+    version: str
+
+
 class BootstrapResponse(BaseModel):
     user: BootstrapUser
     settings: dict
@@ -41,3 +50,4 @@ class BootstrapResponse(BaseModel):
     fits_keys: list[str]
     object_types: list[BootstrapObjectType]
     custom_columns: list[BootstrapCustomColumn]
+    setup: BootstrapSetup

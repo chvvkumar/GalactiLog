@@ -1,6 +1,6 @@
 // frontend/src/pages/SettingsPage.tsx
-import { Show, Suspense, lazy, type Component } from "solid-js";
-import { useSearchParams } from "@solidjs/router";
+import { Show, Suspense, createEffect, lazy, onCleanup, type Component } from "solid-js";
+import { useLocation, useSearchParams } from "@solidjs/router";
 import { useAuth } from "../components/AuthProvider";
 import { useSettingsContext } from "../components/SettingsProvider";
 import { contentWidthClass } from "../utils/format";
@@ -77,6 +77,25 @@ export const SettingsPage: Component = () => {
   const tabs = () => ALL_TABS.filter((t) => !("adminOnly" in t && t.adminOnly) || isAdmin());
   const activeTab = () => (tabs().some((t) => t.id === searchParams.tab) ? (searchParams.tab as TabId) : "scan");
 
+  // Deep links such as /settings?tab=equipment#phd2-profiles land before the
+  // lazy tab chunk has mounted its content, so poll briefly for the anchor.
+  const location = useLocation();
+  createEffect(() => {
+    activeTab();
+    const id = location.hash.replace(/^#/, "");
+    if (!id) return;
+    let tries = 0;
+    const timer = setInterval(() => {
+      const el = document.getElementById(id);
+      // A collapsed <details> section (scan filters) would otherwise scroll
+      // into view still shut, hiding the setting the link was aimed at.
+      if (el instanceof HTMLDetailsElement) el.open = true;
+      if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+      if (el || ++tries > 20) clearInterval(timer);
+    }, 100);
+    onCleanup(() => clearInterval(timer));
+  });
+
   return (
     <div class={`page-enter p-4 space-y-6 ${contentWidthClass(ctx.contentWidth())}`}>
       <h1 class="text-xl font-semibold tracking-tight text-theme-text-primary">Settings</h1>
@@ -142,7 +161,7 @@ export const SettingsPage: Component = () => {
               </div>
               <EquipmentTab />
             </div>
-            <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
+            <div id="phd2-profiles" class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4 scroll-mt-4">
               <div class="flex items-center gap-2">
                 <h2 class="text-sm font-semibold text-theme-text-primary">PHD2 Profiles</h2>
                 <HelpPopover title="PHD2 Profiles">

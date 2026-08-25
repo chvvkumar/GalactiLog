@@ -1,5 +1,8 @@
 """Tests for analysis API endpoints (ARCH-4)."""
+import statistics
 import uuid
+from datetime import date, datetime, timedelta, timezone
+
 import pytest
 from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -742,3 +745,241 @@ async def test_distribution_counts_a_phd2_row_and_a_csv_row_alike():
     sql = str(executed[0].compile(dialect=postgresql.dialect()))
     assert "images.guiding_rms_arcsec" in sql
     assert "guiding_rms_source" not in sql
+
+
+# ---------------------------------------------------------------------------
+# PHD2 night metrics as correlation X (DB-backed)
+# ---------------------------------------------------------------------------
+#
+# Requires a real Postgres (test:test@localhost:5432/test_catalog) with the
+# Alembic schema applied. Pattern from test_stats_fwhm_timeline.py.
+
+import pytest_asyncio
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+from app.config import settings as _settings
+from app.models import Image
+from app.models.phd2 import Phd2Log, Phd2Session
+from app.models.user_settings import UserSettings, SETTINGS_ROW_ID
+from app.services.normalization import invalidate_alias_cache
+from app.services.phd2_metrics import _weighted_rms, MIN_FRAMES
+
+PHD2_NIGHT = date(2024, 3, 1)
+NO_PHD2_NIGHT = date(2024, 3, 2)
+PHD2_NIGHT_FWHM = [2.0, 3.0, 4.0]
+
+# (raw telescope spelling, frame_count, drop_count, rms_total, rms_ra, rms_dec, snr)
+# The alias spelling and the canonical one must merge into one night; the
+# 50-frame session is under MIN_FRAMES and only counts toward star-lost and SNR.
+PHD2_SESSIONS = [
+    ("Askar_SQA55", 300, 3, 0.5, 0.3, 0.4, 30.0),
+    ("SQA55", 200, 7, 1.0, 0.6, 0.8, 50.0),
+    ("SQA55", 50, 5, 9.0, 9.0, 9.0, 10.0),
+]
+assert PHD2_SESSIONS[2][1] < MIN_FRAMES
+
+
+class _SessionRow:
+    def __init__(self, frame_count, rms_total_arcsec, rms_ra_arcsec, rms_dec_arcsec):
+        self.frame_count = frame_count
+        self.rms_total_arcsec = rms_total_arcsec
+        self.rms_ra_arcsec = rms_ra_arcsec
+        self.rms_dec_arcsec = rms_dec_arcsec
+
+
+_EXPECTED_ROWS = [_SessionRow(fc, t, r, d) for _, fc, _, t, r, d, _ in PHD2_SESSIONS]
+EXPECTED_RMS_TOTAL = _weighted_rms(_EXPECTED_ROWS, "rms_total_arcsec")
+EXPECTED_RMS_RA = _weighted_rms(_EXPECTED_ROWS, "rms_ra_arcsec")
+EXPECTED_RMS_DEC = _weighted_rms(_EXPECTED_ROWS, "rms_dec_arcsec")
+_TOTAL_FRAMES = sum(s[1] for s in PHD2_SESSIONS)
+EXPECTED_STAR_LOST_PCT = 100.0 * sum(s[2] for s in PHD2_SESSIONS) / _TOTAL_FRAMES
+EXPECTED_SNR_MEAN = sum(s[6] * s[1] for s in PHD2_SESSIONS) / _TOTAL_FRAMES
+
+
+def _light(**kw):
+    defaults = dict(
+        id=uuid.uuid4(),
+        file_path=f"/data/{uuid.uuid4()}.fits",
+        file_name="x.fits",
+        image_type="LIGHT",
+        exposure_time=300.0,
+        camera="ASI2600MM Pro",
+        filter_used="Ha",
+    )
+    defaults.update(kw)
+    return Image(**defaults)
+
+
+async def _truncate_phd2(engine):
+    async with engine.begin() as conn:
+        await conn.execute(text(
+            "TRUNCATE images, user_settings, phd2_logs RESTART IDENTITY CASCADE"
+        ))
+
+
+@pytest_asyncio.fixture
+async def seeded_phd2_db():
+    from app.database import engine as app_engine
+    await app_engine.dispose()
+
+    engine = create_async_engine(_settings.database_url, poolclass=None)
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+
+    await _truncate_phd2(engine)
+
+    async with Session() as s:
+        s.add(UserSettings(
+            id=SETTINGS_ROW_ID,
+            equipment={"telescopes": {"SQA55": {"aliases": ["Askar_SQA55"]}}},
+        ))
+
+        # Night with a mapped PHD2 night: three frames, canonical spelling.
+        for i, fwhm in enumerate(PHD2_NIGHT_FWHM):
+            s.add(_light(
+                session_date=PHD2_NIGHT,
+                capture_date=datetime(2024, 3, 1, 20, i, tzinfo=timezone.utc),
+                telescope="SQA55", fwhm=fwhm,
+            ))
+        # Same night, a rig with no PHD2 sessions: must be dropped.
+        s.add(_light(
+            session_date=PHD2_NIGHT,
+            capture_date=datetime(2024, 3, 1, 21, 0, tzinfo=timezone.utc),
+            telescope="Other Scope", fwhm=9.0,
+        ))
+        # Same rig (alias spelling), a night with no PHD2 sessions: dropped.
+        for i, fwhm in enumerate([5.0, 6.0]):
+            s.add(_light(
+                session_date=NO_PHD2_NIGHT,
+                capture_date=datetime(2024, 3, 2, 20, i, tzinfo=timezone.utc),
+                telescope="Askar_SQA55", fwhm=fwhm,
+            ))
+
+        log_id = uuid.uuid4()
+        s.add(Phd2Log(id=log_id, file_path=f"/phd2/{log_id}.txt", parse_status="ok"))
+        await s.flush()
+        start = datetime(2024, 3, 2, 2, 0, tzinfo=timezone.utc)
+        for i, (tel, fc, drops, rms_t, rms_ra, rms_dec, snr) in enumerate(PHD2_SESSIONS):
+            s.add(Phd2Session(
+                id=uuid.uuid4(), log_id=log_id, run_index=0, section_index=i,
+                started_at_local=start.replace(tzinfo=None),
+                started_at_utc=start,
+                ended_at_utc=start + timedelta(seconds=fc),
+                duration_s=float(fc),
+                session_date=PHD2_NIGHT,
+                telescope=tel,
+                pixel_scale_arcsec=1.0,
+                frame_count=fc, drop_count=drops,
+                rms_total_arcsec=rms_t, rms_ra_arcsec=rms_ra, rms_dec_arcsec=rms_dec,
+                snr_mean=snr,
+                events=[],
+            ))
+        await s.commit()
+
+    invalidate_alias_cache()
+
+    async def _override_db():
+        async with Session() as s:
+            yield s
+
+    app.dependency_overrides[get_session] = _override_db
+    app.dependency_overrides[get_current_user] = _override_user(_admin_user())
+
+    yield Session
+
+    app.dependency_overrides.clear()
+    invalidate_alias_cache()
+    await _truncate_phd2(engine)
+    await engine.dispose()
+    await app_engine.dispose()
+
+
+async def _correlation(x_metric, granularity="frame"):
+    with _make_cache_miss_patch():
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            return await client.get(
+                f"/api/analysis/correlation?x_metric={x_metric}&y_metric=fwhm"
+                f"&granularity={granularity}"
+            )
+
+
+@pytest.mark.asyncio
+async def test_correlation_phd2_rms_total_joins_only_mapped_nights(seeded_phd2_db):
+    resp = await _correlation("phd2_rms_total")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["x_metric"] == "phd2_rms_total"
+    assert body["total_count"] == len(PHD2_NIGHT_FWHM)
+    assert sorted(p["y"] for p in body["points"]) == PHD2_NIGHT_FWHM
+    assert {p["date"] for p in body["points"]} == {PHD2_NIGHT.isoformat()}
+    for p in body["points"]:
+        assert p["x"] == pytest.approx(EXPECTED_RMS_TOTAL, abs=1e-5)
+
+
+@pytest.mark.asyncio
+async def test_correlation_phd2_rms_axes(seeded_phd2_db):
+    for metric, expected in [
+        ("phd2_rms_ra", EXPECTED_RMS_RA),
+        ("phd2_rms_dec", EXPECTED_RMS_DEC),
+    ]:
+        resp = await _correlation(metric)
+        assert resp.status_code == 200, resp.text
+        xs = {round(p["x"], 5) for p in resp.json()["points"]}
+        assert xs == {round(expected, 5)}, metric
+
+
+@pytest.mark.asyncio
+async def test_correlation_phd2_star_lost_pct_uses_all_sessions(seeded_phd2_db):
+    resp = await _correlation("phd2_star_lost_pct")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["total_count"] == len(PHD2_NIGHT_FWHM)
+    for p in body["points"]:
+        assert p["x"] == pytest.approx(EXPECTED_STAR_LOST_PCT, abs=1e-6)
+
+
+@pytest.mark.asyncio
+async def test_correlation_phd2_snr_mean_is_frame_weighted(seeded_phd2_db):
+    resp = await _correlation("phd2_snr_mean")
+    assert resp.status_code == 200, resp.text
+    for p in resp.json()["points"]:
+        assert p["x"] == pytest.approx(EXPECTED_SNR_MEAN, abs=1e-6)
+
+
+@pytest.mark.asyncio
+async def test_correlation_phd2_session_granularity_keeps_night_value(seeded_phd2_db):
+    resp = await _correlation("phd2_rms_total", granularity="session")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["total_count"] == 1
+    point = body["points"][0]
+    assert point["x"] == pytest.approx(EXPECTED_RMS_TOTAL, abs=1e-5)
+    assert point["y"] == pytest.approx(statistics.median(PHD2_NIGHT_FWHM))
+    assert point["date"] == PHD2_NIGHT.isoformat()
+
+
+@pytest.mark.asyncio
+async def test_phd2_metrics_rejected_outside_correlation():
+    """The phd2_* names are correlation-only X metrics: every other metric
+    endpoint rejects them through its unknown-metric path, and they are not
+    part of the matrix X list."""
+    from app.api.analysis import METRIC_MAP, X_METRICS, PHD2_X_METRICS
+
+    for name in PHD2_X_METRICS:
+        assert name not in METRIC_MAP
+        assert name not in X_METRICS
+
+    app.dependency_overrides[get_current_user] = _override_user(_admin_user())
+    app.dependency_overrides[get_session] = _override_session(AsyncMock())
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        dist = await client.get("/api/analysis/distribution?metric=phd2_rms_total")
+        ts = await client.get("/api/analysis/timeseries?metric=phd2_star_lost_pct")
+        as_y = await client.get(
+            "/api/analysis/correlation?x_metric=humidity&y_metric=phd2_rms_total"
+        )
+    app.dependency_overrides.clear()
+    assert dist.status_code == 400
+    assert ts.status_code == 400
+    assert as_y.status_code == 400

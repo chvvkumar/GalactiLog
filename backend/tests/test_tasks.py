@@ -787,3 +787,37 @@ class TestIngestFilenameCandidateNoDetach:
         # The candidate was persisted with the id captured before session close.
         assert state["candidate"] is not None, "expected a FilenameCandidate to be added"
         assert state["candidate"].image_ids == [assigned_id]
+
+
+# ---------------------------------------------------------------------------
+# _is_unrecoverable: a truncated file must fail fast, not burn three retries
+# ---------------------------------------------------------------------------
+
+class TestIsUnrecoverable:
+    """FITSIO status 107 means the read ran off the end of a short file.
+
+    Every retry re-reads the same truncated bytes and fails identically, so
+    retrying only delays the scan and the failure report the user acts on.
+    """
+
+    @pytest.mark.parametrize("msg", [
+        "FITSIO status = 107: tried to move past end of file",
+        "attempt to move past end of file in table",
+        "FITSIO status = 107: could not interpret primary array header",
+        "SIMPLE card",
+        "file is not a valid FITS file",
+    ])
+    def test_unrecoverable_oserror_messages(self, msg):
+        tasks_mod = _bootstrap_tasks("app.worker.tasks_scan")
+        assert tasks_mod._is_unrecoverable(OSError(msg)) is True
+
+    def test_transient_oserror_is_still_retried(self):
+        tasks_mod = _bootstrap_tasks("app.worker.tasks_scan")
+        assert tasks_mod._is_unrecoverable(OSError("Stale file handle")) is False
+
+    def test_value_and_filesystem_errors_stay_unrecoverable(self):
+        tasks_mod = _bootstrap_tasks("app.worker.tasks_scan")
+        assert tasks_mod._is_unrecoverable(ValueError("bad header")) is True
+        assert tasks_mod._is_unrecoverable(FileNotFoundError("gone")) is True
+        assert tasks_mod._is_unrecoverable(PermissionError("denied")) is True
+        assert tasks_mod._is_unrecoverable(RuntimeError("boom")) is False

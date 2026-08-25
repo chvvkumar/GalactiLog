@@ -1,5 +1,6 @@
 import copy
 import uuid
+from datetime import datetime, timezone
 from enum import Enum
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -315,6 +316,26 @@ async def update_general(
             _queue_worker_task("recompute_session_dates")
 
     return _row_to_response(row)
+
+
+@router.post("/setup-complete")
+async def mark_setup_complete(
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(require_admin),
+):
+    """Record that the first-run wizard has been finished or skipped.
+
+    Stored as a raw key on `general` rather than a GeneralSettings field: the
+    wizard writes it while the settings page may be holding a stale copy of
+    the model, and a full-model PUT would clobber it.
+    """
+    row = await _get_or_create_settings(session)
+    row.general = {
+        **(row.general or {}),
+        "setup_completed_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await session.commit()
+    return {"ok": True}
 
 
 def _activity_settings_payload(general: dict) -> dict:

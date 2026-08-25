@@ -30,6 +30,11 @@ export const METRIC_LABELS: Record<string, string> = {
   adu_mean: "ADU Mean",
   adu_median: "ADU Median",
   adu_stdev: "ADU StDev",
+  phd2_rms_total: `PHD2 RMS Total (${ARCSEC})`,
+  phd2_rms_ra: `PHD2 RMS RA (${ARCSEC})`,
+  phd2_rms_dec: `PHD2 RMS Dec (${ARCSEC})`,
+  phd2_star_lost_pct: "PHD2 Star Lost (%)",
+  phd2_snr_mean: "PHD2 Guide SNR",
 };
 
 // Unit suffix appended directly after a formatted value ("2.31 px", "0.85″").
@@ -45,7 +50,19 @@ export const METRIC_UNITS: Record<string, string> = {
   guiding_rms: ARCSEC,
   guiding_rms_ra: ARCSEC,
   guiding_rms_dec: ARCSEC,
+  phd2_rms_total: ARCSEC,
+  phd2_rms_ra: ARCSEC,
+  phd2_rms_dec: ARCSEC,
+  phd2_star_lost_pct: "%",
 };
+
+// Night-level PHD2 X metrics, accepted by the correlation endpoint only.
+export const PHD2_X_METRICS = [
+  "phd2_rms_total", "phd2_rms_ra", "phd2_rms_dec", "phd2_star_lost_pct", "phd2_snr_mean",
+];
+
+export const PHD2_METRIC_NOTE =
+  "Night-level PHD2 figures joined by rig and imaging night; nights with no mapped PHD2 profile are omitted.";
 
 export function metricLabel(key: string): string {
   return METRIC_LABELS[key] ?? key;
