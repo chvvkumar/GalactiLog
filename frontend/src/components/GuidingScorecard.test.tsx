@@ -41,13 +41,13 @@ function rig(overrides: Partial<GuidingRig> = {}): GuidingRig {
 }
 
 describe("GuidingScorecard", () => {
-  it("renders one row per rig with the session and gated counts", () => {
+  it("renders one row per rig with the session and short-session counts", () => {
     const rigs = [rig(), rig({ telescope: "RedCat 51", session_count: 5, gated_session_count: 0 })];
     const { getByText, getAllByText } = render(() => <GuidingScorecard rigs={rigs} />);
     expect(getByText("Esprit 100")).toBeDefined();
     expect(getByText("RedCat 51")).toBeDefined();
     expect(getByText("12")).toBeDefined();
-    expect(getByText("2 gated")).toBeDefined();
+    expect(getByText("2 too short to score")).toBeDefined();
     expect(getAllByText(/Guide exposure: 1000, 2000 ms/).length).toBe(2);
   });
 

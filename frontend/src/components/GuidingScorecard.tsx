@@ -1,6 +1,7 @@
 import { Component, For, Show, createMemo } from "solid-js";
 import { A } from "@solidjs/router";
 import { useAuth } from "./AuthProvider";
+import HelpPopover from "./HelpPopover";
 import type { GuidingRig } from "../api/types";
 import { madZ, bandForZ, bandToCellClass, type MetricBaseline } from "../utils/frameQuality";
 
@@ -92,7 +93,19 @@ const GuidingScorecard: Component<{ rigs: GuidingRig[] }> = (props) => {
             <thead>
               <tr class="border-b border-theme-border">
                 <th class={TH_L}>Rig</th>
-                <th class={TH_R}>Sessions</th>
+                <th class={TH_R}>
+                  <span class="inline-flex items-center justify-end gap-1">
+                    Sessions
+                    <HelpPopover title="Sessions" align="right">
+                      <p class="text-sm text-theme-text-secondary">
+                        The large number is every guiding session recorded for this rig. The small number counts sessions shorter than 100 guide frames, which is too short for an RMS to mean anything.
+                      </p>
+                      <p class="text-sm text-theme-text-secondary">
+                        Short sessions are left out of the RMS, filtered RMS, Dec:RA and peak columns. They still count toward hours, star lost, unguided minutes, settling and guide exposure.
+                      </p>
+                    </HelpPopover>
+                  </span>
+                </th>
                 <th class={TH_R}>Hours</th>
                 <th class={TH_R}>RMS Total</th>
                 <th class={TH_R}>RMS RA</th>
@@ -116,7 +129,7 @@ const GuidingScorecard: Component<{ rigs: GuidingRig[] }> = (props) => {
                       <td class={`${TD_R} text-theme-text-primary`}>
                         <span>{rig.session_count}</span>
                         <Show when={rig.gated_session_count > 0}>
-                          <span class="ml-1 text-tiny text-theme-text-tertiary">{rig.gated_session_count} gated</span>
+                          <span class="ml-1 text-tiny text-theme-text-tertiary">{rig.gated_session_count} too short to score</span>
                         </Show>
                       </td>
                       <td class={`${TD_R} text-theme-text-primary`}>{fmtNum(rig.guided_hours, 1)}</td>

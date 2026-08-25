@@ -88,7 +88,7 @@ const StatisticsPage: Component = () => {
                 </button>
                 <HelpPopover>
                   <p class="text-sm text-theme-text-secondary">
-                    PHD2 guide-log comparisons per rig. A rig is the telescope mapped to the PHD2 profile, so cameras under one telescope share a value. RMS figures are frame-count weighted over sessions with at least 100 samples and are not comparable across different guide exposures. Sessions from unmapped profiles are excluded; <A href="/settings?tab=equipment#phd2-profiles" class="text-theme-accent hover:underline">map profiles in Settings</A>.
+                    PHD2 guide-log comparisons per rig. A rig is the telescope mapped to the PHD2 profile, so cameras under one telescope share a value. RMS figures are frame-count weighted over sessions of at least 100 guide frames, and shorter sessions are left out of them. RMS is not comparable across different guide exposures. Sessions from unmapped profiles are excluded; <A href="/settings?tab=equipment#phd2-profiles" class="text-theme-accent hover:underline">map profiles in Settings</A>.
                   </p>
                 </HelpPopover>
               </div>
