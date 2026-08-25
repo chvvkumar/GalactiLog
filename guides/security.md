@@ -136,14 +136,21 @@ For development: set `GALACTILOG_CORS_ORIGINS` environment variable with an expl
 
 ### First-Time Setup
 
-Set `GALACTILOG_ADMIN_PASSWORD` in `docker-compose.yml`. On first start, if no users exist, an admin account is created automatically:
+Set `GALACTILOG_ADMIN_PASSWORD` in `docker-compose.yml` or `.env`. On start, an admin account is created automatically if one with the configured username does not already exist:
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `GALACTILOG_ADMIN_PASSWORD` | *(none)* | Admin password. Required for auto-creation. |
 | `GALACTILOG_ADMIN_USERNAME` | `admin` | Admin username. |
 
-Once a user exists in the database, these variables are ignored.
+This step runs on every boot, not only the first, and matches on username:
+
+- An account whose username already exists is skipped. Its password, role, and active status are never overwritten from the environment, so changing `GALACTILOG_ADMIN_PASSWORD` after the first boot does not reset an existing account and cannot be used to recover a lost password.
+- Changing `GALACTILOG_ADMIN_USERNAME` after the first boot creates a second admin account on the next boot. The original admin is not renamed and is not removed. Delete the unwanted account from Settings > Users.
+
+The same rules apply to `GALACTILOG_VIEWER_USERNAME` and `GALACTILOG_VIEWER_PASSWORD`.
+
+Treat these variables as a bootstrap mechanism only. Because they are re-read every boot, a password left in the compose file or `.env` remains a live credential for any account that gets deleted and later recreated under the same name. Remove them once the accounts exist and you manage credentials from Settings > Account.
 
 ### CLI
 

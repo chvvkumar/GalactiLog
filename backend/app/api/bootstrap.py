@@ -1,15 +1,18 @@
 import asyncio
 import logging
+import os
 from collections import defaultdict
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import select, func, text
+from sqlalchemy import select, func, text, exists
 
+from app.config import settings as app_settings
 from app.database import async_session
 from app.api.deps import get_current_user
 from app.models.user import User
 from app.models import Target, Image
 from app.models.custom_column import CustomColumn
+from app.models.user_settings import UserSettings, SETTINGS_ROW_ID
 from app.services.normalization import load_alias_maps, normalize_equipment
 from app.services.cache import cached_json
 from app.schemas.bootstrap import BootstrapResponse
@@ -112,17 +115,74 @@ async def _fetch_custom_columns() -> list[dict]:
     ]
 
 
+def _fits_root_state(path: str) -> tuple[bool, bool]:
+    """Return (exists, has_entries) for the FITS root, never raising.
+
+    The peek is a single non-recursive scandir that stops at the first entry:
+    the root can hold a very large tree and the wizard only needs to know
+    whether it is empty.
+    """
+    try:
+        if not os.path.isdir(path):
+            return False, False
+        with os.scandir(path) as it:
+            return True, next(it, None) is not None
+    except OSError:
+        return False, False
+
+
+async def _fetch_setup_state() -> dict:
+    """Return first-run wizard state.
+
+    Reads the RAW `general` JSONB rather than the settings response: the
+    Pydantic GeneralSettings model does not carry `setup_completed_at` or
+    `scan_filters_configured`, so they would be stripped on the way out.
+    """
+    async with async_session() as session:
+        result = await session.execute(
+            select(UserSettings.general).where(UserSettings.id == SETTINGS_ROW_ID)
+        )
+        general = result.scalar_one_or_none() or {}
+        has_images = bool(
+            (await session.execute(select(exists(select(Image.id))))).scalar()
+        )
+
+    fits_root = app_settings.fits_data_path
+    root_exists, root_has_entries = await asyncio.to_thread(_fits_root_state, fits_root)
+
+    return {
+        "complete": bool(
+            general.get("setup_completed_at")
+            or general.get("scan_filters_configured")
+            or has_images
+        ),
+        "fits_root": fits_root,
+        "fits_root_exists": root_exists,
+        "fits_root_has_entries": root_has_entries,
+        "https_enabled": bool(app_settings.https),
+        "version": os.environ.get("GALACTILOG_VERSION", "dev"),
+    }
+
+
 @router.get("", response_model=BootstrapResponse)
 async def get_bootstrap(
     current_user: User = Depends(get_current_user),
 ):
     """Return all data needed to initialize the SPA in a single request."""
-    settings_data, equipment_data, fits_keys_data, object_types_data, custom_columns_data = await asyncio.gather(
+    (
+        settings_data,
+        equipment_data,
+        fits_keys_data,
+        object_types_data,
+        custom_columns_data,
+        setup_data,
+    ) = await asyncio.gather(
         _fetch_settings(),
         _fetch_equipment(),
         _fetch_fits_keys(),
         _fetch_object_types(),
         _fetch_custom_columns(),
+        _fetch_setup_state(),
     )
 
     return {
@@ -136,4 +196,5 @@ async def get_bootstrap(
         "fits_keys": fits_keys_data,
         "object_types": object_types_data,
         "custom_columns": custom_columns_data,
+        "setup": setup_data,
     }

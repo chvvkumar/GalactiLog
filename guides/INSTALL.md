@@ -35,6 +35,8 @@ Open `docker-compose.yml` and update the lines marked with `<-- CHANGE`:
 
 You must set an admin password before starting a brand-new install. If `GALACTILOG_ADMIN_PASSWORD` is unset, no admin user exists yet, and no session secret has been generated, the container refuses to start rather than boot a site nobody can log into. This check only applies to a genuinely empty database: once an admin account exists, the container starts normally on later boots even if you remove the env var from your compose file.
 
+The account-creation step itself runs on every boot, not only the first, and matches on username. An account whose username already exists is left untouched, so changing `GALACTILOG_ADMIN_PASSWORD` later does not reset the password of an existing admin. Changing `GALACTILOG_ADMIN_USERNAME` later does not rename the existing admin either: it creates a second admin account on the next boot. Change passwords and usernames from Settings > Account, or remove the unwanted account from Settings > Users.
+
 #### Platform-specific FITS paths
 
 **Linux:**
@@ -66,6 +68,14 @@ nas.local:/volume1/astrophotography  /mnt/astro  nfs  ro,soft,timeo=30  0  0
 
 The compose file includes commented-out options for host paths (postgres data, thumbnails), JWT secret, and a read-only viewer account.
 
+If you cloned the repository, [`.env.example`](../.env.example) lists every pre-boot environment variable with its default and a comment describing what it does. Copy it to `.env` next to `docker-compose.yml` and edit there instead of editing the compose file:
+
+```bash
+cp .env.example .env
+```
+
+Values that must be set before the first boot (FITS path, admin password, `GALACTILOG_HTTPS`, postgres credentials, `PUID`/`PGID`) belong in `.env`. Everything else is configured in the web UI after login.
+
 ### 3. Start
 
 ```bash
@@ -87,9 +97,23 @@ curl http://localhost:8080/api/scan/status
 # Expected: {"state":"idle","total":0,"completed":0,"failed":0,"failed_files":[]}
 ```
 
-### 5. First Scan
+### 5. First login
 
-Log in and go to **Settings > Library > Scan Directory**. GalactiLog discovers FITS files, extracts metadata, generates thumbnails, resolves targets via SIMBAD, and backfills metrics from any N.I.N.A. CSV files. Progress is shown in real-time.
+Log in with the admin username and password you set. On a fresh install the setup wizard opens automatically over the app. It runs for admin accounts only; viewer accounts never see it.
+
+The wizard has five steps, each with **Back**, **Next**, and a **Skip setup** link:
+
+1. **Environment check.** Reports the FITS root path the container sees, whether that path exists, whether it contains any entries, the `GALACTILOG_HTTPS` setting, and the running version. A failing row names the environment variable to fix (`GALACTILOG_FITS_HOST_PATH`, `GALACTILOG_HTTPS`). **Next** is blocked only when the FITS root does not exist.
+2. **Observer location and timezone.** Latitude, longitude, IANA timezone, and the imaging-night grouping toggle. The timezone is prefilled from the browser. **Use my location** fills the coordinates from the browser geolocation prompt, and is hidden when the browser does not offer it. Longitude may be left blank; imaging-night grouping then falls back to UTC. See [Observer Location and Guiding Nights](CONFIGURATION.md#observer-location-and-guiding-nights).
+3. **Scan filters.** Pick the folders to include, and check the exclude presets for the stacking and processing directories you do not want catalogued (`masters`, `WBPP`, `calibrated`, `WORK_AREA`, `PixInsight`). **Scan everything** clears both lists. Per-file name rules are configured later under **Settings > Library**.
+4. **Ingest options.** Whether to ingest calibration frames, whether to discover PHD2 guide logs, and whether to run automatic scans and at what interval.
+5. **First scan.** Starts the initial library scan and shows live progress. **Finish** is available immediately; the scan continues in the background if you close the wizard.
+
+**Skip setup** and **Finish** both mark setup complete, so the wizard does not reopen on the next login. Nothing is lost by skipping: every value it writes is also editable from Settings.
+
+To run it again later, use **Settings > Library > Run setup again**.
+
+During the scan, GalactiLog discovers FITS files, extracts metadata, generates thumbnails, resolves targets via SIMBAD, and backfills metrics from any N.I.N.A. CSV files. Progress is shown in real time. Later scans are started from **Settings > Library > Scan Directory**.
 
 ## Architecture
 

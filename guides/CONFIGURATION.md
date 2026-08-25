@@ -2,7 +2,7 @@
 
 ## Environment Variables
 
-All configuration is done via `GALACTILOG_*` environment variables in `docker-compose.yml`. See [`docker-compose.example.yml`](../docker-compose.example.yml) for the full template.
+All configuration is done via `GALACTILOG_*` environment variables in `docker-compose.yml`. See [`docker-compose.example.yml`](../docker-compose.example.yml) for the full template, and [`.env.example`](../.env.example) for the same variables in `.env` form with defaults and inline notes.
 
 ### Application Settings
 
@@ -64,20 +64,41 @@ Set in the postgres service's `environment:` block. Must match `GALACTILOG_DATAB
 | `POSTGRES_PASSWORD` | `galactilog` | Database password. |
 | `POSTGRES_DB` | `galactilog_catalog` | Database name. |
 
+The repository's own `docker-compose.yml` sets all three from `GALACTILOG_POSTGRES_USER`, `GALACTILOG_POSTGRES_PASSWORD`, and `GALACTILOG_POSTGRES_DB`, and substitutes the same values into `GALACTILOG_DATABASE_URL`, so setting them once in `.env` keeps the service and the connection string in agreement.
+
+PostgreSQL applies these values only when it initializes an empty data directory. Changing them against an existing database has no effect; the data volume must be deleted first.
+
 ### Authentication Settings
 
 See the [Security Guide](security.md) for full details on authentication, cookie security, roles, rate limiting, and audit logging.
 
 | Variable | Default | Description | When to Change |
 |----------|---------|-------------|----------------|
-| `GALACTILOG_ADMIN_PASSWORD` | *(none)* | Admin account password. On first start, if no users exist, an admin is auto-created with this password. Ignored once any user exists. | Required for first-time setup. Must be 8+ characters. |
-| `GALACTILOG_ADMIN_USERNAME` | `admin` | Username for the auto-created admin account. | Only if you want a different admin username. |
-| `GALACTILOG_VIEWER_USERNAME` | *(none)* | Optional read-only viewer account username, created on first start alongside admin. | When you want to share access without admin privileges (e.g., family members, club members viewing your data). |
+| `GALACTILOG_ADMIN_PASSWORD` | *(none)* | Admin account password, used when the account named by `GALACTILOG_ADMIN_USERNAME` does not exist yet. See [Account creation on every boot](#account-creation-on-every-boot). | Required for first-time setup. Must be 8+ characters. |
+| `GALACTILOG_ADMIN_USERNAME` | `admin` | Username of the account created from `GALACTILOG_ADMIN_PASSWORD`. Changing it later creates a second admin rather than renaming the first. | Only if you want a different admin username, and only before the first boot. |
+| `GALACTILOG_VIEWER_USERNAME` | *(none)* | Optional read-only viewer account username, created alongside admin. Requires `GALACTILOG_VIEWER_PASSWORD`. | When you want to share access without admin privileges (e.g., family members, club members viewing your data). |
 | `GALACTILOG_VIEWER_PASSWORD` | *(none)* | Password for the viewer account. | Required if `GALACTILOG_VIEWER_USERNAME` is set. Must be 8+ characters. |
 | `GALACTILOG_HTTPS` | `true` | Controls the Secure flag on auth cookies. When true, cookies are only sent over HTTPS. | Set to `false` if accessing GalactiLog over plain HTTP (e.g., `http://localhost`, LAN without TLS). |
 | `GALACTILOG_JWT_SECRET` | *(auto-generated)* | Secret key for signing JWT access tokens (HS256). When not set, a random key is generated at startup, invalidating all sessions on restart. | Set to a long random string (`openssl rand -hex 32`) for persistent sessions across container restarts. |
 | `GALACTILOG_ACCESS_TOKEN_EXPIRY` | `1800` (30 min) | Access token lifetime in seconds. | Shorter values are more secure but cause more frequent silent refreshes. Increase if users report being logged out mid-session. |
 | `GALACTILOG_REFRESH_TOKEN_EXPIRY` | `604800` (7 days) | Refresh token lifetime in seconds. Users must re-login after this period of inactivity. | Increase for less frequent logins. Decrease for tighter security. |
+
+#### Account creation on every boot
+
+The account-creation step is not a first-start-only step. It runs on every container boot whenever `GALACTILOG_ADMIN_PASSWORD` or `GALACTILOG_VIEWER_PASSWORD` is set, and it matches on username:
+
+- If a user row with that username already exists, the step skips it and changes nothing. An existing account's password, role, and active status are never overwritten from the environment, so editing `GALACTILOG_ADMIN_PASSWORD` after the first boot has no effect on the existing account.
+- If no user row with that username exists, the account is created with the configured password and role. Changing `GALACTILOG_ADMIN_USERNAME` after the first boot therefore adds a second admin account on the next boot; the original admin remains.
+
+Change credentials from **Settings > Account**, and remove an unwanted account from **Settings > Users**. Removing the environment variables afterwards is optional and changes nothing on its own.
+
+### Metrics and Integrations
+
+| Variable | Default | Description | When to Change |
+|----------|---------|-------------|----------------|
+| `GALACTILOG_METRICS_TOKEN` | *(none)* | Bearer token required by `GET /api/metrics`. When set, the request must carry `Authorization: Bearer <token>`; the scheme must be exactly `Bearer`, the token must be non-empty, and it is compared in constant time. Anything else returns 401. When unset, the endpoint requires no token. | Set when the metrics endpoint is reachable from beyond the nginx allowlist, or when you want scraper-level authentication regardless. See the [Monitoring Guide](MONITORING.md). |
+| `GALACTILOG_INTEGRATION_ALLOWED_HOSTS` | *(none)* | Comma-separated allowlist of hostnames the N.I.N.A. and Stellarium integration endpoints may connect to. Entries are whitespace-trimmed and lowercased, and the URL host must equal one of them exactly. There is no wildcard, prefix, or suffix matching, and the port is not part of the comparison. A host not on the list is rejected with 400. When unset, any host is allowed except loopback, link-local, and cloud metadata addresses, which are blocked in all cases. | Set when you want to pin the integrations to specific capture machines, for example `nina-pc.lan,192.168.1.50`. |
+| `GALACTILOG_CELERY_CONCURRENCY` | `4` | Number of concurrent Celery worker processes. | Raise on hosts with spare cores to shorten scans; lower to reduce memory use. |
 
 ### CORS (Development Only)
 
@@ -87,7 +108,7 @@ See the [Security Guide](security.md) for full details on authentication, cookie
 
 ## Auto-Scan
 
-Configure from **Settings > General**:
+Configure from **Settings > Library**:
 
 - **Enable/Disable** -- Toggle automatic scanning
 - **Scan Interval** -- 1 to 24 hours
