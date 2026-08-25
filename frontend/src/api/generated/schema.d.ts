@@ -17,6 +17,11 @@ export interface paths {
          *
          *     Only top-level events (parent_id IS NULL) are returned. Children are
          *     batch-loaded and nested under their parent's `children` field.
+         *
+         *     `attention=true` selects everything that asks the user to do something:
+         *     errors, plus any severity carrying a `details.action` link. It replaces
+         *     the `severity` filter rather than narrowing it, since the two halves of
+         *     that union sit on either side of any single severity value.
          */
         get: operations["list_activity_api_activity_get"];
         put?: never;
@@ -6000,6 +6005,7 @@ export interface operations {
             query?: {
                 severity?: string[];
                 category?: string[];
+                attention?: boolean;
                 limit?: number;
                 cursor?: string | null;
                 since?: string | null;

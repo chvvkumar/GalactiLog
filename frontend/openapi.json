@@ -10620,7 +10620,7 @@
         ]
       },
       "get": {
-        "description": "Return paginated activity events, newest first.\n\nOnly top-level events (parent_id IS NULL) are returned. Children are\nbatch-loaded and nested under their parent's `children` field.",
+        "description": "Return paginated activity events, newest first.\n\nOnly top-level events (parent_id IS NULL) are returned. Children are\nbatch-loaded and nested under their parent's `children` field.\n\n`attention=true` selects everything that asks the user to do something:\nerrors, plus any severity carrying a `details.action` link. It replaces\nthe `severity` filter rather than narrowing it, since the two halves of\nthat union sit on either side of any single severity value.",
         "operationId": "list_activity_api_activity_get",
         "parameters": [
           {
@@ -10647,6 +10647,16 @@
               },
               "title": "Category",
               "type": "array"
+            }
+          },
+          {
+            "in": "query",
+            "name": "attention",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Attention",
+              "type": "boolean"
             }
           },
           {

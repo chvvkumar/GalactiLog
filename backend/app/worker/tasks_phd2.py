@@ -1320,7 +1320,13 @@ def _emit_correlation_activity(result, parent_activity_id: int | None) -> None:
                     "Equipment > PHD2 Profiles and map the profile to the "
                     "telescope it guides."
                 ),
-                details={"profiles": result.unattributed_profiles},
+                details={
+                    "profiles": result.unattributed_profiles,
+                    "action": {
+                        "label": "Map PHD2 profiles",
+                        "href": "/settings?tab=equipment#phd2-profiles",
+                    },
+                },
                 actor="system", parent_id=parent_activity_id,
             )
 

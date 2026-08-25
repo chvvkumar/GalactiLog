@@ -450,7 +450,14 @@ def check_complete_sync(r: sync_redis.Redis) -> None:
                         _db, redis=r, category="scan", severity="warning",
                         event_type="scan_files_failed",
                         message=f"Scan completed with {len(fits_failures)} file failure{'s' if len(fits_failures) != 1 else ''}",
-                        details={"failed_files": fits_failures, "truncated": len(raw) > 500},
+                        details={
+                            "failed_files": fits_failures,
+                            "truncated": len(raw) > 500,
+                            "action": {
+                                "label": "View failed files",
+                                "href": "/settings?tab=scan#activity-feed",
+                            },
+                        },
                         actor="system",
                         parent_id=scan_activity_id,
                     )

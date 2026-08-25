@@ -18,6 +18,7 @@ import {
   markAllErrorsSeen,
   setActivitySeenAt,
 } from "../store/activityErrors";
+import ActivityActionLink from "./activity/ActionLink";
 import type { ActiveJob } from "../api/types";
 
 const IDLE_CHECK_MS = 30_000;
@@ -104,7 +105,7 @@ const WaitingRow: Component<{ job: ActiveJob }> = (props) => (
  */
 const JobMonitor: Component = () => {
   wireGlobalJobSources();
-  const { user } = useAuth();
+  const { user, isAdmin } = useAuth();
   // Ref-counted 2s poller while a scan is active, plus one status fetch on
   // mount. NavBar (and therefore this component) is mounted on every page
   // except /login, so the subscriber count never drops to zero mid-session.
@@ -271,6 +272,7 @@ const JobMonitor: Component = () => {
                   <span class="mt-1.5 h-1.5 w-1.5 rounded-full bg-theme-error shrink-0" />
                   <span class="text-xs text-theme-text-primary leading-snug min-w-0 flex-1">
                     {item.message}
+                    <ActivityActionLink event={item} class="ml-2 mt-1" onNavigate={() => setOpen(false)} />
                   </span>
                   <span class="text-tiny text-theme-text-tertiary tabular-nums whitespace-nowrap">
                     {timeAgo(item.timestamp)}
@@ -281,8 +283,10 @@ const JobMonitor: Component = () => {
           </Show>
 
           <div class="border-t border-theme-border-em px-4 py-2.5 text-center">
+            {/* The Activity Log settings tab is admin-only; viewers get the
+                scan page's activity feed instead (same target ScanControls uses). */}
             <A
-              href="/settings"
+              href={isAdmin() ? "/settings?tab=activity-log" : "/settings?tab=scan#activity-feed"}
               class="text-xs font-medium text-theme-accent hover:text-theme-accent-hover transition-colors"
               onClick={() => setOpen(false)}
             >

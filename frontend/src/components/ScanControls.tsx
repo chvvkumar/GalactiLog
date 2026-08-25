@@ -1,5 +1,7 @@
 import { Component, Show } from "solid-js";
+import { A } from "@solidjs/router";
 import { useAuth } from "./AuthProvider";
+import { scanStatus } from "../store/scan";
 import Button from "./ui/Button";
 
 type FrameFilter = "all" | "light_only";
@@ -66,6 +68,14 @@ const ScanControls: Component<{
             Remove catalogued records for all files missing from disk, even past the 50% safety limit. Use after deleting files on purpose.
           </p>
         </div>
+      </Show>
+      <Show when={scanStatus().failed > 0}>
+        <A
+          href="/settings?tab=scan#activity-feed"
+          class="text-xs text-theme-warning hover:underline"
+        >
+          {scanStatus().failed} file{scanStatus().failed === 1 ? "" : "s"} failed
+        </A>
       </Show>
       <Show when={isAdmin()}>
         <div class="flex gap-2 flex-shrink-0 ml-auto">
