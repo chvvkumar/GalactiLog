@@ -3550,290 +3550,14 @@
         "title": "GuidingAltitudeBandRow",
         "type": "object"
       },
-      "GuidingCalibrationRow": {
-        "properties": {
-          "completed": {
-            "title": "Completed",
-            "type": "boolean"
-          },
-          "dec_deg": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Dec Deg"
-          },
-          "dec_guide_speed": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Dec Guide Speed"
-          },
-          "equipment_profile": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Equipment Profile"
-          },
-          "north_angle_deg": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "North Angle Deg"
-          },
-          "north_rate_arcsec_s": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "North Rate Arcsec S"
-          },
-          "ortho_error_deg": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Ortho Error Deg"
-          },
-          "pier_side": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Pier Side"
-          },
-          "ra_guide_speed": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Ra Guide Speed"
-          },
-          "started_at": {
-            "title": "Started At",
-            "type": "string"
-          },
-          "telescope": {
-            "title": "Telescope",
-            "type": "string"
-          },
-          "west_angle_deg": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "West Angle Deg"
-          },
-          "west_rate_arcsec_s": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "West Rate Arcsec S"
-          }
-        },
-        "required": [
-          "telescope",
-          "started_at",
-          "completed"
-        ],
-        "title": "GuidingCalibrationRow",
-        "type": "object"
-      },
-      "GuidingMonthlyRow": {
-        "properties": {
-          "guided_hours": {
-            "title": "Guided Hours",
-            "type": "number"
-          },
-          "month": {
-            "title": "Month",
-            "type": "string"
-          },
-          "rms_dec_arcsec": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Rms Dec Arcsec"
-          },
-          "rms_ra_arcsec": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Rms Ra Arcsec"
-          },
-          "rms_total_arcsec": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Rms Total Arcsec"
-          },
-          "session_count": {
-            "title": "Session Count",
-            "type": "integer"
-          },
-          "star_lost_pct": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Star Lost Pct"
-          },
-          "telescope": {
-            "title": "Telescope",
-            "type": "string"
-          }
-        },
-        "required": [
-          "telescope",
-          "month",
-          "session_count",
-          "guided_hours"
-        ],
-        "title": "GuidingMonthlyRow",
-        "type": "object"
-      },
-      "GuidingPierSideRow": {
-        "properties": {
-          "pier_side": {
-            "title": "Pier Side",
-            "type": "string"
-          },
-          "rms_dec_arcsec": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Rms Dec Arcsec"
-          },
-          "rms_ra_arcsec": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Rms Ra Arcsec"
-          },
-          "rms_total_arcsec": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Rms Total Arcsec"
-          },
-          "session_count": {
-            "title": "Session Count",
-            "type": "integer"
-          },
-          "telescope": {
-            "title": "Telescope",
-            "type": "string"
-          }
-        },
-        "required": [
-          "telescope",
-          "pier_side",
-          "session_count"
-        ],
-        "title": "GuidingPierSideRow",
-        "type": "object"
-      },
       "GuidingRig": {
         "properties": {
-          "dither_count": {
-            "title": "Dither Count",
-            "type": "integer"
-          },
           "exposure_ms_values": {
             "items": {
               "type": "integer"
             },
             "title": "Exposure Ms Values",
             "type": "array"
-          },
-          "first_night": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "First Night"
           },
           "gated_session_count": {
             "title": "Gated Session Count",
@@ -3842,39 +3566,6 @@
           "guided_hours": {
             "title": "Guided Hours",
             "type": "number"
-          },
-          "last_night": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Last Night"
-          },
-          "peak_dec_arcsec": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Peak Dec Arcsec"
-          },
-          "peak_ra_arcsec": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Peak Ra Arcsec"
           },
           "ra_dec_ratio": {
             "anyOf": [
@@ -3935,17 +3626,6 @@
             "title": "Session Count",
             "type": "integer"
           },
-          "settle_fail_pct": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Settle Fail Pct"
-          },
           "settle_median_s": {
             "anyOf": [
               {
@@ -3957,24 +3637,9 @@
             ],
             "title": "Settle Median S"
           },
-          "star_lost_pct": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Star Lost Pct"
-          },
           "telescope": {
             "title": "Telescope",
             "type": "string"
-          },
-          "unguided_minutes": {
-            "title": "Unguided Minutes",
-            "type": "number"
           }
         },
         "required": [
@@ -3982,145 +3647,9 @@
           "session_count",
           "gated_session_count",
           "guided_hours",
-          "unguided_minutes",
-          "dither_count",
           "exposure_ms_values"
         ],
         "title": "GuidingRig",
-        "type": "object"
-      },
-      "GuidingSettingsRow": {
-        "properties": {
-          "algo_dec": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Algo Dec"
-          },
-          "algo_ra": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Algo Ra"
-          },
-          "dec_guide_mode": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Dec Guide Mode"
-          },
-          "exposure_ms": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Exposure Ms"
-          },
-          "guided_hours": {
-            "title": "Guided Hours",
-            "type": "number"
-          },
-          "rms_dec_arcsec": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Rms Dec Arcsec"
-          },
-          "rms_ra_arcsec": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Rms Ra Arcsec"
-          },
-          "rms_total_arcsec": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Rms Total Arcsec"
-          },
-          "session_count": {
-            "title": "Session Count",
-            "type": "integer"
-          },
-          "star_lost_pct": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Star Lost Pct"
-          },
-          "telescope": {
-            "title": "Telescope",
-            "type": "string"
-          }
-        },
-        "required": [
-          "telescope",
-          "session_count",
-          "guided_hours"
-        ],
-        "title": "GuidingSettingsRow",
-        "type": "object"
-      },
-      "GuidingStarLostReason": {
-        "properties": {
-          "count": {
-            "title": "Count",
-            "type": "integer"
-          },
-          "reason": {
-            "title": "Reason",
-            "type": "string"
-          },
-          "telescope": {
-            "title": "Telescope",
-            "type": "string"
-          }
-        },
-        "required": [
-          "telescope",
-          "reason",
-          "count"
-        ],
-        "title": "GuidingStarLostReason",
         "type": "object"
       },
       "GuidingStatsResponse": {
@@ -4132,46 +3661,11 @@
             "title": "Altitude Bands",
             "type": "array"
           },
-          "calibrations": {
-            "items": {
-              "$ref": "#/components/schemas/GuidingCalibrationRow"
-            },
-            "title": "Calibrations",
-            "type": "array"
-          },
-          "monthly": {
-            "items": {
-              "$ref": "#/components/schemas/GuidingMonthlyRow"
-            },
-            "title": "Monthly",
-            "type": "array"
-          },
-          "pier_side": {
-            "items": {
-              "$ref": "#/components/schemas/GuidingPierSideRow"
-            },
-            "title": "Pier Side",
-            "type": "array"
-          },
           "rigs": {
             "items": {
               "$ref": "#/components/schemas/GuidingRig"
             },
             "title": "Rigs",
-            "type": "array"
-          },
-          "settings": {
-            "items": {
-              "$ref": "#/components/schemas/GuidingSettingsRow"
-            },
-            "title": "Settings",
-            "type": "array"
-          },
-          "star_lost_reasons": {
-            "items": {
-              "$ref": "#/components/schemas/GuidingStarLostReason"
-            },
-            "title": "Star Lost Reasons",
             "type": "array"
           },
           "unmapped_session_count": {
@@ -4182,12 +3676,7 @@
         "required": [
           "unmapped_session_count",
           "rigs",
-          "settings",
-          "pier_side",
-          "altitude_bands",
-          "star_lost_reasons",
-          "monthly",
-          "calibrations"
+          "altitude_bands"
         ],
         "title": "GuidingStatsResponse",
         "type": "object"

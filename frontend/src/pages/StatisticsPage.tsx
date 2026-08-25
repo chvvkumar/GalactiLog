@@ -15,10 +15,7 @@ import ImagingTimeline from "../components/ImagingTimeline";
 import ImagingCalendar from "../components/ImagingCalendar";
 import TopTargets from "../components/TopTargets";
 import GuidingScorecard, { GuidingEmptyNotice } from "../components/GuidingScorecard";
-import GuidingSettingsTable from "../components/GuidingSettingsTable";
-import GuidingPointing from "../components/GuidingPointing";
-import GuidingTrend from "../components/GuidingTrend";
-import GuidingCalibrations from "../components/GuidingCalibrations";
+import GuidingAltitude from "../components/GuidingAltitude";
 
 const StatisticsPage: Component = () => {
   const { stats } = useStats();
@@ -88,7 +85,7 @@ const StatisticsPage: Component = () => {
                 </button>
                 <HelpPopover>
                   <p class="text-sm text-theme-text-secondary">
-                    PHD2 guide-log comparisons per rig. A rig is the telescope mapped to the PHD2 profile, so cameras under one telescope share a value. RMS figures are frame-count weighted over sessions of at least 100 guide frames, and shorter sessions are left out of them. RMS is not comparable across different guide exposures. Sessions from unmapped profiles are excluded; <A href="/settings?tab=equipment#phd2-profiles" class="text-theme-accent hover:underline">map profiles in Settings</A>.
+                    PHD2 guide-log comparisons per rig, in two panels: a scorecard of RMS, settling and guided hours for each rig, and RMS split by the target altitude band it was captured at. A rig is the telescope mapped to the PHD2 profile, so cameras under one telescope share a value. RMS figures are frame-count weighted over sessions of at least 100 guide frames, and are not comparable across different guide exposures. Sessions from unmapped profiles are excluded; <A href="/settings?tab=equipment#phd2-profiles" class="text-theme-accent hover:underline">map profiles in Settings</A>.
                   </p>
                 </HelpPopover>
               </div>
@@ -107,14 +104,7 @@ const StatisticsPage: Component = () => {
                     >
                       <div class="space-y-4">
                         <GuidingScorecard rigs={g().rigs} />
-                        <GuidingSettingsTable settings={g().settings} />
-                        <GuidingPointing
-                          pierSide={g().pier_side}
-                          altitudeBands={g().altitude_bands}
-                          starLostReasons={g().star_lost_reasons}
-                        />
-                        <GuidingTrend monthly={g().monthly} />
-                        <GuidingCalibrations calibrations={g().calibrations} />
+                        <GuidingAltitude altitudeBands={g().altitude_bands} />
                       </div>
                     </Show>
                   )}

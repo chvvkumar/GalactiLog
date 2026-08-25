@@ -1,7 +1,7 @@
 """DB-backed tests for GET /api/stats/guiding and compute_guiding_stats.
 
-Seeds phd2_logs, phd2_sessions, phd2_calibrations and a telescope alias, then
-asserts the spec formulas, grouping rules and ordering from
+Seeds phd2_logs, phd2_sessions and a telescope alias, then asserts the
+spec formulas, grouping rules and ordering from
 docs/superpowers/specs/2026-08-24-phd2-statistics-design.md.
 
 Requires a real Postgres (test:test@localhost:5432/test_catalog) with the
@@ -24,7 +24,7 @@ from app.api.deps import get_current_user
 from app.config import settings
 from app.database import get_session
 from app.main import app
-from app.models.phd2 import Phd2Calibration, Phd2Log, Phd2Session
+from app.models.phd2 import Phd2Log, Phd2Session
 from app.models.user import User, UserRole
 from app.models.user_settings import SETTINGS_ROW_ID, UserSettings
 from app.services.normalization import invalidate_alias_cache
@@ -65,7 +65,6 @@ def _sess(log_id, label, **kw):
         rms_total_arcsec=total,
         rms_ra_arcsec=ra,
         rms_dec_arcsec=dec,
-        star_lost_reasons={},
         events=[],
     )
     defaults.update(kw)
@@ -102,7 +101,7 @@ async def seeded_db():
             id=log_id,
             file_path="/guiding-stats-test/PHD2_GuideLog.txt",
             parse_status="ok",
-            run_count=1, session_count=6, calibration_count=2,
+            run_count=1, session_count=6,
         ))
         await s.flush()
 
@@ -113,31 +112,19 @@ async def seeded_db():
             session_date=date(2026, 3, 5),
             started_at_utc=datetime(2026, 3, 6, 2, 0, 0, tzinfo=timezone.utc),
             duration_s=3600.0,
-            alt_deg=45.0, pier_side="East",
-            algo_ra="Hysteresis", algo_dec="ResistSwitch", exposure_ms=2000.0,
-            dec_guide_mode="Auto",
+            alt_deg=45.0, exposure_ms=2000.0, settle_median_s=3.5,
             rms_total_filtered_arcsec=0.45,
-            peak_ra_arcsec=2.0, peak_dec_arcsec=1.8,
-            unguided_seconds=30.0, dither_count=3,
-            settle_count=6, settle_failed_count=1, settle_median_s=3.5,
-            star_lost_reasons={"Star lost - low SNR": 2, "Star lost - mass changed": 1},
         ))
         # Rig A, gated: too few frames to weight, still counted. alt exactly
-        # 30 lands in the 30-60 band. Own guide exposure so it forms a
-        # settings group with no RMS (sorted last).
+        # 30 lands in the 30-60 band. Its 9.0 RMS must stay out of the
+        # weighted figures, but its guide exposure still shows up.
         s.add(_sess(
             log_id, "a_gated",
             telescope=RIG_A,
             session_date=date(2026, 3, 20),
             started_at_utc=datetime(2026, 3, 21, 2, 0, 0, tzinfo=timezone.utc),
             duration_s=300.0,
-            alt_deg=30.0, pier_side=None,
-            algo_ra="Hysteresis", algo_dec="ResistSwitch", exposure_ms=3000.0,
-            dec_guide_mode="Auto",
-            peak_ra_arcsec=99.0, peak_dec_arcsec=99.0,
-            unguided_seconds=0.0, dither_count=0,
-            settle_count=0, settle_failed_count=0, settle_median_s=None,
-            star_lost_reasons={"Star lost - mass changed": 1},
+            alt_deg=30.0, exposure_ms=3000.0, settle_median_s=None,
         ))
         # Rig A under its alias spelling: must merge into RIG_A.
         s.add(_sess(
@@ -146,25 +133,18 @@ async def seeded_db():
             session_date=date(2026, 4, 2),
             started_at_utc=datetime(2026, 4, 3, 2, 0, 0, tzinfo=timezone.utc),
             duration_s=1800.0,
-            alt_deg=25.0, pier_side="West",
-            algo_ra="Hysteresis", algo_dec="ResistSwitch", exposure_ms=1000.0,
-            dec_guide_mode="Auto",
+            alt_deg=25.0, exposure_ms=1000.0, settle_median_s=2.5,
             rms_total_filtered_arcsec=0.65,
-            peak_ra_arcsec=1.5, peak_dec_arcsec=1.2,
-            unguided_seconds=30.0, dither_count=2,
-            settle_count=4, settle_failed_count=1, settle_median_s=2.5,
-            star_lost_reasons={"Star lost - low SNR": 1},
         ))
-        # Rig B: two sessions, algorithms unknown (NULL settings components).
+        # Rig B: two sessions, one guide exposure, no settle medians.
         s.add(_sess(
             log_id, "b_main",
             telescope=RIG_B,
             session_date=date(2026, 3, 5),
             started_at_utc=datetime(2026, 3, 6, 3, 0, 0, tzinfo=timezone.utc),
             duration_s=7200.0,
-            alt_deg=70.0, pier_side="East",
+            alt_deg=70.0,
             exposure_ms=1500.0,
-            unguided_seconds=0.0, dither_count=1,
         ))
         # alt exactly 60 lands in the >60 band; frame_count == MIN_FRAMES is
         # not gated.
@@ -174,55 +154,17 @@ async def seeded_db():
             session_date=date(2026, 3, 6),
             started_at_utc=datetime(2026, 3, 7, 3, 0, 0, tzinfo=timezone.utc),
             duration_s=1800.0,
-            alt_deg=60.0, pier_side="East",
+            alt_deg=60.0,
             exposure_ms=1500.0,
-            unguided_seconds=0.0, dither_count=0,
         ))
         # Unmapped profile: excluded everywhere, counted once.
         s.add(_sess(
             log_id, "a_main",
             telescope=None,
             session_date=date(2026, 3, 5),
-            alt_deg=50.0, pier_side="East",
-            star_lost_reasons={"Star lost - low SNR": 50},
+            alt_deg=50.0,
         ))
 
-        s.add(Phd2Calibration(
-            log_id=log_id,
-            started_at_local=datetime(2026, 3, 5, 20, 0, 0),
-            started_at_utc=datetime(2026, 3, 6, 1, 0, 0, tzinfo=timezone.utc),
-            session_date=date(2026, 3, 5),
-            equipment_profile="profile",
-            telescope=RIG_A,
-            pixel_scale_arcsec=1.5,
-            west_angle_deg=10.0, north_angle_deg=95.0,
-            west_rate_px_s=3.0, north_rate_px_s=4.0,
-            ra_guide_speed=0.5, dec_guide_speed=0.5,
-            pier_side="East", dec_deg=41.0,
-            completed=True, steps=[],
-        ))
-        # Newer, under the alias spelling.
-        s.add(Phd2Calibration(
-            log_id=log_id,
-            started_at_local=datetime(2026, 4, 2, 20, 0, 0),
-            started_at_utc=datetime(2026, 4, 3, 1, 0, 0, tzinfo=timezone.utc),
-            session_date=date(2026, 4, 2),
-            equipment_profile="profile",
-            telescope=RIG_A_ALIAS,
-            pixel_scale_arcsec=None,
-            west_angle_deg=0.0, north_angle_deg=90.0,
-            west_rate_px_s=3.0, north_rate_px_s=None,
-            completed=False, steps=[],
-        ))
-        # Unmapped calibration: excluded.
-        s.add(Phd2Calibration(
-            log_id=log_id,
-            started_at_local=datetime(2026, 4, 2, 20, 0, 0),
-            started_at_utc=datetime(2026, 4, 3, 1, 0, 0, tzinfo=timezone.utc),
-            telescope=None,
-            west_angle_deg=0.0, north_angle_deg=45.0,
-            completed=True, steps=[],
-        ))
         await s.commit()
 
     invalidate_alias_cache()
@@ -300,17 +242,9 @@ async def test_rig_scorecard_matches_weighted_rms_and_gates(seeded_db):
     assert a["rms_total_filtered_arcsec"] == pytest.approx(
         ((300 * 0.45 ** 2 + 200 * 0.65 ** 2) / 500) ** 0.5, abs=1e-6)
     assert a["ra_dec_ratio"] == pytest.approx(a["rms_dec_arcsec"] / a["rms_ra_arcsec"], abs=1e-3)
-    assert a["peak_ra_arcsec"] == 2.0
-    assert a["peak_dec_arcsec"] == 1.8
     assert a["guided_hours"] == round(5700 / 3600, 2)
-    assert a["star_lost_pct"] == pytest.approx(100 * 6 / 550, abs=1e-6)
-    assert a["unguided_minutes"] == 1.0
-    assert a["dither_count"] == 5
     assert a["settle_median_s"] == statistics.median([3.5, 2.5])
-    assert a["settle_fail_pct"] == 20.0
     assert a["exposure_ms_values"] == [1000, 2000, 3000]
-    assert a["first_night"] == "2026-03-05"
-    assert a["last_night"] == "2026-04-02"
 
     b = _rig(data, RIG_B)
     assert b["session_count"] == 2
@@ -318,42 +252,31 @@ async def test_rig_scorecard_matches_weighted_rms_and_gates(seeded_db):
     assert b["rms_total_arcsec"] == pytest.approx(1.0, abs=1e-6)
     assert b["rms_total_filtered_arcsec"] is None
     assert b["settle_median_s"] is None
-    assert b["settle_fail_pct"] is None
     assert b["exposure_ms_values"] == [1500]
 
 
 @pytest.mark.asyncio
-async def test_settings_groups_and_ordering(seeded_db):
+async def test_response_carries_only_the_trimmed_keys(seeded_db):
+    """The trim dropped settings/pier_side/monthly/star_lost_reasons/
+    calibrations and five per-rig fields; nothing may leak back in."""
     data = await _get_guiding()
 
-    keys = [(s["telescope"], s["algo_ra"], s["algo_dec"], s["exposure_ms"], s["dec_guide_mode"])
-            for s in data["settings"]]
-    assert keys == [
-        (RIG_B, None, None, 1500, None),
-        (RIG_A, "Hysteresis", "ResistSwitch", 2000, "Auto"),
-        (RIG_A, "Hysteresis", "ResistSwitch", 1000, "Auto"),
-        (RIG_A, "Hysteresis", "ResistSwitch", 3000, "Auto"),
-    ]
-    rms = [s["rms_total_arcsec"] for s in data["settings"]]
-    assert rms[0] == pytest.approx(1.0, abs=1e-6)
-    assert rms[1] == 0.5
-    assert rms[2] == 0.7
-    assert rms[3] is None
-    assert data["settings"][1]["session_count"] == 1
-    assert data["settings"][1]["guided_hours"] == 1.0
-    assert data["settings"][1]["star_lost_pct"] == 1.0
-    assert data["settings"][0]["session_count"] == 2
+    assert set(data) == {"unmapped_session_count", "rigs", "altitude_bands"}
+    assert set(data["rigs"][0]) == {
+        "telescope", "session_count", "gated_session_count", "guided_hours",
+        "rms_total_arcsec", "rms_ra_arcsec", "rms_dec_arcsec",
+        "rms_total_filtered_arcsec", "ra_dec_ratio", "settle_median_s",
+        "exposure_ms_values",
+    }
+    assert set(data["altitude_bands"][0]) == {
+        "telescope", "band", "session_count",
+        "rms_total_arcsec", "rms_ra_arcsec", "rms_dec_arcsec",
+    }
 
 
 @pytest.mark.asyncio
-async def test_pier_side_and_altitude_bands(seeded_db):
+async def test_altitude_bands(seeded_db):
     data = await _get_guiding()
-
-    pier = [(p["telescope"], p["pier_side"], p["session_count"]) for p in data["pier_side"]]
-    # NULL pier_side (the gated session) is excluded.
-    assert pier == [(RIG_B, "East", 2), (RIG_A, "East", 1), (RIG_A, "West", 1)]
-    east_a = next(p for p in data["pier_side"] if p["telescope"] == RIG_A and p["pier_side"] == "East")
-    assert east_a["rms_total_arcsec"] == 0.5
 
     bands = [(b["telescope"], b["band"], b["session_count"]) for b in data["altitude_bands"]]
     # 25 -> <30, 30 -> 30-60 (gated but counted), 45 -> 30-60, 60 and 70 -> >60.
@@ -367,50 +290,6 @@ async def test_pier_side_and_altitude_bands(seeded_db):
 
 
 @pytest.mark.asyncio
-async def test_star_lost_reasons_and_monthly(seeded_db):
-    data = await _get_guiding()
-
-    reasons = [(r["telescope"], r["reason"], r["count"]) for r in data["star_lost_reasons"]]
-    assert reasons == [
-        (RIG_A, "Star lost - low SNR", 3),
-        (RIG_A, "Star lost - mass changed", 2),
-    ]
-
-    monthly = [(m["telescope"], m["month"], m["session_count"]) for m in data["monthly"]]
-    assert monthly == [
-        (RIG_B, "2026-03", 2),
-        (RIG_A, "2026-03", 2),
-        (RIG_A, "2026-04", 1),
-    ]
-    a_march = data["monthly"][1]
-    assert a_march["rms_total_arcsec"] == 0.5
-    assert a_march["guided_hours"] == round(3900 / 3600, 2)
-    assert a_march["star_lost_pct"] == pytest.approx(100 * 4 / 350, abs=1e-6)
-
-
-@pytest.mark.asyncio
-async def test_calibrations_ortho_error_rates_and_ordering(seeded_db):
-    data = await _get_guiding()
-
-    cals = data["calibrations"]
-    assert [c["telescope"] for c in cals] == [RIG_A, RIG_A]
-    # Most recent first; the alias spelling merges into RIG_A.
-    assert cals[0]["started_at"].startswith("2026-04-03")
-    assert cals[0]["completed"] is False
-    assert cals[0]["ortho_error_deg"] == 0.0
-    assert cals[0]["west_rate_arcsec_s"] is None  # no pixel scale
-    assert cals[0]["north_rate_arcsec_s"] is None
-
-    assert cals[1]["started_at"].startswith("2026-03-06")
-    assert cals[1]["ortho_error_deg"] == 5.0
-    assert cals[1]["west_rate_arcsec_s"] == pytest.approx(4.5)
-    assert cals[1]["north_rate_arcsec_s"] == pytest.approx(6.0)
-    assert cals[1]["ra_guide_speed"] == 0.5
-    assert cals[1]["pier_side"] == "East"
-    assert cals[1]["dec_deg"] == 41.0
-
-
-@pytest.mark.asyncio
 async def test_compute_guiding_stats_without_http(seeded_db):
     from app.services.phd2_stats import compute_guiding_stats
 
@@ -420,17 +299,6 @@ async def test_compute_guiding_stats_without_http(seeded_db):
     assert result.unmapped_session_count == 1
     assert [r.telescope for r in result.rigs] == [RIG_B, RIG_A]
     assert result.model_dump(mode="json") == await _get_guiding()
-
-
-def test_ortho_error_reduces_modulo_180():
-    from app.services.phd2_stats import ortho_error_deg
-
-    assert ortho_error_deg(10.0, 95.0) == 5.0
-    assert ortho_error_deg(0.0, 90.0) == 0.0
-    assert ortho_error_deg(87.9, -170.3) == pytest.approx(11.8, abs=1e-6)
-    assert ortho_error_deg(350.0, 80.0) == 0.0
-    assert ortho_error_deg(None, 90.0) is None
-    assert ortho_error_deg(10.0, None) is None
 
 
 @pytest.mark.asyncio

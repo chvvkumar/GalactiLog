@@ -3651,87 +3651,14 @@ export interface components {
             /** Telescope */
             telescope: string;
         };
-        /** GuidingCalibrationRow */
-        GuidingCalibrationRow: {
-            /** Completed */
-            completed: boolean;
-            /** Dec Deg */
-            dec_deg?: number | null;
-            /** Dec Guide Speed */
-            dec_guide_speed?: number | null;
-            /** Equipment Profile */
-            equipment_profile?: string | null;
-            /** North Angle Deg */
-            north_angle_deg?: number | null;
-            /** North Rate Arcsec S */
-            north_rate_arcsec_s?: number | null;
-            /** Ortho Error Deg */
-            ortho_error_deg?: number | null;
-            /** Pier Side */
-            pier_side?: string | null;
-            /** Ra Guide Speed */
-            ra_guide_speed?: number | null;
-            /** Started At */
-            started_at: string;
-            /** Telescope */
-            telescope: string;
-            /** West Angle Deg */
-            west_angle_deg?: number | null;
-            /** West Rate Arcsec S */
-            west_rate_arcsec_s?: number | null;
-        };
-        /** GuidingMonthlyRow */
-        GuidingMonthlyRow: {
-            /** Guided Hours */
-            guided_hours: number;
-            /** Month */
-            month: string;
-            /** Rms Dec Arcsec */
-            rms_dec_arcsec?: number | null;
-            /** Rms Ra Arcsec */
-            rms_ra_arcsec?: number | null;
-            /** Rms Total Arcsec */
-            rms_total_arcsec?: number | null;
-            /** Session Count */
-            session_count: number;
-            /** Star Lost Pct */
-            star_lost_pct?: number | null;
-            /** Telescope */
-            telescope: string;
-        };
-        /** GuidingPierSideRow */
-        GuidingPierSideRow: {
-            /** Pier Side */
-            pier_side: string;
-            /** Rms Dec Arcsec */
-            rms_dec_arcsec?: number | null;
-            /** Rms Ra Arcsec */
-            rms_ra_arcsec?: number | null;
-            /** Rms Total Arcsec */
-            rms_total_arcsec?: number | null;
-            /** Session Count */
-            session_count: number;
-            /** Telescope */
-            telescope: string;
-        };
         /** GuidingRig */
         GuidingRig: {
-            /** Dither Count */
-            dither_count: number;
             /** Exposure Ms Values */
             exposure_ms_values: number[];
-            /** First Night */
-            first_night?: string | null;
             /** Gated Session Count */
             gated_session_count: number;
             /** Guided Hours */
             guided_hours: number;
-            /** Last Night */
-            last_night?: string | null;
-            /** Peak Dec Arcsec */
-            peak_dec_arcsec?: number | null;
-            /** Peak Ra Arcsec */
-            peak_ra_arcsec?: number | null;
             /** Ra Dec Ratio */
             ra_dec_ratio?: number | null;
             /** Rms Dec Arcsec */
@@ -3744,48 +3671,8 @@ export interface components {
             rms_total_filtered_arcsec?: number | null;
             /** Session Count */
             session_count: number;
-            /** Settle Fail Pct */
-            settle_fail_pct?: number | null;
             /** Settle Median S */
             settle_median_s?: number | null;
-            /** Star Lost Pct */
-            star_lost_pct?: number | null;
-            /** Telescope */
-            telescope: string;
-            /** Unguided Minutes */
-            unguided_minutes: number;
-        };
-        /** GuidingSettingsRow */
-        GuidingSettingsRow: {
-            /** Algo Dec */
-            algo_dec?: string | null;
-            /** Algo Ra */
-            algo_ra?: string | null;
-            /** Dec Guide Mode */
-            dec_guide_mode?: string | null;
-            /** Exposure Ms */
-            exposure_ms?: number | null;
-            /** Guided Hours */
-            guided_hours: number;
-            /** Rms Dec Arcsec */
-            rms_dec_arcsec?: number | null;
-            /** Rms Ra Arcsec */
-            rms_ra_arcsec?: number | null;
-            /** Rms Total Arcsec */
-            rms_total_arcsec?: number | null;
-            /** Session Count */
-            session_count: number;
-            /** Star Lost Pct */
-            star_lost_pct?: number | null;
-            /** Telescope */
-            telescope: string;
-        };
-        /** GuidingStarLostReason */
-        GuidingStarLostReason: {
-            /** Count */
-            count: number;
-            /** Reason */
-            reason: string;
             /** Telescope */
             telescope: string;
         };
@@ -3793,18 +3680,8 @@ export interface components {
         GuidingStatsResponse: {
             /** Altitude Bands */
             altitude_bands: components["schemas"]["GuidingAltitudeBandRow"][];
-            /** Calibrations */
-            calibrations: components["schemas"]["GuidingCalibrationRow"][];
-            /** Monthly */
-            monthly: components["schemas"]["GuidingMonthlyRow"][];
-            /** Pier Side */
-            pier_side: components["schemas"]["GuidingPierSideRow"][];
             /** Rigs */
             rigs: components["schemas"]["GuidingRig"][];
-            /** Settings */
-            settings: components["schemas"]["GuidingSettingsRow"][];
-            /** Star Lost Reasons */
-            star_lost_reasons: components["schemas"]["GuidingStarLostReason"][];
             /** Unmapped Session Count */
             unmapped_session_count: number;
         };
