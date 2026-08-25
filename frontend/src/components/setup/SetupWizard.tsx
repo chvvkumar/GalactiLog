@@ -1,7 +1,6 @@
 import { Component, For, Show, createEffect, createSignal, type JSX } from "solid-js";
 import Dialog from "../Dialog";
 import Button from "../ui/Button";
-import FolderBrowserModal from "../FolderBrowserModal";
 import HelpPopover from "../HelpPopover";
 import { showToast } from "../Toast";
 import { useSettingsContext } from "../SettingsProvider";
@@ -11,16 +10,10 @@ import { scanFilters, type NameRule } from "../../api/scanFilters";
 import { supportedTimeZones } from "../../utils/dateTime";
 import type { GeneralSettings } from "../../api/types";
 
-const STEPS = [
-  "Environment",
-  "Location",
-  "Scan filters",
-  "Ingest options",
-  "First scan",
-];
+const STEPS = ["Environment", "Location", "Scan options", "First scan"];
 
 /** Folder names commonly holding processing output rather than sub-frames. */
-const EXCLUDE_PRESETS = ["masters", "WBPP", "calibrated", "WORK_AREA", "PixInsight"];
+const EXCLUDE_DEFAULTS = ["masters", "WBPP", "calibrated", "WORK_AREA", "PixInsight"];
 
 const INTERVALS = [
   { value: 60, label: "1 hour" },
@@ -35,16 +28,16 @@ const INTERVALS = [
 const inputClass =
   "w-full px-2.5 py-1.5 text-sm bg-theme-base border border-theme-border rounded-[var(--radius-sm)] text-theme-text-primary placeholder:text-theme-text-secondary/50 focus:outline-none focus:border-theme-accent";
 
-/** Preset excludes are folder-name rules so they prune at any depth, not just
- *  a `<fits_root>/<name>` directory (path excludes match by prefix only). */
-const presetRule = (name: string): NameRule => ({
+/** Defaults are folder-name rules so they prune at any depth, not just a
+ *  `<fits_root>/<name>` directory (path excludes match by prefix only). */
+const DEFAULT_RULES: NameRule[] = EXCLUDE_DEFAULTS.map((name) => ({
   id: `setup-exclude-${name}`,
   action: "exclude",
   type: "substring",
   pattern: name,
   target: "folder",
   enabled: true,
-});
+}));
 
 const CheckRow: Component<{
   label: string;
@@ -76,45 +69,11 @@ const CheckRow: Component<{
   </div>
 );
 
-/** Removable chips for the selected include folders. Rendered on step 1 and
- *  step 3 against the same signal, so a pick made on either shows on both. */
-const FolderChips: Component<{
-  paths: string[];
-  root: string;
-  onRemove: (index: number) => void;
-}> = (props) => (
-  <Show
-    when={props.paths.length > 0}
-    fallback={
-      <p class="text-xs text-theme-text-secondary">
-        None selected. Everything under {props.root} will be scanned.
-      </p>
-    }
-  >
-    <ul class="flex flex-wrap gap-2">
-      <For each={props.paths}>
-        {(p, i) => (
-          <li class="flex items-center gap-1.5 px-2 py-1 rounded-full bg-theme-elevated border border-theme-border text-xs text-theme-text-primary">
-            <code class="break-all">{p}</code>
-            <button
-              type="button"
-              aria-label={`Remove ${p}`}
-              class="text-theme-text-secondary hover:text-theme-text-primary shrink-0"
-              onClick={() => props.onRemove(i())}
-            >
-              &times;
-            </button>
-          </li>
-        )}
-      </For>
-    </ul>
-  </Show>
-);
-
 const SetupWizard: Component = () => {
   const {
     settings,
     saveGeneral,
+    setupComplete,
     setupState,
     setSetupComplete,
     closeSetupWizard,
@@ -131,14 +90,7 @@ const SetupWizard: Component = () => {
   const [imagingNight, setImagingNight] = createSignal(true);
   const [lonWarning, setLonWarning] = createSignal(false);
 
-  // Step 3 (the folder picker is also reachable from step 1)
-  const [includePaths, setIncludePaths] = createSignal<string[]>([]);
-  // Every preset starts checked: processing-output folders are the common case
-  // and cataloguing them distorts frame counts, so opt out rather than opt in.
-  const [excludeNames, setExcludeNames] = createSignal<string[]>([...EXCLUDE_PRESETS]);
-  const [browsing, setBrowsing] = createSignal(false);
-
-  // Step 4
+  // Step 3
   const [includeCalibration, setIncludeCalibration] = createSignal(true);
   const [phd2Enabled, setPhd2Enabled] = createSignal(true);
   const [autoScan, setAutoScan] = createSignal(false);
@@ -180,10 +132,21 @@ const SetupWizard: Component = () => {
   const finish = async () => {
     setBusy(true);
     try {
+      // Periodic scanning stays paused until a scan filter configuration
+      // exists, and this wizard is the only thing standing between a fresh
+      // install and that write. A rerun leaves a customized config alone.
+      if (!setupComplete()) {
+        await scanFilters.put({
+          include_paths: [],
+          exclude_paths: [],
+          name_rules: DEFAULT_RULES,
+        });
+        window.dispatchEvent(new CustomEvent("scan-filters-configured"));
+      }
       await setupApi.markComplete();
     } catch {
-      // The wizard must close even if the stamp fails; it is a convenience
-      // flag, not a gate on anything the user just configured.
+      // The wizard must close even if a write fails; the stamp is a
+      // convenience flag and the filters are editable from Settings.
       showToast("Could not record setup completion", "error");
     } finally {
       setBusy(false);
@@ -211,18 +174,6 @@ const SetupWizard: Component = () => {
     if (!t) return null;
     const v = Number(t);
     return Number.isFinite(v) ? v : null;
-  };
-
-  const removeInclude = (index: number) =>
-    setIncludePaths(includePaths().filter((_, n) => n !== index));
-
-  const saveFilters = async (include: string[], excludeNames: string[]) => {
-    await scanFilters.put({
-      include_paths: include,
-      exclude_paths: [],
-      name_rules: excludeNames.map(presetRule),
-    });
-    window.dispatchEvent(new CustomEvent("scan-filters-configured"));
   };
 
   /** The mounted library root, for copy that names what "everything" means.
@@ -259,8 +210,6 @@ const SetupWizard: Component = () => {
           use_imaging_night: imagingNight(),
         });
       } else if (step() === 2) {
-        await saveFilters(includePaths(), excludeNames());
-      } else if (step() === 3) {
         await patchGeneral({
           include_calibration: includeCalibration(),
           phd2_scan_enabled: phd2Enabled(),
@@ -269,20 +218,6 @@ const SetupWizard: Component = () => {
         });
       }
       setStep(step() + 1);
-    } catch {
-      showToast("Could not save this step", "error");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const scanEverything = async () => {
-    setIncludePaths([]);
-    setExcludeNames([]);
-    setBusy(true);
-    try {
-      await saveFilters([], []);
-      setStep(3);
     } catch {
       showToast("Could not save this step", "error");
     } finally {
@@ -348,59 +283,13 @@ const SetupWizard: Component = () => {
                           at a different folder.
                         </p>
                         <p>
-                          Subfolders under the root can be selected below to
-                          limit what a scan walks.
+                          Everything under the root is scanned. Folders to skip
+                          are configured under Settings &gt; Library &gt; Scan
+                          filters.
                         </p>
                       </HelpPopover>
                     }
                   />
-
-                  <div class="py-3 space-y-2 border-b border-theme-border">
-                    <div class="flex items-center gap-1.5">
-                      <span class="text-sm text-theme-text-primary">
-                        Folders to scan
-                      </span>
-                      <HelpPopover
-                        title="Folders to scan"
-                        label="About folders to scan"
-                      >
-                        <p>
-                          Limits the scan to the folders you pick, so nothing
-                          outside them is walked. The library root itself is
-                          fixed by the container mount; only subfolders under it
-                          can be selected.
-                        </p>
-                        <p>
-                          Picking nothing scans everything under {rootLabel()}.
-                          Example: select your Lights folder to leave a sibling
-                          folder of processed images untouched.
-                        </p>
-                        <p>
-                          Nothing is saved here. The picks carry over to the Scan
-                          filters step, which writes them.
-                        </p>
-                      </HelpPopover>
-                      <Button
-                        class="ml-auto"
-                        variant="secondary"
-                        size="sm"
-                        disabled={!s().fits_root_exists}
-                        onClick={() => setBrowsing(true)}
-                      >
-                        Choose folders to scan
-                      </Button>
-                    </div>
-                    <p class="text-xs text-theme-text-secondary">
-                      The library root is set by the container mount and cannot
-                      be changed here; only subfolders under it are selectable.
-                      Pick nothing to scan everything under {rootLabel()}.
-                    </p>
-                    <FolderChips
-                      paths={includePaths()}
-                      root={rootLabel()}
-                      onRemove={removeInclude}
-                    />
-                  </div>
 
                   <CheckRow
                     label="Library contains files"
@@ -618,97 +507,14 @@ const SetupWizard: Component = () => {
             </div>
           </Show>
 
-          {/* Step 3: scan filters */}
+          {/* Step 3: scan options */}
           <Show when={step() === 2}>
             <p class="text-sm text-theme-text-secondary">
-              Limit the scan to the folders holding your sub-frames. Select
-              nothing to scan everything under {rootLabel()}.
+              Everything under {rootLabel()} is scanned. Folders named masters,
+              WBPP, calibrated, WORK_AREA and PixInsight are skipped anywhere in
+              the tree. Change this later under Settings &gt; Library &gt; Scan
+              filters.
             </p>
-            <div class="space-y-2">
-              <div class="flex items-center gap-1.5">
-                <span class="text-xs text-theme-text-secondary">Folders to scan</span>
-                <HelpPopover title="Folders to scan" label="About folders to scan">
-                  <p>
-                    Limits the scan to the folders you pick, so nothing outside
-                    them is walked. Selecting nothing scans everything under{" "}
-                    {rootLabel()}.
-                  </p>
-                  <p>
-                    Example: pick your Lights folder to skip a sibling folder of
-                    processed images. Folders picked on the Environment step
-                    appear here already.
-                  </p>
-                </HelpPopover>
-                <Button
-                  class="ml-auto"
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => setBrowsing(true)}
-                >
-                  Browse
-                </Button>
-              </div>
-              <FolderChips
-                paths={includePaths()}
-                root={rootLabel()}
-                onRemove={removeInclude}
-              />
-            </div>
-
-            <div class="space-y-2">
-              <div class="flex items-center gap-1.5">
-                <span class="text-xs text-theme-text-secondary">Folders to skip</span>
-                <HelpPopover title="Folders to skip" label="About folders to skip">
-                  <p>
-                    Folder names skipped wherever they appear in the tree, at any
-                    depth, rather than only directly under the library root.
-                  </p>
-                  <p>
-                    These names usually hold processing output rather than
-                    sub-frames. Cataloguing them fills the library with stacked,
-                    calibrated, and intermediate files that distort frame counts
-                    and integration totals.
-                  </p>
-                  <p>
-                    All five start checked. Uncheck one if you keep sub-frames in
-                    a folder by that name.
-                  </p>
-                </HelpPopover>
-              </div>
-              <For each={EXCLUDE_PRESETS}>
-                {(name) => (
-                  <label class="flex items-center gap-2 text-sm text-theme-text-primary">
-                    <input
-                      type="checkbox"
-                      checked={excludeNames().includes(name)}
-                      onChange={(e) =>
-                        setExcludeNames(
-                          e.currentTarget.checked
-                            ? [...excludeNames(), name]
-                            : excludeNames().filter((n) => n !== name),
-                        )
-                      }
-                    />
-                    {name}
-                  </label>
-                )}
-              </For>
-              <p class="text-xs text-theme-text-secondary">
-                These rules can be changed later under Settings &gt; Library &gt;
-                Scan filters. Regex and filename rules are available there as
-                well.
-              </p>
-            </div>
-
-            <div class="flex items-center gap-4">
-              <Button variant="secondary" size="sm" disabled={busy()} onClick={scanEverything}>
-                Scan everything
-              </Button>
-            </div>
-          </Show>
-
-          {/* Step 4: ingest options */}
-          <Show when={step() === 3}>
             <div class="flex items-center gap-1.5">
               <label class="flex items-center gap-2 text-sm text-theme-text-primary">
                 <input
@@ -806,8 +612,8 @@ const SetupWizard: Component = () => {
             </Show>
           </Show>
 
-          {/* Step 5: first scan */}
-          <Show when={step() === 4}>
+          {/* Step 4: first scan */}
+          <Show when={step() === 3}>
             <div class="flex items-center gap-1.5">
               <span class="text-sm text-theme-text-primary">First scan</span>
               <HelpPopover title="First scan" label="About the first scan">
@@ -851,19 +657,6 @@ const SetupWizard: Component = () => {
               </p>
             </Show>
           </Show>
-
-          {/* Shared by step 1 and step 3: both write the same include list. */}
-          <FolderBrowserModal
-            open={browsing()}
-            fitsRoot={setupState()?.fits_root ?? ""}
-            title="Select folders to scan"
-            existing={includePaths()}
-            onCancel={() => setBrowsing(false)}
-            onConfirm={(paths) => {
-              setIncludePaths([...includePaths(), ...paths]);
-              setBrowsing(false);
-            }}
-          />
         </div>
 
         <div class="p-4 border-t border-theme-border flex items-center justify-between">

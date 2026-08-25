@@ -8,6 +8,7 @@ const harness = vi.hoisted(() => {
   const state: {
     setup: Record<string, unknown> | undefined;
     general: Record<string, unknown>;
+    complete: boolean;
     saved: Record<string, unknown>[];
     filters: unknown[];
     markComplete: () => Promise<void>;
@@ -17,6 +18,7 @@ const harness = vi.hoisted(() => {
   } = {
     setup: undefined,
     general: {},
+    complete: false,
     saved: [],
     filters: [],
     markComplete: async () => {},
@@ -38,6 +40,7 @@ vi.mock("../SettingsProvider", () => ({
         harness.saved.push(g);
         return {};
       },
+      setupComplete: () => harness.complete,
       setupState: () => harness.setup,
       setSetupComplete: (v: boolean) => harness.setupCompleteSet.push(v),
       closeSetupWizard: () => {
@@ -70,8 +73,6 @@ vi.mock("../../api/scanFilters", () => ({
       harness.filters.push(f);
       return {};
     },
-    browse: async (path?: string) =>
-      path ? [] : [{ name: "Lights", path: "Lights", has_children: false }],
   },
 }));
 
@@ -100,9 +101,21 @@ const setupState = (over: Partial<SetupState> = {}): Record<string, unknown> => 
   ...over,
 });
 
+const DEFAULT_RULES = ["masters", "WBPP", "calibrated", "WORK_AREA", "PixInsight"].map(
+  (name) => ({
+    id: `setup-exclude-${name}`,
+    action: "exclude",
+    type: "substring",
+    pattern: name,
+    target: "folder",
+    enabled: true,
+  }),
+);
+
 beforeEach(() => {
   harness.setup = setupState();
   harness.general = { ...GENERAL };
+  harness.complete = false;
   harness.saved = [];
   harness.filters = [];
   harness.completeCalls = 0;
@@ -153,7 +166,7 @@ const settle = async () => {
 describe("SetupWizard", () => {
   it("opens on the environment step and lists the env checks", () => {
     render(() => <SetupWizard />);
-    expect(bodyText()).toContain("Step 1 of 5: Environment");
+    expect(bodyText()).toContain("Step 1 of 4: Environment");
     expect(bodyText()).toContain("/data/fits");
     expect(bodyText()).toContain("2.4.0");
   });
@@ -170,10 +183,10 @@ describe("SetupWizard", () => {
     expect(btn("Next").disabled).toBe(false);
     fireEvent.click(btn("Next"));
     await settle();
-    expect(bodyText()).toContain("Step 2 of 5: Location");
+    expect(bodyText()).toContain("Step 2 of 4: Location");
     fireEvent.click(btn("Back"));
     await settle();
-    expect(bodyText()).toContain("Step 1 of 5: Environment");
+    expect(bodyText()).toContain("Step 1 of 4: Environment");
   });
 
   it("persists the observer fields when leaving the location step", async () => {
@@ -182,7 +195,7 @@ describe("SetupWizard", () => {
     await settle();
     fireEvent.click(btn("Next"));
     await settle();
-    expect(bodyText()).toContain("Step 3 of 5: Scan filters");
+    expect(bodyText()).toContain("Step 3 of 4: Scan options");
     expect(harness.saved.length).toBe(1);
     expect(harness.saved[0].observer_latitude).toBe(42.5);
     expect(harness.saved[0].observer_longitude).toBe(-71.1);
@@ -197,94 +210,24 @@ describe("SetupWizard", () => {
     fireEvent.click(btn("Next"));
     await settle();
     expect(bodyText()).toContain("Imaging-night grouping falls back to UTC");
-    expect(bodyText()).toContain("Step 2 of 5: Location");
+    expect(bodyText()).toContain("Step 2 of 4: Location");
     fireEvent.click(btn("Next"));
     await settle();
-    expect(bodyText()).toContain("Step 3 of 5: Scan filters");
+    expect(bodyText()).toContain("Step 3 of 4: Scan options");
   });
 
-  it("writes preset excludes as folder name rules, not paths", async () => {
+  it("names the library root on the scan options step", async () => {
     render(() => <SetupWizard />);
     fireEvent.click(btn("Next"));
     await settle();
     fireEvent.click(btn("Next"));
     await settle();
-    // Every preset starts checked, so unchecking WBPP is what proves the
-    // remaining names are written as folder-name rules.
-    const boxes = Array.from(
-      document.body.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'),
+    expect(bodyText().replace(/\s+/g, " ")).toContain(
+      "Everything under /data/fits is scanned.",
     );
-    const wbpp = boxes.find(
-      (b) => (b.parentElement?.textContent ?? "").trim() === "WBPP",
+    expect(bodyText().replace(/\s+/g, " ")).toContain(
+      "Settings > Library > Scan filters",
     );
-    if (!wbpp) throw new Error("no WBPP preset checkbox");
-    expect(wbpp.checked).toBe(true);
-    fireEvent.click(wbpp);
-    fireEvent.click(btn("Next"));
-    await settle();
-    expect(harness.filters).toEqual([
-      {
-        include_paths: [],
-        exclude_paths: [],
-        name_rules: ["masters", "calibrated", "WORK_AREA", "PixInsight"].map(
-          (name) => ({
-            id: `setup-exclude-${name}`,
-            action: "exclude",
-            type: "substring",
-            pattern: name,
-            target: "folder",
-            enabled: true,
-          }),
-        ),
-      },
-    ]);
-  });
-
-  it("picks folders from the environment step and carries them to scan filters", async () => {
-    render(() => <SetupWizard />);
-    expect(bodyText()).toContain("Step 1 of 5: Environment");
-    fireEvent.click(btn("Choose folders to scan"));
-    await settle();
-    const folderBox = document.body.querySelector<HTMLInputElement>(
-      'input[type="checkbox"]',
-    );
-    if (!folderBox) throw new Error("folder browser did not open");
-    fireEvent.click(folderBox);
-    fireEvent.click(btn("Add 1"));
-    await settle();
-    expect(bodyText()).toContain("Lights");
-    fireEvent.click(btn("Next"));
-    await settle();
-    fireEvent.click(btn("Next"));
-    await settle();
-    expect(bodyText()).toContain("Step 3 of 5: Scan filters");
-    expect(bodyText()).toContain("Lights");
-    fireEvent.click(btn("Next"));
-    await settle();
-    expect((harness.filters[0] as { include_paths: string[] }).include_paths).toEqual([
-      "Lights",
-    ]);
-  });
-
-  it("disables the step 1 folder picker when the FITS root is missing", () => {
-    harness.setup = setupState({ fits_root_exists: false });
-    render(() => <SetupWizard />);
-    expect(btn("Choose folders to scan").disabled).toBe(true);
-  });
-
-  it("names the library root in the scan-everything copy", async () => {
-    render(() => <SetupWizard />);
-    fireEvent.click(btn("Next"));
-    await settle();
-    fireEvent.click(btn("Next"));
-    await settle();
-    expect(bodyText()).toContain("scan everything under /data/fits");
-    expect(bodyText()).toContain("Everything under /data/fits will be scanned");
-    expect(bodyText()).toContain("Settings > Library > Scan filters");
-    expect(buttons().some((b) => (b.textContent ?? "").includes("Advanced rules"))).toBe(
-      false,
-    );
-    expect(bodyText()).not.toContain("Advanced rules");
   });
 
   it("offers a help popover on the imaging-night field", async () => {
@@ -299,26 +242,25 @@ describe("SetupWizard", () => {
     expect(bodyText()).toContain("local noon");
   });
 
-  it("writes empty filter lists when Scan everything is used", async () => {
-    render(() => <SetupWizard />);
-    fireEvent.click(btn("Next"));
-    await settle();
-    fireEvent.click(btn("Next"));
-    await settle();
-    fireEvent.click(btn("Scan everything"));
-    await settle();
-    expect(bodyText()).toContain("Step 4 of 5: Ingest options");
-    expect(harness.filters).toEqual([
-      { include_paths: [], exclude_paths: [], name_rules: [] },
-    ]);
-  });
-
-  it("marks setup complete and closes when Skip setup is used", async () => {
+  it("writes the default scan filters once on a first-run Skip", async () => {
     render(() => <SetupWizard />);
     fireEvent.click(btn("Skip setup"));
     await settle();
+    expect(harness.filters).toEqual([
+      { include_paths: [], exclude_paths: [], name_rules: DEFAULT_RULES },
+    ]);
     expect(harness.completeCalls).toBe(1);
     expect(harness.setupCompleteSet).toEqual([true]);
+    expect(harness.closed).toBe(1);
+  });
+
+  it("leaves existing scan filters alone when the wizard is rerun", async () => {
+    harness.complete = true;
+    render(() => <SetupWizard />);
+    fireEvent.click(btn("Skip setup"));
+    await settle();
+    expect(harness.filters).toEqual([]);
+    expect(harness.completeCalls).toBe(1);
     expect(harness.closed).toBe(1);
   });
 

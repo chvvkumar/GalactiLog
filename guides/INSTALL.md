@@ -101,13 +101,14 @@ curl http://localhost:8080/api/scan/status
 
 Log in with the admin username and password you set. On a fresh install the setup wizard opens automatically over the app. It runs for admin accounts only; viewer accounts never see it.
 
-The wizard has five steps, each with **Back**, **Next**, and a **Skip setup** link:
+The wizard has four steps, each with **Back**, **Next**, and a **Skip setup** link:
 
 1. **Environment check.** Reports the FITS root path the container sees, whether that path exists, whether it contains any entries, the `GALACTILOG_HTTPS` setting, and the running version. A failing row names the environment variable to fix (`GALACTILOG_FITS_HOST_PATH`, `GALACTILOG_HTTPS`). **Next** is blocked only when the FITS root does not exist.
 2. **Observer location and timezone.** Latitude, longitude, IANA timezone, and the imaging-night grouping toggle. The timezone is prefilled from the browser. **Use my location** fills the coordinates from the browser geolocation prompt, and is hidden when the browser does not offer it. Longitude may be left blank; imaging-night grouping then falls back to UTC. See [Observer Location and Guiding Nights](CONFIGURATION.md#observer-location-and-guiding-nights).
-3. **Scan filters.** Pick the folders to include, and check the exclude presets for the stacking and processing directories you do not want catalogued (`masters`, `WBPP`, `calibrated`, `WORK_AREA`, `PixInsight`). **Scan everything** clears both lists. Per-file name rules are configured later under **Settings > Library**.
-4. **Ingest options.** Whether to ingest calibration frames, whether to discover PHD2 guide logs, and whether to run automatic scans and at what interval.
-5. **First scan.** Starts the initial library scan and shows live progress. **Finish** is available immediately; the scan continues in the background if you close the wizard.
+3. **Scan options.** Whether to ingest calibration frames, whether to discover PHD2 guide logs, and whether to run automatic scans and at what interval. The step also states what a scan covers: everything under the FITS root is scanned, and no folders are selected by hand.
+4. **First scan.** Starts the initial library scan and shows live progress. **Finish** is available immediately; the scan continues in the background if you close the wizard.
+
+On a first run, **Skip setup** and **Finish** both apply the default scan filters: folders named `masters`, `WBPP`, `calibrated`, `WORK_AREA`, and `PixInsight` are skipped wherever they appear in the tree, and everything else under the FITS root is scanned. Change or remove these rules, and add path and per-file name rules, under **Settings > Library > Scan filters**. Rerunning the wizard later leaves existing filters untouched.
 
 **Skip setup** and **Finish** both mark setup complete, so the wizard does not reopen on the next login. Nothing is lost by skipping: every value it writes is also editable from Settings.
 
