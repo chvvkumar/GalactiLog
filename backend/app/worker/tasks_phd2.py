@@ -783,6 +783,12 @@ def _sidereal_details(findings: list[dict], general: GeneralSettings) -> dict:
             for f in findings[:10]
         ],
         "observer_longitude": general.observer_longitude,
+        # The message names the PHD2 profile card as the place that tells a
+        # wrong timezone from a wrong site apart, so the link lands there.
+        "action": {
+            "label": "Open PHD2 profiles",
+            "href": "/settings?tab=equipment#phd2-profiles",
+        },
     }
 
 
@@ -1162,7 +1168,13 @@ def _run_phd2_pass(
                     "known IANA zone. Guide-log timestamps were read in the "
                     "server's local zone instead."
                 ),
-                details={"observer_timezone": general.observer_timezone},
+                details={
+                    "observer_timezone": general.observer_timezone,
+                    "action": {
+                        "label": "Set observer timezone",
+                        "href": "/settings?tab=scan#observer-location",
+                    },
+                },
                 actor="system", parent_id=parent_activity_id,
             )
         if suspicious and night_fallback and day_skewed:
@@ -1190,6 +1202,10 @@ def _run_phd2_pass(
                     "observer_longitude": general.observer_longitude,
                     "profiles": night_fallback[:10],
                     "use_imaging_night": True,
+                    "action": {
+                        "label": "Set observer location",
+                        "href": "/settings?tab=scan#observer-location",
+                    },
                 },
                 actor="system", parent_id=parent_activity_id,
             )
@@ -1208,7 +1224,13 @@ def _run_phd2_pass(
                     "the profile in Settings > Equipment > PHD2 Profiles for a "
                     "rig that runs on a clock of its own."
                 ),
-                details={"session_dates": suspicious[:50]},
+                details={
+                    "session_dates": suspicious[:50],
+                    "action": {
+                        "label": "Set observer timezone",
+                        "href": "/settings?tab=scan#observer-location",
+                    },
+                },
                 actor="system", parent_id=parent_activity_id,
             )
         if sidereal:

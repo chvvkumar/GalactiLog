@@ -1,4 +1,5 @@
 import { Component, Show, createSignal } from "solid-js";
+import { A } from "@solidjs/router";
 import { useQuery } from "@tanstack/solid-query";
 import { useStats } from "../store/stats";
 import { guidingStats } from "../api/guidingStats";
@@ -13,7 +14,7 @@ import FilterUsageChart from "../components/FilterUsageChart";
 import ImagingTimeline from "../components/ImagingTimeline";
 import ImagingCalendar from "../components/ImagingCalendar";
 import TopTargets from "../components/TopTargets";
-import GuidingScorecard, { guidingEmptyMessage } from "../components/GuidingScorecard";
+import GuidingScorecard, { GuidingEmptyNotice } from "../components/GuidingScorecard";
 import GuidingSettingsTable from "../components/GuidingSettingsTable";
 import GuidingPointing from "../components/GuidingPointing";
 import GuidingTrend from "../components/GuidingTrend";
@@ -87,7 +88,7 @@ const StatisticsPage: Component = () => {
                 </button>
                 <HelpPopover>
                   <p class="text-sm text-theme-text-secondary">
-                    PHD2 guide-log comparisons per rig. A rig is the telescope mapped to the PHD2 profile, so cameras under one telescope share a value. RMS figures are frame-count weighted over sessions with at least 100 samples and are not comparable across different guide exposures. Sessions from unmapped profiles are excluded; map profiles in Settings.
+                    PHD2 guide-log comparisons per rig. A rig is the telescope mapped to the PHD2 profile, so cameras under one telescope share a value. RMS figures are frame-count weighted over sessions with at least 100 samples and are not comparable across different guide exposures. Sessions from unmapped profiles are excluded; <A href="/settings?tab=equipment#phd2-profiles" class="text-theme-accent hover:underline">map profiles in Settings</A>.
                   </p>
                 </HelpPopover>
               </div>
@@ -101,12 +102,8 @@ const StatisticsPage: Component = () => {
                 <Show when={guidingQuery.data}>
                   {(g) => (
                     <Show
-                      when={guidingEmptyMessage(g().rigs.length, g().unmapped_session_count) === null}
-                      fallback={
-                        <p class="text-sm text-theme-text-secondary">
-                          {guidingEmptyMessage(g().rigs.length, g().unmapped_session_count)}
-                        </p>
-                      }
+                      when={g().rigs.length > 0}
+                      fallback={<GuidingEmptyNotice unmapped={g().unmapped_session_count} />}
                     >
                       <div class="space-y-4">
                         <GuidingScorecard rigs={g().rigs} />

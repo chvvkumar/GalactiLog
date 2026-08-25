@@ -1,7 +1,19 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { render } from "@solidjs/testing-library";
-import GuidingScorecard, { guidingEmptyMessage } from "./GuidingScorecard";
+import { Router, Route } from "@solidjs/router";
+import GuidingScorecard, { GuidingEmptyNotice } from "./GuidingScorecard";
 import type { GuidingRig } from "../api/types";
+
+let admin = true;
+vi.mock("./AuthProvider", () => ({ useAuth: () => ({ isAdmin: () => admin }) }));
+
+function renderNotice(unmapped: number) {
+  return render(() => (
+    <Router>
+      <Route path="/" component={() => <GuidingEmptyNotice unmapped={unmapped} />} />
+    </Router>
+  ));
+}
 
 function rig(overrides: Partial<GuidingRig> = {}): GuidingRig {
   return {
@@ -51,20 +63,28 @@ describe("GuidingScorecard", () => {
   });
 });
 
-describe("guidingEmptyMessage", () => {
-  it("returns null when rigs exist", () => {
-    expect(guidingEmptyMessage(1, 3)).toBeNull();
-  });
-
-  it("names the Scan Manager when nothing is catalogued", () => {
-    expect(guidingEmptyMessage(0, 0)).toBe(
-      "No PHD2 guide logs catalogued. Enable guide log scanning in Scan Manager.",
+describe("GuidingEmptyNotice", () => {
+  it("links an admin to the PHD2 profile mapping when profiles are unmapped", async () => {
+    admin = true;
+    const { findByText } = renderNotice(7);
+    const link = await findByText("Map profiles in Settings");
+    expect(link.getAttribute("href")).toBe("/settings?tab=equipment#phd2-profiles");
+    expect(link.parentElement?.textContent).toContain(
+      "7 guiding sessions found but no PHD2 profile is mapped to a telescope.",
     );
   });
 
-  it("counts unmapped sessions when only unmapped profiles exist", () => {
-    expect(guidingEmptyMessage(0, 7)).toBe(
-      "7 guiding sessions found but no PHD2 profile is mapped to a telescope. Map profiles in Settings.",
-    );
+  it("links an admin to the guide log setting when nothing is catalogued", async () => {
+    admin = true;
+    const { findByText } = renderNotice(0);
+    const link = await findByText("Enable guide log scanning");
+    expect(link.getAttribute("href")).toBe("/settings?tab=scan#guide-logs");
+  });
+
+  it("renders no link for a viewer and says an admin must do it", async () => {
+    admin = false;
+    const { container, findByText } = renderNotice(7);
+    await findByText(/An admin can map profiles in Settings/);
+    expect(container.querySelector("a")).toBeNull();
   });
 });

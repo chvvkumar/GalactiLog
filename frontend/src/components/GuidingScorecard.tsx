@@ -1,4 +1,6 @@
 import { Component, For, Show, createMemo } from "solid-js";
+import { A } from "@solidjs/router";
+import { useAuth } from "./AuthProvider";
 import type { GuidingRig } from "../api/types";
 import { madZ, bandForZ, bandToCellClass, type MetricBaseline } from "../utils/frameQuality";
 
@@ -16,11 +18,33 @@ export function fmtNum(val: number | null | undefined, dp = 2): string {
   return val.toFixed(dp);
 }
 
-export function guidingEmptyMessage(rigCount: number, unmapped: number): string | null {
-  if (rigCount > 0) return null;
-  if (unmapped === 0) return "No PHD2 guide logs catalogued. Enable guide log scanning in Scan Manager.";
-  return `${unmapped} guiding sessions found but no PHD2 profile is mapped to a telescope. Map profiles in Settings.`;
-}
+// Both destinations are admin-only controls (the Guide Logs card and the PHD2
+// profile mapping), so a viewer gets the same sentence without a link.
+const HINT_LINK = "text-theme-accent hover:underline";
+
+export const GuidingEmptyNotice: Component<{ unmapped: number }> = (props) => {
+  const { isAdmin } = useAuth();
+  return (
+    <p class="text-sm text-theme-text-secondary">
+      <Show
+        when={props.unmapped > 0}
+        fallback={
+          <>
+            No PHD2 guide logs catalogued.{" "}
+            <Show when={isAdmin()} fallback={<>An admin can enable guide log scanning in Settings, Library, Guide Logs.</>}>
+              <A href="/settings?tab=scan#guide-logs" class={HINT_LINK}>Enable guide log scanning</A> in Settings.
+            </Show>
+          </>
+        }
+      >
+        {props.unmapped} guiding sessions found but no PHD2 profile is mapped to a telescope.{" "}
+        <Show when={isAdmin()} fallback={<>An admin can map profiles in Settings, Equipment, PHD2 Profiles.</>}>
+          <A href="/settings?tab=equipment#phd2-profiles" class={HINT_LINK}>Map profiles in Settings</A>.
+        </Show>
+      </Show>
+    </p>
+  );
+};
 
 // Cross-rig baseline: median / MAD of each metric across every rig, same
 // construction as EquipmentPerformance.tsx. madZ returns null (neutral) below
