@@ -15,6 +15,13 @@ interface DialogProps {
   "aria-label"?: string;
   /** Extra classes forwarded to the outer backdrop div. */
   class?: string;
+  /**
+   * Element to focus when the dialog opens, instead of the first focusable
+   * child. Used when the first tab stop is decoration (a help glyph) rather
+   * than the action the user is expected to take. Falls back to the first
+   * focusable child when it returns nothing, or an element that refuses focus.
+   */
+  initialFocus?: () => HTMLElement | null | undefined;
   children: JSX.Element;
 }
 
@@ -50,6 +57,12 @@ const Dialog: Component<DialogProps> = (props) => {
   };
 
   const moveFocusIn = () => {
+    const preferred = props.initialFocus?.();
+    if (preferred) {
+      preferred.focus();
+      // A disabled or detached element silently ignores focus(); fall through.
+      if (document.activeElement === preferred) return;
+    }
     const focusable = getFocusable();
     if (focusable.length > 0) {
       focusable[0].focus();

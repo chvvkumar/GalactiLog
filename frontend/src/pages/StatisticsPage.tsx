@@ -1,5 +1,8 @@
 import { Component, Show, createSignal } from "solid-js";
+import { useQuery } from "@tanstack/solid-query";
 import { useStats } from "../store/stats";
+import { guidingStats } from "../api/guidingStats";
+import { queryKeys } from "../api/queryKeys";
 import { useSettingsContext } from "../components/SettingsProvider";
 import { contentWidthClass } from "../utils/format";
 import HelpPopover from "../components/HelpPopover";
@@ -10,11 +13,20 @@ import FilterUsageChart from "../components/FilterUsageChart";
 import ImagingTimeline from "../components/ImagingTimeline";
 import ImagingCalendar from "../components/ImagingCalendar";
 import TopTargets from "../components/TopTargets";
+import GuidingScorecard, { guidingEmptyMessage } from "../components/GuidingScorecard";
+import GuidingSettingsTable from "../components/GuidingSettingsTable";
+import GuidingPointing from "../components/GuidingPointing";
+import GuidingTrend from "../components/GuidingTrend";
+import GuidingCalibrations from "../components/GuidingCalibrations";
 
 const StatisticsPage: Component = () => {
   const { stats } = useStats();
   const ctx = useSettingsContext();
   const [timelineView, setTimelineView] = createSignal<"timeline" | "calendar">("timeline");
+  const guidingQuery = useQuery(() => ({
+    queryKey: queryKeys.guidingStats(),
+    queryFn: ({ signal }) => guidingStats.get(signal),
+  }));
 
   return (
     <div class={`page-enter p-4 space-y-4 ${contentWidthClass(ctx.contentWidth())}`}>
@@ -22,7 +34,7 @@ const StatisticsPage: Component = () => {
         <h1 class="text-xl font-semibold tracking-tight text-theme-text-primary">Statistics</h1>
         <HelpPopover>
           <p class="text-sm text-theme-text-secondary">
-            Aggregate metrics across the full catalog. Four sections: Overview, Equipment Performance, Breakdowns, and Imaging Activity. Open the popover next to each section for details.
+            Aggregate metrics across the full catalog. Five sections: Overview, Equipment Performance, Guiding, Breakdowns, and Imaging Activity. Open the popover next to each section for details.
           </p>
         </HelpPopover>
       </div>
@@ -60,6 +72,47 @@ const StatisticsPage: Component = () => {
                 </HelpPopover>
               </div>
               <EquipmentPerformance combos={data().equipment_performance} />
+            </section>
+
+            <section class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
+              <div class="flex items-center gap-2">
+                <h2 class="text-sm font-semibold text-theme-text-primary">Guiding</h2>
+                <HelpPopover>
+                  <p class="text-sm text-theme-text-secondary">
+                    PHD2 guide-log comparisons per rig. A rig is the telescope mapped to the PHD2 profile, so cameras under one telescope share a value. RMS figures are frame-count weighted over sessions with at least 100 samples and are not comparable across different guide exposures. Sessions from unmapped profiles are excluded; map profiles in Settings.
+                  </p>
+                </HelpPopover>
+              </div>
+              <Show when={guidingQuery.isPending}>
+                <div class="text-center text-theme-text-secondary py-4 text-sm">Loading...</div>
+              </Show>
+              <Show when={guidingQuery.isError}>
+                <div class="text-sm text-theme-error">Failed to load guiding stats</div>
+              </Show>
+              <Show when={guidingQuery.data}>
+                {(g) => (
+                  <Show
+                    when={guidingEmptyMessage(g().rigs.length, g().unmapped_session_count) === null}
+                    fallback={
+                      <p class="text-sm text-theme-text-secondary">
+                        {guidingEmptyMessage(g().rigs.length, g().unmapped_session_count)}
+                      </p>
+                    }
+                  >
+                    <div class="space-y-4">
+                      <GuidingScorecard rigs={g().rigs} />
+                      <GuidingSettingsTable settings={g().settings} />
+                      <GuidingPointing
+                        pierSide={g().pier_side}
+                        altitudeBands={g().altitude_bands}
+                        starLostReasons={g().star_lost_reasons}
+                      />
+                      <GuidingTrend monthly={g().monthly} />
+                      <GuidingCalibrations calibrations={g().calibrations} />
+                    </div>
+                  </Show>
+                )}
+              </Show>
             </section>
 
             <section class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">

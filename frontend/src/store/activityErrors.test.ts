@@ -41,7 +41,7 @@ describe("activityErrors", () => {
     expect(errorEvents().length).toBe(2);
     expect(unseenErrorCount()).toBe(2);
     expect(apiClient.GET).toHaveBeenCalledWith("/api/activity", {
-      params: { query: { severity: ["error"], limit: 20 } },
+      params: { query: { attention: true, limit: 20 } },
     });
   });
 
@@ -87,5 +87,37 @@ describe("activityErrors", () => {
     expect(vi.mocked(showToast).mock.calls[0][0]).toContain("Background: [scan]");
     await checkErrors();
     expect(vi.mocked(showToast).mock.calls.length).toBe(toastsAfterFirst);
+  });
+
+  it("counts actionable warnings in the panel but never toasts them", async () => {
+    const mixed = [
+      {
+        id: 202,
+        timestamp: "2026-07-18T14:10:00+00:00",
+        severity: "warning",
+        category: "scan",
+        event_type: "phd2_correlation_unattributed",
+        message: "2 guide logs could not be attributed",
+        details: { action: { label: "Map PHD2 profiles", href: "/settings?tab=equipment" } },
+      },
+      {
+        id: 201,
+        timestamp: "2026-07-18T14:00:00+00:00",
+        severity: "error",
+        category: "scan",
+        event_type: "ingest_failed",
+        message: "1 file failed to ingest",
+      },
+    ];
+    vi.mocked(apiClient.GET).mockResolvedValue(okResult({ items: mixed, next_cursor: null, total: 2 }));
+    setActivitySeenAt(null);
+    await checkErrors();
+    // Both rows reach the panel and the badge.
+    expect(errorEvents().length).toBe(2);
+    expect(unseenErrorCount()).toBe(2);
+    // Only the error toasted.
+    const calls = vi.mocked(showToast).mock.calls;
+    expect(calls.length).toBe(1);
+    expect(calls[0][0]).toContain("ref #201");
   });
 });

@@ -17,6 +17,11 @@ export interface paths {
          *
          *     Only top-level events (parent_id IS NULL) are returned. Children are
          *     batch-loaded and nested under their parent's `children` field.
+         *
+         *     `attention=true` selects everything that asks the user to do something:
+         *     errors, plus any severity carrying a `details.action` link. It replaces
+         *     the `severity` filter rather than narrowing it, since the two halves of
+         *     that union sit on either side of any single severity value.
          */
         get: operations["list_activity_api_activity_get"];
         put?: never;
@@ -1679,6 +1684,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/settings/setup-complete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mark Setup Complete
+         * @description Record that the first-run wizard has been finished or skipped.
+         *
+         *     Stored as a raw key on `general` rather than a GeneralSettings field: the
+         *     wizard writes it while the settings page may be holding a stale copy of
+         *     the model, and a full-model PUT would clobber it.
+         */
+        post: operations["mark_setup_complete_api_settings_setup_complete_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/settings/suggestions/equipment": {
         parameters: {
             query?: never;
@@ -1755,6 +1784,23 @@ export interface paths {
         };
         /** Get Calendar */
         get: operations["get_calendar_api_stats_calendar_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/stats/guiding": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Guiding Stats */
+        get: operations["get_guiding_stats_api_stats_guiding_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2592,7 +2638,23 @@ export interface components {
             settings: {
                 [key: string]: unknown;
             };
+            setup: components["schemas"]["BootstrapSetup"];
             user: components["schemas"]["BootstrapUser"];
+        };
+        /** BootstrapSetup */
+        BootstrapSetup: {
+            /** Complete */
+            complete: boolean;
+            /** Fits Root */
+            fits_root: string;
+            /** Fits Root Exists */
+            fits_root_exists: boolean;
+            /** Fits Root Has Entries */
+            fits_root_has_entries: boolean;
+            /** Https Enabled */
+            https_enabled: boolean;
+            /** Version */
+            version: string;
         };
         /** BootstrapUser */
         BootstrapUser: {
@@ -3021,7 +3083,10 @@ export interface components {
             filters: string[];
             /** Frame Count */
             frame_count: number;
-            /** Fwhm Frame Count */
+            /**
+             * Fwhm Frame Count
+             * @default 0
+             */
             fwhm_frame_count: number;
             /** Grouped */
             grouped: boolean;
@@ -3063,7 +3128,10 @@ export interface components {
             filter_name: string;
             /** Frame Count */
             frame_count: number;
-            /** Fwhm Frame Count */
+            /**
+             * Fwhm Frame Count
+             * @default 0
+             */
             fwhm_frame_count: number;
             /** Median Eccentricity */
             median_eccentricity: number | null;
@@ -3080,7 +3148,10 @@ export interface components {
             avg_session_seconds?: number | null;
             /** Frame Count */
             frame_count: number;
-            /** Fwhm Frame Count */
+            /**
+             * Fwhm Frame Count
+             * @default 0
+             */
             fwhm_frame_count: number;
             /**
              * Grouped
@@ -3561,6 +3632,181 @@ export interface components {
             fwhm: components["schemas"]["MetricBaseline"];
             guiding_rms_arcsec: components["schemas"]["MetricBaseline"];
             median_hfr: components["schemas"]["MetricBaseline"];
+        };
+        /** GuidingAltitudeBandRow */
+        GuidingAltitudeBandRow: {
+            /**
+             * Band
+             * @enum {string}
+             */
+            band: "<30" | "30-60" | ">60";
+            /** Rms Dec Arcsec */
+            rms_dec_arcsec?: number | null;
+            /** Rms Ra Arcsec */
+            rms_ra_arcsec?: number | null;
+            /** Rms Total Arcsec */
+            rms_total_arcsec?: number | null;
+            /** Session Count */
+            session_count: number;
+            /** Telescope */
+            telescope: string;
+        };
+        /** GuidingCalibrationRow */
+        GuidingCalibrationRow: {
+            /** Completed */
+            completed: boolean;
+            /** Dec Deg */
+            dec_deg?: number | null;
+            /** Dec Guide Speed */
+            dec_guide_speed?: number | null;
+            /** Equipment Profile */
+            equipment_profile?: string | null;
+            /** North Angle Deg */
+            north_angle_deg?: number | null;
+            /** North Rate Arcsec S */
+            north_rate_arcsec_s?: number | null;
+            /** Ortho Error Deg */
+            ortho_error_deg?: number | null;
+            /** Pier Side */
+            pier_side?: string | null;
+            /** Ra Guide Speed */
+            ra_guide_speed?: number | null;
+            /** Started At */
+            started_at: string;
+            /** Telescope */
+            telescope: string;
+            /** West Angle Deg */
+            west_angle_deg?: number | null;
+            /** West Rate Arcsec S */
+            west_rate_arcsec_s?: number | null;
+        };
+        /** GuidingMonthlyRow */
+        GuidingMonthlyRow: {
+            /** Guided Hours */
+            guided_hours: number;
+            /** Month */
+            month: string;
+            /** Rms Dec Arcsec */
+            rms_dec_arcsec?: number | null;
+            /** Rms Ra Arcsec */
+            rms_ra_arcsec?: number | null;
+            /** Rms Total Arcsec */
+            rms_total_arcsec?: number | null;
+            /** Session Count */
+            session_count: number;
+            /** Star Lost Pct */
+            star_lost_pct?: number | null;
+            /** Telescope */
+            telescope: string;
+        };
+        /** GuidingPierSideRow */
+        GuidingPierSideRow: {
+            /** Pier Side */
+            pier_side: string;
+            /** Rms Dec Arcsec */
+            rms_dec_arcsec?: number | null;
+            /** Rms Ra Arcsec */
+            rms_ra_arcsec?: number | null;
+            /** Rms Total Arcsec */
+            rms_total_arcsec?: number | null;
+            /** Session Count */
+            session_count: number;
+            /** Telescope */
+            telescope: string;
+        };
+        /** GuidingRig */
+        GuidingRig: {
+            /** Dither Count */
+            dither_count: number;
+            /** Exposure Ms Values */
+            exposure_ms_values: number[];
+            /** First Night */
+            first_night?: string | null;
+            /** Gated Session Count */
+            gated_session_count: number;
+            /** Guided Hours */
+            guided_hours: number;
+            /** Last Night */
+            last_night?: string | null;
+            /** Peak Dec Arcsec */
+            peak_dec_arcsec?: number | null;
+            /** Peak Ra Arcsec */
+            peak_ra_arcsec?: number | null;
+            /** Ra Dec Ratio */
+            ra_dec_ratio?: number | null;
+            /** Rms Dec Arcsec */
+            rms_dec_arcsec?: number | null;
+            /** Rms Ra Arcsec */
+            rms_ra_arcsec?: number | null;
+            /** Rms Total Arcsec */
+            rms_total_arcsec?: number | null;
+            /** Rms Total Filtered Arcsec */
+            rms_total_filtered_arcsec?: number | null;
+            /** Session Count */
+            session_count: number;
+            /** Settle Fail Pct */
+            settle_fail_pct?: number | null;
+            /** Settle Median S */
+            settle_median_s?: number | null;
+            /** Star Lost Pct */
+            star_lost_pct?: number | null;
+            /** Telescope */
+            telescope: string;
+            /** Unguided Minutes */
+            unguided_minutes: number;
+        };
+        /** GuidingSettingsRow */
+        GuidingSettingsRow: {
+            /** Algo Dec */
+            algo_dec?: string | null;
+            /** Algo Ra */
+            algo_ra?: string | null;
+            /** Dec Guide Mode */
+            dec_guide_mode?: string | null;
+            /** Exposure Ms */
+            exposure_ms?: number | null;
+            /** Guided Hours */
+            guided_hours: number;
+            /** Rms Dec Arcsec */
+            rms_dec_arcsec?: number | null;
+            /** Rms Ra Arcsec */
+            rms_ra_arcsec?: number | null;
+            /** Rms Total Arcsec */
+            rms_total_arcsec?: number | null;
+            /** Session Count */
+            session_count: number;
+            /** Star Lost Pct */
+            star_lost_pct?: number | null;
+            /** Telescope */
+            telescope: string;
+        };
+        /** GuidingStarLostReason */
+        GuidingStarLostReason: {
+            /** Count */
+            count: number;
+            /** Reason */
+            reason: string;
+            /** Telescope */
+            telescope: string;
+        };
+        /** GuidingStatsResponse */
+        GuidingStatsResponse: {
+            /** Altitude Bands */
+            altitude_bands: components["schemas"]["GuidingAltitudeBandRow"][];
+            /** Calibrations */
+            calibrations: components["schemas"]["GuidingCalibrationRow"][];
+            /** Monthly */
+            monthly: components["schemas"]["GuidingMonthlyRow"][];
+            /** Pier Side */
+            pier_side: components["schemas"]["GuidingPierSideRow"][];
+            /** Rigs */
+            rigs: components["schemas"]["GuidingRig"][];
+            /** Settings */
+            settings: components["schemas"]["GuidingSettingsRow"][];
+            /** Star Lost Reasons */
+            star_lost_reasons: components["schemas"]["GuidingStarLostReason"][];
+            /** Unmapped Session Count */
+            unmapped_session_count: number;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -5759,6 +6005,7 @@ export interface operations {
             query?: {
                 severity?: string[];
                 category?: string[];
+                attention?: boolean;
                 limit?: number;
                 cursor?: string | null;
                 since?: string | null;
@@ -8986,6 +9233,37 @@ export interface operations {
             };
         };
     };
+    mark_setup_complete_api_settings_setup_complete_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     suggest_equipment_api_settings_suggestions_equipment_get: {
         parameters: {
             query?: never;
@@ -9099,6 +9377,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CalendarEntry"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_guiding_stats_api_stats_guiding_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GuidingStatsResponse"];
                 };
             };
             /** @description Validation Error */

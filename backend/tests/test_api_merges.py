@@ -15,7 +15,7 @@ from app.main import app
 from app.database import get_session
 from app.api.deps import require_admin, get_current_user
 from app.models.target import Target
-from app.services.cache import STATS_CACHE_KEY
+from app.services.cache import GUIDING_STATS_CACHE_KEY, STATS_CACHE_KEY
 
 
 def _make_target(name="M 31", aliases=None, merged_into_id=None):
@@ -150,7 +150,7 @@ async def test_merge_invalidates_stats_and_analysis_cache(admin_user):
     finally:
         app.dependency_overrides.clear()
 
-    assert mock_redis.delete.await_args_list[0].args == (STATS_CACHE_KEY,)
+    assert mock_redis.delete.await_args_list[0].args == (STATS_CACHE_KEY, GUIDING_STATS_CACHE_KEY)
     assert set(mock_redis.delete.await_args_list[1].args) == set(analysis_keys)
 
 
@@ -205,7 +205,7 @@ async def test_unmerge_invalidates_stats_and_analysis_cache(admin_user):
     finally:
         app.dependency_overrides.clear()
 
-    assert mock_redis.delete.await_args_list[0].args == (STATS_CACHE_KEY,)
+    assert mock_redis.delete.await_args_list[0].args == (STATS_CACHE_KEY, GUIDING_STATS_CACHE_KEY)
     assert set(mock_redis.delete.await_args_list[1].args) == set(analysis_keys)
 
 
@@ -310,7 +310,7 @@ async def test_revert_merge_candidate_invalidates_stats_and_analysis_cache(admin
     finally:
         app.dependency_overrides.clear()
 
-    assert mock_redis.delete.await_args_list[0].args == (STATS_CACHE_KEY,)
+    assert mock_redis.delete.await_args_list[0].args == (STATS_CACHE_KEY, GUIDING_STATS_CACHE_KEY)
     assert set(mock_redis.delete.await_args_list[1].args) == set(analysis_keys)
 
 
@@ -357,7 +357,7 @@ async def test_orphan_create_invalidates_stats_and_analysis_cache(admin_user, mo
     finally:
         app.dependency_overrides.clear()
 
-    assert mock_redis.delete.await_args_list[0].args == (STATS_CACHE_KEY,)
+    assert mock_redis.delete.await_args_list[0].args == (STATS_CACHE_KEY, GUIDING_STATS_CACHE_KEY)
     assert set(mock_redis.delete.await_args_list[1].args) == set(analysis_keys)
 
 
@@ -387,7 +387,7 @@ async def test_custom_create_invalidates_stats_and_analysis_cache(admin_user, mo
     finally:
         app.dependency_overrides.clear()
 
-    assert mock_redis.delete.await_args_list[0].args == (STATS_CACHE_KEY,)
+    assert mock_redis.delete.await_args_list[0].args == (STATS_CACHE_KEY, GUIDING_STATS_CACHE_KEY)
     assert set(mock_redis.delete.await_args_list[1].args) == set(analysis_keys)
 
 
@@ -488,5 +488,5 @@ async def test_rename_target_invalidates_stats_and_analysis_cache(admin_user):
     finally:
         app.dependency_overrides.clear()
 
-    assert mock_redis.delete.await_args_list[0].args == (STATS_CACHE_KEY,)
+    assert mock_redis.delete.await_args_list[0].args == (STATS_CACHE_KEY, GUIDING_STATS_CACHE_KEY)
     assert set(mock_redis.delete.await_args_list[1].args) == set(analysis_keys)

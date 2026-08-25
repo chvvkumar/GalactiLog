@@ -255,6 +255,7 @@ const AnalysisPage: Component = () => {
                     <ul class="list-disc list-inside space-y-1">
                       <li class="text-sm text-theme-text-secondary">Plot HFR against guide RMS to check whether seeing tracks guiding.</li>
                       <li class="text-sm text-theme-text-secondary">Plot star count against altitude to see how elevation affects detections.</li>
+                      <li class="text-sm text-theme-text-secondary">PHD2 guiding metrics are night-level figures joined by rig and imaging night; nights with no mapped PHD2 profile are omitted.</li>
                     </ul>
                   </HelpPopover>
                 </div>

@@ -7,6 +7,10 @@ from app.config import async_redis
 logger = logging.getLogger(__name__)
 
 STATS_CACHE_KEY = "galactilog:stats:cache"
+# GET /api/stats/guiding: per-rig PHD2 aggregates, invalidated with the rest
+# of the stats caches whenever a scan, ingest, or guide-log pass runs.
+GUIDING_STATS_CACHE_KEY = "galactilog:stats:guiding"
+GUIDING_STATS_CACHE_TTL = 300
 ANALYSIS_CACHE_PATTERN = "galactilog:analysis:*"
 # Cached "this rig overall" frame-quality baselines (target-independent,
 # grouped by normalized telescope|camera|filter over every LIGHT frame). This
@@ -32,7 +36,7 @@ async def invalidate_stats_and_analysis_cache() -> None:
     """
     try:
         async with async_redis() as r:
-            await r.delete(STATS_CACHE_KEY)
+            await r.delete(STATS_CACHE_KEY, GUIDING_STATS_CACHE_KEY)
             keys = [key async for key in r.scan_iter(match=ANALYSIS_CACHE_PATTERN)]
             if keys:
                 await r.delete(*keys)

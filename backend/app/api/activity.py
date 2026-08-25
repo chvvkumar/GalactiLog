@@ -48,6 +48,7 @@ def _decode_cursor(cursor: str) -> tuple[datetime, int] | None:
 async def list_activity(
     severity: list[str] = Query(default=[]),
     category: list[str] = Query(default=[]),
+    attention: bool = Query(default=False),
     limit: int = Query(default=50, ge=1, le=200),
     cursor: str | None = Query(default=None),
     since: datetime | None = Query(default=None),
@@ -58,16 +59,29 @@ async def list_activity(
 
     Only top-level events (parent_id IS NULL) are returned. Children are
     batch-loaded and nested under their parent's `children` field.
+
+    `attention=true` selects everything that asks the user to do something:
+    errors, plus any severity carrying a `details.action` link. It replaces
+    the `severity` filter rather than narrowing it, since the two halves of
+    that union sit on either side of any single severity value.
     """
     top_level_filter = ActivityEvent.parent_id.is_(None)
 
     count_q = select(func.count(ActivityEvent.id)).where(top_level_filter)
     items_q = select(ActivityEvent).where(top_level_filter)
 
-    valid_sev = [s for s in severity if s in _VALID_SEVERITIES]
-    if valid_sev:
-        count_q = count_q.where(ActivityEvent.severity.in_(valid_sev))
-        items_q = items_q.where(ActivityEvent.severity.in_(valid_sev))
+    if attention:
+        needs_attention = (
+            (ActivityEvent.severity == "error")
+            | ActivityEvent.details.has_key("action")
+        )
+        count_q = count_q.where(needs_attention)
+        items_q = items_q.where(needs_attention)
+    else:
+        valid_sev = [s for s in severity if s in _VALID_SEVERITIES]
+        if valid_sev:
+            count_q = count_q.where(ActivityEvent.severity.in_(valid_sev))
+            items_q = items_q.where(ActivityEvent.severity.in_(valid_sev))
 
     valid_cat = [c for c in category if c in _VALID_CATEGORIES]
     if valid_cat:

@@ -1312,3 +1312,61 @@ def test_activity_retention_days_validation():
         GeneralSettings(activity_retention_days=3651)
     assert GeneralSettings(activity_retention_days=1).activity_retention_days == 1
     assert GeneralSettings(activity_retention_days=3650).activity_retention_days == 3650
+
+
+# ---------------------------------------------------------------------------
+# POST /api/settings/setup-complete
+# ---------------------------------------------------------------------------
+
+async def _post_setup_complete():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        return await client.post("/api/settings/setup-complete")
+
+
+@pytest.mark.asyncio
+async def test_setup_complete_writes_timestamp_and_keeps_other_keys():
+    """The wizard writes one raw key; everything already on general survives."""
+    row = _make_settings_row(general={"_migrated": True, "auto_scan_interval": 240})
+    mock_session = _mock_settings_session(row)
+
+    async def override():
+        yield mock_session
+
+    app.dependency_overrides[get_session] = override
+    _override_admin()
+    try:
+        resp = await _post_setup_complete()
+        assert resp.status_code == 200
+        assert resp.json() == {"ok": True}
+        assert row.general["auto_scan_interval"] == 240
+        stamped = row.general["setup_completed_at"]
+        # Parses as an aware ISO timestamp.
+        from datetime import datetime
+        assert datetime.fromisoformat(stamped).tzinfo is not None
+        mock_session.commit.assert_awaited()
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_setup_complete_rejects_viewer():
+    from fastapi import HTTPException
+
+    async def _deny():
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    app.dependency_overrides[require_admin] = _deny
+    try:
+        resp = await _post_setup_complete()
+        assert resp.status_code == 403
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_setup_complete_rejects_anonymous():
+    # No overrides at all: the request carries no credentials.
+    app.dependency_overrides.clear()
+    resp = await _post_setup_complete()
+    assert resp.status_code in (401, 403)

@@ -946,3 +946,14 @@ export interface PanelSessionFilter {
   frames: number;
   integration: number;
 }
+
+// === Guiding stats (GET /api/stats/guiding) ===
+// generated name: GuidingCalibrationRow for GuidingCalibration; the rest match.
+export type GuidingRig = Schemas["GuidingRig"];
+export type GuidingSettingsRow = Schemas["GuidingSettingsRow"];
+export type GuidingPierSideRow = Schemas["GuidingPierSideRow"];
+export type GuidingAltitudeBandRow = Schemas["GuidingAltitudeBandRow"];
+export type GuidingStarLostReason = Schemas["GuidingStarLostReason"];
+export type GuidingMonthlyRow = Schemas["GuidingMonthlyRow"];
+export type GuidingCalibration = Schemas["GuidingCalibrationRow"];
+export type GuidingStatsResponse = Schemas["GuidingStatsResponse"];

@@ -20,6 +20,7 @@ import type {
   ActiveJob,
 } from "../api/types";
 import Button from "./ui/Button";
+import ActivityActionLink from "./activity/ActionLink";
 import FailedFilesList from "./activity/FailedFilesList";
 import EnrichmentFailureList from "./activity/EnrichmentFailureList";
 import DetailsJsonFallback from "./activity/DetailsJsonFallback";
@@ -167,8 +168,19 @@ function detailsRedundantWithMessage(
   return message.includes(needle);
 }
 
+// `details.action` is rendered as a link next to the message, so it must not
+// also show up in the expanded detail block.
+function detailsWithoutAction(
+  details: Record<string, unknown> | null | undefined,
+): Record<string, unknown> | null {
+  if (!details || typeof details !== "object") return null;
+  if (!("action" in details)) return details;
+  const { action: _action, ...rest } = details;
+  return rest;
+}
+
 const RowDetails: Component<{ event: ActivityEvent }> = (props) => {
-  const d = props.event.details;
+  const d = detailsWithoutAction(props.event.details);
   if (!d) return null;
 
   if (
@@ -215,10 +227,8 @@ const HistoryRow: Component<{ event: ActivityEvent }> = (props) => {
   const settingsCtx = useSettingsContext();
   const [expanded, setExpanded] = createSignal(false);
   const hasDetails = () => {
-    const d = props.event.details;
-    if (d === null || d === undefined) return false;
-    if (typeof d !== "object") return false;
-    const record = d as Record<string, unknown>;
+    const record = detailsWithoutAction(props.event.details);
+    if (record === null) return false;
     if (Object.keys(record).length === 0) return false;
     if (detailsRedundantWithMessage(record, props.event.message)) return false;
     return true;
@@ -274,6 +284,7 @@ const HistoryRow: Component<{ event: ActivityEvent }> = (props) => {
           >
             <TargetLinkedMessage event={props.event} />
           </Show>
+          <ActivityActionLink event={props.event} class="ml-2" />
         </span>
         <Show when={hasDetails()}>
           <span

@@ -1,4 +1,4 @@
-import { Component, For, Show } from "solid-js";
+import { Component, For, Show, createSignal } from "solid-js";
 
 interface FailedFile {
   path: string;
@@ -11,7 +11,8 @@ const FailedFilesList: Component<{
   files: FailedFile[];
   truncated: boolean;
 }> = (props) => {
-  const shown = () => props.files.slice(0, DISPLAY_LIMIT);
+  const [showAll, setShowAll] = createSignal(false);
+  const shown = () => (showAll() ? props.files : props.files.slice(0, DISPLAY_LIMIT));
   const overflow = () => props.files.length - DISPLAY_LIMIT;
 
   return (
@@ -32,9 +33,14 @@ const FailedFilesList: Component<{
         )}
       </For>
       <Show when={overflow() > 0}>
-        <p class="text-xs text-theme-text-secondary pl-1">
-          {overflow()} more file{overflow() > 1 ? "s" : ""}
-        </p>
+        <button
+          onClick={() => setShowAll((v) => !v)}
+          class="text-xs text-theme-accent hover:underline pl-1"
+        >
+          {showAll()
+            ? "Show fewer"
+            : `Show ${overflow()} more file${overflow() > 1 ? "s" : ""}`}
+        </button>
       </Show>
       <Show when={props.truncated}>
         <p class="text-xs text-[var(--color-warning)] pl-1">

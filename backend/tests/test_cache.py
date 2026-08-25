@@ -106,12 +106,12 @@ async def test_invalidate_stats_and_analysis_cache_deletes_both_key_families():
         yield mock_redis
 
     with patch("app.services.cache.async_redis", _mock_async_redis):
-        from app.services.cache import invalidate_stats_and_analysis_cache, STATS_CACHE_KEY
+        from app.services.cache import invalidate_stats_and_analysis_cache, GUIDING_STATS_CACHE_KEY, STATS_CACHE_KEY
         await invalidate_stats_and_analysis_cache()
 
     # First delete call clears the stats cache key.
     first_call_args = mock_redis.delete.await_args_list[0].args
-    assert first_call_args == (STATS_CACHE_KEY,)
+    assert first_call_args == (STATS_CACHE_KEY, GUIDING_STATS_CACHE_KEY)
     # Second delete call clears every discovered analysis:* key.
     second_call_args = mock_redis.delete.await_args_list[1].args
     assert set(second_call_args) == set(analysis_keys)

@@ -23,6 +23,7 @@ import { applyTheme, applyTextSize, DEFAULT_THEME_ID, DEFAULT_TEXT_SIZE } from "
 import { apiClient } from "../api/generated/client";
 import { unwrap } from "../api/unwrap";
 import { useAuth } from "./AuthProvider";
+import type { SetupState } from "../api/setup";
 
 interface SettingsContextValue {
   settings: Resource<SettingsResponse | undefined>;
@@ -46,6 +47,15 @@ interface SettingsContextValue {
   refetchCustomColumns: () => void;
   columnVisibility: () => ColumnVisibility | undefined;
   saveColumnVisibility: (vis: ColumnVisibility) => Promise<void>;
+  /** False only when the backend says first-run setup is unfinished. */
+  setupComplete: () => boolean;
+  setSetupComplete: (v: boolean) => void;
+  /** The bootstrap `setup` block, for the wizard's environment-check step. */
+  setupState: () => SetupState | undefined;
+  /** True when an admin asked to re-run the wizard from Settings > Library. */
+  wizardRequested: () => boolean;
+  openSetupWizard: () => void;
+  closeSetupWizard: () => void;
 }
 
 const SettingsContext = createContext<SettingsContextValue>();
@@ -71,6 +81,10 @@ export const SettingsProvider: ParentComponent = (props) => {
   );
   const refetchCustomColumns = () => startTransition(() => rawRefetchCustomColumns());
   const [columnVisibility, setColumnVisibility] = createSignal<ColumnVisibility | undefined>(undefined);
+  // Default true: a bootstrap failure must never trap a user behind a wizard.
+  const [setupComplete, setSetupComplete] = createSignal(true);
+  const [setupState, setSetupState] = createSignal<SetupState | undefined>(undefined);
+  const [wizardRequested, setWizardRequested] = createSignal(false);
 
   graphStore.loadGraphSettings();
 
@@ -99,10 +113,17 @@ export const SettingsProvider: ParentComponent = (props) => {
         pendingCustomColumnsSeed = customColumns;
         mutateCustomColumns(customColumns);
         setCCGate(true);
+        const setup = b.setup;
+        if (setup) {
+          setSetupState(setup);
+          setSetupComplete(setup.complete);
+        }
       })
       .catch(() => {
         enableSettingsFetch();
         setCCGate(true);
+        // setupComplete stays at its `true` default here on purpose: a
+        // bootstrap failure must not lock an admin behind the wizard.
       });
   });
 
@@ -153,6 +174,12 @@ export const SettingsProvider: ParentComponent = (props) => {
       await apiClient.PUT("/api/settings/column-visibility", { body: vis }).then(unwrap);
       setColumnVisibility(vis);
     },
+    setupComplete,
+    setSetupComplete,
+    setupState,
+    wizardRequested,
+    openSetupWizard: () => setWizardRequested(true),
+    closeSetupWizard: () => setWizardRequested(false),
   };
 
   return (

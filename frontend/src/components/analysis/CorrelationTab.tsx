@@ -16,12 +16,15 @@ import type { SharedFilters } from "../../pages/AnalysisPage";
 import type { CorrelationResponse } from "../../api/types";
 import CorrelationChart from "./CorrelationChart";
 import StatsCard from "./StatsCard";
-import { metricOptions, METRIC_UNITS } from "../../utils/metricLabels";
+import { metricOptions, metricLabel, METRIC_UNITS, PHD2_X_METRICS, PHD2_METRIC_NOTE } from "../../utils/metricLabels";
 
 const X_OPTIONS = metricOptions([
   "humidity", "wind_speed", "ambient_temp", "dew_point", "pressure",
   "cloud_cover", "sky_quality", "focuser_temp", "airmass", "sensor_temp",
 ]);
+
+// Rendered as a separate optgroup; the backend accepts these for correlation only.
+const PHD2_X_OPTIONS = metricOptions(PHD2_X_METRICS);
 
 const Y_OPTIONS = metricOptions([
   "hfr", "fwhm", "eccentricity", "guiding_rms", "guiding_rms_ra",
@@ -34,6 +37,7 @@ const PRESETS = [
   { label: "Wind vs Guiding", x: "wind_speed", y: "guiding_rms" },
   { label: "Temp vs Eccentricity", x: "ambient_temp", y: "eccentricity" },
   { label: "Sky Quality vs Stars", x: "sky_quality", y: "detected_stars" },
+  { label: "Guiding vs FWHM", x: "phd2_rms_total", y: "fwhm" },
 ];
 
 interface Props {
@@ -159,6 +163,9 @@ const CorrelationTab: Component<Props> = (props) => {
         <label class="text-sm text-theme-text-secondary">X Axis:</label>
         <select class={selectClass} value={customX()} onChange={(e) => setCustomX(e.currentTarget.value)}>
           {X_OPTIONS.map((o) => <option value={o.value}>{o.label}</option>)}
+          <optgroup label="Guiding (PHD2)">
+            {PHD2_X_OPTIONS.map((o) => <option value={o.value}>{o.label}</option>)}
+          </optgroup>
         </select>
         <label class="text-sm text-theme-text-secondary">Y Axis:</label>
         <select class={selectClass} value={customY()} onChange={(e) => setCustomY(e.currentTarget.value)}>
@@ -168,6 +175,10 @@ const CorrelationTab: Component<Props> = (props) => {
           {hideOutliers() ? "Show Outliers" : "Hide Outliers"}
         </button>
       </div>
+
+      <Show when={customX().startsWith("phd2_")}>
+        <p class="text-xs text-theme-text-tertiary mb-2">{PHD2_METRIC_NOTE}</p>
+      </Show>
 
       <Show when={samplingNote()}>
         <p class="text-xs text-theme-text-tertiary mb-2">{samplingNote()}</p>
@@ -180,7 +191,7 @@ const CorrelationTab: Component<Props> = (props) => {
       {/* Stats cards */}
       <Show when={dataQuery.data?.x_stats && dataQuery.data?.y_stats}>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-2 mt-3">
-          <StatsCard stats={dataQuery.data!.x_stats!} label={`X: ${X_OPTIONS.find((o) => o.value === customX())?.label}`} unit={METRIC_UNITS[customX()]} />
+          <StatsCard stats={dataQuery.data!.x_stats!} label={`X: ${metricLabel(customX())}`} unit={METRIC_UNITS[customX()]} />
           <StatsCard stats={dataQuery.data!.y_stats!} label={`Y: ${Y_OPTIONS.find((o) => o.value === customY())?.label}`} unit={METRIC_UNITS[customY()]} />
         </div>
       </Show>
