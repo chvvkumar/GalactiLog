@@ -227,8 +227,23 @@ const SetupWizard: Component = () => {
 
   const timezoneList = supportedTimeZones();
 
+  // The footer's primary action (Next, or Finish on the last step). Named as
+  // the dialog's initial focus target so opening the wizard does not land on
+  // the first help glyph, and refocused on every step change so Back/Next keep
+  // focus on the action rather than whatever the new step renders first.
+  let primaryRef: HTMLButtonElement | undefined;
+  createEffect(() => {
+    step();
+    queueMicrotask(() => primaryRef?.focus());
+  });
+
   return (
-    <Dialog open={true} onClose={() => {}} aria-labelledby="setup-wizard-title">
+    <Dialog
+      open={true}
+      onClose={() => {}}
+      aria-labelledby="setup-wizard-title"
+      initialFocus={() => primaryRef}
+    >
       <div
         class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] w-full max-w-2xl max-h-[85vh] flex flex-col"
         onClick={(e) => e.stopPropagation()}
@@ -678,12 +693,22 @@ const SetupWizard: Component = () => {
             <Show
               when={step() < STEPS.length - 1}
               fallback={
-                <Button variant="primary" disabled={busy()} onClick={finish}>
+                <Button
+                  variant="primary"
+                  disabled={busy()}
+                  onClick={finish}
+                  ref={(el: HTMLButtonElement) => (primaryRef = el)}
+                >
                   Finish
                 </Button>
               }
             >
-              <Button variant="primary" disabled={nextDisabled()} onClick={next}>
+              <Button
+                variant="primary"
+                disabled={nextDisabled()}
+                onClick={next}
+                ref={(el: HTMLButtonElement) => (primaryRef = el)}
+              >
                 Next
               </Button>
             </Show>

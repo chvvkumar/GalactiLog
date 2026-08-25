@@ -171,6 +171,12 @@ describe("SetupWizard", () => {
     expect(bodyText()).toContain("2.4.0");
   });
 
+  it("opens with focus on Next rather than the first help glyph", async () => {
+    render(() => <SetupWizard />);
+    await settle();
+    expect(document.activeElement).toBe(btn("Next"));
+  });
+
   it("disables Next and names the env var when the FITS root does not exist", () => {
     harness.setup = setupState({ fits_root_exists: false });
     render(() => <SetupWizard />);
