@@ -446,7 +446,7 @@ const ImagingTimeline: Component<Props> = (props) => {
       {/* Footer */}
       <div class="flex items-center justify-between">
         <span class="text-micro text-theme-text-secondary select-none hidden sm:inline">
-          <span class="text-green-400">%</span> = imaging time / astronomical dark hours
+          <span class="text-green-400">%</span> = exposure time / astronomical dark hours, per rig on multi-rig nights
         </span>
         <span class="text-micro text-theme-text-secondary select-none hidden sm:inline">
           Scroll to zoom · Drag to pan

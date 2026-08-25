@@ -451,7 +451,8 @@ async def get_target_detail(target_id: str, session: AsyncSession) -> TargetDeta
             median_detected_stars=statistics.median(sess_detected_stars) if sess_detected_stars else None,
             median_guiding_rms_arcsec=statistics.median(sess_guiding_rms) if sess_guiding_rms else None,
             hfr_arcsec=_median_arcsec(sess_images, "median_hfr"),
-            fwhm_arcsec=_median_arcsec(sess_images, "fwhm"),
+            # `fwhm` is already arcsec (NINA CSV): no plate-scale multiply.
+            fwhm_arcsec=statistics.median(sess_fwhm) if sess_fwhm else None,
             filter_medians=sess_filter_medians,
             has_notes=date_type.fromisoformat(date_key) in note_dates if date_key != "unknown" else False,
             rig_count=sess_rig_count,
@@ -794,7 +795,8 @@ async def get_session_detail(target_id: str, date: str, session: AsyncSession) -
     # pixels. When the current session itself has no plate scale, no
     # best/poor-HFR verdict is emitted at all.
     session_hfr_arcsec = _median_arcsec(images, "median_hfr")
-    session_fwhm_arcsec = _median_arcsec(images, "fwhm")
+    # `fwhm` is already arcsec (NINA CSV): no plate-scale multiply.
+    session_fwhm_arcsec = statistics.median(fwhm_values) if fwhm_values else None
     is_best_hfr = False
     target_avg_hfr_arcsec: float | None = None
     if median_hfr is not None:

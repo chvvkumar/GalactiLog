@@ -7,8 +7,10 @@ Plate scale in arcseconds per pixel is:
 This formula previously lived twice in the mosaic code
 (mosaic_detection.compute_fov_arcmin, mosaic_composite.compute_panel_layout)
 and is now extracted here so every surface that needs to compare pixel-domain
-star metrics (HFR, FWHM) across optical trains converts through the same
-helper.
+star metrics across optical trains converts through the same helper. HFR is
+the pixel-domain metric; the `fwhm` column is NOT one, it arrives from the
+N.I.N.A. Session Metadata CSV already in arcseconds and must never be passed
+through here.
 
 Binning caveat: XPIXSZ is assumed to be the binned-effective pixel size.
 N.I.N.A. writes XPIXSZ that way (physical pixel size multiplied by the binning
@@ -46,7 +48,7 @@ def arcsec_per_pixel(xpixsz_um, focallen_mm) -> float | None:
 
 
 def to_arcsec(value_px, xpixsz_um, focallen_mm) -> float | None:
-    """Convert a pixel-domain value (HFR, FWHM) to arcseconds.
+    """Convert a pixel-domain value (HFR) to arcseconds.
 
     Returns None when the value or the plate scale is unavailable.
     """

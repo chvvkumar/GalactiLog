@@ -63,8 +63,11 @@ class SessionOverview(BaseModel):
     median_fwhm: float | None = None
     median_detected_stars: float | None = None
     median_guiding_rms_arcsec: float | None = None
-    # Plate-scale-converted quality metrics (arcsec). None when the session's
-    # frames carry no usable XPIXSZ/FOCALLEN headers.
+    # hfr_arcsec: HFR (pixels) multiplied by plate scale, so None when the
+    # session's frames carry no usable XPIXSZ/FOCALLEN headers. fwhm_arcsec:
+    # median of the stored FWHM, already in arcseconds (NINA Session Metadata
+    # CSV), never multiplied, so None only when no frame in the session has a
+    # FWHM value.
     hfr_arcsec: float | None = None
     fwhm_arcsec: float | None = None
     filter_medians: list[FilterMedian] = []
@@ -320,7 +323,9 @@ class SessionDetailResponse(BaseModel):
     median_fwhm: float | None = None
     min_fwhm: float | None = None
     max_fwhm: float | None = None
-    # Plate-scale-converted session medians (arcsec); None without XPIXSZ/FOCALLEN.
+    # hfr_arcsec: HFR (pixels) multiplied by plate scale. fwhm_arcsec: median of
+    # the stored FWHM, already in arcseconds (NINA Session Metadata CSV), never
+    # multiplied. Both None without XPIXSZ/FOCALLEN.
     hfr_arcsec: float | None = None
     fwhm_arcsec: float | None = None
     median_guiding_rms: float | None = None

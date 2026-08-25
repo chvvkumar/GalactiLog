@@ -671,12 +671,13 @@ def test_the_guiding_metrics_are_column_backed_and_source_agnostic():
 
 
 def test_the_guiding_metrics_are_not_plate_scale_converted():
-    """They are already in arcsec. HFR and FWHM are the pixel metrics."""
+    """They are already in arcsec, and so is the CSV-sourced `fwhm` column.
+    HFR is the only pixel metric."""
     from app.api.analysis import METRIC_MAP, _PIXEL_METRICS
 
-    assert _PIXEL_METRICS == {"hfr", "fwhm"}
+    assert _PIXEL_METRICS == {"hfr"}
     assert not _PIXEL_METRICS & {
-        "guiding_rms", "guiding_rms_ra", "guiding_rms_dec"
+        "fwhm", "guiding_rms", "guiding_rms_ra", "guiding_rms_dec"
     }
     assert set(_PIXEL_METRICS) <= set(METRIC_MAP)
 
