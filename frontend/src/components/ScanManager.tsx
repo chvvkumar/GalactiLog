@@ -331,7 +331,7 @@ const ScanManager: Component = () => {
             </Show>
 
             <Show when={isAdmin()}>
-              <section class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
+              <section id="guide-logs" class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4 scroll-mt-4">
                 <div class="flex items-center gap-2">
                   <h4 class="text-sm font-medium text-theme-text-primary">Guide Logs</h4>
                   <HelpPopover title="Guide Logs">

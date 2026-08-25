@@ -87,6 +87,9 @@ export const SettingsPage: Component = () => {
     let tries = 0;
     const timer = setInterval(() => {
       const el = document.getElementById(id);
+      // A collapsed <details> section (scan filters) would otherwise scroll
+      // into view still shut, hiding the setting the link was aimed at.
+      if (el instanceof HTMLDetailsElement) el.open = true;
       if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
       if (el || ++tries > 20) clearInterval(timer);
     }, 100);

@@ -27,10 +27,35 @@ const HelpPopover: Component<HelpPopoverProps> = (props) => {
   let panelRef: HTMLDivElement | undefined;
   let triggerRef: HTMLButtonElement | undefined;
 
+  // Hover-open must not move focus; click/keyboard still does.
+  let hoverOpened = false;
+  let openTimer: number | undefined;
+  let closeTimer: number | undefined;
+  const clearTimers = () => {
+    clearTimeout(openTimer);
+    clearTimeout(closeTimer);
+    openTimer = undefined;
+    closeTimer = undefined;
+  };
+
   const close = () => setOpen(false);
   const toggle = (e: MouseEvent) => {
     e.stopPropagation();
+    clearTimers();
+    hoverOpened = false;
     setOpen((v) => !v);
+  };
+  const onPointerEnter = () => {
+    clearTimers();
+    if (open()) return;
+    openTimer = window.setTimeout(() => {
+      hoverOpened = true;
+      setOpen(true);
+    }, 150);
+  };
+  const onPointerLeave = () => {
+    clearTimers();
+    closeTimer = window.setTimeout(close, 200);
   };
 
   // The panel is portaled to the body with position:fixed so a scrolling
@@ -52,14 +77,14 @@ const HelpPopover: Component<HelpPopoverProps> = (props) => {
   createEffect(() => {
     if (!open()) return;
     place();
-    panelRef?.focus();
+    if (!hoverOpened) panelRef?.focus();
     // Capture phase so scrolling containers, not just the window, reposition.
     window.addEventListener("scroll", place, true);
     window.addEventListener("resize", place);
     onCleanup(() => {
       window.removeEventListener("scroll", place, true);
       window.removeEventListener("resize", place);
-      triggerRef?.focus();
+      if (!hoverOpened) triggerRef?.focus();
     });
   });
 
@@ -80,10 +105,16 @@ const HelpPopover: Component<HelpPopoverProps> = (props) => {
   onCleanup(() => {
     document.removeEventListener("click", onDocClick);
     document.removeEventListener("keydown", onKey);
+    clearTimers();
   });
 
   return (
-    <div ref={wrapperRef} class={`relative inline-flex ${props.class ?? ""}`}>
+    <div
+      ref={wrapperRef}
+      class={`relative inline-flex ${props.class ?? ""}`}
+      onMouseEnter={onPointerEnter}
+      onMouseLeave={onPointerLeave}
+    >
       <button
         ref={triggerRef}
         type="button"
@@ -108,6 +139,8 @@ const HelpPopover: Component<HelpPopoverProps> = (props) => {
             aria-modal="true"
             tabindex={-1}
             onClick={(e) => e.stopPropagation()}
+            onMouseEnter={clearTimers}
+            onMouseLeave={onPointerLeave}
             style={{ left: `${pos().left}px`, top: `${pos().top}px` }}
             class="glass-popover fixed z-50 w-[min(28rem,90vw)] max-w-[calc(100vw-16px)] border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-lg)] p-4"
           >
