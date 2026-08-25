@@ -70,7 +70,8 @@ vi.mock("../../api/scanFilters", () => ({
       harness.filters.push(f);
       return {};
     },
-    browse: async () => [],
+    browse: async (path?: string) =>
+      path ? [] : [{ name: "Lights", path: "Lights", has_children: false }],
   },
 }));
 
@@ -208,6 +209,8 @@ describe("SetupWizard", () => {
     await settle();
     fireEvent.click(btn("Next"));
     await settle();
+    // Every preset starts checked, so unchecking WBPP is what proves the
+    // remaining names are written as folder-name rules.
     const boxes = Array.from(
       document.body.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'),
     );
@@ -215,6 +218,7 @@ describe("SetupWizard", () => {
       (b) => (b.parentElement?.textContent ?? "").trim() === "WBPP",
     );
     if (!wbpp) throw new Error("no WBPP preset checkbox");
+    expect(wbpp.checked).toBe(true);
     fireEvent.click(wbpp);
     fireEvent.click(btn("Next"));
     await settle();
@@ -222,18 +226,77 @@ describe("SetupWizard", () => {
       {
         include_paths: [],
         exclude_paths: [],
-        name_rules: [
-          {
-            id: "setup-exclude-WBPP",
+        name_rules: ["masters", "calibrated", "WORK_AREA", "PixInsight"].map(
+          (name) => ({
+            id: `setup-exclude-${name}`,
             action: "exclude",
             type: "substring",
-            pattern: "WBPP",
+            pattern: name,
             target: "folder",
             enabled: true,
-          },
-        ],
+          }),
+        ),
       },
     ]);
+  });
+
+  it("picks folders from the environment step and carries them to scan filters", async () => {
+    render(() => <SetupWizard />);
+    expect(bodyText()).toContain("Step 1 of 5: Environment");
+    fireEvent.click(btn("Choose folders to scan"));
+    await settle();
+    const folderBox = document.body.querySelector<HTMLInputElement>(
+      'input[type="checkbox"]',
+    );
+    if (!folderBox) throw new Error("folder browser did not open");
+    fireEvent.click(folderBox);
+    fireEvent.click(btn("Add 1"));
+    await settle();
+    expect(bodyText()).toContain("Lights");
+    fireEvent.click(btn("Next"));
+    await settle();
+    fireEvent.click(btn("Next"));
+    await settle();
+    expect(bodyText()).toContain("Step 3 of 5: Scan filters");
+    expect(bodyText()).toContain("Lights");
+    fireEvent.click(btn("Next"));
+    await settle();
+    expect((harness.filters[0] as { include_paths: string[] }).include_paths).toEqual([
+      "Lights",
+    ]);
+  });
+
+  it("disables the step 1 folder picker when the FITS root is missing", () => {
+    harness.setup = setupState({ fits_root_exists: false });
+    render(() => <SetupWizard />);
+    expect(btn("Choose folders to scan").disabled).toBe(true);
+  });
+
+  it("names the library root in the scan-everything copy", async () => {
+    render(() => <SetupWizard />);
+    fireEvent.click(btn("Next"));
+    await settle();
+    fireEvent.click(btn("Next"));
+    await settle();
+    expect(bodyText()).toContain("scan everything under /data/fits");
+    expect(bodyText()).toContain("Everything under /data/fits will be scanned");
+    expect(bodyText()).toContain("Settings > Library > Scan filters");
+    expect(buttons().some((b) => (b.textContent ?? "").includes("Advanced rules"))).toBe(
+      false,
+    );
+    expect(bodyText()).not.toContain("Advanced rules");
+  });
+
+  it("offers a help popover on the imaging-night field", async () => {
+    render(() => <SetupWizard />);
+    fireEvent.click(btn("Next"));
+    await settle();
+    const glyph = buttons().find(
+      (b) => b.getAttribute("aria-label") === "About imaging night grouping",
+    );
+    expect(glyph).toBeTruthy();
+    fireEvent.click(glyph!);
+    expect(bodyText()).toContain("local noon");
   });
 
   it("writes empty filter lists when Scan everything is used", async () => {

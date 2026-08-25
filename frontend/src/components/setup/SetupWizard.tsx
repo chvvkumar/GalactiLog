@@ -1,7 +1,8 @@
-import { Component, For, Show, createEffect, createSignal } from "solid-js";
+import { Component, For, Show, createEffect, createSignal, type JSX } from "solid-js";
 import Dialog from "../Dialog";
 import Button from "../ui/Button";
 import FolderBrowserModal from "../FolderBrowserModal";
+import HelpPopover from "../HelpPopover";
 import { showToast } from "../Toast";
 import { useSettingsContext } from "../SettingsProvider";
 import { useScan } from "../../store/scan";
@@ -45,12 +46,19 @@ const presetRule = (name: string): NameRule => ({
   enabled: true,
 });
 
-const CheckRow: Component<{ label: string; ok: boolean | null; value: string; hint?: string }> = (
-  props,
-) => (
+const CheckRow: Component<{
+  label: string;
+  ok: boolean | null;
+  value: string;
+  hint?: string;
+  help?: JSX.Element;
+}> = (props) => (
   <div class="flex items-start justify-between gap-4 py-2 border-b border-theme-border last:border-b-0">
     <div class="min-w-0">
-      <div class="text-sm text-theme-text-primary">{props.label}</div>
+      <div class="flex items-center gap-1.5">
+        <span class="text-sm text-theme-text-primary">{props.label}</span>
+        {props.help}
+      </div>
       <div class="text-xs text-theme-text-secondary break-all">{props.value}</div>
       <Show when={props.hint}>
         <div class="text-xs text-theme-warning mt-1">{props.hint}</div>
@@ -66,6 +74,41 @@ const CheckRow: Component<{ label: string; ok: boolean | null; value: string; hi
       </span>
     </Show>
   </div>
+);
+
+/** Removable chips for the selected include folders. Rendered on step 1 and
+ *  step 3 against the same signal, so a pick made on either shows on both. */
+const FolderChips: Component<{
+  paths: string[];
+  root: string;
+  onRemove: (index: number) => void;
+}> = (props) => (
+  <Show
+    when={props.paths.length > 0}
+    fallback={
+      <p class="text-xs text-theme-text-secondary">
+        None selected. Everything under {props.root} will be scanned.
+      </p>
+    }
+  >
+    <ul class="flex flex-wrap gap-2">
+      <For each={props.paths}>
+        {(p, i) => (
+          <li class="flex items-center gap-1.5 px-2 py-1 rounded-full bg-theme-elevated border border-theme-border text-xs text-theme-text-primary">
+            <code class="break-all">{p}</code>
+            <button
+              type="button"
+              aria-label={`Remove ${p}`}
+              class="text-theme-text-secondary hover:text-theme-text-primary shrink-0"
+              onClick={() => props.onRemove(i())}
+            >
+              &times;
+            </button>
+          </li>
+        )}
+      </For>
+    </ul>
+  </Show>
 );
 
 const SetupWizard: Component = () => {
@@ -88,9 +131,11 @@ const SetupWizard: Component = () => {
   const [imagingNight, setImagingNight] = createSignal(true);
   const [lonWarning, setLonWarning] = createSignal(false);
 
-  // Step 3
+  // Step 3 (the folder picker is also reachable from step 1)
   const [includePaths, setIncludePaths] = createSignal<string[]>([]);
-  const [excludeNames, setExcludeNames] = createSignal<string[]>([]);
+  // Every preset starts checked: processing-output folders are the common case
+  // and cataloguing them distorts frame counts, so opt out rather than opt in.
+  const [excludeNames, setExcludeNames] = createSignal<string[]>([...EXCLUDE_PRESETS]);
   const [browsing, setBrowsing] = createSignal(false);
 
   // Step 4
@@ -168,6 +213,9 @@ const SetupWizard: Component = () => {
     return Number.isFinite(v) ? v : null;
   };
 
+  const removeInclude = (index: number) =>
+    setIncludePaths(includePaths().filter((_, n) => n !== index));
+
   const saveFilters = async (include: string[], excludeNames: string[]) => {
     await scanFilters.put({
       include_paths: include,
@@ -176,6 +224,10 @@ const SetupWizard: Component = () => {
     });
     window.dispatchEvent(new CustomEvent("scan-filters-configured"));
   };
+
+  /** The mounted library root, for copy that names what "everything" means.
+   *  Falls back to a generic phrase only when the env probe is unavailable. */
+  const rootLabel = () => setupState()?.fits_root ?? "the library";
 
   const envBlocked = () => {
     const s = setupState();
@@ -278,15 +330,102 @@ const SetupWizard: Component = () => {
                         ? undefined
                         : "The path is not a directory inside the container. Set GALACTILOG_FITS_HOST_PATH and restart."
                     }
+                    help={
+                      <HelpPopover
+                        title="FITS library path"
+                        label="About the FITS library path"
+                      >
+                        <p>
+                          The folder mounted into the container as your FITS
+                          library. Every file the scanner reads lives under this
+                          path.
+                        </p>
+                        <p>
+                          The host folder comes from GALACTILOG_FITS_HOST_PATH in
+                          the .env file and is mounted inside the container at
+                          GALACTILOG_FITS_DATA_PATH. It cannot be changed from
+                          this dialog: edit .env and restart the stack to point
+                          at a different folder.
+                        </p>
+                        <p>
+                          Subfolders under the root can be selected below to
+                          limit what a scan walks.
+                        </p>
+                      </HelpPopover>
+                    }
                   />
+
+                  <div class="py-3 space-y-2 border-b border-theme-border">
+                    <div class="flex items-center gap-1.5">
+                      <span class="text-sm text-theme-text-primary">
+                        Folders to scan
+                      </span>
+                      <HelpPopover
+                        title="Folders to scan"
+                        label="About folders to scan"
+                      >
+                        <p>
+                          Limits the scan to the folders you pick, so nothing
+                          outside them is walked. The library root itself is
+                          fixed by the container mount; only subfolders under it
+                          can be selected.
+                        </p>
+                        <p>
+                          Picking nothing scans everything under {rootLabel()}.
+                          Example: select your Lights folder to leave a sibling
+                          folder of processed images untouched.
+                        </p>
+                        <p>
+                          Nothing is saved here. The picks carry over to the Scan
+                          filters step, which writes them.
+                        </p>
+                      </HelpPopover>
+                      <Button
+                        class="ml-auto"
+                        variant="secondary"
+                        size="sm"
+                        disabled={!s().fits_root_exists}
+                        onClick={() => setBrowsing(true)}
+                      >
+                        Choose folders to scan
+                      </Button>
+                    </div>
+                    <p class="text-xs text-theme-text-secondary">
+                      The library root is set by the container mount and cannot
+                      be changed here; only subfolders under it are selectable.
+                      Pick nothing to scan everything under {rootLabel()}.
+                    </p>
+                    <FolderChips
+                      paths={includePaths()}
+                      root={rootLabel()}
+                      onRemove={removeInclude}
+                    />
+                  </div>
+
                   <CheckRow
-                    label="Library contains entries"
+                    label="Library contains files"
                     value={s().fits_root_has_entries ? "Yes" : "No files found"}
                     ok={s().fits_root_has_entries}
                     hint={
                       s().fits_root_has_entries
                         ? undefined
                         : "The mount is empty. Check that GALACTILOG_FITS_HOST_PATH points at your capture folder."
+                    }
+                    help={
+                      <HelpPopover
+                        title="Library contains files"
+                        label="About the library contents check"
+                      >
+                        <p>
+                          Checks that the mounted library is not empty. A scan of
+                          an empty mount finds nothing and imports nothing.
+                        </p>
+                        <p>
+                          If no files are found, GALACTILOG_FITS_HOST_PATH points
+                          at the wrong host folder, or the folder is not readable
+                          by the container.
+                        </p>
+                      </HelpPopover>
                     }
                   />
                   <CheckRow
@@ -298,8 +437,38 @@ const SetupWizard: Component = () => {
                         ? undefined
                         : "Set GALACTILOG_HTTPS=true if this instance is reachable outside your network."
                     }
+                    help={
+                      <HelpPopover title="HTTPS" label="About HTTPS">
+                        <p>
+                          Whether this instance serves over HTTPS, set by
+                          GALACTILOG_HTTPS in the .env file.
+                        </p>
+                        <p>
+                          With HTTPS enabled, the session cookie is marked
+                          secure. A browser refuses to store a secure cookie
+                          delivered over plain http://, so a login appears to
+                          succeed and then returns to the login page on the next
+                          request. Reach the instance over https://, or leave
+                          HTTPS disabled while you use it over plain HTTP on a
+                          local network.
+                        </p>
+                      </HelpPopover>
+                    }
                   />
-                  <CheckRow label="Version" value={s().version} ok={null} />
+                  <CheckRow
+                    label="Version"
+                    value={s().version}
+                    ok={null}
+                    help={
+                      <HelpPopover title="Version" label="About the version">
+                        <p>
+                          The GalactiLog build currently running. Quote it when
+                          reporting a problem, and compare it against the image
+                          tag you pulled after an upgrade.
+                        </p>
+                      </HelpPopover>
+                    }
+                  />
                 </div>
               )}
             </Show>
@@ -313,7 +482,20 @@ const SetupWizard: Component = () => {
             </p>
             <div class="grid grid-cols-2 gap-3">
               <label class="space-y-1">
-                <span class="text-xs text-theme-text-secondary">Latitude</span>
+                <span class="text-xs text-theme-text-secondary inline-flex items-center gap-1.5">
+                  Latitude
+                  <HelpPopover title="Latitude" label="About latitude">
+                    <p>
+                      Your site latitude in decimal degrees, positive north of
+                      the equator and negative south of it.
+                    </p>
+                    <p>
+                      Used as a fallback when FITS headers carry no site
+                      coordinates, and to compute darkness hours and target
+                      altitude. Example: 42.3601 for Boston.
+                    </p>
+                  </HelpPopover>
+                </span>
                 <input
                   class={inputClass}
                   value={latitude()}
@@ -322,7 +504,23 @@ const SetupWizard: Component = () => {
                 />
               </label>
               <label class="space-y-1">
-                <span class="text-xs text-theme-text-secondary">Longitude</span>
+                <span class="text-xs text-theme-text-secondary inline-flex items-center gap-1.5">
+                  Longitude
+                  <HelpPopover title="Longitude" label="About longitude">
+                    <p>
+                      Your site longitude in decimal degrees, positive east of
+                      Greenwich and negative west of it.
+                    </p>
+                    <p>
+                      Used as a fallback when FITS headers carry no site
+                      coordinates, and to compute the local noon boundary used by
+                      imaging-night grouping. Example: with a longitude of -74,
+                      frames captured between local noon one day and local noon
+                      the next are grouped as one imaging night, so a session
+                      that crosses midnight stays together.
+                    </p>
+                  </HelpPopover>
+                </span>
                 <input
                   class={inputClass}
                   value={longitude()}
@@ -342,7 +540,30 @@ const SetupWizard: Component = () => {
               </p>
             </Show>
             <label class="space-y-1 block">
-              <span class="text-xs text-theme-text-secondary">Capture computer timezone</span>
+              <span class="text-xs text-theme-text-secondary inline-flex items-center gap-1.5">
+                Capture computer timezone
+                <HelpPopover
+                  title="Capture computer timezone"
+                  label="About the capture computer timezone"
+                >
+                  <p>
+                    The clock the computer running PHD2 was set to. PHD2 writes
+                    guide log timestamps as local wall-clock with no zone marker,
+                    so this is what lines those sessions up with your frames.
+                  </p>
+                  <p>
+                    It is not the server's clock, and it is not the display
+                    timezone on the Display tab, which only changes how
+                    already-recorded times are shown. The server runs on UTC
+                    inside its container no matter which timezone the host uses,
+                    so there is no sensible value to fall back to.
+                  </p>
+                  <p>
+                    While this is unset, guide logs are still catalogued but
+                    their guiding numbers are not applied to individual frames.
+                  </p>
+                </HelpPopover>
+              </span>
               <Show
                 when={timezoneList}
                 fallback={
@@ -365,61 +586,95 @@ const SetupWizard: Component = () => {
                 )}
               </Show>
             </label>
-            <label class="flex items-center gap-2 text-sm text-theme-text-primary">
-              <input
-                type="checkbox"
-                checked={imagingNight()}
-                onChange={(e) => setImagingNight(e.currentTarget.checked)}
-              />
-              Group frames by imaging night
-            </label>
+            <div class="flex items-center gap-1.5">
+              <label class="flex items-center gap-2 text-sm text-theme-text-primary">
+                <input
+                  type="checkbox"
+                  checked={imagingNight()}
+                  onChange={(e) => setImagingNight(e.currentTarget.checked)}
+                />
+                Group frames by imaging night
+              </label>
+              <HelpPopover
+                title="Group frames by imaging night"
+                label="About imaging night grouping"
+              >
+                <p>
+                  An imaging session runs from dusk to dawn, so frames captured
+                  after midnight belong to the previous evening's night. With
+                  this on, those frames stay in one session instead of splitting
+                  across two calendar dates.
+                </p>
+                <p>
+                  The boundary is local noon, computed from your longitude:
+                  frames captured between local noon one day and local noon the
+                  next count as one night.
+                </p>
+                <p>
+                  Without a longitude the boundary falls back to UTC midnight,
+                  which splits most nights in two.
+                </p>
+              </HelpPopover>
+            </div>
           </Show>
 
           {/* Step 3: scan filters */}
           <Show when={step() === 2}>
             <p class="text-sm text-theme-text-secondary">
               Limit the scan to the folders holding your sub-frames. Select
-              nothing to scan the whole library.
+              nothing to scan everything under {rootLabel()}.
             </p>
             <div class="space-y-2">
-              <div class="flex items-center justify-between">
-                <span class="text-xs text-theme-text-secondary">Include folders</span>
-                <Button variant="secondary" size="sm" onClick={() => setBrowsing(true)}>
+              <div class="flex items-center gap-1.5">
+                <span class="text-xs text-theme-text-secondary">Folders to scan</span>
+                <HelpPopover title="Folders to scan" label="About folders to scan">
+                  <p>
+                    Limits the scan to the folders you pick, so nothing outside
+                    them is walked. Selecting nothing scans everything under{" "}
+                    {rootLabel()}.
+                  </p>
+                  <p>
+                    Example: pick your Lights folder to skip a sibling folder of
+                    processed images. Folders picked on the Environment step
+                    appear here already.
+                  </p>
+                </HelpPopover>
+                <Button
+                  class="ml-auto"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setBrowsing(true)}
+                >
                   Browse
                 </Button>
               </div>
-              <Show
-                when={includePaths().length > 0}
-                fallback={
-                  <p class="text-xs text-theme-text-secondary">
-                    None selected. The entire library will be scanned.
-                  </p>
-                }
-              >
-                <ul class="space-y-1">
-                  <For each={includePaths()}>
-                    {(p, i) => (
-                      <li class="flex items-center justify-between gap-2 text-xs text-theme-text-primary">
-                        <code class="break-all">{p}</code>
-                        <button
-                          class="underline hover:no-underline shrink-0"
-                          onClick={() =>
-                            setIncludePaths(includePaths().filter((_, n) => n !== i()))
-                          }
-                        >
-                          Remove
-                        </button>
-                      </li>
-                    )}
-                  </For>
-                </ul>
-              </Show>
+              <FolderChips
+                paths={includePaths()}
+                root={rootLabel()}
+                onRemove={removeInclude}
+              />
             </div>
 
             <div class="space-y-2">
-              <span class="text-xs text-theme-text-secondary">
-                Skip common output folders, wherever they sit in the tree
-              </span>
+              <div class="flex items-center gap-1.5">
+                <span class="text-xs text-theme-text-secondary">Folders to skip</span>
+                <HelpPopover title="Folders to skip" label="About folders to skip">
+                  <p>
+                    Folder names skipped wherever they appear in the tree, at any
+                    depth, rather than only directly under the library root.
+                  </p>
+                  <p>
+                    These names usually hold processing output rather than
+                    sub-frames. Cataloguing them fills the library with stacked,
+                    calibrated, and intermediate files that distort frame counts
+                    and integration totals.
+                  </p>
+                  <p>
+                    All five start checked. Uncheck one if you keep sub-frames in
+                    a folder by that name.
+                  </p>
+                </HelpPopover>
+              </div>
               <For each={EXCLUDE_PRESETS}>
                 {(name) => (
                   <label class="flex items-center gap-2 text-sm text-theme-text-primary">
@@ -438,64 +693,106 @@ const SetupWizard: Component = () => {
                   </label>
                 )}
               </For>
+              <p class="text-xs text-theme-text-secondary">
+                These rules can be changed later under Settings &gt; Library &gt;
+                Scan filters. Regex and filename rules are available there as
+                well.
+              </p>
             </div>
 
             <div class="flex items-center gap-4">
               <Button variant="secondary" size="sm" disabled={busy()} onClick={scanEverything}>
                 Scan everything
               </Button>
-              <a
-                class="text-xs underline text-theme-accent"
-                href="/settings?tab=scan"
-                target="_blank"
-                rel="noreferrer"
-              >
-                Advanced rules
-              </a>
             </div>
-
-            <FolderBrowserModal
-              open={browsing()}
-              fitsRoot={setupState()?.fits_root ?? ""}
-              title="Select folders to scan"
-              existing={includePaths()}
-              onCancel={() => setBrowsing(false)}
-              onConfirm={(paths) => {
-                setIncludePaths([...includePaths(), ...paths]);
-                setBrowsing(false);
-              }}
-            />
           </Show>
 
           {/* Step 4: ingest options */}
           <Show when={step() === 3}>
-            <label class="flex items-center gap-2 text-sm text-theme-text-primary">
-              <input
-                type="checkbox"
-                checked={includeCalibration()}
-                onChange={(e) => setIncludeCalibration(e.currentTarget.checked)}
-              />
-              Catalog calibration frames (darks, flats, bias)
-            </label>
-            <label class="flex items-center gap-2 text-sm text-theme-text-primary">
-              <input
-                type="checkbox"
-                checked={phd2Enabled()}
-                onChange={(e) => setPhd2Enabled(e.currentTarget.checked)}
-              />
-              Read PHD2 guide logs found in the library
-            </label>
-            <label class="flex items-center gap-2 text-sm text-theme-text-primary">
-              <input
-                type="checkbox"
-                checked={autoScan()}
-                onChange={(e) => setAutoScan(e.currentTarget.checked)}
-              />
-              Scan automatically on a schedule
-            </label>
+            <div class="flex items-center gap-1.5">
+              <label class="flex items-center gap-2 text-sm text-theme-text-primary">
+                <input
+                  type="checkbox"
+                  checked={includeCalibration()}
+                  onChange={(e) => setIncludeCalibration(e.currentTarget.checked)}
+                />
+                Catalog calibration frames (darks, flats, bias)
+              </label>
+              <HelpPopover
+                title="Calibration frames"
+                label="About cataloguing calibration frames"
+              >
+                <p>
+                  Catalogs darks, flats, and bias frames alongside light frames.
+                  Turn it off to catalog light frames only, which is faster and
+                  keeps the library limited to the frames that go into an image.
+                </p>
+                <p>
+                  This sets the default. A one-time scan can still be run for
+                  light frames only from the Scan page.
+                </p>
+              </HelpPopover>
+            </div>
+            <div class="flex items-center gap-1.5">
+              <label class="flex items-center gap-2 text-sm text-theme-text-primary">
+                <input
+                  type="checkbox"
+                  checked={phd2Enabled()}
+                  onChange={(e) => setPhd2Enabled(e.currentTarget.checked)}
+                />
+                Read PHD2 guide logs found in the library
+              </label>
+              <HelpPopover title="Guide Logs" label="About PHD2 guide log scanning">
+                <p>
+                  Collects PHD2 guide logs found anywhere under the library path
+                  during the same walk that reads FITS files, and stores
+                  per-session guiding statistics alongside your frames.
+                </p>
+                <p>
+                  Only files named PHD2_GuideLog_*.txt are read; PHD2 debug logs
+                  are ignored. Turn this off if your library holds guide logs you
+                  do not want catalogued.
+                </p>
+              </HelpPopover>
+            </div>
+            <div class="flex items-center gap-1.5">
+              <label class="flex items-center gap-2 text-sm text-theme-text-primary">
+                <input
+                  type="checkbox"
+                  checked={autoScan()}
+                  onChange={(e) => setAutoScan(e.currentTarget.checked)}
+                />
+                Scan automatically on a schedule
+              </label>
+              <HelpPopover title="Auto-scan" label="About auto-scan">
+                <p>
+                  Runs a scan automatically on a fixed interval so new files
+                  dropped into the library are picked up without manual action.
+                </p>
+                <p>
+                  Example: set the interval to 1 hour to ingest frames that your
+                  capture software writes during an active session, or 12 hours
+                  if you only sync files once per day.
+                </p>
+              </HelpPopover>
+            </div>
             <Show when={autoScan()}>
               <label class="space-y-1 block">
-                <span class="text-xs text-theme-text-secondary">Scan interval</span>
+                <span class="text-xs text-theme-text-secondary inline-flex items-center gap-1.5">
+                  Scan interval
+                  <HelpPopover title="Scan interval" label="About the scan interval">
+                    <p>
+                      How long to wait between automatic scans. Each scan walks
+                      the library again and reads only files that are new or
+                      changed since the last run.
+                    </p>
+                    <p>
+                      Shorter intervals pick up frames sooner at the cost of more
+                      disk activity. A large library on a network share is
+                      happier with a longer interval.
+                    </p>
+                  </HelpPopover>
+                </span>
                 <select
                   class={inputClass}
                   value={autoScanInterval()}
@@ -511,6 +808,26 @@ const SetupWizard: Component = () => {
 
           {/* Step 5: first scan */}
           <Show when={step() === 4}>
+            <div class="flex items-center gap-1.5">
+              <span class="text-sm text-theme-text-primary">First scan</span>
+              <HelpPopover title="First scan" label="About the first scan">
+                <p>
+                  A scan walks the configured library path, reads FITS headers,
+                  and imports target names, filters, timestamps, and equipment
+                  metadata into the catalog.
+                </p>
+                <p>
+                  The first scan reads every file it finds, so it takes far
+                  longer than later scans, which only pick up new or changed
+                  files. It keeps running in the background if you close this
+                  dialog.
+                </p>
+                <p>
+                  Everything configured in this wizard is already saved, so
+                  starting the scan later from the Scan page loses nothing.
+                </p>
+              </HelpPopover>
+            </div>
             <p class="text-sm text-theme-text-secondary">
               Run the first scan now, or finish and start it later from Settings.
             </p>
@@ -534,6 +851,19 @@ const SetupWizard: Component = () => {
               </p>
             </Show>
           </Show>
+
+          {/* Shared by step 1 and step 3: both write the same include list. */}
+          <FolderBrowserModal
+            open={browsing()}
+            fitsRoot={setupState()?.fits_root ?? ""}
+            title="Select folders to scan"
+            existing={includePaths()}
+            onCancel={() => setBrowsing(false)}
+            onConfirm={(paths) => {
+              setIncludePaths([...includePaths(), ...paths]);
+              setBrowsing(false);
+            }}
+          />
         </div>
 
         <div class="p-4 border-t border-theme-border flex items-center justify-between">
