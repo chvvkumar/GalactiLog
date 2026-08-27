@@ -345,7 +345,7 @@ export default function DisplayTab() {
           <h2 class="text-sm font-semibold text-theme-text-primary">Filter Badge Style</h2>
           <HelpPopover title="Filter Badge Style">
             <p>Controls how filter names render in session tables, dashboard rows, and charts.</p>
-            <p>Example: a solid pill fills the badge with the filter color, while the dot style keeps text neutral and uses a small colored dot next to the name.</p>
+            <p>Example: a solid pill fills the badge with the filter color, while the ghost style keeps text neutral and colors only the first letter.</p>
           </HelpPopover>
         </div>
         <div class="flex items-center justify-between">

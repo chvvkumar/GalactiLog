@@ -54,18 +54,32 @@ export type FilterBadgeStyle =
   | "indicator-dots"
   | "underline"
   | "tint-border"
-  | "tint-border-bright";
+  | "tint-border-bright"
+  | "frost"
+  | "thin-glass"
+  | "led"
+  | "brushed"
+  | "hairline"
+  | "ticket"
+  | "ghost";
 
+// "indicator-dots" and "underline" still render for stored settings but are
+// no longer offered in the picker.
 export const FILTER_STYLE_OPTIONS: { value: FilterBadgeStyle; label: string }[] = [
   { value: "solid", label: "Solid" },
   { value: "muted", label: "Muted Backgrounds" },
   { value: "frosted-glass", label: "Frosted Glass" },
+  { value: "frost", label: "Frost (Light Haze)" },
+  { value: "thin-glass", label: "Thin Glass" },
   { value: "outlined", label: "Outlined (Hollow)" },
+  { value: "hairline", label: "Hairline Ring" },
   { value: "text-only", label: "Colored Text Only (Default)" },
-  { value: "indicator-dots", label: "Indicator Dots" },
-  { value: "underline", label: "Underline Accents" },
+  { value: "ghost", label: "Ghost Cap" },
+  { value: "ticket", label: "Ticket Stub" },
   { value: "tint-border", label: "Subtle Tint & Border" },
   { value: "tint-border-bright", label: "Subtle Tint & Border (Bright)" },
+  { value: "led", label: "LED Backlit" },
+  { value: "brushed", label: "Brushed Metal" },
 ];
 
 export interface FilterBadgeStyleResult {
@@ -190,6 +204,80 @@ export function getFilterBadgeStyle(
           "background-color": hexToRgba(hexColor, 0.55),
           border: `1px solid ${hexToRgba(hexColor, 0.65)}`,
           color: "black",
+        },
+      };
+    // The seven styles below came from the 2026-08-26 badge study. Glass
+    // variants deliberately omit backdrop-filter (see frosted-glass above).
+    case "frost":
+      return {
+        style: {
+          "background-image": "linear-gradient(180deg, rgba(255,255,255,0.2), rgba(255,255,255,0.04) 55%, rgba(255,255,255,0))",
+          "background-color": hexToRgba(hexColor, 0.3),
+          border: `1px solid ${hexToRgba(hexColor, 0.5)}`,
+          "box-shadow": "inset 0 1px 0 rgba(255,255,255,0.35), 0 1px 2px rgba(0,0,0,0.4)",
+          "text-shadow": "0 1px 1px rgba(0,0,0,0.35)",
+          color: badgeText(),
+        },
+      };
+    case "thin-glass":
+      return {
+        style: {
+          "background-image": "linear-gradient(180deg, rgba(255,255,255,0.14), rgba(255,255,255,0) 50%)",
+          "background-color": hexToRgba(hexColor, 0.09),
+          border: `1px solid ${hexToRgba(hexColor, 0.55)}`,
+          "box-shadow": `inset 0 0 0 1px rgba(255,255,255,0.06), inset 0 0 8px ${hexToRgba(hexColor, 0.45)}, 0 0 6px ${hexToRgba(hexColor, 0.18)}`,
+          color: `color-mix(in srgb, ${hexColor} 55%, ${badgeText()})`,
+        },
+      };
+    case "led":
+      return {
+        style: {
+          "background-image": "linear-gradient(180deg, rgba(0,0,0,0.45), rgba(0,0,0,0.7))",
+          "box-shadow": `inset 0 1px 0 rgba(255,255,255,0.08), inset 0 0 0 1px rgba(0,0,0,0.6), inset 0 -3px 4px -2px ${hexToRgba(hexColor, 0.55)}, 0 0 0 1px ${hexToRgba(hexColor, 0.3)}, 0 1px 5px ${hexToRgba(hexColor, 0.4)}`,
+          "text-shadow": `0 0 3px ${hexToRgba(hexColor, 0.7)}`,
+          filter: "brightness(1.4)",
+          color: hexColor,
+        },
+      };
+    case "brushed":
+      return {
+        style: {
+          "background-image": `repeating-linear-gradient(0deg, rgba(255,255,255,0.07) 0 1px, rgba(0,0,0,0) 1px 2px), linear-gradient(180deg, rgba(255,255,255,0.15), rgba(255,255,255,0) 50%, rgba(0,0,0,0.18)), linear-gradient(${hexToRgba(hexColor, 0.28)}, ${hexToRgba(hexColor, 0.28)})`,
+          "background-color": badgeBg(),
+          "box-shadow": `inset 0 1px 0 rgba(255,255,255,0.28), inset 0 0 0 1px ${hexToRgba(hexColor, 0.45)}, 0 1px 2px rgba(0,0,0,0.5)`,
+          "text-shadow": "0 1px 1px rgba(0,0,0,0.7)",
+          color: badgeText(),
+        },
+      };
+    case "hairline":
+      return {
+        style: {
+          "background-color": "transparent",
+          "box-shadow": `inset 0 0 0 0.5px ${hexToRgba(hexColor, 0.6)}`,
+          color: hexColor,
+        },
+      };
+    case "ticket":
+      return {
+        style: {
+          "background-color": hexToRgba(hexColor, 0.05),
+          outline: `1px dashed ${hexToRgba(hexColor, 0.55)}`,
+          "outline-offset": "-1px",
+          "font-family": "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
+          "letter-spacing": "0.04em",
+          color: hexColor,
+        },
+      };
+    case "ghost":
+      // The colored first glyph is a ::first-letter rule in index.css keyed on
+      // this --ghost custom property ([style*="--ghost:"]), so no consumer has
+      // to add a class. ::first-letter needs a block container, which that
+      // rule also provides.
+      return {
+        style: {
+          "--ghost": hexColor,
+          "background-color": "transparent",
+          color: `color-mix(in srgb, ${badgeText()} 62%, transparent)`,
         },
       };
     default:
