@@ -213,18 +213,21 @@ Same concept as filter aliases -- the same camera may appear in FITS headers as 
 
 ## Themes
 
-GalactiLog includes 11 built-in themes. Select your theme from **Settings > Display**.
+GalactiLog includes 14 built-in themes. Select your theme from **Settings > Display**.
 
 | Theme | Description |
 |-------|-------------|
 | **Nebula Cyan** | Holographic star-chart glassmorphism |
+| **Obsidian** | Near-black neutral glass with ice blue accent |
 | **Deep Space** | Frosted translucent glass panels |
 | **Void** | Dark glass with muted slate and indigo depth |
 | **Dark** | Modern dark theme |
 | **Deep Neutral** | Ultra-dark pure graphite grey |
 | **Slate Blue** | Deep slate with muted blue tint |
 | **Warm Stone** | Dark graphite with earthy undertones |
+| **Dune** | Dark desert glass with terracotta warmth |
 | **Soft Zinc** | Matte studio-grade dark grey |
+| **Smoke** | Translucent warm smoke glass with steel accent |
 | **Twilight** | Mid-tone grey with cool undertones |
 | **Silver Mist** | Soft silver with muted blue accent |
 | **Daylight** | Clean light theme for daytime use |
