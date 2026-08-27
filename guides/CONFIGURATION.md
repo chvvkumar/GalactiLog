@@ -213,26 +213,41 @@ Same concept as filter aliases -- the same camera may appear in FITS headers as 
 
 ## Themes
 
-GalactiLog includes 14 built-in themes. Select your theme from **Settings > Display**.
+GalactiLog includes 14 built-in themes. Select your theme from **Settings > Display**. The picker groups themes by color family; within each group they run darkest to lightest. All themes except Daylight are glass themes with backdrop blur and gradient backgrounds.
+
+Cool Glass
 
 | Theme | Description |
 |-------|-------------|
 | **Nebula Cyan** | Holographic star-chart glassmorphism |
-| **Obsidian** | Near-black neutral glass with ice blue accent |
 | **Deep Space** | Frosted translucent glass panels |
-| **Void** | Dark glass with muted slate and indigo depth |
-| **Dark** | Modern dark theme |
-| **Deep Neutral** | Ultra-dark pure graphite grey |
 | **Slate Blue** | Deep slate with muted blue tint |
-| **Warm Stone** | Dark graphite with earthy undertones |
-| **Dune** | Dark desert glass with terracotta warmth |
-| **Soft Zinc** | Matte studio-grade dark grey |
-| **Smoke** | Translucent warm smoke glass with steel accent |
 | **Twilight** | Mid-tone grey with cool undertones |
 | **Silver Mist** | Soft silver with muted blue accent |
-| **Daylight** | Clean light theme for daytime use |
 
-The first three are glass themes with backdrop blur and gradient backgrounds.
+Neutral Glass
+
+| Theme | Description |
+|-------|-------------|
+| **Obsidian** | Near-black neutral glass with ice blue accent |
+| **Dark** | Modern dark theme |
+| **Void** | Dark glass with muted slate and indigo depth |
+| **Soft Zinc** | Matte studio-grade dark grey |
+| **Deep Neutral** | Ultra-dark pure graphite grey |
+
+Warm Glass
+
+| Theme | Description |
+|-------|-------------|
+| **Warm Stone** | Dark graphite with earthy undertones |
+| **Dune** | Dark desert glass with terracotta warmth |
+| **Smoke** | Translucent warm smoke glass with steel accent |
+
+Light
+
+| Theme | Description |
+|-------|-------------|
+| **Daylight** | Clean light theme for daytime use |
 
 ### Text Size
 

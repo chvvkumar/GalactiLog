@@ -4,7 +4,7 @@ import { useAuth } from "./AuthProvider";
 import { showToast } from "./Toast";
 import HelpPopover from "./HelpPopover";
 import type { DisplaySettings, MetricGroupSettings } from "../api/types";
-import { THEMES_SORTED, TEXT_SIZES, type ThemeMeta } from "../themes";
+import { THEMES, THEME_GROUPS, TEXT_SIZES, type ThemeMeta } from "../themes";
 import { FILTER_STYLE_OPTIONS, getFilterBadgeStyle, type FilterBadgeStyle } from "../utils/filterStyles";
 import { timezoneLabel } from "../utils/dateTime";
 import Button from "./ui/Button";
@@ -264,7 +264,7 @@ export default function DisplayTab() {
 
   return (
     <div class="rounded-[var(--radius-md)] bg-theme-surface border border-theme-border p-4 space-y-6">
-      <Show when={THEMES_SORTED.length > 1}>
+      <Show when={THEMES.length > 1}>
         <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
           <div class="flex items-center gap-2">
             <h2 class="text-sm font-semibold text-theme-text-primary">Theme</h2>
@@ -273,33 +273,40 @@ export default function DisplayTab() {
               <p>Example: pick a dark theme for night-time sessions at the scope and a light theme for planning during the day.</p>
             </HelpPopover>
           </div>
-          <div class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-3">
-            <For each={THEMES_SORTED}>
-              {(theme: ThemeMeta) => (
-                <button
-                  type="button"
-                  class={`rounded-[var(--radius-md)] p-3 text-left border-2 transition-colors ${
-                    selectedTheme() === theme.id
-                      ? "border-theme-accent"
-                      : "border-theme-border hover:border-theme-border-em"
-                  }`}
-                  style={{ "background-color": theme.tokens["bg-surface"] }}
-                  onClick={() => handleThemeChange(theme.id)}
-                  disabled={themeSaving()}
-                >
-                  <div class="flex gap-1 mb-2">
-                    <span class="w-4 h-4 rounded-full" style={{ "background-color": theme.tokens["accent"] }} />
-                    <span class="w-4 h-4 rounded-full" style={{ "background-color": theme.tokens["success"] }} />
-                    <span class="w-4 h-4 rounded-full" style={{ "background-color": theme.tokens["warning"] }} />
-                    <span class="w-4 h-4 rounded-full" style={{ "background-color": theme.tokens["error"] }} />
-                  </div>
-                  <div class="text-xs font-medium" style={{ color: theme.tokens["text-primary"] }}>
-                    {theme.name.replace(/\s*Glass\s*/i, " ").trim()}
-                  </div>
-                </button>
-              )}
-            </For>
-          </div>
+          <For each={THEME_GROUPS}>
+            {(group) => (
+              <div class="space-y-2">
+                <h3 class="text-label font-medium uppercase tracking-wider text-theme-text-tertiary">{group.label}</h3>
+                <div class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-3">
+                  <For each={group.themes}>
+                    {(theme: ThemeMeta) => (
+                      <button
+                        type="button"
+                        class={`rounded-[var(--radius-md)] p-3 text-left border-2 transition-colors ${
+                          selectedTheme() === theme.id
+                            ? "border-theme-accent"
+                            : "border-theme-border hover:border-theme-border-em"
+                        }`}
+                        style={{ "background-color": theme.tokens["bg-surface"] }}
+                        onClick={() => handleThemeChange(theme.id)}
+                        disabled={themeSaving()}
+                      >
+                        <div class="flex gap-1 mb-2">
+                          <span class="w-4 h-4 rounded-full" style={{ "background-color": theme.tokens["accent"] }} />
+                          <span class="w-4 h-4 rounded-full" style={{ "background-color": theme.tokens["success"] }} />
+                          <span class="w-4 h-4 rounded-full" style={{ "background-color": theme.tokens["warning"] }} />
+                          <span class="w-4 h-4 rounded-full" style={{ "background-color": theme.tokens["error"] }} />
+                        </div>
+                        <div class="text-xs font-medium" style={{ color: theme.tokens["text-primary"] }}>
+                          {theme.name.replace(/\s*Glass\s*/i, " ").trim()}
+                        </div>
+                      </button>
+                    )}
+                  </For>
+                </div>
+              </div>
+            )}
+          </For>
         </div>
       </Show>
 

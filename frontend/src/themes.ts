@@ -70,11 +70,22 @@ export interface GlassConfig {
   orbs?: GlassOrb[];
 }
 
+export type ThemeFamily = "cool" | "neutral" | "warm" | "light";
+
+/** Picker subsections, in display order. */
+export const THEME_FAMILIES: { id: ThemeFamily; label: string }[] = [
+  { id: "cool", label: "Cool Glass" },
+  { id: "neutral", label: "Neutral Glass" },
+  { id: "warm", label: "Warm Glass" },
+  { id: "light", label: "Light" },
+];
+
 export interface ThemeMeta {
   id: string;
   name: string;
   description: string;
   order: number;
+  family: ThemeFamily;
   tokens: ThemeTokens;
   glass?: GlassConfig;
 }
@@ -86,6 +97,7 @@ export const THEMES: ThemeMeta[] = [
     name: "Nebula Cyan",
     description: "Holographic star-chart glassmorphism",
     order: 10,
+    family: "cool",
     glass: {
       blur: "14px",
       saturate: "1.8",
@@ -142,6 +154,7 @@ export const THEMES: ThemeMeta[] = [
     name: "Obsidian",
     description: "Near-black neutral glass with ice blue accent",
     order: 15,
+    family: "neutral",
     glass: {
       blur: "16px",
       saturate: "1.1",
@@ -198,6 +211,7 @@ export const THEMES: ThemeMeta[] = [
     name: "Deep Space",
     description: "True glassmorphic with frosted translucent panels",
     order: 20,
+    family: "cool",
     glass: {
       blur: "20px",
       saturate: "1.6",
@@ -254,6 +268,7 @@ export const THEMES: ThemeMeta[] = [
     name: "Void",
     description: "Dark glass with muted slate and indigo depth",
     order: 30,
+    family: "neutral",
     glass: {
       blur: "12px",
       saturate: "1.0",
@@ -310,6 +325,7 @@ export const THEMES: ThemeMeta[] = [
     name: "Dark",
     description: "Refined dark glass with subtle violet depth",
     order: 40,
+    family: "neutral",
     glass: {
       blur: "16px",
       saturate: "1.4",
@@ -366,6 +382,7 @@ export const THEMES: ThemeMeta[] = [
     name: "Deep Neutral",
     description: "Ultra-dark graphite with white-alpha glass panels",
     order: 50,
+    family: "neutral",
     glass: {
       blur: "10px",
       saturate: "1.8",
@@ -422,6 +439,7 @@ export const THEMES: ThemeMeta[] = [
     name: "Slate Blue",
     description: "Deep oceanic glass with rich blue depth",
     order: 60,
+    family: "cool",
     glass: {
       blur: "18px",
       saturate: "1.5",
@@ -478,6 +496,7 @@ export const THEMES: ThemeMeta[] = [
     name: "Warm Stone",
     description: "Smoked amber glass with earthy warmth",
     order: 70,
+    family: "warm",
     glass: {
       blur: "12px",
       saturate: "1.2",
@@ -534,6 +553,7 @@ export const THEMES: ThemeMeta[] = [
     name: "Dune",
     description: "Dark desert glass with terracotta warmth",
     order: 75,
+    family: "warm",
     glass: {
       blur: "14px",
       saturate: "1.25",
@@ -590,6 +610,7 @@ export const THEMES: ThemeMeta[] = [
     name: "Soft Zinc",
     description: "Studio matte glass with restrained violet",
     order: 80,
+    family: "neutral",
     glass: {
       blur: "12px",
       saturate: "1.1",
@@ -645,6 +666,7 @@ export const THEMES: ThemeMeta[] = [
     name: "Smoke",
     description: "Translucent warm smoke glass with steel accent",
     order: 88,
+    family: "warm",
     glass: {
       blur: "18px",
       saturate: "1.3",
@@ -701,6 +723,7 @@ export const THEMES: ThemeMeta[] = [
     name: "Twilight",
     description: "Dusk sky glass with cool slate depth",
     order: 90,
+    family: "cool",
     glass: {
       blur: "14px",
       saturate: "1.3",
@@ -757,6 +780,7 @@ export const THEMES: ThemeMeta[] = [
     name: "Silver Mist",
     description: "Luminous frosted chrome with soft blue accent",
     order: 100,
+    family: "cool",
     glass: {
       blur: "14px",
       saturate: "1.2",
@@ -812,6 +836,7 @@ export const THEMES: ThemeMeta[] = [
     name: "Daylight",
     description: "Clean light theme for daytime use",
     order: 110,
+    family: "light",
     tokens: {
       "bg-base": "#f4f5f7",
       "bg-surface": "#ffffff",
@@ -854,7 +879,18 @@ export const THEMES: ThemeMeta[] = [
   },
 ];
 
-export const THEMES_SORTED = [...THEMES].sort((a, b) => a.order - b.order);
+/** Page base color: the gradient start on glass themes, bg-base on solid ones. */
+function pageBase(theme: ThemeMeta): string {
+  return theme.glass ? theme.glass.gradientFrom : theme.tokens["bg-base"];
+}
+
+/** Themes grouped by family for the picker, each group darkest to lightest. */
+export const THEME_GROUPS = THEME_FAMILIES.map((f) => ({
+  ...f,
+  themes: THEMES.filter((t) => t.family === f.id).sort(
+    (a, b) => hexLuminance(pageBase(a)) - hexLuminance(pageBase(b)) || a.order - b.order,
+  ),
+})).filter((g) => g.themes.length > 0);
 
 export const DEFAULT_THEME_ID = "glass-void";
 
@@ -959,8 +995,7 @@ export function applyTheme(themeId: string): void {
   invalidateThemeVarCache();
   // Light vs dark drives the modal contrast bump (lighter panel on dark themes,
   // darker on light). For glass themes the page base is the opaque gradient.
-  const pageBase = theme.glass ? theme.glass.gradientFrom : theme.tokens["bg-base"];
-  root.setAttribute("data-theme-mode", hexLuminance(pageBase) > 0.5 ? "light" : "dark");
+  root.setAttribute("data-theme-mode", hexLuminance(pageBase(theme)) > 0.5 ? "light" : "dark");
   if (theme.glass) {
     root.style.setProperty("--glass-blur", theme.glass.blur);
     root.style.setProperty("--glass-saturate", theme.glass.saturate);
