@@ -339,3 +339,19 @@ option {
     border-bottom-right-radius: var(--radius-sm);
   }
 }
+
+/* Ghost Cap filter badge: getFilterBadgeStyle("ghost") sets --ghost inline;
+   the first glyph takes the filter color. ::first-letter only applies to
+   block containers, so the badge drops its flex display here. Unlayered on
+   purpose so it wins over the Tailwind flex/inline-flex utilities. */
+[style*="--ghost:"] {
+  display: inline-block;
+  text-align: center;
+}
+[style*="--ghost:"].h-6 {
+  line-height: 1.5rem;
+}
+[style*="--ghost:"]::first-letter {
+  color: var(--ghost);
+  font-weight: 700;
+}
