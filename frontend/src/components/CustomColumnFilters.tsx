@@ -82,6 +82,9 @@ const TextFilter: Component<{
   // Never sync non-empty external values back - input owns its own text
   createEffect(on(() => props.value, (external) => {
     if (external == null || external === "") setLocal("");
+    // Fill an EMPTY input from a restored value (sessionStorage restore on
+    // navigate-back lands after mount) - never overwrite user-owned text.
+    else if (!local()) setLocal(external);
   }, { defer: true }));
 
   const onInput = (value: string) => {

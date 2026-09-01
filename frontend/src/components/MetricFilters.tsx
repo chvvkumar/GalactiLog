@@ -1,4 +1,4 @@
-import { Component, For, Show, createSignal } from "solid-js";
+import { Component, For, Show, createEffect, createSignal, on } from "solid-js";
 import { useDashboardFilters } from "./DashboardFilterProvider";
 import { useSettingsContext } from "./SettingsProvider";
 import { debounce } from "../utils/debounce";
@@ -44,6 +44,18 @@ const MetricRow: Component<MetricRowProps> = (props) => {
   const [maxVal, setMaxVal] = createSignal<string>(
     props.initialMax != null ? String(props.initialMax) : ""
   );
+
+  // Sync external filter state into the inputs: clear on Reset Filters, and
+  // fill an EMPTY input from a restored value (sessionStorage restore on
+  // navigate-back lands after mount). Never overwrites user-owned text.
+  createEffect(on(() => props.initialMin, (v) => {
+    if (v == null) setMinVal("");
+    else if (!minVal()) setMinVal(String(v));
+  }, { defer: true }));
+  createEffect(on(() => props.initialMax, (v) => {
+    if (v == null) setMaxVal("");
+    else if (!maxVal()) setMaxVal(String(v));
+  }, { defer: true }));
 
   const apply = debounce((min: string, max: string) => {
     const parseFn = props.isInt ? parseInt : parseFloat;

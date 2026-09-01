@@ -37,6 +37,11 @@ def _compact_col(col):
     )
 
 
+def _compact_sql(expr: str) -> str:
+    """Raw-SQL string mirror of _compact, for hand-written text() queries."""
+    return f"upper(replace(replace(replace({expr}, ' ', ''), '-', ''), '_', ''))"
+
+
 def _score_compact(cq: str, name: str | None) -> float | None:
     """Tier-1 score of a compacted query against one name; None if no match."""
     if not name:
@@ -409,18 +414,22 @@ async def list_targets_aggregated(
         where_parts.append("i.resolved_target_id = CAST(:exact_target_id AS uuid)")
         params["exact_target_id"] = target_id
     elif search:
-        escaped_search = search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-        pattern = f"%{escaped_search}%"
-        where_parts.append("""(
-            t.primary_name ILIKE :search_pat
-            OR t.catalog_id ILIKE :search_pat
-            OR t.common_name ILIKE :search_pat
-            OR array_to_string(t.aliases, ' ') ILIKE :search_pat
-            OR similarity(concat(coalesce(t.catalog_id,''),' ',coalesce(t.common_name,''),' ',array_to_string(t.aliases,' ')), :search_raw) > 0.3
-            OR i.raw_headers->>'OBJECT' ILIKE :search_pat
+        # Compact matching, mirroring search_targets tier 1: case/space/
+        # hyphen/underscore-insensitive substring over each name separately
+        # (no concatenated-blob similarity, which let "sh2-12" match
+        # "SH 2-131"). '|' survives compaction, so aliases cannot merge
+        # across the boundary. Fuzzy is deliberately absent here: this is a
+        # filter box, and substring over all names + FITS OBJECT suffices.
+        cq = _compact(search)
+        escaped_search = cq.replace("\\", "\\\\").replace("%", "\\%")  # '_' removed by compaction
+        where_parts.append(f"""(
+            {_compact_sql('t.primary_name')} LIKE :search_pat ESCAPE '\\'
+            OR {_compact_sql('t.catalog_id')} LIKE :search_pat ESCAPE '\\'
+            OR {_compact_sql('t.common_name')} LIKE :search_pat ESCAPE '\\'
+            OR {_compact_sql("array_to_string(t.aliases, '|')")} LIKE :search_pat ESCAPE '\\'
+            OR {_compact_sql("i.raw_headers->>'OBJECT'")} LIKE :search_pat ESCAPE '\\'
         )""")
-        params["search_pat"] = pattern
-        params["search_raw"] = search
+        params["search_pat"] = f"%{escaped_search}%"
 
     if object_type:
         type_list = [tp.strip() for tp in object_type.split(",")]

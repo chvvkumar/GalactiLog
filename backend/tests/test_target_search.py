@@ -369,3 +369,60 @@ async def test_include_unresolved_appends_object_groups(seeded_db):
     for r in unresolved:
         assert r["id"].startswith("obj:")
         assert r["image_count"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Dashboard list filter (GET /api/targets?search=): compact matching, no
+# blob-similarity false positives ("sh2-12" must not match SH 2-131).
+# ---------------------------------------------------------------------------
+
+@pytest_asyncio.fixture
+async def dashboard_db(seeded_db):
+    """Layer LIGHT frames onto seeded targets; the list query aggregates images."""
+    engine = create_async_engine(TEST_DB_URL, poolclass=None)
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    async with Session() as s:
+        s.add_all([
+            _img(resolved_target_id=TID_SH129, raw_headers={"OBJECT": "SH 2-129"}),
+            _img(resolved_target_id=TID_SH131, raw_headers={"OBJECT": "SH 2-131"}),
+            _img(resolved_target_id=TID_SH188, raw_headers={"OBJECT": "SH 2-188"}),
+            _img(resolved_target_id=TID_M31, raw_headers={"OBJECT": "M 31"}),
+        ])
+        await s.commit()
+    yield
+    await engine.dispose()
+
+
+async def _list_targets(search: str):
+    transport = ASGITransport(app=app)
+    from urllib.parse import quote
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get(f"/api/targets?search={quote(search)}")
+    assert resp.status_code == 200, resp.text
+    return resp.json()["targets"]
+
+
+@pytest.mark.asyncio
+async def test_dashboard_sh2_12_does_not_match_sh2_131(dashboard_db):
+    targets = await _list_targets("sh2-12")
+    ids = [t["target_id"] for t in targets]
+    assert str(TID_SH131) not in ids, (
+        f"blob-similarity false positive: SH 2-131 returned for 'sh2-12' ({ids})"
+    )
+    assert str(TID_SH188) not in ids
+
+
+@pytest.mark.asyncio
+async def test_dashboard_sh2_12_matches_sh2_129_compact(dashboard_db):
+    targets = await _list_targets("sh2-12")
+    ids = [t["target_id"] for t in targets]
+    assert ids == [str(TID_SH129)], f"expected only SH 2-129, got {ids}"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("q", ["m31", "M 31", "m-31"])
+async def test_dashboard_compact_finds_m31(dashboard_db, q):
+    targets = await _list_targets(q)
+    assert str(TID_M31) in [t["target_id"] for t in targets], (
+        f"query {q!r} did not find 'M 31 - Andromeda Galaxy'"
+    )

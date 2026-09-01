@@ -13,25 +13,45 @@ const SearchBar: Component = () => {
   const [showSuggestions, setShowSuggestions] = createSignal(false);
   const [activeIndex, setActiveIndex] = createSignal(-1);
 
+  // Rehydrate the input from persisted filters. The sessionStorage restore in
+  // DashboardPage.onMount runs AFTER this component mounts (parent onMount
+  // fires last), so this must be an effect, not the signal's initial value.
+  // Only fills an EMPTY input - never overwrites text the user owns.
+  createEffect(on([() => filters().selectedTargetName, () => filters().searchQuery], ([name, search]) => {
+    const external = name || search || "";
+    if (external && !query()) setQuery(external);
+  }));
+
   // Only sync when external value is cleared (e.g. Reset Filters)
-  // Never sync non-empty external values back - input owns its own text
+  // Never sync non-empty external values back - input owns its own text.
+  // Each clear is guarded on the OTHER dimension: selecting a target clears
+  // `search` (and typing a new search clears `target_id`) as a side effect of
+  // the same updateFilter call, so only a clear of BOTH means the filter is
+  // truly gone and the input should blank.
   createEffect(on(() => filters().searchQuery, (search, prev) => {
-    if (!search && prev) setQuery("");
+    if (!search && prev && !filters().selectedTargetId) setQuery("");
   }, { defer: true }));
   createEffect(on(() => filters().selectedTargetId, (id, prev) => {
-    if (!id && prev) setQuery("");
+    if (!id && prev && !filters().searchQuery) setQuery("");
   }, { defer: true }));
 
   const fetchSuggestions = debounce(async (value: string) => {
+    // Drop stale runs: the input may have been emptied/retyped after this
+    // callback was scheduled, or changed while the fetch was in flight
+    // (e.g. fast-deleting to empty within the debounce window, or picking
+    // a suggestion before the debounce fires).
+    if (value !== query()) return;
+    let results: TargetSearchResultFuzzy[] = [];
     try {
-      const results = await apiClient
+      results = await apiClient
         .GET("/api/targets/search", { params: { query: { q: value } } })
         .then(unwrap);
-      setSuggestions(results);
-      setShowSuggestions(results.length > 0);
     } catch {
-      setSuggestions([]);
+      /* results stay empty */
     }
+    if (value !== query()) return;
+    setSuggestions(results);
+    setShowSuggestions(results.length > 0);
     updateFilter("searchQuery", value);
   }, 300);
 
@@ -69,7 +89,7 @@ const SearchBar: Component = () => {
   const selectTarget = (target: TargetSearchResultFuzzy) => {
     setQuery(target.primary_name);
     setShowSuggestions(false);
-    updateFilter("selectedTargetId", target.id);
+    updateFilter("selectedTargetId", { id: target.id, name: target.primary_name });
   };
 
   return (

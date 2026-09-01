@@ -845,6 +845,9 @@ export type AppLogPageResponse = Schemas["PaginatedAppLogResponse"];
 export interface ActiveFilters {
   searchQuery: string;
   selectedTargetId: string | null;
+  // Display name captured at selection time so the search box can show what
+  // is filtering after a navigate-away/back restore (id alone is opaque).
+  selectedTargetName?: string | null;
   camera: string | null;
   telescope: string | null;
   opticalFilters: string[];
