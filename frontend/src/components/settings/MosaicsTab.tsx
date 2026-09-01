@@ -7,6 +7,8 @@ import { useAuth } from "../AuthProvider";
 import { useSettingsContext } from "../SettingsProvider";
 import HelpPopover from "../HelpPopover";
 import { emitWithToast } from "../../lib/emitWithToast";
+import { debounce } from "../../utils/debounce";
+import SuggestionRowText from "../SuggestionRowText";
 import type {
   MosaicSummary,
   MosaicDetailResponse,
@@ -536,13 +538,7 @@ export const MosaicsTab: Component = () => {
   };
 
   // Panel search
-  const handlePanelSearch = async (query: string) => {
-    setPanelSearch(query);
-    setSelectedTarget(null);
-    if (query.length < 2) {
-      setSearchResults([]);
-      return;
-    }
+  const fetchPanelSearch = debounce(async (query: string) => {
     try {
       const results = await apiClient
         .GET("/api/targets/search", { params: { query: { q: query } } })
@@ -551,6 +547,16 @@ export const MosaicsTab: Component = () => {
     } catch {
       setSearchResults([]);
     }
+  }, 300);
+
+  const handlePanelSearch = (query: string) => {
+    setPanelSearch(query);
+    setSelectedTarget(null);
+    if (query.length < 2) {
+      setSearchResults([]);
+      return;
+    }
+    fetchPanelSearch(query);
   };
 
   const selectTarget = (t: TargetSearchResultFuzzy) => {
@@ -1515,7 +1521,7 @@ export const MosaicsTab: Component = () => {
                                               onClick={() => selectTarget(t)}
                                               class="w-full text-left px-2 py-1.5 text-sm text-theme-text-primary hover:bg-theme-base/50 transition-colors"
                                             >
-                                              {t.primary_name}
+                                              <SuggestionRowText target={t} />
                                             </button>
                                           )}
                                         </For>

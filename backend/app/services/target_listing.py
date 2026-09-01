@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Target, Image
 from app.services.simbad import COMMON_NAME_MAP
+from app.services.stellarium_names import get_stellarium_names
 from app.services.normalization import load_alias_maps, normalize_filter, normalize_equipment, expand_canonical
 from app.schemas.target import (
     TargetAggregationResponse, TargetAggregation, SessionSummary,
@@ -24,139 +25,165 @@ from app.schemas.target import (
 from app.services.target_helpers import sort_clause, categorize_object_type, SIMBAD_CATEGORY_MAP
 
 
+def _compact(s: str) -> str:
+    """Uppercase with spaces, hyphens, underscores removed: 'SH 2-129' -> 'SH2129'."""
+    return s.upper().replace(" ", "").replace("-", "").replace("_", "")
+
+
+def _compact_col(col):
+    """SQL mirror of _compact: nested replace() + upper() on a column."""
+    return func.upper(
+        func.replace(func.replace(func.replace(col, " ", ""), "-", ""), "_", "")
+    )
+
+
+def _score_compact(cq: str, name: str | None) -> float | None:
+    """Tier-1 score of a compacted query against one name; None if no match."""
+    if not name:
+        return None
+    cn = _compact(name)
+    if cn == cq:
+        return 1.0
+    if cn.startswith(cq):
+        return 0.9
+    if cq in cn:
+        return 0.8
+    return None
+
+
 async def search_targets(
     q: str, limit: int, session: AsyncSession, *, include_unresolved: bool = False,
 ) -> list[TargetSearchResultFuzzy]:
-    """Search targets by name or alias with fuzzy trigram matching.
+    """Search targets by name or alias.
+
+    Tier 1 matches compacted forms (case/space/hyphen/underscore-insensitive)
+    of primary_name, catalog_id, common_name and aliases, alongside a
+    common-name table lookup (Stellarium names.dat + COMMON_NAME_MAP). Fuzzy
+    word_similarity matching runs only when those tiers found nothing.
 
     With include_unresolved, distinct unlinked OBJECT header names matching the
     query are appended as "obj:<name>" pseudo entries so merge flows can offer
-    unresolved image groups as merge sources.
+    unresolved image groups as merge sources. Total rows respect `limit`.
     """
-    escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-    pattern = f"%{escaped}%"
+    cq = _compact(q)
+    # Best (score, match_source) per target id across tier 1 + common-name map.
+    hits: dict = {}  # id -> (score, match_source, Target)
 
-    # Also create a space-normalized pattern for catalog IDs like "M31" → "M 31"
-    spaced = re.sub(r"([A-Za-z])(\d)", r"\1 \2", escaped)
-    spaced_pattern = f"%{spaced}%" if spaced != escaped else None
-
-    # Tier 1: Exact substring matches - exclude soft-deleted
-    aliases_str = func.array_to_string(Target.aliases, ' ')
-    ilike_conditions = [
-        Target.primary_name.ilike(pattern),
-        Target.catalog_id.ilike(pattern),
-        Target.common_name.ilike(pattern),
-        aliases_str.ilike(pattern),
-    ]
-    if spaced_pattern:
-        ilike_conditions.extend([
-            Target.primary_name.ilike(spaced_pattern),
-            Target.catalog_id.ilike(spaced_pattern),
-            Target.common_name.ilike(spaced_pattern),
-            aliases_str.ilike(spaced_pattern),
-        ])
-    exact_query = (
-        select(Target)
-        .where(
+    if cq:
+        # Tier 1: compact substring match in SQL, scored/attributed in Python.
+        escaped = cq.replace("\\", "\\\\").replace("%", "\\%")  # '_' removed by compaction
+        pattern = f"%{escaped}%"
+        # '|' survives compaction, so aliases cannot merge across the boundary.
+        aliases_str = func.array_to_string(Target.aliases, "|")
+        tier1_query = select(Target).where(
             Target.merged_into_id.is_(None),
-            or_(*ilike_conditions),
+            or_(
+                _compact_col(Target.primary_name).like(pattern, escape="\\"),
+                _compact_col(Target.catalog_id).like(pattern, escape="\\"),
+                _compact_col(Target.common_name).like(pattern, escape="\\"),
+                _compact_col(aliases_str).like(pattern, escape="\\"),
+            ),
         )
-        .limit(limit)
-    )
-    exact_result = await session.execute(exact_query)
-    exact_targets = exact_result.scalars().all()
+        for t in (await session.execute(tier1_query)).scalars().all():
+            best = None
+            for name in [t.primary_name, t.catalog_id, t.common_name, *(t.aliases or [])]:
+                score = _score_compact(cq, name)
+                if score is not None and (best is None or score > best[0]):
+                    best = (score, name)
+            if best:
+                hits[t.id] = (best[0], best[1], t)
 
-    exact_ids = {t.id for t in exact_targets}
+        # Common-name table: Stellarium names.dat (~1,364 entries) with the
+        # small curated override map layered on top. Search-time lookup only.
+        if len(cq) > 3:
+            combined = {**get_stellarium_names(), **COMMON_NAME_MAP}
+            # compact catalog id -> (key, score), best-scoring key wins
+            mapped: dict[str, tuple[str, float]] = {}
+            for key, cid in combined.items():
+                ck = _compact(key)
+                if cq == ck:
+                    score = 1.0
+                elif cq in ck:
+                    score = 0.9
+                else:
+                    continue
+                ccid = _compact(cid)
+                prev = mapped.get(ccid)
+                if prev is None or score > prev[1]:
+                    mapped[ccid] = (key, score)
+            if mapped:
+                # ponytail: 123 targets -- fetch all and compare compact forms
+                # in Python; revisit with a SQL join if the table ever grows.
+                all_targets = (await session.execute(
+                    select(Target).where(Target.merged_into_id.is_(None))
+                )).scalars().all()
+                for t in all_targets:
+                    forms = {
+                        _compact(n)
+                        for n in [t.catalog_id, t.primary_name, *(t.aliases or [])]
+                        if n
+                    }
+                    for ccid in forms & mapped.keys():
+                        key, score = mapped[ccid]
+                        prev = hits.get(t.id)
+                        if prev is None or score > prev[0]:
+                            hits[t.id] = (score, key, t)
+
     results = []
-    for t in exact_targets:
-        match_source = None
-        if q.upper() not in t.primary_name.upper():
-            for alias in (t.aliases or []):
-                if q.upper() in alias.upper():
-                    match_source = alias
-                    break
+    for score, source, t in sorted(hits.values(), key=lambda h: (-h[0], h[2].primary_name)):
         results.append(TargetSearchResultFuzzy(
             id=t.id,
             primary_name=t.primary_name,
             object_type=t.object_type,
             aliases=t.aliases or [],
-            match_source=match_source,
-            similarity_score=1.0,
+            match_source=source,
+            similarity_score=score,
         ))
+    results = results[:limit]
 
-    # Tier 1.5: Common name map lookup - match colloquial names to catalog IDs
-    if len(results) < limit:
-        q_lower = q.lower()
-        mapped_catalog_ids = set()
-        for common_name, catalog_id in COMMON_NAME_MAP.items():
-            if q_lower in common_name or common_name in q_lower:
-                mapped_catalog_ids.add(catalog_id)
-        if mapped_catalog_ids:
-            exclude_ids = exact_ids | {r.id for r in results}
-            map_conditions = [Target.catalog_id == cid for cid in mapped_catalog_ids]
-            map_query = (
-                select(Target)
-                .where(
-                    Target.merged_into_id.is_(None),
-                    Target.id.notin_(exclude_ids) if exclude_ids else True,
-                    or_(*map_conditions),
-                )
-                .limit(limit - len(results))
+    # Fuzzy tier: only when the tiers above found nothing. Per-name
+    # word_similarity (mirrors filename_resolver), never a concatenated blob.
+    if not results:
+        fuzzy_rows = (await session.execute(
+            text("""
+                SELECT * FROM (
+                    SELECT t.id, t.primary_name, t.object_type, t.aliases,
+                           t.catalog_id, t.common_name,
+                           word_similarity(:q, t.primary_name) AS s_primary,
+                           COALESCE(word_similarity(:q, t.catalog_id), 0) AS s_catalog,
+                           COALESCE(word_similarity(:q, t.common_name), 0) AS s_common,
+                           (SELECT COALESCE(MAX(word_similarity(:q, a)), 0)
+                            FROM unnest(t.aliases) a) AS s_alias,
+                           (SELECT a FROM unnest(t.aliases) a
+                            ORDER BY word_similarity(:q, a) DESC LIMIT 1) AS best_alias
+                    FROM targets t
+                    WHERE t.merged_into_id IS NULL
+                ) sub
+                WHERE GREATEST(s_primary, s_catalog, s_common, s_alias) >= :threshold
+                ORDER BY GREATEST(s_primary, s_catalog, s_common, s_alias) DESC,
+                         primary_name ASC
+                LIMIT :lim
+            """).bindparams(q=q, threshold=0.4, lim=limit)
+        )).all()
+        for row in fuzzy_rows:
+            score, source = max(
+                (float(row.s_primary or 0), row.primary_name),
+                (float(row.s_catalog), row.catalog_id),
+                (float(row.s_common), row.common_name),
+                (float(row.s_alias), row.best_alias),
+                key=lambda x: x[0],
             )
-            map_result = await session.execute(map_query)
-            for t in map_result.scalars().all():
-                # Find which common name matched for display
-                matched_name = None
-                for cn, cid in COMMON_NAME_MAP.items():
-                    if cid == t.catalog_id and (q_lower in cn or cn in q_lower):
-                        matched_name = cn.title()
-                        break
-                exact_ids.add(t.id)
-                results.append(TargetSearchResultFuzzy(
-                    id=t.id,
-                    primary_name=t.primary_name,
-                    object_type=t.object_type,
-                    aliases=t.aliases or [],
-                    match_source=matched_name,
-                    similarity_score=1.0,
-                ))
-
-    # Tier 2: Fuzzy trigram matches if we need more
-    if len(results) < limit:
-        remaining = limit - len(results)
-        searchable_text = func.concat(
-            func.coalesce(Target.catalog_id, ''), ' ',
-            func.coalesce(Target.common_name, ''), ' ',
-            func.array_to_string(Target.aliases, ' '),
-        )
-        fuzzy_score = func.similarity(searchable_text, q)
-        fuzzy_query = (
-            select(Target, fuzzy_score.label("score"))
-            .where(
-                Target.merged_into_id.is_(None),
-                Target.id.notin_(exact_ids) if exact_ids else True,
-                fuzzy_score > 0.3,
-            )
-            .order_by(fuzzy_score.desc())
-            .limit(remaining)
-        )
-        fuzzy_result = await session.execute(fuzzy_query)
-        for target, score in fuzzy_result.all():
-            best_alias = None
-            for alias in (target.aliases or []):
-                if q.upper() in alias.upper():
-                    best_alias = alias
-                    break
             results.append(TargetSearchResultFuzzy(
-                id=target.id,
-                primary_name=target.primary_name,
-                object_type=target.object_type,
-                aliases=target.aliases or [],
-                match_source=best_alias,
-                similarity_score=float(score),
+                id=row.id,
+                primary_name=row.primary_name,
+                object_type=row.object_type,
+                aliases=row.aliases or [],
+                match_source=source,
+                similarity_score=score,
             ))
 
-    if include_unresolved:
+    if include_unresolved and len(results) < limit:
+        raw_escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         unresolved_rows = (await session.execute(
             text("""
                 SELECT raw_headers->>'OBJECT' AS obj, COUNT(*) AS cnt
@@ -164,11 +191,11 @@ async def search_targets(
                 WHERE resolved_target_id IS NULL
                   AND raw_headers->>'OBJECT' IS NOT NULL
                   AND raw_headers->>'OBJECT' != ''
-                  AND raw_headers->>'OBJECT' ILIKE :pattern
+                  AND raw_headers->>'OBJECT' ILIKE :pattern ESCAPE '\'
                 GROUP BY raw_headers->>'OBJECT'
                 ORDER BY cnt DESC
                 LIMIT :lim
-            """).bindparams(pattern=pattern, lim=limit)
+            """).bindparams(pattern=f"%{raw_escaped}%", lim=limit - len(results))
         )).all()
         for obj_name, cnt in unresolved_rows:
             results.append(TargetSearchResultFuzzy(

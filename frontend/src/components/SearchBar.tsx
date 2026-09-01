@@ -3,6 +3,7 @@ import { apiClient } from "../api/generated/client";
 import { unwrap } from "../api/unwrap";
 import { useDashboardFilters } from "./DashboardFilterProvider";
 import { debounce } from "../utils/debounce";
+import SuggestionRowText from "./SuggestionRowText";
 import type { TargetSearchResultFuzzy } from "../api/types";
 
 const SearchBar: Component = () => {
@@ -93,20 +94,7 @@ const SearchBar: Component = () => {
                 class={`w-full text-left px-3 py-2 text-theme-text-primary text-sm ${activeIndex() === i() ? "bg-theme-accent/20" : "hover:bg-theme-accent/20"}`}
                 onMouseDown={() => selectTarget(target)}
               >
-                <span class="font-medium">{target.primary_name}</span>
-                <Show when={target.object_type}>
-                  <span class="text-theme-text-secondary ml-2">({target.object_type})</span>
-                </Show>
-                <Show when={target.match_source}>
-                  <span class="text-theme-accent text-xs ml-2">
-                    matched: {target.match_source}
-                  </span>
-                </Show>
-                <Show when={target.similarity_score < 1.0}>
-                  <span class="text-theme-text-secondary text-xs ml-1">
-                    ~{Math.round(target.similarity_score * 100)}%
-                  </span>
-                </Show>
+                <SuggestionRowText target={target} />
               </button>
             )}
           </For>
