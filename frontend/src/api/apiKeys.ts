@@ -54,4 +54,8 @@ export const apiKeysApi = {
   /** Revokes the key. The row stays listed with `revoked_at` set. */
   revoke: (id: string): Promise<void> =>
     request<void>(`/api/apikeys/${encodeURIComponent(id)}`, { method: "DELETE" }),
+
+  /** Permanently deletes a revoked key's row. 409 if the key is not revoked. */
+  deletePermanent: (id: string): Promise<void> =>
+    request<void>(`/api/apikeys/${encodeURIComponent(id)}/permanent`, { method: "DELETE" }),
 };

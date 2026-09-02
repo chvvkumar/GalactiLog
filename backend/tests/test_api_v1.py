@@ -329,6 +329,41 @@ async def test_admin_delete_unknown_key_is_404(v1env):
     assert resp.status_code == 404, resp.text
 
 
+@pytest.mark.asyncio
+async def test_admin_permanent_delete_revoked_key(v1env):
+    _as_admin()
+    created = (await _call("POST", "/api/apikeys", json={"name": "doomed"})).json()
+    key_id = created["id"]
+    assert (await _call("DELETE", f"/api/apikeys/{key_id}")).status_code == 204
+
+    resp = await _call("DELETE", f"/api/apikeys/{key_id}/permanent")
+    assert resp.status_code == 204, resp.text
+
+    rows = await _get_ok("/api/apikeys", None)
+    assert all(r["id"] != key_id for r in rows)
+
+
+@pytest.mark.asyncio
+async def test_admin_permanent_delete_active_key_is_409(v1env):
+    _as_admin()
+    created = (await _call("POST", "/api/apikeys", json={"name": "alive"})).json()
+    key_id = created["id"]
+
+    resp = await _call("DELETE", f"/api/apikeys/{key_id}/permanent")
+    assert resp.status_code == 409, resp.text
+    assert resp.json()["detail"] == "Revoke the key first"
+
+    rows = await _get_ok("/api/apikeys", None)
+    assert any(r["id"] == key_id for r in rows)
+
+
+@pytest.mark.asyncio
+async def test_admin_permanent_delete_unknown_key_is_404(v1env):
+    _as_admin()
+    resp = await _call("DELETE", f"/api/apikeys/{uuid.uuid4()}/permanent")
+    assert resp.status_code == 404, resp.text
+
+
 # ---------------------------------------------------------------------------
 # Read shapes
 # ---------------------------------------------------------------------------

@@ -19,7 +19,7 @@ from app.models.api_key import ApiKey
 from app.models.user import User
 from app.schemas.api_key import ApiKeyCreateRequest, ApiKeyCreateResponse, ApiKeyResponse
 from app.services.activity import emit
-from app.services.api_keys import create_api_key, revoke_api_key
+from app.services.api_keys import create_api_key, delete_api_key, revoke_api_key
 from app.services.auth import audit_log
 from app.config import client_ip_from_request
 
@@ -91,5 +91,36 @@ async def delete_key(
         session, category="user_action", severity="warning",
         event_type="api_key_revoked",
         message=f"API key '{name}' revoked", actor=admin.username,
+        details={"id": str(key_id), "prefix": prefix},
+    )
+
+
+@router.delete("/{key_id}/permanent", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_key_permanently(
+    key_id: uuid.UUID,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    admin: User = Depends(require_admin),
+):
+    """Hard-delete a revoked key. Active keys must be revoked first (409)."""
+    key = await session.get(ApiKey, key_id)
+    if key is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="API key not found")
+    prefix, name = key.prefix, key.name
+
+    try:
+        await delete_api_key(session, key_id)
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Revoke the key first")
+
+    audit_log(
+        "api_key_delete", user_id=admin.id, username=admin.username,
+        source_ip=client_ip_from_request(request), success=True,
+        detail=f"Deleted API key {prefix} ({name})",
+    )
+    await emit(
+        session, category="user_action", severity="warning",
+        event_type="api_key_deleted",
+        message=f"API key '{name}' deleted", actor=admin.username,
         details={"id": str(key_id), "prefix": prefix},
     )

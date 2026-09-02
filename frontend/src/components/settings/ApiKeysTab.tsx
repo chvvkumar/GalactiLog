@@ -27,6 +27,7 @@ export const ApiKeysTab: Component = () => {
   // The pending key, not just its id: the confirmation is a banner above the
   // table, so it needs the name to say what it is about to revoke.
   const [confirmRevoke, setConfirmRevoke] = createSignal<ApiKey | null>(null);
+  const [confirmDelete, setConfirmDelete] = createSignal<ApiKey | null>(null);
 
   const refresh = async () => {
     try {
@@ -65,6 +66,17 @@ export const ApiKeysTab: Component = () => {
       await refresh();
     } catch (err) {
       showToast(err instanceof ApiError ? err.message : "Failed to revoke API key", "error");
+    }
+  };
+
+  const handleDelete = async (k: ApiKey) => {
+    setConfirmDelete(null);
+    try {
+      await apiKeysApi.deletePermanent(k.id);
+      showToast(`Key "${k.name}" deleted`);
+      await refresh();
+    } catch (err) {
+      showToast(err instanceof ApiError ? err.message : "Failed to delete API key", "error");
     }
   };
 
@@ -157,13 +169,20 @@ export const ApiKeysTab: Component = () => {
       align: "right",
       alwaysVisible: true,
       render: (k) => (
-        <Show when={!isRevoked(k)}>
-          <div class="flex justify-end">
+        <div class="flex justify-end">
+          <Show
+            when={!isRevoked(k)}
+            fallback={
+              <Button variant="danger" size="sm" onClick={() => setConfirmDelete(k)}>
+                Delete
+              </Button>
+            }
+          >
             <Button variant="danger" size="sm" onClick={() => setConfirmRevoke(k)}>
               Revoke
             </Button>
-          </div>
-        </Show>
+          </Show>
+        </div>
       ),
     },
   ];
@@ -176,7 +195,7 @@ export const ApiKeysTab: Component = () => {
           <p>API keys authenticate programs against the public API at /api/v1, separately from browser logins. Send one as a bearer token: <code>Authorization: Bearer glg_...</code></p>
           <p>A read key can list targets, sessions, frames, and statistics. A "Read + act" key can additionally trigger scans, send coordinates to NINA or Stellarium, and write notes.</p>
           <p>The full key is shown once, at creation. Store it where the calling program can read it; if it is lost, revoke the key and create another.</p>
-          <p>Revoking takes effect immediately. Revoked keys stay listed so you can see what existed and when it was last used.</p>
+          <p>Revoking takes effect immediately. Revoked keys stay listed so you can see what existed and when it was last used, and can be deleted permanently once revoked.</p>
         </HelpPopover>
       </div>
 
@@ -259,6 +278,25 @@ export const ApiKeysTab: Component = () => {
                 Yes, revoke
               </Button>
               <Button variant="secondary" size="sm" onClick={() => setConfirmRevoke(null)}>
+                Cancel
+              </Button>
+            </div>
+          </div>
+        )}
+      </Show>
+
+      <Show when={confirmDelete()}>
+        {(k) => (
+          <div class="bg-theme-error/15 border border-theme-error/50 rounded-[var(--radius-md)] p-4 space-y-2">
+            <p class="text-sm text-theme-error font-medium">Permanently delete "{k().name}"?</p>
+            <p class="text-xs text-theme-text-secondary">
+              This removes the key from the list for good, including its creation and last-used history. It cannot be undone.
+            </p>
+            <div class="flex gap-2 pt-1">
+              <Button variant="danger" size="sm" onClick={() => handleDelete(k())}>
+                Yes, delete permanently
+              </Button>
+              <Button variant="secondary" size="sm" onClick={() => setConfirmDelete(null)}>
                 Cancel
               </Button>
             </div>

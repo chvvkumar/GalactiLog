@@ -66,3 +66,17 @@ async def revoke_api_key(session: AsyncSession, key_id: uuid.UUID) -> bool:
         key.revoked_at = datetime.now(timezone.utc)
         await session.commit()
     return True
+
+
+async def delete_api_key(session: AsyncSession, key_id: uuid.UUID) -> bool:
+    """Hard-delete a revoked key's row. False if no such key. Raises
+    ValueError if the key is not revoked: revoke-then-delete is the only
+    path to permanent removal."""
+    key = await session.get(ApiKey, key_id)
+    if key is None:
+        return False
+    if key.revoked_at is None:
+        raise ValueError("Revoke the key first")
+    await session.delete(key)
+    await session.commit()
+    return True
