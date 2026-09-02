@@ -119,7 +119,57 @@ body, .swagger-ui { font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
   color: var(--glg-text);
 }
 .swagger-ui select { box-shadow: none; }
+/* Swagger UI 5.x renders OAS 3.1 schemas with json-schema-2020-12 markup,
+   which its stock stylesheet paints as light chips - re-ground it all dark. */
+.swagger-ui .json-schema-2020-12,
+.swagger-ui .json-schema-2020-12-head,
+.swagger-ui .json-schema-2020-12-body,
+.swagger-ui .json-schema-2020-12-accordion,
+.swagger-ui .json-schema-2020-12-expand-deep-button,
+.swagger-ui .json-schema-2020-12-property,
+.swagger-ui .json-schema-2020-12__attribute,
+.swagger-ui .model-box .json-schema-2020-12:hover,
+.swagger-ui .json-schema-2020-12:hover {
+  background: transparent;
+  border-color: var(--glg-border-em);
+  color: var(--glg-text);
+}
+.swagger-ui .json-schema-2020-12__title,
+.swagger-ui .json-schema-2020-12-property .json-schema-2020-12__title,
+.swagger-ui .json-schema-2020-12-keyword__name,
+.swagger-ui .json-schema-2020-12-keyword__value { color: var(--glg-text); }
+.swagger-ui .json-schema-2020-12-keyword__value--warning,
+.swagger-ui .json-schema-2020-12__attribute--muted,
+.swagger-ui .json-schema-2020-12-keyword__name--secondary,
+.swagger-ui .json-schema-2020-12-keyword__value--secondary { color: var(--glg-text-2); }
+.swagger-ui .json-schema-2020-12-keyword__value--const,
+.swagger-ui .json-schema-2020-12-keyword__value--primary,
+.swagger-ui .json-schema-2020-12__attribute--primary { color: var(--glg-accent); }
+.swagger-ui .json-schema-2020-12-accordion,
+.swagger-ui .json-schema-2020-12-expand-deep-button {
+  color: var(--glg-accent);
+}
+.swagger-ui .json-schema-2020-12-accordion__icon svg,
+.swagger-ui .json-schema-2020-12-accordion svg { fill: var(--glg-text); }
+.swagger-ui .model-box, .swagger-ui .model-box .model-box { background: var(--glg-elevated); }
+.swagger-ui section.models .model-container .model-box { background: transparent; }
+.swagger-ui section.models .model-container,
+.swagger-ui section.models .model-container:hover {
+  background: var(--glg-elevated);
+  border: 1px solid var(--glg-border-em);
+}
+.swagger-ui .model .property, .swagger-ui .model .property.primitive { color: var(--glg-text-2); }
 .swagger-ui .btn { color: var(--glg-text); border-color: var(--glg-border-em); }
+.swagger-ui .btn.try-out__btn {
+  color: var(--glg-accent);
+  border: 1px solid var(--glg-accent);
+  background: transparent;
+}
+.swagger-ui .btn.try-out__btn.cancel, .swagger-ui .btn.btn-clear {
+  color: var(--glg-text-2);
+  border-color: var(--glg-border-em);
+  background: transparent;
+}
 .swagger-ui .btn.authorize {
   color: var(--glg-accent);
   border-color: var(--glg-accent);
