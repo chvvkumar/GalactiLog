@@ -52,6 +52,8 @@ const CustomColumnsTab = lazy(() => import("../components/CustomColumnsTab"));
 const ActivityLogTab = lazy(() => import("../components/settings/ActivityLogTab"));
 const MetricsTab = lazy(() => import("../components/settings/MetricsTab").then(m => ({ default: m.MetricsTab })));
 const AccountTab = lazy(() => import("../components/settings/AccountTab").then(m => ({ default: m.AccountTab })));
+const ApiKeysTab = lazy(() => import("../components/settings/ApiKeysTab").then(m => ({ default: m.ApiKeysTab })));
+const ApiDocsTab = lazy(() => import("../components/settings/ApiDocsTab").then(m => ({ default: m.ApiDocsTab })));
 
 const ALL_TABS = [
   { id: "scan", label: "Library" },
@@ -65,6 +67,8 @@ const ALL_TABS = [
   { id: "users", label: "Users", adminOnly: true },
   { id: "activity-log", label: "Activity Log", adminOnly: true },
   { id: "metrics", label: "Metrics", adminOnly: true },
+  { id: "api-keys", label: "API Keys", adminOnly: true },
+  { id: "api", label: "API", adminOnly: true },
 ] as const;
 
 type TabId = (typeof ALL_TABS)[number]["id"];
@@ -130,6 +134,8 @@ export const SettingsPage: Component = () => {
             <li><strong class="text-theme-text-primary">Backup & Restore</strong> (admin): export and import the configuration as a versioned JSON file.</li>
             <li><strong class="text-theme-text-primary">Users</strong> (admin): manage accounts and roles.</li>
             <li><strong class="text-theme-text-primary">Metrics</strong> (admin): live Prometheus metrics with API, database, job, and process health summaries.</li>
+            <li><strong class="text-theme-text-primary">API Keys</strong> (admin): issue and revoke bearer tokens for the public API.</li>
+            <li><strong class="text-theme-text-primary">API</strong> (admin): reference for the /api/v1 endpoints, with copy-pasteable examples.</li>
           </ul>
         </HelpPopover>
       </div>
@@ -215,6 +221,16 @@ export const SettingsPage: Component = () => {
         <Show when={activeTab() === "metrics" && isAdmin()}>
           <div class="tab-fade-in">
             <MetricsTab />
+          </div>
+        </Show>
+        <Show when={activeTab() === "api-keys" && isAdmin()}>
+          <div class="tab-fade-in rounded-[var(--radius-md)] bg-theme-surface border border-theme-border p-4">
+            <ApiKeysTab />
+          </div>
+        </Show>
+        <Show when={activeTab() === "api" && isAdmin()}>
+          <div class="tab-fade-in rounded-[var(--radius-md)] bg-theme-surface border border-theme-border p-4">
+            <ApiDocsTab />
           </div>
         </Show>
       </Suspense>

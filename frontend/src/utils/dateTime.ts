@@ -88,3 +88,28 @@ export function isValidTimeZone(tz: string): boolean {
     return false;
   }
 }
+
+const RTF = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
+const RELATIVE_UNITS: [Intl.RelativeTimeFormatUnit, number][] = [
+  ["year", 31536000],
+  ["month", 2592000],
+  ["day", 86400],
+  ["hour", 3600],
+  ["minute", 60],
+];
+
+/**
+ * Coarse "3 days ago" phrasing for a timestamp, in the largest unit that fits.
+ * `null` (and an unparseable date) render as `neverLabel`, since the only
+ * caller so far is a "last used" column where absent means never used.
+ */
+export function relativeTime(iso: string | null | undefined, neverLabel = "Never"): string {
+  if (!iso) return neverLabel;
+  const ms = Date.parse(iso);
+  if (Number.isNaN(ms)) return neverLabel;
+  const seconds = (ms - Date.now()) / 1000;
+  for (const [unit, size] of RELATIVE_UNITS) {
+    if (Math.abs(seconds) >= size) return RTF.format(Math.round(seconds / size), unit);
+  }
+  return RTF.format(Math.round(seconds), "second");
+}

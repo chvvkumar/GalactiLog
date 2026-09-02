@@ -2,7 +2,7 @@ import logging
 import os
 from pathlib import Path as FsPath
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -34,9 +34,9 @@ from app.services.scan_filters import ScanFilterConfig
 from app.services.activity import emit as _emit_activity
 from app.services.scan_state import (
     get_scan_state, get_failed_files, start_scanning, set_ingesting, set_idle, reset_scan,
-    get_rebuild_state, request_cancel, mark_scan_dispatched,
+    get_rebuild_state, request_cancel, request_scan,
 )
-from app.worker.tasks import regenerate_thumbnail, run_scan, rebuild_targets, smart_rebuild_targets, retry_unresolved, backfill_csv_metrics, generate_reference_thumbnails, purge_and_regenerate_thumbnails, regenerate_missing_thumbnails, backfill_catalog_identity
+from app.worker.tasks import regenerate_thumbnail, rebuild_targets, smart_rebuild_targets, retry_unresolved, backfill_csv_metrics, generate_reference_thumbnails, purge_and_regenerate_thumbnails, regenerate_missing_thumbnails, backfill_catalog_identity
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +45,7 @@ router = APIRouter(prefix="/scan", tags=["scan"])
 
 @router.post("", response_model=ScanQueueResponse)
 async def trigger_scan(
+    response: Response,
     include_calibration: bool = Query(False, description="Include calibration frames (BIAS, DARK, FLAT)"),
     force_orphan_cleanup: bool = Query(False, description="Bypass the 50%-missing safety threshold and remove all orphaned records (one-time, for deliberate bulk deletions)"),
     session: AsyncSession = Depends(get_session),
@@ -54,6 +55,11 @@ async def trigger_scan(
 
     The heavy directory scan runs inside a Celery task so this endpoint
     returns immediately - no nginx timeout issues on large data sets.
+
+    Triggering while a scan is running no longer bounces: it queues a single
+    follow-up run (202, ``status: "queued"``) that starts when the current one
+    finishes. The walk is single-pass, so this is the only way files copied in
+    after it started get seen without someone watching for the scan to end.
     """
     # Persist the frame filter choice for next visit
     from app.models.user_settings import UserSettings, SETTINGS_ROW_ID
@@ -68,27 +74,18 @@ async def trigger_scan(
     await session.commit()
 
     async with async_redis() as r:
-        # Use SET NX as a lock to prevent race between check and dispatch
-        acquired = await r.set("scan:lock", "1", nx=True, ex=10)
-        if not acquired:
-            return {"status": "already_running", "message": "Scan start in progress"}
-
-        try:
-            state = await get_scan_state(r)
-            if state.state in ("scanning", "ingesting"):
-                return {"status": "already_running", **state.to_dict()}
-
-            # Mark a scan as dispatched *before* releasing the lock below, so a
-            # second request that acquires the lock right after this one still
-            # sees an active scan even though the queued run_scan task hasn't
-            # been picked up by a worker yet and started_scanning_sync() hasn't
-            # run (AUD-016).
-            await mark_scan_dispatched(r)
-            run_scan.delay(include_calibration=include_calibration, force_orphan_cleanup=force_orphan_cleanup)
-
-            return {"status": "accepted", "message": "Scan queued - check /scan/status for progress"}
-        finally:
-            await r.delete("scan:lock")
+        outcome = await request_scan(
+            r,
+            include_calibration=include_calibration,
+            force_orphan_cleanup=force_orphan_cleanup,
+        )
+        if outcome == "queued":
+            response.status_code = 202
+            return {
+                "status": "queued",
+                "message": "A scan is running - one rescan queued to follow it",
+            }
+        return {"status": "accepted", "message": "Scan queued - check /scan/status for progress"}
 
 
 @router.post("/regenerate-thumbnails", response_model=RegenerateThumbnailsResponse)

@@ -310,6 +310,7 @@ async def list_targets_aggregated(
     page_size: int,
     include_custom: bool,
     custom_filters: str | None,
+    resolved_only: bool = False,
 ) -> TargetAggregationResponse:
     """Return targets with aggregated session data, filtered by query params."""
     filter_map, cam_map, tel_map = await load_alias_maps(session)
@@ -342,6 +343,15 @@ async def list_targets_aggregated(
         "i.image_type = 'LIGHT'",
         "(i.resolved_target_id IS NULL OR t.merged_into_id IS NULL)",
     ]
+    # resolved_only drops the unresolved-OBJECT / uncategorized "obj:" groups
+    # before grouping, so total_count, the page slice and the aggregates all
+    # describe the same set of real targets. The Dashboard wants those groups
+    # (they are how a user finds frames that failed to resolve), so this is
+    # opt-in and off by default; /api/v1/targets sets it because an "obj:" id
+    # is not addressable by any other public route, and a client paging on
+    # total_count must not be told about rows it can never fetch.
+    if resolved_only:
+        where_parts.append("i.resolved_target_id IS NOT NULL")
     params: dict = {}
 
     # Generate EXISTS subqueries for custom column filters

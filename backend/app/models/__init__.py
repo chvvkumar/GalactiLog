@@ -32,5 +32,6 @@ from .app_log import AppLog
 from .data_job import DataJob, DataJobStatus
 from .catalog_cache import CatalogCache
 from .phd2 import Phd2Log, Phd2Session, Phd2Frame, Phd2Calibration
+from .api_key import ApiKey
 
-__all__ = ["Base", "Target", "Image", "UserSettings", "SETTINGS_ROW_ID", "MergeCandidate", "MergeManifest", "SimbadCache", "SesameCache", "User", "UserRole", "RefreshToken", "AppMetadata", "OpenNGCEntry", "VizierCache", "HyperLEDACache", "SiteDarkHours", "SessionNote", "Mosaic", "MosaicPanel", "MosaicSuggestion", "MosaicPanelSession", "CustomColumn", "CustomColumnValue", "ColumnType", "AppliesTo", "FilenameCandidate", "GaiaCache", "SACEntry", "CaldwellEntry", "Herschel400Entry", "ArpEntry", "AbellEntry", "TargetCatalogMembership", "ActivityEvent", "AppLog", "DataJob", "DataJobStatus", "CatalogCache", "Phd2Log", "Phd2Session", "Phd2Frame", "Phd2Calibration"]
+__all__ = ["Base", "Target", "Image", "UserSettings", "SETTINGS_ROW_ID", "MergeCandidate", "MergeManifest", "SimbadCache", "SesameCache", "User", "UserRole", "RefreshToken", "AppMetadata", "OpenNGCEntry", "VizierCache", "HyperLEDACache", "SiteDarkHours", "SessionNote", "Mosaic", "MosaicPanel", "MosaicSuggestion", "MosaicPanelSession", "CustomColumn", "CustomColumnValue", "ColumnType", "AppliesTo", "FilenameCandidate", "GaiaCache", "SACEntry", "CaldwellEntry", "Herschel400Entry", "ArpEntry", "AbellEntry", "TargetCatalogMembership", "ActivityEvent", "AppLog", "DataJob", "DataJobStatus", "CatalogCache", "Phd2Log", "Phd2Session", "Phd2Frame", "Phd2Calibration", "ApiKey"]
