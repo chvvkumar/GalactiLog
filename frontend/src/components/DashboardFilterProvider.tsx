@@ -66,7 +66,7 @@ export function useDashboardFilters(): DashboardFilterAPI {
 }
 
 const FILTER_KEYS = [
-  "search", "target_id", "camera", "telescope", "filters", "object_type",
+  "search", "target_id", "target_name", "camera", "telescope", "filters", "object_type",
   "date_from", "date_to", "hfr_min", "hfr_max",
   "fits_key", "fits_op", "fits_val", "cc_filters", "catalog",
 ];
@@ -180,6 +180,7 @@ function deriveFilters(rawSp: RawSearchParams): ActiveFilters {
   return {
     searchQuery: sp.search ?? "",
     selectedTargetId: sp.target_id || null,
+    selectedTargetName: sp.target_name || null,
     camera: sp.camera || null,
     telescope: sp.telescope || null,
     opticalFilters: sp.filters?.split(",").filter(Boolean) ?? [],
@@ -355,11 +356,16 @@ const DashboardFilterProvider: Component<{ children: JSX.Element }> = (props) =>
   const updateFilter = (key: string, value: any) => {
     switch (key) {
       case "searchQuery":
-        set({ search: value || undefined, target_id: undefined });
+        set({ search: value || undefined, target_id: undefined, target_name: undefined });
         break;
-      case "selectedTargetId":
-        set({ target_id: value || undefined, search: undefined });
+      case "selectedTargetId": {
+        // value: { id, name } from SearchBar's selectTarget, or null/"" to clear.
+        const t = value as { id: string; name?: string } | string | null;
+        const id = t && typeof t === "object" ? t.id : t;
+        const name = t && typeof t === "object" ? t.name : undefined;
+        set({ target_id: id || undefined, target_name: name || undefined, search: undefined });
         break;
+      }
       case "camera":
         set({ camera: value || undefined });
         break;

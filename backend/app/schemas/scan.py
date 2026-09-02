@@ -28,6 +28,7 @@ class ScanQueueResponse(BaseModel):
     skipped_calibration: int | None = None
     new_files: int | None = None
     changed_files: int | None = None
+    pending_rescan: bool | None = None
     task: str | None = None
     step: int | None = None
     total_steps: int | None = None
@@ -86,6 +87,10 @@ class ScanStateResponse(BaseModel):
     # this instead.
     phd2_state_at: float | None = None
     failed_files: list[ScanFailedFile] | None = None
+    # A trigger arrived while this scan was running, so one follow-up scan is
+    # queued to start when it finishes. Defaults to False, so an older
+    # snapshot dict without the key still validates.
+    pending_rescan: bool = False
     task: str = ""
     step: int = 0
     total_steps: int = 0

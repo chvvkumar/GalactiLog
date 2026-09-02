@@ -64,7 +64,10 @@ async def test_get_scan_state_ignores_dispatch_marker_once_ingesting():
     state = await get_scan_state(r)
 
     assert state.state == "ingesting"
-    r.exists.assert_not_called()
+    # The pending-rescan key is still read (it feeds pending_rescan on the
+    # snapshot); the DISPATCH marker is what must not be consulted here.
+    from app.services.scan_state import SCAN_DISPATCHED_KEY
+    assert SCAN_DISPATCHED_KEY not in [c.args[0] for c in r.exists.await_args_list]
 
 
 @pytest.mark.asyncio

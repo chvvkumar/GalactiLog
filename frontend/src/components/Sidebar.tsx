@@ -71,6 +71,7 @@ export const SECTION_ICONS: Record<SidebarSectionId, () => JSX.Element> = {
 
 export interface ActiveSectionFilters {
   searchQuery?: string;
+  selectedTargetId?: string | null;
   camera?: string;
   telescope?: string;
   opticalFilters: unknown[];
@@ -84,7 +85,7 @@ export interface ActiveSectionFilters {
 
 export function getActiveSectionIds(f: ActiveSectionFilters): Set<SidebarSectionId> {
   const ids = new Set<SidebarSectionId>();
-  if (f.searchQuery) ids.add("search");
+  if (f.searchQuery || f.selectedTargetId) ids.add("search");
   if (f.objectTypes.length > 0) ids.add("object-type");
   if (f.dateRange.start || f.dateRange.end) ids.add("date-range");
   if (Object.keys(f.qualityFilters).some((k) => (f.qualityFilters as Record<string, unknown>)[k] != null)) ids.add("filters");

@@ -29,6 +29,7 @@ from .logs import router as logs_router
 from .integrations import router as integrations_router
 from .wbpp import router as wbpp_router
 from .phd2 import router as phd2_router
+from .apikeys import router as apikeys_router
 from app.database import async_session
 from app.config import async_redis
 from app.services.version_check import (
@@ -61,6 +62,10 @@ api_router.include_router(logs_router)
 api_router.include_router(integrations_router)
 api_router.include_router(wbpp_router)
 api_router.include_router(phd2_router)
+api_router.include_router(apikeys_router)
+# The public bearer-key API is not included here: it is a FastAPI sub-app that
+# app.main mounts at /api/v1 so it can serve its own OpenAPI document. Nothing
+# above claims a /api/v1/... path, so the mount is unambiguous.
 
 
 @api_router.get("/version")

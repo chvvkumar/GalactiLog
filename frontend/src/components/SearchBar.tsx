@@ -3,6 +3,7 @@ import { apiClient } from "../api/generated/client";
 import { unwrap } from "../api/unwrap";
 import { useDashboardFilters } from "./DashboardFilterProvider";
 import { debounce } from "../utils/debounce";
+import SuggestionRowText from "./SuggestionRowText";
 import type { TargetSearchResultFuzzy } from "../api/types";
 
 const SearchBar: Component = () => {
@@ -12,25 +13,45 @@ const SearchBar: Component = () => {
   const [showSuggestions, setShowSuggestions] = createSignal(false);
   const [activeIndex, setActiveIndex] = createSignal(-1);
 
+  // Rehydrate the input from persisted filters. The sessionStorage restore in
+  // DashboardPage.onMount runs AFTER this component mounts (parent onMount
+  // fires last), so this must be an effect, not the signal's initial value.
+  // Only fills an EMPTY input - never overwrites text the user owns.
+  createEffect(on([() => filters().selectedTargetName, () => filters().searchQuery], ([name, search]) => {
+    const external = name || search || "";
+    if (external && !query()) setQuery(external);
+  }));
+
   // Only sync when external value is cleared (e.g. Reset Filters)
-  // Never sync non-empty external values back - input owns its own text
+  // Never sync non-empty external values back - input owns its own text.
+  // Each clear is guarded on the OTHER dimension: selecting a target clears
+  // `search` (and typing a new search clears `target_id`) as a side effect of
+  // the same updateFilter call, so only a clear of BOTH means the filter is
+  // truly gone and the input should blank.
   createEffect(on(() => filters().searchQuery, (search, prev) => {
-    if (!search && prev) setQuery("");
+    if (!search && prev && !filters().selectedTargetId) setQuery("");
   }, { defer: true }));
   createEffect(on(() => filters().selectedTargetId, (id, prev) => {
-    if (!id && prev) setQuery("");
+    if (!id && prev && !filters().searchQuery) setQuery("");
   }, { defer: true }));
 
   const fetchSuggestions = debounce(async (value: string) => {
+    // Drop stale runs: the input may have been emptied/retyped after this
+    // callback was scheduled, or changed while the fetch was in flight
+    // (e.g. fast-deleting to empty within the debounce window, or picking
+    // a suggestion before the debounce fires).
+    if (value !== query()) return;
+    let results: TargetSearchResultFuzzy[] = [];
     try {
-      const results = await apiClient
+      results = await apiClient
         .GET("/api/targets/search", { params: { query: { q: value } } })
         .then(unwrap);
-      setSuggestions(results);
-      setShowSuggestions(results.length > 0);
     } catch {
-      setSuggestions([]);
+      /* results stay empty */
     }
+    if (value !== query()) return;
+    setSuggestions(results);
+    setShowSuggestions(results.length > 0);
     updateFilter("searchQuery", value);
   }, 300);
 
@@ -68,7 +89,7 @@ const SearchBar: Component = () => {
   const selectTarget = (target: TargetSearchResultFuzzy) => {
     setQuery(target.primary_name);
     setShowSuggestions(false);
-    updateFilter("selectedTargetId", target.id);
+    updateFilter("selectedTargetId", { id: target.id, name: target.primary_name });
   };
 
   return (
@@ -93,20 +114,7 @@ const SearchBar: Component = () => {
                 class={`w-full text-left px-3 py-2 text-theme-text-primary text-sm ${activeIndex() === i() ? "bg-theme-accent/20" : "hover:bg-theme-accent/20"}`}
                 onMouseDown={() => selectTarget(target)}
               >
-                <span class="font-medium">{target.primary_name}</span>
-                <Show when={target.object_type}>
-                  <span class="text-theme-text-secondary ml-2">({target.object_type})</span>
-                </Show>
-                <Show when={target.match_source}>
-                  <span class="text-theme-accent text-xs ml-2">
-                    matched: {target.match_source}
-                  </span>
-                </Show>
-                <Show when={target.similarity_score < 1.0}>
-                  <span class="text-theme-text-secondary text-xs ml-1">
-                    ~{Math.round(target.similarity_score * 100)}%
-                  </span>
-                </Show>
+                <SuggestionRowText target={target} />
               </button>
             )}
           </For>

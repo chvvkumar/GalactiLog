@@ -13,6 +13,7 @@ from starlette.responses import JSONResponse
 from app.config import settings, limiter, async_redis, get_jwt_secret, jwt_secret_persisted
 from app.database import async_session
 from app.api.router import api_router
+from app.api.v1 import v1_app
 from app.api.metrics_endpoint import router as metrics_router
 from app.metrics import PrometheusMiddleware, start_queue_depth_probe, register_celery_collector
 from app.schemas.error import ErrorEnvelope
@@ -272,6 +273,20 @@ def create_app() -> FastAPI:
     # API routes
     application.include_router(api_router)
     application.include_router(metrics_router)
+
+    # Public bearer-key API as a mounted sub-application, so it owns an
+    # OpenAPI document covering only its own routes (/api/v1/docs,
+    # /api/v1/openapi.json). The mount path is the prefix the router used to
+    # carry, so external paths are byte-identical to before.
+    application.mount("/api/v1", v1_app)
+    # A mounted app resolves dependency overrides against itself, so tests that
+    # override get_session on the outer app would silently miss v1. Sharing the
+    # one dict keeps `app.dependency_overrides[...] = ...` meaning what it did.
+    v1_app.dependency_overrides = application.dependency_overrides
+    # Starlette stops at the sub-app's own error middleware, so without this a
+    # 500 under /api/v1 would skip the api_error activity event and the JSON
+    # error envelope that every other route gets.
+    v1_app.add_exception_handler(Exception, unhandled_exception_handler)
 
     application.add_middleware(PrometheusMiddleware)
 
