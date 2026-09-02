@@ -345,6 +345,7 @@ COMMON_NAME_MAP: dict[str, str] = {
     "moon": "Moon",
     "hickson 44": "HCG 44",
     "ou 4": "PN Ou 4",
+    "squid nebula": "PN Ou 4",
     # Stellarium maps to NGC; we prefer Messier designation
     "pinwheel galaxy": "M 101",
     "beehive cluster": "M 44",

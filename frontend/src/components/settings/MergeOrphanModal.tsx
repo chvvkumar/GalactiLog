@@ -4,6 +4,7 @@ import { unwrap } from "../../api/unwrap";
 import { showToast } from "../Toast";
 import type { MergeCandidateResponse, TargetSearchResultFuzzy } from "../../api/types";
 import Dialog from "../Dialog";
+import SuggestionRowText from "../SuggestionRowText";
 import Button from "../ui/Button";
 
 interface Props {
@@ -117,10 +118,7 @@ const MergeOrphanModal: Component<Props> = (props) => {
                         : "text-theme-text-primary hover:bg-theme-hover"
                     }`}
                   >
-                    <span class="font-medium">{t.primary_name}</span>
-                    <Show when={t.object_type}>
-                      <span class="text-xs text-theme-text-secondary ml-2">{t.object_type}</span>
-                    </Show>
+                    <SuggestionRowText target={t} />
                   </button>
                 )}
               </For>

@@ -50,6 +50,17 @@ SCAN_SKIPPED_PATHS_TTL = 7 * 86400  # 7 days
 # the task up at all.
 SCAN_DISPATCHED_KEY = "scan:dispatched"
 SCAN_DISPATCHED_TTL = 60  # seconds
+# A scan trigger that arrives while a scan is running sets this flag instead of
+# being rejected: the running walk is single-pass, so files copied in after it
+# started are invisible to it until someone triggers again. The flag is a
+# single key, so N triggers during one scan collapse into exactly one follow-up
+# run. Value is "1"/"0" carrying the trigger's include_calibration choice
+# (force_orphan_cleanup is deliberately not carried - it is a one-time
+# admin action, not something to replay into a scan the admin didn't ask for).
+# Consumed with GETDEL at every scan completion path, so the follow-up can
+# never re-trigger itself; its own followers queue normally.
+SCAN_PENDING_KEY = "scan:pending_rescan"
+SCAN_PENDING_TTL = 6 * 3600  # backstop: a flag stranded by a crashed scan dies
 EXPIRE_AFTER_COMPLETE = 86400  # 24 hours
 STALE_TIMEOUT = 300  # 5 minutes with no progress → consider stuck
 
@@ -106,6 +117,11 @@ class ScanStateSnapshot:
     total_steps: int = 0
     percent: float = 0.0
     message: str = ""
+    # True when a trigger arrived mid-scan and a follow-up scan is queued to
+    # run once this one finishes (SCAN_PENDING_KEY). Not a field of the
+    # scan:state hash - it outlives that hash's resets - so it is filled in by
+    # get_scan_state, not by parse_snapshot.
+    pending_rescan: bool = False
 
     def to_dict(self) -> dict:
         return {
@@ -132,6 +148,7 @@ class ScanStateSnapshot:
             "total_steps": self.total_steps,
             "percent": self.percent,
             "message": self.message,
+            "pending_rescan": self.pending_rescan,
         }
 
 
@@ -213,7 +230,73 @@ async def get_scan_state(r: aioredis.Redis) -> ScanStateSnapshot:
         # idle/complete. Report it as active so a second request doesn't
         # race in and dispatch a duplicate scan (AUD-016).
         snap.state = "scanning"
+    snap.pending_rescan = await r.exists(SCAN_PENDING_KEY) == 1
     return snap
+
+
+async def request_scan(
+    r: aioredis.Redis | None = None,
+    *,
+    include_calibration: bool = False,
+    force_orphan_cleanup: bool = False,
+) -> str:
+    """Start a scan, or queue one to follow the scan that is already running.
+
+    Returns "started" (run_scan dispatched now) or "queued" (a scan is in
+    flight; SCAN_PENDING_KEY set so exactly one follow-up runs when it
+    finishes). Queuing rather than rejecting is the point: the directory walk
+    is single-pass, so files that land after it started are invisible to it,
+    and "come back and press the button again" is not something a copy job can
+    do.
+
+    ``r`` is optional so a caller that already holds a connection can pass it;
+    without one a connection is opened for the call.
+    """
+    if r is None:
+        from app.config import async_redis
+        async with async_redis() as conn:
+            return await request_scan(
+                conn,
+                include_calibration=include_calibration,
+                force_orphan_cleanup=force_orphan_cleanup,
+            )
+
+    pending_value = "1" if include_calibration else "0"
+    # Same SET NX lock as before: it closes the check/dispatch race. Losing it
+    # means another request is dispatching a scan right now - its walk has not
+    # begun, so it will see whatever this caller just copied in. Nothing to
+    # queue and nothing to dispatch; queuing here would turn a double-click
+    # into a second full library walk.
+    if not await r.set("scan:lock", "1", nx=True, ex=10):
+        return "started"
+    try:
+        state = await get_scan_state(r)
+        if state.state in ("scanning", "ingesting"):
+            # get_scan_state reports a just-dispatched scan as "scanning" even
+            # though no worker has picked it up (AUD-016). That scan has not
+            # walked anything yet, so it covers this request too - only a scan
+            # that has actually started needs a follow-up. start_scanning_sync
+            # deletes the marker, so a running scan never trips this.
+            if await r.exists(SCAN_DISPATCHED_KEY):
+                return "started"
+            await r.set(SCAN_PENDING_KEY, pending_value, ex=SCAN_PENDING_TTL)
+            return "queued"
+
+        from app.worker.tasks import run_scan
+
+        # Mark a scan as dispatched *before* releasing the lock below, so a
+        # second request that acquires the lock right after this one still
+        # sees an active scan even though the queued run_scan task hasn't been
+        # picked up by a worker yet and start_scanning_sync() hasn't run
+        # (AUD-016).
+        await mark_scan_dispatched(r)
+        run_scan.delay(
+            include_calibration=include_calibration,
+            force_orphan_cleanup=force_orphan_cleanup,
+        )
+        return "started"
+    finally:
+        await r.delete("scan:lock")
 
 
 async def mark_scan_dispatched(r: aioredis.Redis) -> None:
@@ -278,6 +361,13 @@ async def reset_scan(r: aioredis.Redis) -> None:
     await r.delete(SCAN_PROGRESS_KEY)
     await r.delete(SCAN_FAILED_KEY)
     await r.delete(SCAN_CANCEL_KEY)
+    # Drop any queued follow-up scan too. Reset is the "put everything back to
+    # idle" button, pressed on a scan that is stalled or wedged; honouring the
+    # flag here would start a fresh scan out of an action the user asked for
+    # precisely because they wanted the scanning to stop. They can press Scan.
+    # Without this the flag would sit until its 6h TTL and then surprise the
+    # next completed scan with an extra run.
+    await r.delete(SCAN_PENDING_KEY)
     # Also clear any stuck rebuild/reference-thumbnail state so a rebuild that
     # was hard-killed mid-run (leaving REBUILD_KEY at "running" with no TTL) has
     # a recovery path from the UI instead of requiring a manual Redis edit
@@ -336,6 +426,68 @@ def increment_failed_sync(r: sync_redis.Redis, file_path: str = "", error: str =
     check_complete_sync(r)
 
 
+def arm_pending_rescan_sync(r: sync_redis.Redis, include_calibration: bool) -> None:
+    """Queue a follow-up scan from the worker side (see SCAN_PENDING_KEY).
+
+    The worker-side twin of request_scan's queueing branch, for a run_scan
+    dispatch that bails on the run lock: the walk it was going to do is still
+    owed, and the scan holding the lock is the one that can pay it.
+    """
+    r.set(SCAN_PENDING_KEY, "1" if include_calibration else "0", ex=SCAN_PENDING_TTL)
+
+
+def dispatch_pending_rescan_sync(r: sync_redis.Redis) -> bool:
+    """Run the follow-up scan queued by a trigger that arrived mid-scan.
+
+    Called from every path where a scan finishes. GETDEL is what makes this
+    safe to call from several of them: the flag is read and cleared in one
+    round trip, so two completion paths racing can only dispatch one scan. The
+    follow-up re-arms the flag only if it never got to run at all (bailed on
+    the run lock - see run_scan); a trigger arriving during a follow-up that
+    does run queues the next one normally.
+
+    The countdown gives run_scan's own SCAN_RUN_LOCK - released in its
+    `finally`, which can still be pending when the no-new-files path calls
+    this from inside the task - time to clear; without it the follow-up would
+    bail out as a duplicate dispatch and the queued rescan would be lost. The
+    dispatch marker keeps /scan/status reading "scanning" across the wait, so
+    the UI doesn't blink idle and a third trigger doesn't slip in.
+
+    Race window: a trigger that read the state as "ingesting" before this
+    scan published "complete", but wrote its flag after the GETDEL below, sets
+    a flag nobody consumes until the next scan finishes. It costs one extra
+    scan later, never a lost one, and requires the request to stall across the
+    whole completion tail - not worth a lock to close.
+    """
+    raw = r.getdel(SCAN_PENDING_KEY)
+    if raw is None:
+        return False
+    value = raw.decode() if isinstance(raw, bytes) else raw
+    include_calibration = value == "1"
+    from app.worker.tasks import run_scan
+    try:
+        r.set(SCAN_DISPATCHED_KEY, "1", ex=SCAN_DISPATCHED_TTL)
+        run_scan.apply_async(
+            countdown=10,
+            # queued=True: if it still finds the run lock held, it re-arms the
+            # flag instead of dropping the rescan (the GETDEL above already
+            # consumed it).
+            kwargs={"include_calibration": include_calibration, "queued": True},
+        )
+    except Exception:
+        # Put the flag back: the request that queued this rescan is owed a
+        # scan, and a broker hiccup here would otherwise drop it silently for
+        # good. The next completion path re-tries the dispatch.
+        r.set(SCAN_PENDING_KEY, value, ex=SCAN_PENDING_TTL)
+        r.delete(SCAN_DISPATCHED_KEY)
+        logger.warning(
+            "scan_state: could not dispatch the queued follow-up scan", exc_info=True,
+        )
+        return False
+    logger.info("scan_state: dispatching queued follow-up scan")
+    return True
+
+
 def check_complete_sync(r: sync_redis.Redis) -> None:
     from app.services.progress_envelope import set_progress
 
@@ -375,6 +527,11 @@ def check_complete_sync(r: sync_redis.Redis) -> None:
             r, SCAN_KEY, task=kind, step=snap.total, total_steps=snap.total,
             message=_ingest_progress_message(kind, snap.total, snap.total),
         )
+        # A CSV backfill publishes itself as "ingesting" in this same hash, so
+        # a scan triggered while one runs is told "queued". This branch is
+        # where that backfill ends, and it is the only place that follow-up
+        # can be dispatched from - without it the promised scan never runs.
+        dispatch_pending_rescan_sync(r)
         return
     parts = []
     actual_new = max(0, snap.new_files - snap.skipped_calibration)
@@ -500,6 +657,10 @@ def check_complete_sync(r: sync_redis.Redis) -> None:
         r.set("galactilog:scan_summary", _json.dumps(_summary))
     except Exception:
         logger.exception("scan_state: failed to write scan_summary to Redis")
+    # The ingest is done, so this is where a scan triggered mid-run gets its
+    # turn: everything copied in after this run's single-pass walk started is
+    # only visible to a fresh walk.
+    dispatch_pending_rescan_sync(r)
 
 
 def start_scanning_sync(r: sync_redis.Redis) -> None:
@@ -792,6 +953,10 @@ def set_cancelled_sync(r: sync_redis.Redis) -> None:
     })
     r.expire(SCAN_KEY, EXPIRE_AFTER_COMPLETE)
     r.delete(SCAN_CANCEL_KEY)
+    # A cancelled scan must not hand off to a queued follow-up: the user asked
+    # for the scanning to stop, and a rescan starting seconds later is the
+    # opposite of that.
+    r.delete(SCAN_PENDING_KEY)
     from app.services.progress_envelope import set_progress
     set_progress(
         r, SCAN_KEY, task=kind, step=snap.completed + snap.failed,

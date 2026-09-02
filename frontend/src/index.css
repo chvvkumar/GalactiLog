@@ -160,6 +160,22 @@ option {
   border-radius: var(--radius-sm);
 }
 
+/* Form fields show focus via their own accent border, keyboard outline would double it */
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: none;
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+  border-color: color-mix(in srgb, var(--color-accent) 55%, var(--color-border));
+  box-shadow:
+    0 0 8px color-mix(in srgb, var(--color-accent) 20%, transparent),
+    0 0 24px 6px color-mix(in srgb, var(--color-accent) 10%, transparent);
+}
+
 /* ── Glass theme support ── */
 [data-theme-style="glass"] body {
   background: linear-gradient(

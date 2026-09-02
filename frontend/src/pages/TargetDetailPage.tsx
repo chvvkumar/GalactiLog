@@ -31,6 +31,7 @@ import ActionsMenu from "../components/ActionsMenu";
 import InlineRename from "../components/InlineRename";
 import CollapsibleHeader from "../components/CollapsibleHeader";
 import MergePreviewModal from "../components/MergePreviewModal";
+import SuggestionRowText from "../components/SuggestionRowText";
 import Button, { buttonClasses } from "../components/ui/Button";
 import { useAuth } from "../components/AuthProvider";
 import { OBJECT_TYPE_OPTIONS } from "../constants/objectTypes";
@@ -155,10 +156,7 @@ const MergeFromDetailFlow: Component<MergeFromDetailFlowProps> = (props) => {
                         onClick={() => setSelectedTarget(t)}
                         class="w-full text-left px-3 py-2 text-sm border-b border-theme-border last:border-b-0 transition-colors text-theme-text-primary hover:bg-theme-hover"
                       >
-                        <span class="font-medium">{t.primary_name}</span>
-                        <Show when={t.object_type}>
-                          <span class="text-xs text-theme-text-secondary ml-2">{t.object_type}</span>
-                        </Show>
+                        <SuggestionRowText target={t} />
                         <Show when={t.unresolved}>
                           <span class="text-xs text-theme-warning ml-2">
                             Unresolved{t.image_count != null ? ` · ${t.image_count} ${t.image_count === 1 ? "image" : "images"}` : ""}

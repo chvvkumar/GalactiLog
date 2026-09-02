@@ -141,7 +141,7 @@ def test_both_frame_builders_populate_it():
     )
 
 
-def test_alembic_head_is_0023():
+def test_alembic_has_a_single_head():
     import pathlib
 
     versions = pathlib.Path(__file__).resolve().parents[1] / "alembic" / "versions"
@@ -155,4 +155,6 @@ def test_alembic_head_is_0023():
             if line.startswith("down_revision = "):
                 downs.add(line.split("=", 1)[1].strip().strip('"'))
     heads = set(revisions) - downs
-    assert heads == {"0023"}, f"expected a single head 0023, got {sorted(heads)}"
+    # The invariant is one head, not a particular number: pinning the literal
+    # made every new revision break this test (0024 did).
+    assert len(heads) == 1, f"expected a single alembic head, got {sorted(heads)}"

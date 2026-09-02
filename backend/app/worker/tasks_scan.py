@@ -38,7 +38,7 @@ from app.services.scan_state import (
     increment_skipped_calibration_sync,
     start_scanning_sync, set_ingesting_sync, set_idle_sync,
     set_discovered_sync, is_cancel_requested_sync, clear_cancel_sync, set_cancelled_sync,
-    check_complete_sync,
+    check_complete_sync, dispatch_pending_rescan_sync, arm_pending_rescan_sync,
     add_skipped_path_sync, get_skipped_paths_sync, clear_skipped_paths_sync,
     rebuild_skipped_paths_sync,
     reset_phd2_counts_sync, set_phd2_state_sync, PHD2_STATE_IDLE,
@@ -143,7 +143,12 @@ def _get_cached_general_settings() -> GeneralSettings:
 
 
 @celery_app.task(bind=True, name="app.worker.tasks.run_scan")
-def run_scan(self, include_calibration: bool = True, force_orphan_cleanup: bool = False) -> dict:
+def run_scan(
+    self,
+    include_calibration: bool = True,
+    force_orphan_cleanup: bool = False,
+    queued: bool = False,
+) -> dict:
     """Scan the FITS directory and queue ingest tasks for new files.
 
     Runs entirely inside Celery so the HTTP endpoint returns immediately.
@@ -155,8 +160,16 @@ def run_scan(self, include_calibration: bool = True, force_orphan_cleanup: bool 
     if not _redis.set(SCAN_RUN_LOCK, "1", nx=True, ex=SCAN_RUN_LOCK_TTL):
         logger.info(
             "run_scan: a scan is already running (run lock held), "
-            "skipping duplicate dispatch"
+            "skipping duplicate dispatch; queued as a follow-up instead"
         )
+        # A follow-up that bails here does no work at all, and the flag that
+        # asked for it was already consumed by the dispatch - so the queued
+        # rescan would just vanish. Put it back and let whoever holds the lock
+        # dispatch it again when they finish. Only ``queued`` runs re-arm: an
+        # ordinary duplicate dispatch (auto_scan_tick racing a manual scan)
+        # bails and stays bailed, as it always has.
+        if queued:
+            arm_pending_rescan_sync(_redis, include_calibration)
         return {"status": "skipped", "reason": "already running"}
     try:
         from app.services.scanner import scan_directory
@@ -353,6 +366,10 @@ def run_scan(self, include_calibration: bool = True, force_orphan_cleanup: bool 
                     "run_scan: could not dispatch the guiding correlation pass",
                     exc_info=True,
                 )
+            # Scan over here: no ingest tasks were queued, so check_complete_sync
+            # (which handles the same hand-off for the ingesting path) never
+            # runs. A trigger that arrived during this walk gets its rescan.
+            dispatch_pending_rescan_sync(_redis)
             return {"status": "complete", "new_files_queued": 0, "already_known": cataloged, "removed": removed, "phd2_found": len(phd2_paths)}
 
         # Transition to ingesting with final total - ingest tasks are already running

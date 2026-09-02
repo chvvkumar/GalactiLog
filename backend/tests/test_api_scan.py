@@ -46,9 +46,12 @@ async def test_trigger_scan_accepted():
     app.dependency_overrides[get_current_user] = lambda: admin
     app.dependency_overrides[require_admin] = lambda: admin
 
-    with patch("app.api.scan.run_scan") as mock_run_scan, \
-         patch("app.api.scan.async_redis") as mock_redis_cm:
-        mock_run_scan.delay = MagicMock()
+    # run_scan is imported inside scan_state.request_scan from app.worker.tasks,
+    # which conftest already replaces with a MagicMock module.
+    import app.worker.tasks as _tasks
+    _tasks.run_scan.delay.reset_mock()
+
+    with patch("app.api.scan.async_redis") as mock_redis_cm:
         # Mock Redis returning idle state
         mock_redis = AsyncMock()
         mock_redis.hgetall = AsyncMock(return_value={})
@@ -69,6 +72,7 @@ async def test_trigger_scan_accepted():
     assert data["status"] == "accepted"
     mock_session.commit.assert_called_once()
     mock_redis.set.assert_any_call("scan:dispatched", "1", ex=60)
+    _tasks.run_scan.delay.assert_called_once()
 
     app.dependency_overrides.clear()
 
@@ -183,7 +187,10 @@ async def test_scan_status_returns_failed_file_objects():
 
 
 @pytest.mark.asyncio
-async def test_scan_rejects_when_already_running():
+async def test_scan_queues_when_already_running():
+    """Triggering during a running scan queues one follow-up run (202) instead
+    of bouncing the request: the directory walk is single-pass, so files copied
+    in after it started are invisible to it."""
     settings_result = MagicMock()
     settings_result.scalar_one_or_none.return_value = None  # no existing row
 
@@ -214,15 +221,19 @@ async def test_scan_rejects_when_already_running():
         mock_redis.get = AsyncMock(return_value=str(_time.time()))  # recent progress
         mock_redis.set = AsyncMock(return_value=True)  # lock acquired
         mock_redis.delete = AsyncMock()
+        mock_redis.exists = AsyncMock(return_value=0)  # get_scan_state checks the pending key
         mock_redis_cm.side_effect = _mock_async_redis(mock_redis)
 
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             resp = await client.post("/api/scan")
 
-    assert resp.status_code == 200
+    assert resp.status_code == 202
     data = resp.json()
-    assert data["status"] == "already_running"
+    assert data["status"] == "queued"
+    # Exactly one follow-up is remembered, as a flag on a fixed key.
+    from app.services.scan_state import SCAN_PENDING_KEY
+    mock_redis.set.assert_any_call(SCAN_PENDING_KEY, "0", ex=6 * 3600)
 
     app.dependency_overrides.clear()
 
