@@ -9,6 +9,12 @@ public surface even as the internal schemas grow.
 
 Auth is structural: require_read_key is attached to the router below, so
 every route is key-authed by default and write routes add require_write_key.
+
+The router carries no /v1 prefix: it is included into the ``v1_app`` sub-
+application (app/api/v1/__init__.py) which app.main mounts at /api/v1, so the
+external paths are unchanged. Keeping the key dependency on the router rather
+than on the sub-app is what leaves the sub-app's own /docs and /openapi.json
+reachable without a key.
 """
 
 import logging
@@ -17,6 +23,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
+from fastapi.security import HTTPBearer
 from pydantic import BaseModel
 from sqlalchemy import distinct, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -37,10 +44,15 @@ from app.services.path_safety import resolve_relative_under
 
 logger = logging.getLogger(__name__)
 
+# Declared only so the generated OpenAPI carries an HTTPBearer security scheme
+# and Swagger's Authorize button offers a token field. Runtime auth stays the
+# manual header parsing in deps.require_read_key, so auto_error=False keeps
+# this from ever raising or shadowing that dependency's 401/429 responses.
+_bearer = HTTPBearer(auto_error=False, description="API key, e.g. glg_...")
+
 router = APIRouter(
-    prefix="/v1",
     tags=["v1"],
-    dependencies=[Depends(require_read_key)],
+    dependencies=[Depends(_bearer), Depends(require_read_key)],
 )
 
 # list_targets_aggregated takes every dashboard filter as a required keyword.

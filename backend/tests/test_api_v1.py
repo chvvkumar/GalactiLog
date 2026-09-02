@@ -603,3 +603,156 @@ async def test_repeat_requests_collapse_to_one_flag():
     pending = [c for c in redis.set.await_args_list if c.args[0] == ss.SCAN_PENDING_KEY]
     assert len(pending) == 2, "both requests should write the pending marker"
     assert {c.args[0] for c in pending} == {ss.SCAN_PENDING_KEY}, "pending marker must be one fixed key"
+
+
+# ---------------------------------------------------------------------------
+# The v1 sub-application: its own OpenAPI document and Swagger UI
+#
+# /api/v1 is a mounted FastAPI app rather than a router under /api, so it can
+# publish a spec covering only the public surface. These tests pin the two
+# things that mount buys (a v1-only spec, a Swagger UI that can authorize) and
+# the three it must not break (unchanged paths, one auth pass per request, a
+# real client address reaching the rate limiter).
+# ---------------------------------------------------------------------------
+
+V1_PATHS = {
+    "/guiding",
+    "/mosaics",
+    "/mosaics/{mosaic_id}",
+    "/nights",
+    "/scan",
+    "/scan/status",
+    "/search",
+    "/stats",
+    "/targets",
+    "/targets/{target_id}",
+    "/targets/{target_id}/export",
+    "/targets/{target_id}/frames",
+    "/targets/{target_id}/notes",
+    "/targets/{target_id}/point/nina",
+    "/targets/{target_id}/point/stellarium",
+    "/targets/{target_id}/sessions",
+    "/targets/{target_id}/sessions/{date}",
+    "/targets/{target_id}/sessions/{date}/notes",
+    "/targets/{target_id}/thumbnail",
+}
+
+
+@pytest.mark.asyncio
+async def test_v1_openapi_lists_only_v1_routes():
+    """The spec is the public contract: 19 projected routes and nothing from
+    the internal API. A leak here is a leak of the admin surface's shape."""
+    resp = await _call("GET", "/api/v1/openapi.json")
+    assert resp.status_code == 200, resp.text
+    spec = resp.json()
+
+    assert spec["info"]["title"] == "GalactiLog API v1"
+    assert set(spec["paths"]) == V1_PATHS
+
+    # Named because these are the routes most likely to be dragged in by a
+    # regression that re-includes the internal router into the sub-app.
+    joined = " ".join(spec["paths"])
+    for internal in ("auth", "login", "settings", "apikeys", "bootstrap",
+                     "activity", "logs", "backup", "custom-columns",
+                     "merges", "wbpp", "phd2", "analysis", "preview"):
+        assert internal not in joined, f"internal surface {internal!r} in v1 spec"
+
+    # /api/v1/scan is the public trigger; the admin scan routes (stop, reset,
+    # progress, activity) must not have come along with it.
+    assert {m.lower() for m in spec["paths"]["/scan"]} == {"post"}
+    assert {m.lower() for m in spec["paths"]["/scan/status"]} == {"get"}
+
+
+@pytest.mark.asyncio
+async def test_v1_openapi_servers_resolve_to_api_v1(v1env):
+    """Paths are prefix-free and `servers` carries the mount point, so
+    server + path is the URL that actually answers - which is what Swagger's
+    try-out and any generated client will call."""
+    spec = (await _call("GET", "/api/v1/openapi.json")).json()
+
+    assert spec["servers"][0]["url"] == "/api/v1"
+    assert all(not p.startswith("/api") for p in spec["paths"])
+
+    base = spec["servers"][0]["url"]
+    assert (await _call("GET", base + "/targets", v1env.read)).status_code == 200
+    assert (await _call("GET", base + "/stats", v1env.read)).status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_v1_openapi_declares_bearer_scheme_on_every_route():
+    """Without a declared scheme Swagger has no Authorize button and the docs
+    are read-only. Every operation must reference it, not just some."""
+    spec = (await _call("GET", "/api/v1/openapi.json")).json()
+
+    schemes = spec["components"]["securitySchemes"]
+    assert schemes["HTTPBearer"]["type"] == "http"
+    assert schemes["HTTPBearer"]["scheme"] == "bearer"
+
+    for path, ops in spec["paths"].items():
+        for method, op in ops.items():
+            assert op.get("security") == [{"HTTPBearer": []}], f"{method} {path}"
+
+
+@pytest.mark.asyncio
+async def test_v1_docs_serves_swagger_pointing_at_the_v1_spec():
+    resp = await _call("GET", "/api/v1/docs")
+    assert resp.status_code == 200, resp.text
+    assert resp.headers["content-type"].startswith("text/html")
+    assert "/api/v1/openapi.json" in resp.text
+
+
+@pytest.mark.asyncio
+async def test_v1_docs_and_spec_are_reachable_without_a_key():
+    """Swagger has to load before anyone can paste a key into it, so the two
+    doc routes are the only unauthenticated things under /api/v1 - and the
+    data routes next to them are still shut."""
+    assert (await _call("GET", "/api/v1/docs")).status_code == 200
+    assert (await _call("GET", "/api/v1/openapi.json")).status_code == 200
+    assert (await _call("GET", "/api/v1/targets")).status_code == 401
+    assert (await _call("GET", "/api/v1/stats")).status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_mount_does_not_double_apply_the_key_dependency(v1env):
+    """require_write_key resolves through require_read_key, and FastAPI caches
+    it per request. Mounting must not re-run it: a second pass would verify
+    the key twice and charge the rate limit twice for one call."""
+    import app.api.v1.deps as deps
+
+    real = deps.verify_api_key
+    calls = []
+
+    async def counting(session, raw):
+        calls.append(raw)
+        return await real(session, raw)
+
+    with patch.object(deps, "verify_api_key", counting):
+        assert (await _call("GET", "/api/v1/targets", v1env.write)).status_code == 200
+        assert len(calls) == 1, "read route verified the key more than once"
+
+        calls.clear()
+        resp = await _call("PUT", f"/api/v1/targets/{v1env.target}/notes",
+                           v1env.write, json={"notes": "once"})
+        assert resp.status_code == 200, resp.text
+        assert len(calls) == 1, "write route verified the key more than once"
+
+
+@pytest.mark.asyncio
+async def test_client_address_still_reaches_the_rate_limiter_under_the_mount(v1env):
+    """The bad-key budget is charged per client address. A mount rewrites the
+    request's path and root_path but not its peer or headers, so the address
+    the limiter sees must still be the one nginx forwarded."""
+    import app.api.v1.deps as deps
+
+    buckets = []
+
+    async def spy(name, limit):
+        buckets.append(name)
+        return False
+
+    with patch.object(deps, "_count_hit", spy), patch.object(deps, "_is_spent", spy):
+        resp = await _call("GET", "/api/v1/targets", "glg_" + "0" * 40,
+                           headers={"X-Forwarded-For": "203.0.113.7, 10.0.0.1"})
+        assert resp.status_code == 401, resp.text
+
+    assert buckets == ["badkey:203.0.113.7", "badkey:203.0.113.7"], buckets
