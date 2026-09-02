@@ -65,7 +65,7 @@ body, .swagger-ui { font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
 .swagger-ui .loading-container .loading::after {
   color: var(--glg-text);
 }
-.swagger-ui .info .title small pre { color: #ffffff; }
+.swagger-ui .info .title small pre { color: var(--glg-text); }
 .swagger-ui .opblock .opblock-summary-path,
 .swagger-ui .opblock .opblock-summary-path__deprecated { color: var(--glg-text); }
 .swagger-ui .markdown p, .swagger-ui .markdown li,
@@ -119,6 +119,28 @@ body, .swagger-ui { font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
   color: var(--glg-text);
 }
 .swagger-ui select { box-shadow: none; }
+/* Swagger scopes the auth dialog's input more tightly than the rule above, so
+   without this the one field you actually type a key into keeps a light border. */
+.swagger-ui .auth-container input[type=text],
+.swagger-ui .auth-container input[type=password] {
+  background: var(--glg-input);
+  border: 1px solid var(--glg-border-em);
+  color: var(--glg-text);
+}
+.swagger-ui input:focus, .swagger-ui textarea:focus, .swagger-ui select:focus {
+  outline: none;
+  border-color: var(--glg-accent);
+}
+.swagger-ui input:disabled, .swagger-ui textarea:disabled, .swagger-ui select:disabled {
+  background: var(--glg-bg);
+  color: var(--glg-text-2);
+  cursor: not-allowed;
+}
+/* Version and spec-format pills ship as bright stock chips; tone them to the
+   palette so the page header is not the loudest thing on a dark page. */
+.swagger-ui .info .title small,
+.swagger-ui .info .title small.version-stamp { background: var(--glg-elevated); }
+.swagger-ui .info a, .swagger-ui .info a:hover { color: var(--glg-accent); }
 /* Swagger UI 5.x renders OAS 3.1 schemas with json-schema-2020-12 markup,
    which its stock stylesheet paints as light chips - re-ground it all dark. */
 .swagger-ui .json-schema-2020-12,
@@ -165,10 +187,16 @@ body, .swagger-ui { font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
   border: 1px solid var(--glg-accent);
   background: transparent;
 }
+/* Stock cancel/clear buttons are grey-on-grey once the page goes dark, which
+   reads as disabled - keep a border you can actually see. */
 .swagger-ui .btn.try-out__btn.cancel, .swagger-ui .btn.btn-clear {
-  color: var(--glg-text-2);
-  border-color: var(--glg-border-em);
+  color: var(--glg-text);
+  border: 1px solid var(--glg-text-2);
   background: transparent;
+}
+.swagger-ui .btn.try-out__btn.cancel:hover, .swagger-ui .btn.btn-clear:hover,
+.swagger-ui .btn.try-out__btn:hover, .swagger-ui .btn.authorize:hover {
+  background: var(--glg-elevated);
 }
 .swagger-ui .btn.authorize {
   color: var(--glg-accent);
@@ -176,7 +204,14 @@ body, .swagger-ui { font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
   background: transparent;
 }
 .swagger-ui .btn.authorize svg { fill: var(--glg-accent); }
-.swagger-ui .btn.execute { background: var(--glg-accent); border-color: var(--glg-accent); }
+/* .btn above paints every button in light text; Execute is a filled accent
+   button, so white-on-#60a5fa would land near 2:1. Ink it dark instead. */
+.swagger-ui .btn.execute {
+  background: var(--glg-accent);
+  border-color: var(--glg-accent);
+  color: #0b1220;
+}
+.swagger-ui .btn.execute:hover { background: #93c5fd; border-color: #93c5fd; }
 .swagger-ui .dialog-ux .modal-ux {
   background: var(--glg-surface);
   border-color: var(--glg-border-em);

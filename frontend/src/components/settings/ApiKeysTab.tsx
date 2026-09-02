@@ -24,7 +24,9 @@ export const ApiKeysTab: Component = () => {
   const [newCanWrite, setNewCanWrite] = createSignal(false);
   const [creating, setCreating] = createSignal(false);
   const [created, setCreated] = createSignal<CreatedApiKey | null>(null);
-  const [confirmRevokeId, setConfirmRevokeId] = createSignal<string | null>(null);
+  // The pending key, not just its id: the confirmation is a banner above the
+  // table, so it needs the name to say what it is about to revoke.
+  const [confirmRevoke, setConfirmRevoke] = createSignal<ApiKey | null>(null);
 
   const refresh = async () => {
     try {
@@ -56,7 +58,7 @@ export const ApiKeysTab: Component = () => {
   };
 
   const handleRevoke = async (k: ApiKey) => {
-    setConfirmRevokeId(null);
+    setConfirmRevoke(null);
     try {
       await apiKeysApi.revoke(k.id);
       showToast(`Key "${k.name}" revoked`);
@@ -157,26 +159,10 @@ export const ApiKeysTab: Component = () => {
       render: (k) => (
         <Show when={!isRevoked(k)}>
           <div class="flex justify-end">
-            <Button variant="danger" size="sm" onClick={() => setConfirmRevokeId(k.id)}>
+            <Button variant="danger" size="sm" onClick={() => setConfirmRevoke(k)}>
               Revoke
             </Button>
           </div>
-          <Show when={confirmRevokeId() === k.id}>
-            <div class="mt-2 bg-theme-error/20 border border-theme-error/50 rounded-[var(--radius-md)] p-3 space-y-2 text-left">
-              <p class="text-sm text-theme-error font-medium">Revoke "{k.name}"?</p>
-              <p class="text-xs text-theme-error/70">
-                Anything using this key stops working immediately. This cannot be undone; issue a new key instead.
-              </p>
-              <div class="flex gap-2 pt-1">
-                <Button variant="danger" size="sm" onClick={() => handleRevoke(k)}>
-                  Yes, revoke
-                </Button>
-                <Button variant="secondary" size="sm" onClick={() => setConfirmRevokeId(null)}>
-                  Cancel
-                </Button>
-              </div>
-            </div>
-          </Show>
         </Show>
       ),
     },
@@ -208,17 +194,17 @@ export const ApiKeysTab: Component = () => {
                 Dismiss
               </Button>
             </div>
-            <div class="flex items-center gap-2 bg-theme-base border border-theme-border rounded-[var(--radius-sm)] px-3 py-2">
+            <div class="flex items-center gap-2 bg-theme-base border border-theme-border rounded-[var(--radius-sm)] pl-3 pr-2 py-2">
               <code class="flex-1 font-mono text-xs text-theme-text-primary overflow-x-auto whitespace-nowrap">
                 {k().key}
               </code>
               <button
                 onClick={copyCreatedKey}
-                class="cursor-pointer text-theme-text-secondary hover:text-theme-text-primary shrink-0"
+                class="flex items-center gap-1.5 shrink-0 cursor-pointer text-xs px-2 py-1 rounded-[var(--radius-sm)] border border-theme-border bg-theme-surface text-theme-text-secondary hover:text-theme-text-primary hover:bg-theme-hover transition-colors"
                 title="Copy key"
-                aria-label="Copy key"
               >
                 <CopyIcon />
+                Copy
               </button>
             </div>
           </div>
@@ -229,7 +215,7 @@ export const ApiKeysTab: Component = () => {
         onSubmit={handleCreate}
         class="bg-theme-elevated border border-theme-border rounded-[var(--radius-md)] p-4 flex flex-wrap items-end gap-4"
       >
-        <div class="flex-1 min-w-48">
+        <div class="flex-1 min-w-48 max-w-xs">
           <label for="apikey-name" class="block text-xs text-theme-text-secondary mb-1">
             Name
           </label>
@@ -239,7 +225,7 @@ export const ApiKeysTab: Component = () => {
             value={newName()}
             onInput={(e) => setNewName(e.currentTarget.value)}
             placeholder="Observatory dashboard"
-            class="w-full bg-theme-base border border-theme-border rounded px-2 py-1.5 text-sm text-theme-text-primary"
+            class="w-full bg-theme-base border border-theme-border rounded-[var(--radius-sm)] px-2 py-1.5 text-sm text-theme-text-primary placeholder:text-theme-text-secondary/50 focus:outline-none focus:border-theme-accent"
             required
           />
         </div>
@@ -258,7 +244,29 @@ export const ApiKeysTab: Component = () => {
         </Button>
       </form>
 
-      <div class="bg-theme-surface border border-theme-border rounded overflow-hidden">
+      {/* Confirmation lives here, not in the Actions cell: DataTable marks
+          right-aligned cells whitespace-nowrap, so a prompt inside one widened
+          the table past its wrapper and clipped every Revoke button. */}
+      <Show when={confirmRevoke()}>
+        {(k) => (
+          <div class="bg-theme-error/15 border border-theme-error/50 rounded-[var(--radius-md)] p-4 space-y-2">
+            <p class="text-sm text-theme-error font-medium">Revoke "{k().name}"?</p>
+            <p class="text-xs text-theme-text-secondary">
+              Anything using this key stops working immediately. This cannot be undone; issue a new key instead.
+            </p>
+            <div class="flex gap-2 pt-1">
+              <Button variant="danger" size="sm" onClick={() => handleRevoke(k())}>
+                Yes, revoke
+              </Button>
+              <Button variant="secondary" size="sm" onClick={() => setConfirmRevoke(null)}>
+                Cancel
+              </Button>
+            </div>
+          </div>
+        )}
+      </Show>
+
+      <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] overflow-x-auto">
         <DataTable
           columns={columns}
           rows={keys()}

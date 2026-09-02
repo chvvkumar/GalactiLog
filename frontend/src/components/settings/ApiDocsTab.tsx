@@ -670,16 +670,39 @@ const CopyButton: Component<{ text: () => string; label?: string; class?: string
   );
 };
 
-const CodeBlock: Component<{ children: string; copyable?: boolean }> = (props) => (
-  <div class="relative">
-    <pre class="overflow-x-auto rounded-[var(--radius-sm)] bg-theme-base border border-theme-border p-3 text-xs font-mono text-theme-text-primary leading-relaxed">
-      <code>{props.children}</code>
-    </pre>
-    <Show when={props.copyable}>
-      <div class="absolute top-2 right-2">
-        <CopyButton text={() => props.children} />
+/** Long JSON samples get a captioned header and a scroll cap so a page of 19
+ *  endpoints stays scannable instead of being one continuous wall of braces. */
+const CodeBlock: Component<{
+  children: string;
+  copyable?: boolean;
+  label?: string;
+  capped?: boolean;
+}> = (props) => (
+  <div class="rounded-[var(--radius-sm)] bg-theme-base border border-theme-border overflow-hidden">
+    <Show when={props.label}>
+      <div class="flex items-center justify-between gap-2 px-3 py-1.5 border-b border-theme-border bg-theme-surface">
+        <span class="text-[11px] uppercase tracking-wider text-theme-text-tertiary">
+          {props.label}
+        </span>
+        <Show when={props.copyable}>
+          <CopyButton text={() => props.children} />
+        </Show>
       </div>
     </Show>
+    <div class="relative">
+      <pre
+        class={`overflow-auto p-3 text-xs font-mono text-theme-text-primary leading-relaxed${
+          props.capped ? " max-h-72" : ""
+        }`}
+      >
+        <code>{props.children}</code>
+      </pre>
+      <Show when={props.copyable && !props.label}>
+        <div class="absolute top-2 right-2">
+          <CopyButton text={() => props.children} />
+        </div>
+      </Show>
+    </div>
   </div>
 );
 
@@ -696,29 +719,35 @@ const MethodChip: Component<{ method: Method }> = (props) => (
 );
 
 const EndpointCard: Component<{ endpoint: Endpoint }> = (props) => (
-  <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-3">
+  <div class="rounded-[var(--radius-md)] bg-theme-elevated border border-theme-border-em p-4 space-y-3">
     <div class="flex items-start gap-2 flex-wrap">
       <MethodChip method={props.endpoint.method} />
       <code class="font-mono text-xs text-theme-text-primary break-all">
         {origin()}/api/v1{props.endpoint.path}
       </code>
     </div>
-    <p class="text-sm text-theme-text-secondary">{props.endpoint.desc}</p>
+    <p class="max-w-3xl text-sm text-theme-text-secondary">{props.endpoint.desc}</p>
     <Show when={props.endpoint.params}>
-      <dl class="text-xs space-y-1">
-        <For each={props.endpoint.params}>
-          {([name, meaning]) => (
-            <div class="flex gap-2">
-              <dt class="font-mono text-theme-text-primary shrink-0">{name}</dt>
-              <dd class="text-theme-text-secondary">{meaning}</dd>
-            </div>
-          )}
-        </For>
-      </dl>
+      <div class="space-y-1">
+        <p class="text-[11px] uppercase tracking-wider text-theme-text-tertiary">
+          {props.endpoint.method === "GET" ? "Query parameters" : "Body fields"}
+        </p>
+        <dl class="text-xs space-y-1">
+          <For each={props.endpoint.params}>
+            {([name, meaning]) => (
+              <div class="flex gap-2">
+                <dt class="font-mono text-theme-text-primary shrink-0">{name}</dt>
+                <dd class="text-theme-text-secondary">{meaning}</dd>
+              </div>
+            )}
+          </For>
+        </dl>
+      </div>
     </Show>
 
-    <details>
-      <summary class="text-xs text-theme-text-secondary hover:text-theme-text-primary cursor-pointer select-none">
+    <details class="group">
+      <summary class="inline-flex items-center gap-1.5 text-xs px-2 py-1 rounded-[var(--radius-sm)] bg-theme-surface border border-theme-border text-theme-text-secondary hover:text-theme-text-primary hover:bg-theme-hover transition-colors cursor-pointer select-none marker:content-none [&::-webkit-details-marker]:hidden">
+        <span class="transition-transform group-open:rotate-90">&rsaquo;</span>
         Request snippet
       </summary>
       <div class="mt-2 space-y-2">
@@ -744,7 +773,7 @@ const EndpointCard: Component<{ endpoint: Endpoint }> = (props) => (
     </details>
 
     <Show when={props.endpoint.method !== "GET"}>
-      <p class="text-xs text-theme-text-tertiary">
+      <p class="max-w-3xl text-xs text-theme-text-tertiary">
         This one changes something. To send it live, use the{" "}
         <a href={`${origin()}/api/v1/docs`} target="_blank" rel="noreferrer" class="text-theme-accent hover:underline">
           interactive docs
@@ -753,7 +782,9 @@ const EndpointCard: Component<{ endpoint: Endpoint }> = (props) => (
       </p>
     </Show>
 
-    <CodeBlock copyable>{props.endpoint.example}</CodeBlock>
+    <CodeBlock copyable capped label="Response">
+      {props.endpoint.example}
+    </CodeBlock>
   </div>
 );
 
@@ -762,26 +793,28 @@ export const ApiDocsTab: Component = () => (
     {/* Intro */}
     <div class="space-y-3">
       <h2 class="text-base font-medium text-theme-text-primary">API</h2>
-      <p class="text-sm text-theme-text-secondary">
+      <p class="max-w-3xl text-sm text-theme-text-secondary">
         GalactiLog exposes a read-mostly HTTP API at <code class="font-mono text-xs text-theme-text-primary">/api/v1</code> so scripts,
         dashboards, and observatory automation can use the same catalog the web interface shows. Responses are JSON, apart from the
         thumbnail endpoint which returns an image.
       </p>
-      <p class="text-sm text-theme-text-secondary">
+      <p class="max-w-3xl text-sm text-theme-text-secondary">
         Create a key on the{" "}
         <A href="/settings?tab=api-keys" class="text-theme-accent hover:underline">
           API Keys
         </A>{" "}
         tab, then send it on every request as a bearer token:
       </p>
-      <CodeBlock copyable>{`Authorization: Bearer glg_...`}</CodeBlock>
-      <p class="text-sm text-theme-text-secondary">
+      <div class="max-w-3xl">
+        <CodeBlock copyable>{`Authorization: Bearer glg_...`}</CodeBlock>
+      </div>
+      <p class="max-w-3xl text-sm text-theme-text-secondary">
         A plain key reads. Triggering scans, pointing a telescope, and writing notes need a key created with "Allow actions" ticked.
       </p>
     </div>
 
     {/* Interactive docs + tooling */}
-    <div class="rounded-[var(--radius-sm)] bg-theme-elevated border border-theme-border-em p-4 space-y-3">
+    <div class="max-w-3xl rounded-[var(--radius-md)] bg-theme-elevated border border-theme-border-em p-4 space-y-4">
       <p class="text-sm text-theme-text-secondary">
         Try any endpoint live, with your key, in the{" "}
         <a
@@ -837,7 +870,8 @@ export const ApiDocsTab: Component = () => (
     </div>
 
     {/* Jump-to nav */}
-    <div class="flex flex-wrap gap-2">
+    <div class="flex flex-wrap items-center gap-2">
+      <span class="text-xs text-theme-text-tertiary">Jump to</span>
       <For each={SECTIONS}>
         {(s) => (
           <a
@@ -858,9 +892,9 @@ export const ApiDocsTab: Component = () => (
 
     <For each={SECTIONS}>
       {(section) => (
-        <section id={`api-${section.id}`} class="space-y-3 scroll-mt-20">
-          <h3 class="text-sm font-semibold text-theme-text-primary">{section.title}</h3>
-          <p class="text-sm text-theme-text-secondary">{section.blurb}</p>
+        <section id={`api-${section.id}`} class="space-y-3 scroll-mt-20 pt-4 border-t border-theme-border">
+          <h3 class="text-base font-semibold text-theme-text-primary">{section.title}</h3>
+          <p class="max-w-3xl text-sm text-theme-text-secondary">{section.blurb}</p>
           <div class="space-y-3">
             <For each={section.endpoints}>{(e) => <EndpointCard endpoint={e} />}</For>
           </div>
@@ -869,9 +903,9 @@ export const ApiDocsTab: Component = () => (
     </For>
 
     {/* Footer notes */}
-    <section id="api-notes" class="space-y-3 scroll-mt-20">
-      <h3 class="text-sm font-semibold text-theme-text-primary">Notes</h3>
-      <dl class="text-sm space-y-3">
+    <section id="api-notes" class="space-y-3 scroll-mt-20 pt-4 border-t border-theme-border">
+      <h3 class="text-base font-semibold text-theme-text-primary">Notes</h3>
+      <dl class="max-w-3xl text-sm space-y-3">
         <div>
           <dt class="text-theme-text-primary font-medium">Versioning</dt>
           <dd class="text-theme-text-secondary">
