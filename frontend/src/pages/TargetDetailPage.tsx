@@ -1,5 +1,5 @@
 import { Component, Show, For, createResource, createSignal, createEffect, createMemo, on, onMount, onCleanup } from "solid-js";
-import { A, useParams, useSearchParams } from "@solidjs/router";
+import { A, useParams, useSearchParams, useNavigate } from "@solidjs/router";
 import { useQuery } from "@tanstack/solid-query";
 import { apiClient } from "../api/generated/client";
 import { unwrap } from "../api/unwrap";
@@ -21,6 +21,7 @@ import FilterBadges from "../components/FilterBadges";
 import TargetMetricsChart from "../components/TargetMetricsChart";
 import WbppExportModal from "../components/WbppExportModal";
 import FrameListModal from "../components/FrameListModal";
+import CreateMosaicDialog from "../components/CreateMosaicDialog";
 import AladinViewer from "../components/AladinViewer";
 import { useSettingsContext } from "../components/SettingsProvider";
 import { isFieldVisible } from "../utils/displaySettings";
@@ -208,6 +209,7 @@ const TargetDetailPage: Component = () => {
     }
   };
   const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
   const auth = useAuth();
   const ctx = useSettingsContext();
   const { displaySettings, graphSettings, saveGraphSettings, timezone, contentWidth } = ctx;
@@ -241,6 +243,7 @@ const TargetDetailPage: Component = () => {
   const [showMerge, setShowMerge] = createSignal(false);
   const [showWbppExport, setShowWbppExport] = createSignal(false);
   const [showFrameList, setShowFrameList] = createSignal(false);
+  const [showCreateMosaic, setShowCreateMosaic] = createSignal(false);
   const [expandedSessions, setExpandedSessions] = createSignal<Set<string>>(new Set());
   const [sessionCache, setSessionCache] = createSignal<Record<string, SessionDetail>>({});
   const [targetChartExpanded, setTargetChartExpanded] = createSignal(graphSettings().target_chart_expanded);
@@ -676,6 +679,20 @@ const TargetDetailPage: Component = () => {
         />
       </Show>
 
+      <Show when={showCreateMosaic() && targetDetail()}>
+        <CreateMosaicDialog
+          targetId={targetDetail()!.target_id}
+          targetName={targetDetail()!.primary_name}
+          dates={selectedChartDates()}
+          onClose={() => setShowCreateMosaic(false)}
+          onCreated={(mosaic) => {
+            setShowCreateMosaic(false);
+            showToast(`Mosaic "${mosaic.name}" saved (${mosaic.claimed_frames} frames)`, "success", 3000);
+            navigate(`/mosaics/${mosaic.id}`);
+          }}
+        />
+      </Show>
+
       <Show when={targetDetail()}>
         {(detail) => (
           <div class="px-4 sm:px-6 py-4 sm:py-5">
@@ -1079,7 +1096,17 @@ const TargetDetailPage: Component = () => {
                     Each card is one imaging session on this target. Expand a card to see per-frame details (exposure, filter, camera temperature, HFR, guiding). Example: compare two sessions of the same target to pick the better one for stacking.
                   </p>
                 </HelpPopover>
-                <div class="ml-auto">
+                <div class="ml-auto flex items-center gap-2">
+                  <Show when={auth.isAdmin()}>
+                    <Button
+                      variant="primary"
+                      disabled={selectedChartDates().length === 0}
+                      title={selectedChartDates().length === 0 ? "Select one or more sessions first" : undefined}
+                      onClick={() => setShowCreateMosaic(true)}
+                    >
+                      Create Mosaic
+                    </Button>
+                  </Show>
                   <ActionsMenu
                     ariaLabel="Export options"
                     buttonClass={buttonClasses("primary")}

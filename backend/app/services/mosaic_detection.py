@@ -28,6 +28,7 @@ from app.models import Target, UserSettings, SETTINGS_ROW_ID
 from app.models.image import Image
 from app.models.mosaic import Mosaic
 from app.models.mosaic_panel import MosaicPanel
+from app.models.mosaic_panel_session import MosaicPanelSession
 from app.models.mosaic_suggestion import MosaicSuggestion
 from app.services.coordinates import _parse_ra, _parse_coord
 from app.services.units import arcsec_per_pixel
@@ -618,14 +619,17 @@ def compute_dedup_signature(
 
 def _gather_target_records(session: Session) -> list[dict]:
     """Build per-target records (object names, median center, FOV) for all
-    unmerged targets not already assigned to a mosaic panel.
-    """
-    in_mosaic_q = select(MosaicPanel.target_id)
-    in_mosaic = {r[0] for r in session.execute(in_mosaic_q).all()}
+    unmerged targets.
 
+    Targets already assigned to mosaic panels are deliberately INCLUDED: a
+    target can gain a genuinely new campaign after its earlier campaigns were
+    accepted as mosaics, and excluding it here would lock that campaign out of
+    detection forever. Already-accepted campaigns are suppressed downstream in
+    ``_add_suggestion`` (existing mosaic name match + included-session date
+    coverage), not by dropping the whole target.
+    """
     targets_q = select(Target.id).where(Target.merged_into_id.is_(None))
     target_ids = [r[0] for r in session.execute(targets_q).all()]
-    target_ids = [tid for tid in target_ids if tid not in in_mosaic]
     if not target_ids:
         return []
 
@@ -730,8 +734,6 @@ def detect_mosaic_panels(session: Session, gap_days: int = 0) -> int:
     # Map target_id (str) -> raw uuid for persistence.
     raw_id = {r["target_id"]: r["raw_target_id"] for r in records}
 
-    new_base_names = {g.base_name for g in groups}
-
     # Durable dismissals: load the dedup signatures of rejected (dismissed)
     # suggestions BEFORE clearing pending, along with the session dates each
     # dismissal covered at the time. A regenerated group is skipped only when
@@ -766,25 +768,34 @@ def detect_mosaic_panels(session: Session, gap_days: int = 0) -> int:
         delete(MosaicSuggestion).where(MosaicSuggestion.status == "pending")
     )
 
-    # Skip base names already represented by an existing mosaic.
+    # Accepted-campaign suppression happens per suggestion (not per base):
+    # a campaign is skipped when its suggested name matches an existing mosaic
+    # (name check, robust to mosaics accepted before included-session seeding
+    # existed) or when every one of its session dates is already an "included"
+    # panel session of some mosaic (date check, robust to renamed mosaics).
+    # This is what lets a NEW campaign of an already-accepted base resurface.
     existing_mosaic_q = select(Mosaic.name)
-    existing_mosaic_names = {
-        r[0].upper() for r in session.execute(existing_mosaic_q).all()
-    }
-    accepted_bases: set[str] = set()
-    for base in new_base_names:
-        base_upper = base.upper()
-        for name in existing_mosaic_names:
-            if name == base_upper or name.startswith(base_upper + " ("):
-                accepted_bases.add(base)
-                break
+    existing_mosaic_names_raw = [
+        r[0] for r in session.execute(existing_mosaic_q).all()
+    ]
+    existing_mosaic_names = {n.upper() for n in existing_mosaic_names_raw}
+
+    # target_id (str) -> set of "YYYY-MM-DD" dates already committed
+    # ("included") to some mosaic panel of that target.
+    covered_q = (
+        select(MosaicPanel.target_id, MosaicPanelSession.session_date)
+        .join(MosaicPanelSession, MosaicPanelSession.panel_id == MosaicPanel.id)
+        .where(MosaicPanelSession.status == "included")
+    )
+    covered_dates: dict[str, set[str]] = {}
+    for tid, d in session.execute(covered_q).all():
+        covered_dates.setdefault(str(tid), set()).add(str(d))
 
     count = 0
-    used_names: set[str] = set()
+    # Seed with existing mosaic names so a resurfacing campaign can never be
+    # assigned a name that would collide on the unique mosaic name at accept.
+    used_names: set[str] = set(existing_mosaic_names_raw)
     for g in groups:
-        if g.base_name in accepted_bases:
-            continue
-
         # Collect session dates per panel via the OBJECT header pattern, so the
         # campaign (gap_days) split and the suggestion card session view work.
         # Include the matched keyword token so a panel's pattern does not match a
@@ -836,6 +847,8 @@ def detect_mosaic_panels(session: Session, gap_days: int = 0) -> int:
                 suggested_name=g.base_name,
                 used_names=used_names,
                 rejected_signatures=rejected_signatures,
+                existing_mosaic_names=existing_mosaic_names,
+                covered_dates=covered_dates,
             )
         else:
             for cluster_dates in clusters:
@@ -861,6 +874,8 @@ def detect_mosaic_panels(session: Session, gap_days: int = 0) -> int:
                     subset_idxs=idxs,
                     used_names=used_names,
                     rejected_signatures=rejected_signatures,
+                    existing_mosaic_names=existing_mosaic_names,
+                    covered_dates=covered_dates,
                 )
 
     session.commit()
@@ -877,14 +892,24 @@ def _add_suggestion(
     subset_idxs: list[int] | None = None,
     used_names: set[str] | None = None,
     rejected_signatures: dict[str, set[str]] | None = None,
+    existing_mosaic_names: set[str] | None = None,
+    covered_dates: dict[str, set[str]] | None = None,
 ) -> int:
     """Create and add one MosaicSuggestion.
 
-    Returns 1 if created, 0 if skipped because its dedup signature matches a
-    dismissed (rejected) suggestion AND its session dates are fully covered
-    by that dismissal's dates (AUD-033: a later campaign with genuinely new
-    dates is not suppressed). ``suggested_name`` is uniquified against
-    ``used_names`` only when the suggestion is actually created.
+    Returns 1 if created, 0 if skipped. Skips when:
+    - ``suggested_name`` (case-insensitive) matches an existing mosaic: that
+      campaign was already accepted. Checked on the pre-uniquified name, so a
+      new campaign whose date suffix happens to render identically to an
+      accepted one is also suppressed until its dates shift the suffix.
+    - The campaign has session dates and every one of them is already an
+      "included" panel session of its panel's target (``covered_dates``):
+      catches accepted-then-renamed mosaics the name check misses.
+    - Its dedup signature matches a dismissed (rejected) suggestion AND its
+      session dates are fully covered by that dismissal's dates (AUD-033: a
+      later campaign with genuinely new dates is not suppressed).
+    ``suggested_name`` is uniquified against ``used_names`` only when the
+    suggestion is actually created.
     """
     if subset_idxs is None:
         target_ids = [raw_id[tid] for tid in group.target_ids]
@@ -904,6 +929,20 @@ def _add_suggestion(
             geometry = _geometry_from_panels(panels, group.geometry.get("fov_arcmin"))
         else:
             geometry = None
+
+    if existing_mosaic_names and suggested_name.upper() in existing_mosaic_names:
+        return 0
+
+    if covered_dates:
+        pair_dates = [
+            (tid, d)
+            for tid, label in zip(target_ids, panel_labels)
+            for d in sess_dates.get(label, [])
+        ]
+        if pair_dates and all(
+            d in covered_dates.get(str(tid), ()) for tid, d in pair_dates
+        ):
+            return 0
 
     signature = compute_dedup_signature(group.base_name, target_ids, panel_labels)
     if rejected_signatures and signature in rejected_signatures:

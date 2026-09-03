@@ -1,6 +1,6 @@
 import asyncio
 import uuid
-from collections import defaultdict
+from collections import Counter, defaultdict
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
@@ -25,11 +25,15 @@ from app.schemas.mosaic import (
     PanelSessionsResponse, PanelSessionInfo, SessionStatusUpdate,
     MosaicStatusResponse, OkResponse, PanelCreateResponse,
     DetectionStartedResponse, DetectionStatusResponse,
+    FromSessionsPrefillResponse, FromSessionsPrefillRow,
+    FromSessionsMosaicOption,
+    FromSessionsCreateRequest, FromSessionsCreateResponse,
 )
 from app.api.deps import get_current_user, require_admin
 from app.services.mosaic_composite import build_mosaic_composite, find_default_filter
 from app.services.mosaic_detection import (
     load_mosaic_keywords,
+    match_panel_token_full,
     retro_link_panel_images as _retro_link_panel_images,
 )
 from app.services.mosaic_stats import (
@@ -171,6 +175,248 @@ async def clear_all_reviews(
     )
     await session.commit()
     return {"ok": True}
+
+
+# NOTE: like /suggestions above, the /from-sessions routes are defined BEFORE
+# the /{mosaic_id} routes so "from-sessions" is never captured as a UUID.
+@router.get("/from-sessions/prefill", response_model=FromSessionsPrefillResponse)
+async def from_sessions_prefill(
+    target_id: uuid.UUID,
+    dates: str,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    """Prefill data for the create-mosaic-from-sessions dialog.
+
+    For the given target and session dates, returns the most common
+    panel-token base name parsed from the LIGHT frames' OBJECT headers (to
+    seed the new-mosaic name), one row per distinct (session_date,
+    panel_label) pair (to seed the panel/date selection), and the mosaics
+    that already contain a panel on this target (for the add-to-existing
+    dropdown).
+    """
+    from datetime import date as date_type
+
+    try:
+        date_list = [
+            date_type.fromisoformat(ds.strip())
+            for ds in dates.split(",") if ds.strip()
+        ]
+    except ValueError:
+        raise HTTPException(400, "dates must be comma-separated YYYY-MM-DD values")
+    if not date_list:
+        raise HTTPException(400, "dates must contain at least one YYYY-MM-DD value")
+
+    base_filter = [
+        Image.resolved_target_id == target_id,
+        Image.image_type == "LIGHT",
+        Image.session_date.in_(date_list),
+    ]
+
+    # One row per distinct (session_date, panel_label) pair.
+    row_q = (
+        select(
+            Image.session_date,
+            Image.panel_label,
+            func.count(Image.id).label("frames"),
+        )
+        .where(*base_filter)
+        .group_by(Image.session_date, Image.panel_label)
+        .order_by(Image.session_date, Image.panel_label)
+    )
+    rows = [
+        FromSessionsPrefillRow(
+            session_date=str(r.session_date),
+            panel_label=r.panel_label,
+            frame_count=r.frames,
+        )
+        for r in (await session.execute(row_q)).all()
+    ]
+
+    # base_name: most common token base among the frames' OBJECT headers,
+    # parsed with the same tokenizer that stamps panel_label at ingest.
+    keywords = await load_mosaic_keywords(session)
+    obj_col = Image.raw_headers["OBJECT"].astext
+    obj_q = (
+        select(obj_col.label("obj"), func.count(Image.id).label("frames"))
+        .where(*base_filter)
+        .group_by("obj")
+    )
+    base_counts: Counter[str] = Counter()
+    for r in (await session.execute(obj_q)).all():
+        token = match_panel_token_full(r.obj, keywords)
+        if token is not None:
+            base_counts[token[0]] += r.frames
+    base_name = base_counts.most_common(1)[0][0] if base_counts else None
+
+    # Mosaics that already have a panel on this target.
+    mosaic_q = (
+        select(Mosaic.id, Mosaic.name)
+        .join(MosaicPanel, MosaicPanel.mosaic_id == Mosaic.id)
+        .where(MosaicPanel.target_id == target_id)
+        .distinct()
+        .order_by(Mosaic.name)
+    )
+    mosaics = [
+        FromSessionsMosaicOption(id=str(mid), name=mname)
+        for mid, mname in (await session.execute(mosaic_q)).all()
+    ]
+
+    return FromSessionsPrefillResponse(base_name=base_name, rows=rows, mosaics=mosaics)
+
+
+@router.post("/from-sessions", response_model=FromSessionsCreateResponse)
+async def create_mosaic_from_sessions(
+    body: FromSessionsCreateRequest,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(require_admin),
+):
+    """Create a mosaic (or extend an existing one) from explicit sessions.
+
+    One transaction: mosaic, panels, session membership, and frame claiming
+    commit together.
+
+    Frames are claimed here rather than left to a later (target,
+    panel_label) lookup because that lookup is ambiguous when several
+    campaign mosaics share both the target and the label; the caller's
+    explicit per-row (session_date, original_panel_label) selection is what
+    makes the claim deterministic. Each row claims frames carrying its
+    ORIGINAL parsed label (entry.panel_label may be a user-edited final name
+    no frame carries) or, for a None row, frames with no label at all, with
+    no image_type filter (mirroring retro_link_panel_images). Previously
+    unlabeled claimed rows are stamped with the entry's label; a real parsed
+    label is never overwritten with an edited name -- panel_id is the
+    authoritative membership and panel_label stays OBJECT-derived.
+    """
+    from datetime import date as date_type
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    seen_labels: set[str] = set()
+    for entry in body.panels:
+        if entry.panel_label in seen_labels:
+            raise HTTPException(400, f"Duplicate panel_label '{entry.panel_label}' in request")
+        seen_labels.add(entry.panel_label)
+
+    # (parsed session_date, original_panel_label) pairs per entry.
+    parsed_rows: dict[str, list] = {}
+    for entry in body.panels:
+        try:
+            parsed_rows[entry.panel_label] = [
+                (date_type.fromisoformat(r.session_date), r.original_panel_label)
+                for r in entry.rows
+            ]
+        except ValueError:
+            raise HTTPException(
+                400, f"rows for '{entry.panel_label}' must carry YYYY-MM-DD session_date values"
+            )
+
+    if body.mode == "new":
+        if not body.name:
+            raise HTTPException(400, "name is required when mode is 'new'")
+        # Duplicate-name pre-check, case-insensitive, mirroring
+        # accept_suggestion: without it the flush raises a
+        # UniqueViolationError on mosaics_name_key and surfaces as an
+        # unhandled 500; pre-checking keeps the session usable.
+        existing = (await session.execute(
+            select(Mosaic).where(func.upper(Mosaic.name) == body.name.upper())
+        )).scalar_one_or_none()
+        if existing:
+            raise HTTPException(409, f"A mosaic named '{body.name}' already exists")
+        mosaic = Mosaic(name=body.name)
+        session.add(mosaic)
+        await session.flush()
+    else:
+        if body.mosaic_id is None:
+            raise HTTPException(400, "mosaic_id is required when mode is 'existing'")
+        mosaic = await session.get(Mosaic, body.mosaic_id)
+        if not mosaic:
+            raise HTTPException(404, "Mosaic not found")
+
+    next_sort = (await session.execute(
+        select(func.coalesce(func.max(MosaicPanel.sort_order), -1))
+        .where(MosaicPanel.mosaic_id == mosaic.id)
+    )).scalar_one() + 1
+
+    claimed_frames = 0
+    for entry in body.panels:
+        entry_rows = parsed_rows[entry.panel_label]
+        entry_dates = sorted({d for d, _ in entry_rows})
+
+        panel = (await session.execute(
+            select(MosaicPanel).where(
+                MosaicPanel.mosaic_id == mosaic.id,
+                MosaicPanel.panel_label == entry.panel_label,
+            )
+        )).scalars().first()
+        if panel is None:
+            # Derive object_pattern the same way create_mosaic does.
+            base = strip_year_suffix(mosaic.name)
+            panel = MosaicPanel(
+                mosaic_id=mosaic.id,
+                target_id=body.target_id,
+                panel_label=entry.panel_label,
+                sort_order=next_sort,
+                object_pattern=object_pattern_for_label(entry.panel_label, base),
+            )
+            next_sort += 1
+            session.add(panel)
+            await session.flush()
+
+        # Mark the selected sessions included (same on-conflict upsert as
+        # update_panel_sessions).
+        include_values = [
+            {"panel_id": panel.id, "session_date": d, "status": "included"}
+            for d in entry_dates
+        ]
+        include_stmt = pg_insert(MosaicPanelSession).values(include_values)
+        include_stmt = include_stmt.on_conflict_do_update(
+            constraint="uq_mosaic_panel_sessions_panel_date",
+            set_={"status": "included"},
+        )
+        await session.execute(include_stmt)
+
+        # Claim frames per row, matching the ORIGINAL parsed label (the one
+        # Image.panel_label actually carries) or, for a None row, frames
+        # with no label at all.
+        for row_date, original_label in entry_rows:
+            if original_label is None:
+                label_cond = Image.panel_label.is_(None)
+            else:
+                label_cond = or_(
+                    Image.panel_label == original_label,
+                    Image.panel_label.is_(None),
+                )
+            claim = await session.execute(
+                update(Image)
+                .where(
+                    Image.resolved_target_id == body.target_id,
+                    Image.session_date == row_date,
+                    label_cond,
+                )
+                .values(panel_id=panel.id)
+            )
+            claimed_frames += claim.rowcount or 0
+
+        # Stamp the final label ONLY on claimed rows that had none; a real
+        # parsed label is never overwritten with an edited name.
+        await session.execute(
+            update(Image)
+            .where(
+                Image.resolved_target_id == body.target_id,
+                Image.panel_id == panel.id,
+                Image.session_date.in_(entry_dates),
+                Image.panel_label.is_(None),
+            )
+            .values(panel_label=entry.panel_label)
+        )
+
+    await session.commit()
+    return FromSessionsCreateResponse(
+        id=str(mosaic.id),
+        name=mosaic.name,
+        panel_count=len(body.panels),
+        claimed_frames=claimed_frames,
+    )
 
 
 @router.get("", response_model=list[MosaicSummary])
