@@ -1,6 +1,7 @@
 import uuid
+from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class MosaicPanelCreate(BaseModel):
@@ -184,6 +185,59 @@ class DetectionStatusResponse(BaseModel):
 class PanelCreateResponse(BaseModel):
     status: str
     panel_id: str
+
+
+class FromSessionsPrefillRow(BaseModel):
+    """One distinct (session_date, panel_label) pair over a target's LIGHT
+    frames on the requested dates. panel_label is None for frames whose
+    OBJECT header carried no panel token at ingest."""
+    session_date: str
+    panel_label: str | None = None
+    frame_count: int
+
+
+class FromSessionsMosaicOption(BaseModel):
+    """A mosaic that already has at least one panel on the prefill target,
+    offered as an add-to-existing destination."""
+    id: str
+    name: str
+
+
+class FromSessionsPrefillResponse(BaseModel):
+    base_name: str | None = None
+    rows: list[FromSessionsPrefillRow]
+    mosaics: list[FromSessionsMosaicOption]
+
+
+class FromSessionsPanelRow(BaseModel):
+    """One (session_date, original_panel_label) selection for a panel entry.
+
+    original_panel_label is the label as parsed from OBJECT at ingest (what
+    Image.panel_label actually carries), or None for unlabeled frames; the
+    entry's panel_label may be a user-edited final name that no frame
+    carries, so the claim must match on the original label."""
+    session_date: str
+    original_panel_label: str | None = None
+
+
+class FromSessionsPanelEntry(BaseModel):
+    panel_label: str = Field(min_length=1)  # final panel name (may be edited)
+    rows: list[FromSessionsPanelRow] = Field(min_length=1)
+
+
+class FromSessionsCreateRequest(BaseModel):
+    mode: Literal["new", "existing"]
+    name: str | None = None  # required for mode "new"
+    mosaic_id: uuid.UUID | None = None  # required for mode "existing"
+    target_id: uuid.UUID
+    panels: list[FromSessionsPanelEntry] = Field(min_length=1)
+
+
+class FromSessionsCreateResponse(BaseModel):
+    id: str
+    name: str
+    panel_count: int
+    claimed_frames: int
 
 
 class SuggestionPreviewPanel(BaseModel):

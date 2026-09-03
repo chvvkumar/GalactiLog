@@ -89,9 +89,6 @@ def test_detect_creates_separate_suggestions_per_campaign():
     mock_session.get.return_value = mock_settings
 
     # _gather_target_records: in-mosaic panel target_ids (none)
-    in_mosaic_result = MagicMock()
-    in_mosaic_result.all.return_value = []
-
     # _gather_target_records: unmerged target ids
     target_ids_result = MagicMock()
     target_ids_result.all.return_value = [(t1,), (t2,)]
@@ -128,13 +125,15 @@ def test_detect_creates_separate_suggestions_per_campaign():
         (date(2025, 10, 6), "Heart Nebula Panel 2"),
     ]
 
+    covered_result = MagicMock()
+    covered_result.all.return_value = []
     mock_session.execute = MagicMock(side_effect=[
-        in_mosaic_result,
         target_ids_result,
         headers_result,
         rejected_result,
         delete_result,
         existing_result,
+        covered_result,
         p1_dates,
         p2_dates,
     ])
@@ -172,9 +171,6 @@ def test_detect_single_target_two_panel_objects():
     mock_settings.general = {"mosaic_keywords": ["Panel"]}
     mock_session.get.return_value = mock_settings
 
-    in_mosaic_result = MagicMock()
-    in_mosaic_result.all.return_value = []
-
     target_ids_result = MagicMock()
     target_ids_result.all.return_value = [(tid,)]
 
@@ -205,13 +201,15 @@ def test_detect_single_target_two_panel_objects():
     p2_dates = MagicMock()
     p2_dates.all.return_value = [(date(2024, 8, 2), "Veil Nebula Panel 2")]
 
+    covered_result = MagicMock()
+    covered_result.all.return_value = []
     mock_session.execute = MagicMock(side_effect=[
-        in_mosaic_result,
         target_ids_result,
         headers_result,
         rejected_result,
         delete_result,
         existing_result,
+        covered_result,
         p1_dates,
         p2_dates,
     ])
@@ -252,8 +250,6 @@ def test_detect_clears_all_pending_including_legacy_null_base():
     mock_settings.general = {"mosaic_keywords": ["Panel"]}
     mock_session.get.return_value = mock_settings
 
-    in_mosaic_result = MagicMock()
-    in_mosaic_result.all.return_value = []
     target_ids_result = MagicMock()
     target_ids_result.all.return_value = [(tid,)]
     headers_result = MagicMock()
@@ -275,23 +271,27 @@ def test_detect_clears_all_pending_including_legacy_null_base():
 
     executed = []
 
+    covered_result = MagicMock()
+    covered_result.all.return_value = []
+
     def _exec(stmt, *a, **k):
         executed.append(stmt)
-        # Sequence: in_mosaic, target_ids, headers, SELECT rejected sigs,
-        # DELETE(all pending), existing_mosaics, p1_dates, p2_dates
+        # Sequence: target_ids, headers, SELECT rejected sigs,
+        # DELETE(all pending), existing_mosaics, covered_sessions,
+        # p1_dates, p2_dates
         idx = len(executed)
         if idx == 1:
-            return in_mosaic_result
-        if idx == 2:
             return target_ids_result
-        if idx == 3:
+        if idx == 2:
             return headers_result
-        if idx == 4:
+        if idx == 3:
             return rejected_result  # SELECT rejected dedup_signatures
-        if idx == 5:
+        if idx == 4:
             return delete_result    # the unconditional pending delete
-        if idx == 6:
+        if idx == 5:
             return existing_result
+        if idx == 6:
+            return covered_result
         if idx == 7:
             return p1_dates
         return p2_dates
@@ -338,8 +338,6 @@ def test_detect_dedupes_duplicate_suggested_names():
     mock_settings.general = {"mosaic_keywords": ["Panel"]}
     mock_session.get.return_value = mock_settings
 
-    in_mosaic_result = MagicMock()
-    in_mosaic_result.all.return_value = []
     target_ids_result = MagicMock()
     target_ids_result.all.return_value = [(t1,), (t2,)]
     headers_result = MagicMock()
@@ -365,9 +363,11 @@ def test_detect_dedupes_duplicate_suggested_names():
         (date(2024, 1, 2), "Foo Panel 2"), (date(2024, 1, 21), "Foo Panel 2"),
     ]
 
+    covered_result = MagicMock()
+    covered_result.all.return_value = []
     mock_session.execute = MagicMock(side_effect=[
-        in_mosaic_result, target_ids_result, headers_result,
-        rejected_result, delete_result, existing_result, d1, d2,
+        target_ids_result, headers_result,
+        rejected_result, delete_result, existing_result, covered_result, d1, d2,
     ])
 
     from app.services.mosaic_detection import detect_mosaic_panels
@@ -417,8 +417,6 @@ def test_detect_skips_dismissed_signature_but_creates_others():
     mock_settings.general = {"mosaic_keywords": ["Panel"]}
     mock_session.get.return_value = mock_settings
 
-    in_mosaic_result = MagicMock()
-    in_mosaic_result.all.return_value = []
     target_ids_result = MagicMock()
     target_ids_result.all.return_value = [(h1,), (h2,), (w1,), (w2,)]
     headers_result = MagicMock()
@@ -451,9 +449,11 @@ def test_detect_skips_dismissed_signature_but_creates_others():
     for i, m in enumerate(dq):
         m.all.return_value = [(date(2024, 1, 1 + i), dq_objects[i])]
 
+    covered_result = MagicMock()
+    covered_result.all.return_value = []
     mock_session.execute = MagicMock(side_effect=[
-        in_mosaic_result, target_ids_result, headers_result,
-        rejected_result, delete_result, existing_result, *dq,
+        target_ids_result, headers_result,
+        rejected_result, delete_result, existing_result, covered_result, *dq,
     ])
 
     detect_mosaic_panels(mock_session, gap_days=0)
@@ -491,8 +491,6 @@ def test_detect_resurfaces_dismissed_signature_with_genuinely_new_dates():
     mock_settings.general = {"mosaic_keywords": ["Panel"]}
     mock_session.get.return_value = mock_settings
 
-    in_mosaic_result = MagicMock()
-    in_mosaic_result.all.return_value = []
     target_ids_result = MagicMock()
     target_ids_result.all.return_value = [(h1,), (h2,)]
     headers_result = MagicMock()
@@ -518,9 +516,11 @@ def test_detect_resurfaces_dismissed_signature_with_genuinely_new_dates():
     p2_dates = MagicMock()
     p2_dates.all.return_value = [(date(2026, 6, 2), "Heart Nebula Panel 2")]
 
+    covered_result = MagicMock()
+    covered_result.all.return_value = []
     mock_session.execute = MagicMock(side_effect=[
-        in_mosaic_result, target_ids_result, headers_result,
-        rejected_result, delete_result, existing_result,
+        target_ids_result, headers_result,
+        rejected_result, delete_result, existing_result, covered_result,
         p1_dates, p2_dates,
     ])
 
@@ -554,8 +554,6 @@ def test_detect_resurfaces_when_panel_set_changed():
     mock_settings.general = {"mosaic_keywords": ["Panel"]}
     mock_session.get.return_value = mock_settings
 
-    in_mosaic_result = MagicMock()
-    in_mosaic_result.all.return_value = []
     target_ids_result = MagicMock()
     target_ids_result.all.return_value = [(h1,), (h2,), (h3,)]
     headers_result = MagicMock()
@@ -579,9 +577,11 @@ def test_detect_resurfaces_when_panel_set_changed():
     for i, m in enumerate(dq):
         m.all.return_value = [(date(2024, 1, 1 + i), dq_objects[i])]
 
+    covered_result = MagicMock()
+    covered_result.all.return_value = []
     mock_session.execute = MagicMock(side_effect=[
-        in_mosaic_result, target_ids_result, headers_result,
-        rejected_result, delete_result, existing_result, *dq,
+        target_ids_result, headers_result,
+        rejected_result, delete_result, existing_result, covered_result, *dq,
     ])
 
     detect_mosaic_panels(mock_session, gap_days=0)
@@ -594,6 +594,129 @@ def test_detect_resurfaces_when_panel_set_changed():
     assert s.base_name == "Heart Nebula"
     assert sorted(s.panel_labels) == ["Panel 1", "Panel 2", "Panel 3"]
     assert s.dedup_signature != old_sig
+
+
+def test_detect_suggests_new_campaign_for_target_already_in_mosaics():
+    """A target already assigned to accepted mosaics gets a NEW suggestion when
+    a later campaign (dates beyond every existing mosaic) appears.
+
+    Regression for the two-gate lockout: the in-mosaic target exclusion plus
+    the base-name skip meant a target could never be re-suggested after its
+    first accepted mosaic, so genuinely new campaigns were silently ignored.
+    The old campaign itself must stay suppressed (its campaign name matches an
+    existing mosaic).
+    """
+    from datetime import date
+    from app.services.mosaic_detection import detect_mosaic_panels
+
+    t1, t2 = uuid4(), uuid4()
+
+    mock_session = MagicMock()
+    mock_settings = MagicMock()
+    mock_settings.general = {"mosaic_keywords": ["Panel"]}
+    mock_session.get.return_value = mock_settings
+
+    target_ids_result = MagicMock()
+    target_ids_result.all.return_value = [(t1,), (t2,)]
+    headers_result = MagicMock()
+    headers_result.all.return_value = _hdr_rows([
+        (t1, {"OBJECT": "Heart Nebula Panel 1", "RA": 38.0, "DEC": 61.0,
+              "FOCALLEN": 448, "XPIXSZ": 3.76, "NAXIS1": 4144}),
+        (t2, {"OBJECT": "Heart Nebula Panel 2", "RA": 39.5, "DEC": 61.0,
+              "FOCALLEN": 448, "XPIXSZ": 3.76, "NAXIS1": 4144}),
+    ])
+    rejected_result = MagicMock()
+    rejected_result.all.return_value = []
+    delete_result = MagicMock()
+    # The Oct 2025 campaign was accepted as a mosaic.
+    existing_result = MagicMock()
+    existing_result.all.return_value = [("Heart Nebula (Oct 2025)",)]
+    # Its dates are recorded as included panel sessions.
+    covered_result = MagicMock()
+    covered_result.all.return_value = [
+        (t1, date(2025, 10, 5)),
+        (t2, date(2025, 10, 4)),
+    ]
+    p1_dates = MagicMock()
+    p1_dates.all.return_value = [
+        (date(2025, 10, 5), "Heart Nebula Panel 1"),
+        (date(2026, 8, 31), "Heart Nebula Panel 1"),
+    ]
+    p2_dates = MagicMock()
+    p2_dates.all.return_value = [
+        (date(2025, 10, 4), "Heart Nebula Panel 2"),
+        (date(2026, 9, 1), "Heart Nebula Panel 2"),
+    ]
+
+    mock_session.execute = MagicMock(side_effect=[
+        target_ids_result, headers_result,
+        rejected_result, delete_result, existing_result, covered_result,
+        p1_dates, p2_dates,
+    ])
+
+    detect_mosaic_panels(mock_session, gap_days=180)
+
+    added = [call.args[0] for call in mock_session.add.call_args_list
+             if isinstance(call.args[0], MosaicSuggestion)]
+    assert len(added) == 1
+    s = added[0]
+    assert s.suggested_name == "Heart Nebula (Aug 2026 - Sep 2026)"
+    assert s.session_dates == {
+        "Panel 1": ["2026-08-31"],
+        "Panel 2": ["2026-09-01"],
+    }
+
+
+def test_detect_skips_campaign_fully_covered_by_included_sessions():
+    """A campaign whose every session date is already an included panel
+    session of some mosaic is not re-suggested, even when no mosaic name
+    matches (e.g. the accepted mosaic was renamed)."""
+    from datetime import date
+    from app.services.mosaic_detection import detect_mosaic_panels
+
+    t1, t2 = uuid4(), uuid4()
+
+    mock_session = MagicMock()
+    mock_settings = MagicMock()
+    mock_settings.general = {"mosaic_keywords": ["Panel"]}
+    mock_session.get.return_value = mock_settings
+
+    target_ids_result = MagicMock()
+    target_ids_result.all.return_value = [(t1,), (t2,)]
+    headers_result = MagicMock()
+    headers_result.all.return_value = _hdr_rows([
+        (t1, {"OBJECT": "Heart Nebula Panel 1", "RA": 38.0, "DEC": 61.0,
+              "FOCALLEN": 448, "XPIXSZ": 3.76, "NAXIS1": 4144}),
+        (t2, {"OBJECT": "Heart Nebula Panel 2", "RA": 39.5, "DEC": 61.0,
+              "FOCALLEN": 448, "XPIXSZ": 3.76, "NAXIS1": 4144}),
+    ])
+    rejected_result = MagicMock()
+    rejected_result.all.return_value = []
+    delete_result = MagicMock()
+    # Mosaic exists but was renamed, so no campaign name will match it.
+    existing_result = MagicMock()
+    existing_result.all.return_value = [("Heart Core",)]
+    covered_result = MagicMock()
+    covered_result.all.return_value = [
+        (t1, date(2025, 10, 5)),
+        (t2, date(2025, 10, 4)),
+    ]
+    p1_dates = MagicMock()
+    p1_dates.all.return_value = [(date(2025, 10, 5), "Heart Nebula Panel 1")]
+    p2_dates = MagicMock()
+    p2_dates.all.return_value = [(date(2025, 10, 4), "Heart Nebula Panel 2")]
+
+    mock_session.execute = MagicMock(side_effect=[
+        target_ids_result, headers_result,
+        rejected_result, delete_result, existing_result, covered_result,
+        p1_dates, p2_dates,
+    ])
+
+    detect_mosaic_panels(mock_session, gap_days=180)
+
+    added = [call.args[0] for call in mock_session.add.call_args_list
+             if isinstance(call.args[0], MosaicSuggestion)]
+    assert added == []
 
 
 def test_detect_panel_1_vs_panel_12_no_cross_contamination():
@@ -614,8 +737,6 @@ def test_detect_panel_1_vs_panel_12_no_cross_contamination():
     mock_settings.general = {"mosaic_keywords": ["Panel"]}
     mock_session.get.return_value = mock_settings
 
-    in_mosaic_result = MagicMock()
-    in_mosaic_result.all.return_value = []
     target_ids_result = MagicMock()
     target_ids_result.all.return_value = [(p1,), (p12,)]
     headers_result = MagicMock()
@@ -645,9 +766,11 @@ def test_detect_panel_1_vs_panel_12_no_cross_contamination():
         (date(2024, 9, 20), "Veil Nebula Panel 12"),
     ]
 
+    covered_result = MagicMock()
+    covered_result.all.return_value = []
     mock_session.execute = MagicMock(side_effect=[
-        in_mosaic_result, target_ids_result, headers_result,
-        rejected_result, delete_result, existing_result,
+        target_ids_result, headers_result,
+        rejected_result, delete_result, existing_result, covered_result,
         p1_dates, p12_dates,
     ])
 
