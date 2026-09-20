@@ -15,8 +15,10 @@ const BoxPlotChart: Component<Props> = (props) => {
   let chartInstance: Chart | undefined;
 
   const renderChart = () => {
-    if (!canvasRef || props.groups.length === 0) return;
+    // Destroy first so a result with zero groups clears the previous chart.
     chartInstance?.destroy();
+    chartInstance = undefined;
+    if (!canvasRef || props.groups.length === 0) return;
 
     const labels = props.groups.map((g) => g.group_name);
     const iqrData = props.groups.map((g) => [g.q1, g.q3] as [number, number]);

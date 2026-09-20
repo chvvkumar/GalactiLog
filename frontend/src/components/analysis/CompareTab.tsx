@@ -11,7 +11,7 @@ import StatsCard from "./StatsCard";
 // backend ships them; cast at the fetch boundary, same precedent as CorrelationTab.
 import type { CompareResponse } from "../../api/types";
 import { metricOptions, METRIC_UNITS } from "../../utils/metricLabels";
-import { formatArcsec } from "../../utils/format";
+import { getErrorMessage } from "../../utils/errors";
 
 const Y_METRICS = metricOptions([
   "hfr", "fwhm", "eccentricity", "guiding_rms", "guiding_rms_ra",
@@ -49,21 +49,6 @@ const CompareTab: Component<Props> = (props) => {
     enabled: props.active && canCompare(),
     placeholderData: keepPreviousData,
   }));
-
-  // When the backend flags the two sides as different optical trains for a
-  // pixel-domain metric, the % improvement verdict is meaningless: suppress it
-  // and either fall back to the arcsec medians (cross-train comparable) or say
-  // why no comparison is shown.
-  const crossTrainVerdict = (): string | null => {
-    const d = dataQuery.data;
-    if (!d || d.comparable !== false) return null;
-    const a = d.median_hfr_arcsec_a;
-    const b = d.median_hfr_arcsec_b;
-    if (a != null && b != null) {
-      return `Different optical trains: pixel HFR values are not directly comparable. Comparing in arcseconds instead: ${d.group_a.name} median ${formatArcsec(a)} vs ${d.group_b.name} median ${formatArcsec(b)}.`;
-    }
-    return `Different optical trains: pixel HFR is not comparable between these groups, and arcsecond data is unavailable (plate scale unknown). No improvement figure is shown.`;
-  };
 
   const selectClass = "text-sm bg-theme-elevated border border-theme-border rounded px-2.5 py-1.5 text-theme-text-primary";
   const toggleClass = (active: boolean) =>
@@ -130,6 +115,10 @@ const CompareTab: Component<Props> = (props) => {
         </div>
       </Show>
 
+      <Show when={dataQuery.isError && canCompare()}>
+        <div class="text-sm text-theme-error mb-3">{getErrorMessage(dataQuery.error, "Failed to load comparison")}</div>
+      </Show>
+
       <Show when={dataQuery.data && canCompare()}>
         <div style={{ height: "200px" }} class="relative mb-4">
           <BoxPlotChart
@@ -139,12 +128,15 @@ const CompareTab: Component<Props> = (props) => {
           />
         </div>
 
-        <Show
-          when={crossTrainVerdict()}
-          fallback={<div class="text-sm text-theme-text-primary mb-3 font-medium">{dataQuery.data!.verdict}</div>}
-        >
-          <div class="text-sm text-theme-text-secondary mb-3">{crossTrainVerdict()}</div>
-        </Show>
+        {/* The backend authors the verdict in every case. When comparable is
+            false (a pixel-domain metric where one or both groups lack plate-scale
+            headers) its verdict explains why no improvement figure is given, so
+            it is shown in secondary text rather than as a headline result. */}
+        <div class={dataQuery.data!.comparable === false
+          ? "text-sm text-theme-text-secondary mb-3"
+          : "text-sm text-theme-text-primary mb-3 font-medium"}>
+          {dataQuery.data!.verdict}
+        </div>
 
         <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
           <StatsCard stats={dataQuery.data!.group_a.stats} label={dataQuery.data!.group_a.name} unit={METRIC_UNITS[metric()]} />

@@ -7,7 +7,9 @@ import type { SharedFilters } from "../../pages/AnalysisPage";
 import HistogramChart from "./HistogramChart";
 import BoxPlotChart from "./BoxPlotChart";
 import StatsCard from "./StatsCard";
-import { metricOptions, METRIC_UNITS, PIXEL_METRIC_NOTE } from "../../utils/metricLabels";
+import PlateScaleWarning from "./PlateScaleWarning";
+import { metricOptions, METRIC_UNITS } from "../../utils/metricLabels";
+import { getErrorMessage } from "../../utils/errors";
 
 const ALL_METRICS = metricOptions([
   "humidity", "wind_speed", "ambient_temp", "dew_point", "pressure",
@@ -75,15 +77,12 @@ const DistributionsTab: Component<Props> = (props) => {
     placeholderData: keepPreviousData,
   }));
 
-  // HFR is pixel-domain, so values mixed across optical trains are not
-  // cross-comparable. Shown whenever the current scope can span more than one
-  // train (no telescope/camera filter, or the box plot is explicitly grouped by
-  // equipment). FWHM is always arcseconds and needs no such note.
-  const crossTrainNote = (metric: string, groupedByEquipment: boolean): string | null => {
-    if (metric !== "hfr") return null;
-    const singleTrain = props.filters.telescope !== undefined && props.filters.camera !== undefined;
-    if (singleTrain && !groupedByEquipment) return null;
-    return `Values are per-train pixel-domain units, not comparable across optical trains. ${PIXEL_METRIC_NOTE}`;
+  // Groups the backend dropped for having fewer than 4 values. When every
+  // group was dropped this line is the only explanation for the empty chart.
+  const skippedNote = (): string | null => {
+    const skipped = boxQuery.data?.skipped_groups;
+    if (!skipped || skipped.length === 0) return null;
+    return `Not shown (fewer than 4 frames): ${skipped.map((g) => `${g.group_name} (${g.count})`).join(", ")}`;
   };
 
   const selectClass = "text-sm bg-theme-elevated border border-theme-border rounded px-2.5 py-1.5 text-theme-text-primary";
@@ -111,8 +110,9 @@ const DistributionsTab: Component<Props> = (props) => {
             {ALL_METRICS.map((o) => <option value={o.value}>{o.label}</option>)}
           </select>
         </div>
-        <Show when={crossTrainNote(histMetric(), false)}>
-          <p class="text-xs text-theme-text-tertiary mb-2">{crossTrainNote(histMetric(), false)}</p>
+        <PlateScaleWarning show={histQuery.data?.mixed_plate_scales} />
+        <Show when={histQuery.isError}>
+          <div class="text-sm text-theme-error mb-2">{getErrorMessage(histQuery.error, "Failed to load distribution")}</div>
         </Show>
         <div style={{ height: "450px" }} class="relative">
           <HistogramChart
@@ -140,8 +140,9 @@ const DistributionsTab: Component<Props> = (props) => {
             {GROUP_OPTIONS.map((o) => <option value={o.value}>{o.label}</option>)}
           </select>
         </div>
-        <Show when={crossTrainNote(boxMetric(), groupBy() === "equipment")}>
-          <p class="text-xs text-theme-text-tertiary mb-2">{crossTrainNote(boxMetric(), groupBy() === "equipment")}</p>
+        <PlateScaleWarning show={boxQuery.data?.mixed_plate_scales} />
+        <Show when={boxQuery.isError}>
+          <div class="text-sm text-theme-error mb-2">{getErrorMessage(boxQuery.error, "Failed to load box plot")}</div>
         </Show>
         <div style={{ height: `${Math.max(200, (boxQuery.data?.groups?.length || 3) * 60)}px` }} class="relative">
           <BoxPlotChart
@@ -150,6 +151,9 @@ const DistributionsTab: Component<Props> = (props) => {
             metricLabel={Y_METRICS.find((m) => m.value === boxMetric())?.label}
           />
         </div>
+        <Show when={skippedNote()}>
+          <p class="text-sm text-theme-text-secondary mt-2">{skippedNote()}</p>
+        </Show>
       </div>
     </div>
   );
