@@ -139,8 +139,8 @@ const AnalysisPage: Component = () => {
           <ul class="list-disc list-inside space-y-1">
             <li class="text-sm text-theme-text-secondary"><strong class="text-theme-text-primary">Correlation</strong>: scatter plot of two metrics.</li>
             <li class="text-sm text-theme-text-secondary"><strong class="text-theme-text-primary">Distributions</strong>: histogram of one metric, optionally grouped.</li>
-            <li class="text-sm text-theme-text-secondary"><strong class="text-theme-text-primary">Time Series</strong>: a metric plotted over time.</li>
-            <li class="text-sm text-theme-text-secondary"><strong class="text-theme-text-primary">Matrix</strong>: heatmap of one metric across two categorical axes.</li>
+            <li class="text-sm text-theme-text-secondary"><strong class="text-theme-text-primary">Time Series</strong>: nightly median of a metric plotted over time.</li>
+            <li class="text-sm text-theme-text-secondary"><strong class="text-theme-text-primary">Matrix</strong>: grid of Pearson correlation coefficients for every environment metric against every quality metric.</li>
             <li class="text-sm text-theme-text-secondary"><strong class="text-theme-text-primary">Compare</strong>: side-by-side distributions across groups.</li>
           </ul>
           <p class="text-sm text-theme-text-secondary">Each section has its own info icon with details and examples.</p>
@@ -152,13 +152,13 @@ const AnalysisPage: Component = () => {
             <h2 class="text-sm font-semibold text-theme-text-primary">Shared Filters</h2>
             <HelpPopover>
               <p class="text-sm text-theme-text-secondary">
-                Scope controls that apply to every tab on this page at the same time. Switching tabs preserves your selection.
+                Scope controls shared by the tabs on this page. Switching tabs preserves your selection. The Compare tab uses only the date range, because it selects its own equipment or filter groups.
               </p>
               <ul class="list-disc list-inside space-y-1">
                 <li class="text-sm text-theme-text-secondary"><strong class="text-theme-text-primary">Equipment</strong>: telescope and camera combination.</li>
                 <li class="text-sm text-theme-text-secondary"><strong class="text-theme-text-primary">Filter</strong>: restrict to a single optical filter (e.g. Ha, OIII, L).</li>
-                <li class="text-sm text-theme-text-secondary"><strong class="text-theme-text-primary">Granularity</strong>: per frame uses each individual sub, per session aggregates by imaging session.</li>
-                <li class="text-sm text-theme-text-secondary"><strong class="text-theme-text-primary">Date range</strong>: restrict by capture date.</li>
+                <li class="text-sm text-theme-text-secondary"><strong class="text-theme-text-primary">Granularity</strong>: per frame uses each individual sub, per session aggregates by imaging session. Applies to the Correlation tab and the Distributions histogram only; the box plot and the other tabs ignore it.</li>
+                <li class="text-sm text-theme-text-secondary"><strong class="text-theme-text-primary">Date range</strong>: restrict by imaging night (session date).</li>
               </ul>
               <p class="text-sm text-theme-text-secondary">Example: pick your main scope, Ha filter, per session, last 12 months, then flip through tabs to see that slice every way.</p>
             </HelpPopover>
@@ -293,11 +293,11 @@ const AnalysisPage: Component = () => {
                   <h2 class="text-sm font-semibold text-theme-text-primary">Time Series</h2>
                   <HelpPopover>
                     <p class="text-sm text-theme-text-secondary">
-                      A metric plotted over time, either per frame or aggregated by session or night. Useful for spotting drift, degradation, and seasonal patterns.
+                      The nightly median of a metric plotted over time, one point per imaging night. Useful for spotting drift, degradation, and seasonal patterns.
                     </p>
                     <ul class="list-disc list-inside space-y-1">
-                      <li class="text-sm text-theme-text-secondary">Camera temperature across a single night to verify cooling stability.</li>
-                      <li class="text-sm text-theme-text-secondary">Median HFR per session across months (within one rig) to watch for focus or collimation drift.</li>
+                      <li class="text-sm text-theme-text-secondary">Nightly median sensor temperature across a season to verify cooling stability.</li>
+                      <li class="text-sm text-theme-text-secondary">Nightly median HFR across months (within one rig) to watch for focus or collimation drift.</li>
                     </ul>
                   </HelpPopover>
                 </div>
@@ -314,13 +314,13 @@ const AnalysisPage: Component = () => {
                   <h2 class="text-sm font-semibold text-theme-text-primary">Matrix</h2>
                   <HelpPopover>
                     <p class="text-sm text-theme-text-secondary">
-                      Heatmap grid of one metric across two categorical axes. Good for spotting gaps in coverage and comparing aggregate values at a glance.
+                      Grid of Pearson correlation coefficients for every environment metric (columns) against every quality metric (rows). Red cells are positive correlations, blue cells are negative, and stronger color means a stronger correlation. Cells with fewer than 10 paired frames show n/a.
                     </p>
                     <ul class="list-disc list-inside space-y-1">
-                      <li class="text-sm text-theme-text-secondary">Filter by target shows integration time per channel for each object.</li>
-                      <li class="text-sm text-theme-text-secondary">Telescope by filter highlights which rigs have imaged which bands.</li>
+                      <li class="text-sm text-theme-text-secondary">A strong positive cell for humidity against HFR means stars get larger on humid nights.</li>
+                      <li class="text-sm text-theme-text-secondary">A row of near-zero cells means none of the recorded conditions explain that quality metric.</li>
                     </ul>
-                    <p class="text-sm text-theme-text-secondary">Click a cell to jump to the Correlation tab pre-filtered to that combination.</p>
+                    <p class="text-sm text-theme-text-secondary">Click a cell to open that metric pair in the Correlation tab.</p>
                   </HelpPopover>
                 </div>
                 <MatrixTab active={activeTab() === "matrix"} filters={shared()} />

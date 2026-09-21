@@ -27,8 +27,9 @@ class TrendLine(BaseModel):
     slope: float
     intercept: float
     r_squared: float
-    pearson_r: float
-    spearman_rho: float
+    # None when undefined: fewer than 3 points or a constant axis.
+    pearson_r: float | None
+    spearman_rho: float | None
     confidence_upper: list[ConfidenceBandPoint]
     confidence_lower: list[ConfidenceBandPoint]
 
@@ -48,6 +49,9 @@ class CorrelationResponse(BaseModel):
     # and x/y stats are still computed over the full set. Equal otherwise.
     total_count: int = 0
     sampled_count: int = 0
+    # True when a pixel-domain metric (hfr) is involved and the filtered frames
+    # span more than one plate scale, so raw pixel values are not comparable.
+    mixed_plate_scales: bool = False
 
 
 class HistogramBin(BaseModel):
@@ -61,6 +65,9 @@ class DistributionResponse(BaseModel):
     stats: SummaryStats
     metric: str
     skewness: float
+    # True when a pixel-domain metric (hfr) is involved and the filtered frames
+    # span more than one plate scale, so raw pixel values are not comparable.
+    mixed_plate_scales: bool = False
 
 
 class BoxPlotGroup(BaseModel):
@@ -74,10 +81,20 @@ class BoxPlotGroup(BaseModel):
     count: int
 
 
+class SkippedGroup(BaseModel):
+    group_name: str
+    count: int
+
+
 class BoxPlotResponse(BaseModel):
     groups: list[BoxPlotGroup]
     metric: str
     group_by: str
+    # Groups dropped for having fewer than 4 values, sorted by group_name.
+    skipped_groups: list[SkippedGroup] = []
+    # True when a pixel-domain metric (hfr) is involved and the filtered frames
+    # span more than one plate scale, so raw pixel values are not comparable.
+    mixed_plate_scales: bool = False
 
 
 class TimeSeriesPoint(BaseModel):
@@ -98,6 +115,9 @@ class TimeSeriesResponse(BaseModel):
     ma_30: list[MovingAveragePoint]
     metric: str
     month_boundaries: list[str]
+    # True when a pixel-domain metric (hfr) is involved and the filtered frames
+    # span more than one plate scale, so raw pixel values are not comparable.
+    mixed_plate_scales: bool = False
 
 
 class MatrixCell(BaseModel):
@@ -111,6 +131,9 @@ class MatrixResponse(BaseModel):
     cells: list[MatrixCell]
     x_metrics: list[str]
     y_metrics: list[str]
+    # True when a pixel-domain metric (hfr) is involved and the filtered frames
+    # span more than one plate scale, so raw pixel values are not comparable.
+    mixed_plate_scales: bool = False
 
 
 class CompareGroupStats(BaseModel):

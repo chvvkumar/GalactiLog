@@ -16,6 +16,7 @@ import type { SharedFilters } from "../../pages/AnalysisPage";
 import type { CorrelationResponse } from "../../api/types";
 import CorrelationChart from "./CorrelationChart";
 import StatsCard from "./StatsCard";
+import PlateScaleWarning from "./PlateScaleWarning";
 import { metricOptions, metricLabel, METRIC_UNITS, PHD2_X_METRICS, PHD2_METRIC_NOTE } from "../../utils/metricLabels";
 
 const X_OPTIONS = metricOptions([
@@ -183,6 +184,8 @@ const CorrelationTab: Component<Props> = (props) => {
       <Show when={samplingNote()}>
         <p class="text-xs text-theme-text-tertiary mb-2">{samplingNote()}</p>
       </Show>
+
+      <PlateScaleWarning show={dataQuery.data?.mixed_plate_scales} />
 
       <div style={{ height: "500px" }} class="relative">
         <CorrelationChart data={filteredData() as CorrelationResponse | undefined} loading={dataQuery.isFetching} />

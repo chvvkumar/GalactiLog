@@ -186,6 +186,61 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/apikeys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Api Keys */
+        get: operations["list_api_keys_api_apikeys_get"];
+        put?: never;
+        /** Create Key */
+        post: operations["create_key_api_apikeys_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/apikeys/{key_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete Key */
+        delete: operations["delete_key_api_apikeys__key_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/apikeys/{key_id}/permanent": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Key Permanently
+         * @description Hard-delete a revoked key. Active keys must be revoked first (409).
+         */
+        delete: operations["delete_key_permanently_api_apikeys__key_id__permanent_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/auth/login": {
         parameters: {
             query?: never;
@@ -739,6 +794,68 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/mosaics/from-sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Mosaic From Sessions
+         * @description Create a mosaic (or extend an existing one) from explicit sessions.
+         *
+         *     One transaction: mosaic, panels, session membership, and frame claiming
+         *     commit together.
+         *
+         *     Frames are claimed here rather than left to a later (target,
+         *     panel_label) lookup because that lookup is ambiguous when several
+         *     campaign mosaics share both the target and the label; the caller's
+         *     explicit per-row (session_date, original_panel_label) selection is what
+         *     makes the claim deterministic. Each row claims frames carrying its
+         *     ORIGINAL parsed label (entry.panel_label may be a user-edited final name
+         *     no frame carries) or, for a None row, frames with no label at all, with
+         *     no image_type filter (mirroring retro_link_panel_images). Previously
+         *     unlabeled claimed rows are stamped with the entry's label; a real parsed
+         *     label is never overwritten with an edited name -- panel_id is the
+         *     authoritative membership and panel_label stays OBJECT-derived.
+         */
+        post: operations["create_mosaic_from_sessions_api_mosaics_from_sessions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/mosaics/from-sessions/prefill": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * From Sessions Prefill
+         * @description Prefill data for the create-mosaic-from-sessions dialog.
+         *
+         *     For the given target and session dates, returns the most common
+         *     panel-token base name parsed from the LIGHT frames' OBJECT headers (to
+         *     seed the new-mosaic name), one row per distinct (session_date,
+         *     panel_label) pair (to seed the panel/date selection), and the mosaics
+         *     that already contain a panel on this target (for the add-to-existing
+         *     dropdown).
+         */
+        get: operations["from_sessions_prefill_api_mosaics_from_sessions_prefill_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/mosaics/suggestions": {
         parameters: {
             query?: never;
@@ -1086,6 +1203,11 @@ export interface paths {
          *
          *     The heavy directory scan runs inside a Celery task so this endpoint
          *     returns immediately - no nginx timeout issues on large data sets.
+         *
+         *     Triggering while a scan is running no longer bounces: it queues a single
+         *     follow-up run (202, ``status: "queued"``) that starts when the current one
+         *     finishes. The walk is single-pass, so this is the only way files copied in
+         *     after it started get seen without someone watching for the scan to end.
          */
         post: operations["trigger_scan_api_scan_post"];
         delete?: never;
@@ -2485,6 +2607,63 @@ export interface components {
             /** Total Integration Seconds */
             total_integration_seconds: number;
         };
+        /** ApiKeyCreateRequest */
+        ApiKeyCreateRequest: {
+            /**
+             * Can Write
+             * @default false
+             */
+            can_write: boolean;
+            /** Name */
+            name: string;
+        };
+        /**
+         * ApiKeyCreateResponse
+         * @description Creation is the only response that ever carries the raw key.
+         */
+        ApiKeyCreateResponse: {
+            /** Can Write */
+            can_write: boolean;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Key */
+            key: string;
+            /** Name */
+            name: string;
+            /** Prefix */
+            prefix: string;
+        };
+        /** ApiKeyResponse */
+        ApiKeyResponse: {
+            /** Can Write */
+            can_write: boolean;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Last Used At */
+            last_used_at?: string | null;
+            /** Name */
+            name: string;
+            /** Prefix */
+            prefix: string;
+            /** Revoked At */
+            revoked_at?: string | null;
+        };
         /** AppLogItem */
         AppLogItem: {
             /** Id */
@@ -2549,10 +2728,7 @@ export interface components {
         };
         /** Body_restore_backup_endpoint_api_backup_restore_post */
         Body_restore_backup_endpoint_api_backup_restore_post: {
-            /**
-             * File
-             * Format: binary
-             */
+            /** File */
             file: string;
             /**
              * Mode
@@ -2567,10 +2743,7 @@ export interface components {
         };
         /** Body_validate_backup_endpoint_api_backup_validate_post */
         Body_validate_backup_endpoint_api_backup_validate_post: {
-            /**
-             * File
-             * Format: binary
-             */
+            /** File */
             file: string;
             /**
              * Mode
@@ -2692,6 +2865,16 @@ export interface components {
             groups: components["schemas"]["BoxPlotGroup"][];
             /** Metric */
             metric: string;
+            /**
+             * Mixed Plate Scales
+             * @default false
+             */
+            mixed_plate_scales: boolean;
+            /**
+             * Skipped Groups
+             * @default []
+             */
+            skipped_groups: components["schemas"]["SkippedGroup"][];
         };
         /** BrowseEntry */
         BrowseEntry: {
@@ -2814,6 +2997,11 @@ export interface components {
         CorrelationResponse: {
             /** Granularity */
             granularity: string;
+            /**
+             * Mixed Plate Scales
+             * @default false
+             */
+            mixed_plate_scales: boolean;
             /** Points */
             points: components["schemas"]["CorrelationPoint"][];
             /**
@@ -3053,6 +3241,11 @@ export interface components {
             bins: components["schemas"]["HistogramBin"][];
             /** Metric */
             metric: string;
+            /**
+             * Mixed Plate Scales
+             * @default false
+             */
+            mixed_plate_scales: boolean;
             /** Skewness */
             skewness: number;
             stats: components["schemas"]["SummaryStats"];
@@ -3419,6 +3612,92 @@ export interface components {
             /** Wind Speed */
             wind_speed?: number | null;
         };
+        /** FromSessionsCreateRequest */
+        FromSessionsCreateRequest: {
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "new" | "existing";
+            /** Mosaic Id */
+            mosaic_id?: string | null;
+            /** Name */
+            name?: string | null;
+            /** Panels */
+            panels: components["schemas"]["FromSessionsPanelEntry"][];
+            /**
+             * Target Id
+             * Format: uuid
+             */
+            target_id: string;
+        };
+        /** FromSessionsCreateResponse */
+        FromSessionsCreateResponse: {
+            /** Claimed Frames */
+            claimed_frames: number;
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Panel Count */
+            panel_count: number;
+        };
+        /**
+         * FromSessionsMosaicOption
+         * @description A mosaic that already has at least one panel on the prefill target,
+         *     offered as an add-to-existing destination.
+         */
+        FromSessionsMosaicOption: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+        };
+        /** FromSessionsPanelEntry */
+        FromSessionsPanelEntry: {
+            /** Panel Label */
+            panel_label: string;
+            /** Rows */
+            rows: components["schemas"]["FromSessionsPanelRow"][];
+        };
+        /**
+         * FromSessionsPanelRow
+         * @description One (session_date, original_panel_label) selection for a panel entry.
+         *
+         *     original_panel_label is the label as parsed from OBJECT at ingest (what
+         *     Image.panel_label actually carries), or None for unlabeled frames; the
+         *     entry's panel_label may be a user-edited final name that no frame
+         *     carries, so the claim must match on the original label.
+         */
+        FromSessionsPanelRow: {
+            /** Original Panel Label */
+            original_panel_label?: string | null;
+            /** Session Date */
+            session_date: string;
+        };
+        /** FromSessionsPrefillResponse */
+        FromSessionsPrefillResponse: {
+            /** Base Name */
+            base_name?: string | null;
+            /** Mosaics */
+            mosaics: components["schemas"]["FromSessionsMosaicOption"][];
+            /** Rows */
+            rows: components["schemas"]["FromSessionsPrefillRow"][];
+        };
+        /**
+         * FromSessionsPrefillRow
+         * @description One distinct (session_date, panel_label) pair over a target's LIGHT
+         *     frames on the requested dates. panel_label is None for frames whose
+         *     OBJECT header carried no panel token at ingest.
+         */
+        FromSessionsPrefillRow: {
+            /** Frame Count */
+            frame_count: number;
+            /** Panel Label */
+            panel_label?: string | null;
+            /** Session Date */
+            session_date: string;
+        };
         /** GeneralSettings */
         GeneralSettings: {
             /**
@@ -3774,6 +4053,11 @@ export interface components {
         MatrixResponse: {
             /** Cells */
             cells: components["schemas"]["MatrixCell"][];
+            /**
+             * Mixed Plate Scales
+             * @default false
+             */
+            mixed_plate_scales: boolean;
             /** X Metrics */
             x_metrics: string[];
             /** Y Metrics */
@@ -4795,6 +5079,8 @@ export interface components {
             message?: string | null;
             /** New Files */
             new_files?: number | null;
+            /** Pending Rescan */
+            pending_rescan?: boolean | null;
             /** Percent */
             percent?: number | null;
             /** Removed */
@@ -4867,6 +5153,11 @@ export interface components {
              * @default 0
              */
             new_files: number;
+            /**
+             * Pending Rescan
+             * @default false
+             */
+            pending_rescan: boolean;
             /**
              * Percent
              * @default 0
@@ -5202,6 +5493,13 @@ export interface components {
             latitude: number;
             /** Longitude */
             longitude: number;
+        };
+        /** SkippedGroup */
+        SkippedGroup: {
+            /** Count */
+            count: number;
+            /** Group Name */
+            group_name: string;
         };
         /** StatsResponse */
         StatsResponse: {
@@ -5601,6 +5899,11 @@ export interface components {
             ma_7: components["schemas"]["MovingAveragePoint"][];
             /** Metric */
             metric: string;
+            /**
+             * Mixed Plate Scales
+             * @default false
+             */
+            mixed_plate_scales: boolean;
             /** Month Boundaries */
             month_boundaries: string[];
             /** Points */
@@ -5638,13 +5941,13 @@ export interface components {
             /** Intercept */
             intercept: number;
             /** Pearson R */
-            pearson_r: number;
+            pearson_r: number | null;
             /** R Squared */
             r_squared: number;
             /** Slope */
             slope: number;
             /** Spearman Rho */
-            spearman_rho: number;
+            spearman_rho: number | null;
         };
         /** UserCreateRequest */
         UserCreateRequest: {
@@ -5714,6 +6017,10 @@ export interface components {
         };
         /** ValidationError */
         ValidationError: {
+            /** Context */
+            ctx?: Record<string, never>;
+            /** Input */
+            input?: unknown;
             /** Location */
             loc: (string | number)[];
             /** Message */
@@ -6235,6 +6542,134 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["TimeSeriesResponse"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_api_keys_api_apikeys_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiKeyResponse"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_key_api_apikeys_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApiKeyCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiKeyCreateResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_key_api_apikeys__key_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_key_permanently_api_apikeys__key_id__permanent_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
@@ -7416,6 +7851,75 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DetectionStatusResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_mosaic_from_sessions_api_mosaics_from_sessions_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FromSessionsCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FromSessionsCreateResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    from_sessions_prefill_api_mosaics_from_sessions_prefill_get: {
+        parameters: {
+            query: {
+                target_id: string;
+                dates: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FromSessionsPrefillResponse"];
                 };
             };
             /** @description Validation Error */

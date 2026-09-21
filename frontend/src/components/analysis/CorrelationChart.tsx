@@ -7,6 +7,7 @@ import { chartFontSize } from "../../utils/chartConfig";
 // and stats-card labels everywhere.
 import { METRIC_LABELS } from "../../utils/metricLabels";
 import { ARCSEC } from "../../utils/format";
+import { HIGHER_IS_BETTER, NO_POLARITY } from "./metricPolarity";
 
 const METRIC_SHORT: Record<string, string> = {
   humidity: "humidity",
@@ -31,7 +32,10 @@ const METRIC_SHORT: Record<string, string> = {
   adu_stdev: "ADU noise",
 };
 
-function describeCorrelation(data: CorrelationResponse): string {
+// Coefficients are null when there are fewer than 3 points or an axis is constant.
+const fmtCoef = (v: number | null | undefined): string => (v == null ? "n/a" : v.toFixed(2));
+
+export function describeCorrelation(data: CorrelationResponse): string {
   const { trend, x_metric, y_metric, points } = data;
   if (!trend || points.length < 3) return `Not enough data to determine a pattern (${points.length} points).`;
 
@@ -39,6 +43,10 @@ function describeCorrelation(data: CorrelationResponse): string {
   const yName = METRIC_SHORT[y_metric] || y_metric;
   const r2 = trend.r_squared;
   const rising = trend.slope > 0;
+  // A rising Y is worse for lower-is-better metrics and better for
+  // higher-is-better ones; metrics with no polarity get neutral wording.
+  const neutral = NO_POLARITY.has(y_metric);
+  const worse = rising !== HIGHER_IS_BETTER.has(y_metric);
 
   let strength: string;
   let verdict: string;
@@ -52,17 +60,25 @@ function describeCorrelation(data: CorrelationResponse): string {
       : `${yName} tends to decrease slightly with higher ${xName}, but the effect is minor.`;
   } else if (r2 < 0.4) {
     strength = "Moderate correlation";
-    verdict = rising
-      ? `Higher ${xName} is associated with worse ${yName}. Consider this a factor in your imaging conditions.`
-      : `Higher ${xName} is associated with better ${yName}. This is a meaningful pattern in your data.`;
+    if (neutral) {
+      verdict = `${yName} tends to ${rising ? "increase" : "decrease"} with higher ${xName}. This is a meaningful pattern in your data.`;
+    } else {
+      verdict = worse
+        ? `Higher ${xName} is associated with worse ${yName}. Consider this a factor in your imaging conditions.`
+        : `Higher ${xName} is associated with better ${yName}. This is a meaningful pattern in your data.`;
+    }
   } else {
     strength = "Strong correlation";
-    verdict = rising
-      ? `${xName} has a strong negative impact on your ${yName}. This is a key factor at your site.`
-      : `${xName} strongly improves your ${yName}. This is a key factor at your site.`;
+    if (neutral) {
+      verdict = `${yName} ${rising ? "increases" : "decreases"} strongly with higher ${xName}. This is a key factor at your site.`;
+    } else {
+      verdict = worse
+        ? `${xName} has a strong negative impact on your ${yName}. This is a key factor at your site.`
+        : `${xName} strongly improves your ${yName}. This is a key factor at your site.`;
+    }
   }
 
-  const statsLine = `Pearson r=${trend.pearson_r.toFixed(2)}, Spearman \u03c1=${trend.spearman_rho.toFixed(2)}`;
+  const statsLine = `Pearson r=${fmtCoef(trend.pearson_r)}, Spearman \u03c1=${fmtCoef(trend.spearman_rho)}`;
   return `${strength} (R\u00b2=${r2.toFixed(2)}, ${statsLine}). ${verdict}`;
 }
 
