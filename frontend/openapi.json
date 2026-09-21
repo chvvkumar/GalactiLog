@@ -316,6 +316,126 @@
         "title": "AggregateStats",
         "type": "object"
       },
+      "ApiKeyCreateRequest": {
+        "properties": {
+          "can_write": {
+            "default": false,
+            "title": "Can Write",
+            "type": "boolean"
+          },
+          "name": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "ApiKeyCreateRequest",
+        "type": "object"
+      },
+      "ApiKeyCreateResponse": {
+        "description": "Creation is the only response that ever carries the raw key.",
+        "properties": {
+          "can_write": {
+            "title": "Can Write",
+            "type": "boolean"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "prefix": {
+            "title": "Prefix",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "id",
+          "name",
+          "prefix",
+          "can_write",
+          "created_at"
+        ],
+        "title": "ApiKeyCreateResponse",
+        "type": "object"
+      },
+      "ApiKeyResponse": {
+        "properties": {
+          "can_write": {
+            "title": "Can Write",
+            "type": "boolean"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "last_used_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Used At"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "prefix": {
+            "title": "Prefix",
+            "type": "string"
+          },
+          "revoked_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revoked At"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "prefix",
+          "can_write",
+          "created_at"
+        ],
+        "title": "ApiKeyResponse",
+        "type": "object"
+      },
       "AppLogItem": {
         "properties": {
           "id": {
@@ -461,7 +581,7 @@
       "Body_restore_backup_endpoint_api_backup_restore_post": {
         "properties": {
           "file": {
-            "format": "binary",
+            "contentMediaType": "application/octet-stream",
             "title": "File",
             "type": "string"
           },
@@ -485,7 +605,7 @@
       "Body_validate_backup_endpoint_api_backup_validate_post": {
         "properties": {
           "file": {
-            "format": "binary",
+            "contentMediaType": "application/octet-stream",
             "title": "File",
             "type": "string"
           },
@@ -816,6 +936,19 @@
           "metric": {
             "title": "Metric",
             "type": "string"
+          },
+          "mixed_plate_scales": {
+            "default": false,
+            "title": "Mixed Plate Scales",
+            "type": "boolean"
+          },
+          "skipped_groups": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/SkippedGroup"
+            },
+            "title": "Skipped Groups",
+            "type": "array"
           }
         },
         "required": [
@@ -1095,6 +1228,11 @@
           "granularity": {
             "title": "Granularity",
             "type": "string"
+          },
+          "mixed_plate_scales": {
+            "default": false,
+            "title": "Mixed Plate Scales",
+            "type": "boolean"
           },
           "points": {
             "items": {
@@ -1796,6 +1934,11 @@
           "metric": {
             "title": "Metric",
             "type": "string"
+          },
+          "mixed_plate_scales": {
+            "default": false,
+            "title": "Mixed Plate Scales",
+            "type": "boolean"
           },
           "skewness": {
             "title": "Skewness",
@@ -3130,6 +3273,221 @@
         "title": "FrameRecord",
         "type": "object"
       },
+      "FromSessionsCreateRequest": {
+        "properties": {
+          "mode": {
+            "enum": [
+              "new",
+              "existing"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "mosaic_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mosaic Id"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "panels": {
+            "items": {
+              "$ref": "#/components/schemas/FromSessionsPanelEntry"
+            },
+            "minItems": 1,
+            "title": "Panels",
+            "type": "array"
+          },
+          "target_id": {
+            "format": "uuid",
+            "title": "Target Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "mode",
+          "target_id",
+          "panels"
+        ],
+        "title": "FromSessionsCreateRequest",
+        "type": "object"
+      },
+      "FromSessionsCreateResponse": {
+        "properties": {
+          "claimed_frames": {
+            "title": "Claimed Frames",
+            "type": "integer"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "panel_count": {
+            "title": "Panel Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "panel_count",
+          "claimed_frames"
+        ],
+        "title": "FromSessionsCreateResponse",
+        "type": "object"
+      },
+      "FromSessionsMosaicOption": {
+        "description": "A mosaic that already has at least one panel on the prefill target,\noffered as an add-to-existing destination.",
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "FromSessionsMosaicOption",
+        "type": "object"
+      },
+      "FromSessionsPanelEntry": {
+        "properties": {
+          "panel_label": {
+            "minLength": 1,
+            "title": "Panel Label",
+            "type": "string"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/FromSessionsPanelRow"
+            },
+            "minItems": 1,
+            "title": "Rows",
+            "type": "array"
+          }
+        },
+        "required": [
+          "panel_label",
+          "rows"
+        ],
+        "title": "FromSessionsPanelEntry",
+        "type": "object"
+      },
+      "FromSessionsPanelRow": {
+        "description": "One (session_date, original_panel_label) selection for a panel entry.\n\noriginal_panel_label is the label as parsed from OBJECT at ingest (what\nImage.panel_label actually carries), or None for unlabeled frames; the\nentry's panel_label may be a user-edited final name that no frame\ncarries, so the claim must match on the original label.",
+        "properties": {
+          "original_panel_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Original Panel Label"
+          },
+          "session_date": {
+            "title": "Session Date",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_date"
+        ],
+        "title": "FromSessionsPanelRow",
+        "type": "object"
+      },
+      "FromSessionsPrefillResponse": {
+        "properties": {
+          "base_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Name"
+          },
+          "mosaics": {
+            "items": {
+              "$ref": "#/components/schemas/FromSessionsMosaicOption"
+            },
+            "title": "Mosaics",
+            "type": "array"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/FromSessionsPrefillRow"
+            },
+            "title": "Rows",
+            "type": "array"
+          }
+        },
+        "required": [
+          "rows",
+          "mosaics"
+        ],
+        "title": "FromSessionsPrefillResponse",
+        "type": "object"
+      },
+      "FromSessionsPrefillRow": {
+        "description": "One distinct (session_date, panel_label) pair over a target's LIGHT\nframes on the requested dates. panel_label is None for frames whose\nOBJECT header carried no panel token at ingest.",
+        "properties": {
+          "frame_count": {
+            "title": "Frame Count",
+            "type": "integer"
+          },
+          "panel_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Panel Label"
+          },
+          "session_date": {
+            "title": "Session Date",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_date",
+          "frame_count"
+        ],
+        "title": "FromSessionsPrefillRow",
+        "type": "object"
+      },
       "GeneralSettings": {
         "properties": {
           "activity_retention_days": {
@@ -3933,6 +4291,11 @@
             },
             "title": "Cells",
             "type": "array"
+          },
+          "mixed_plate_scales": {
+            "default": false,
+            "title": "Mixed Plate Scales",
+            "type": "boolean"
           },
           "x_metrics": {
             "items": {
@@ -6918,6 +7281,17 @@
             ],
             "title": "New Files"
           },
+          "pending_rescan": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pending Rescan"
+          },
           "percent": {
             "anyOf": [
               {
@@ -7121,6 +7495,11 @@
             "default": 0,
             "title": "New Files",
             "type": "integer"
+          },
+          "pending_rescan": {
+            "default": false,
+            "title": "Pending Rescan",
+            "type": "boolean"
           },
           "percent": {
             "default": 0.0,
@@ -8092,6 +8471,24 @@
           "longitude"
         ],
         "title": "SiteCoords",
+        "type": "object"
+      },
+      "SkippedGroup": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "group_name": {
+            "title": "Group Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "group_name",
+          "count"
+        ],
+        "title": "SkippedGroup",
         "type": "object"
       },
       "StatsResponse": {
@@ -9329,6 +9726,11 @@
             "title": "Metric",
             "type": "string"
           },
+          "mixed_plate_scales": {
+            "default": false,
+            "title": "Mixed Plate Scales",
+            "type": "boolean"
+          },
           "month_boundaries": {
             "items": {
               "type": "string"
@@ -9440,8 +9842,15 @@
             "type": "number"
           },
           "pearson_r": {
-            "title": "Pearson R",
-            "type": "number"
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pearson R"
           },
           "r_squared": {
             "title": "R Squared",
@@ -9452,8 +9861,15 @@
             "type": "number"
           },
           "spearman_rho": {
-            "title": "Spearman Rho",
-            "type": "number"
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Spearman Rho"
           }
         },
         "required": [
@@ -9655,6 +10071,13 @@
       },
       "ValidationError": {
         "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
           "loc": {
             "items": {
               "anyOf": [
@@ -11196,6 +11619,221 @@
         "summary": "Get Timeseries",
         "tags": [
           "analysis"
+        ]
+      }
+    },
+    "/api/apikeys": {
+      "get": {
+        "operationId": "list_api_keys_api_apikeys_get",
+        "parameters": [
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ApiKeyResponse"
+                  },
+                  "title": "Response List Api Keys Api Apikeys Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Api Keys",
+        "tags": [
+          "apikeys"
+        ]
+      },
+      "post": {
+        "operationId": "create_key_api_apikeys_post",
+        "parameters": [
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApiKeyCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiKeyCreateResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Key",
+        "tags": [
+          "apikeys"
+        ]
+      }
+    },
+    "/api/apikeys/{key_id}": {
+      "delete": {
+        "operationId": "delete_key_api_apikeys__key_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Key Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Key",
+        "tags": [
+          "apikeys"
+        ]
+      }
+    },
+    "/api/apikeys/{key_id}/permanent": {
+      "delete": {
+        "description": "Hard-delete a revoked key. Active keys must be revoked first (409).",
+        "operationId": "delete_key_permanently_api_apikeys__key_id__permanent_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Key Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Key Permanently",
+        "tags": [
+          "apikeys"
         ]
       }
     },
@@ -13286,6 +13924,135 @@
         ]
       }
     },
+    "/api/mosaics/from-sessions": {
+      "post": {
+        "description": "Create a mosaic (or extend an existing one) from explicit sessions.\n\nOne transaction: mosaic, panels, session membership, and frame claiming\ncommit together.\n\nFrames are claimed here rather than left to a later (target,\npanel_label) lookup because that lookup is ambiguous when several\ncampaign mosaics share both the target and the label; the caller's\nexplicit per-row (session_date, original_panel_label) selection is what\nmakes the claim deterministic. Each row claims frames carrying its\nORIGINAL parsed label (entry.panel_label may be a user-edited final name\nno frame carries) or, for a None row, frames with no label at all, with\nno image_type filter (mirroring retro_link_panel_images). Previously\nunlabeled claimed rows are stamped with the entry's label; a real parsed\nlabel is never overwritten with an edited name -- panel_id is the\nauthoritative membership and panel_label stays OBJECT-derived.",
+        "operationId": "create_mosaic_from_sessions_api_mosaics_from_sessions_post",
+        "parameters": [
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FromSessionsCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FromSessionsCreateResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Mosaic From Sessions",
+        "tags": [
+          "mosaics"
+        ]
+      }
+    },
+    "/api/mosaics/from-sessions/prefill": {
+      "get": {
+        "description": "Prefill data for the create-mosaic-from-sessions dialog.\n\nFor the given target and session dates, returns the most common\npanel-token base name parsed from the LIGHT frames' OBJECT headers (to\nseed the new-mosaic name), one row per distinct (session_date,\npanel_label) pair (to seed the panel/date selection), and the mosaics\nthat already contain a panel on this target (for the add-to-existing\ndropdown).",
+        "operationId": "from_sessions_prefill_api_mosaics_from_sessions_prefill_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "target_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Target Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "dates",
+            "required": true,
+            "schema": {
+              "title": "Dates",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FromSessionsPrefillResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "From Sessions Prefill",
+        "tags": [
+          "mosaics"
+        ]
+      }
+    },
     "/api/mosaics/suggestions": {
       "get": {
         "operationId": "get_suggestions_api_mosaics_suggestions_get",
@@ -14494,7 +15261,7 @@
     },
     "/api/scan": {
       "post": {
-        "description": "Walk the FITS directory, queue new files for ingestion.\n\nThe heavy directory scan runs inside a Celery task so this endpoint\nreturns immediately - no nginx timeout issues on large data sets.",
+        "description": "Walk the FITS directory, queue new files for ingestion.\n\nThe heavy directory scan runs inside a Celery task so this endpoint\nreturns immediately - no nginx timeout issues on large data sets.\n\nTriggering while a scan is running no longer bounces: it queues a single\nfollow-up run (202, ``status: \"queued\"``) that starts when the current one\nfinishes. The walk is single-pass, so this is the only way files copied in\nafter it started get seen without someone watching for the scan to end.",
         "operationId": "trigger_scan_api_scan_post",
         "parameters": [
           {

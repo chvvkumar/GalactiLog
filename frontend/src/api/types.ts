@@ -717,8 +717,9 @@ export interface TrendLine {
   slope: number;
   intercept: number;
   r_squared: number;
-  pearson_r: number;
-  spearman_rho: number;
+  // null when fewer than 3 points or an axis is constant
+  pearson_r: number | null;
+  spearman_rho: number | null;
   confidence_upper: ConfidenceBandPoint[];
   confidence_lower: ConfidenceBandPoint[];
 }
@@ -734,6 +735,7 @@ export interface CorrelationResponse {
   target_names: Record<string, string>;
   total_count?: number;
   sampled_count?: number;
+  mixed_plate_scales?: boolean;
 }
 
 export type HistogramBin = Schemas["HistogramBin"];
@@ -759,6 +761,7 @@ export interface TimeSeriesResponse {
   ma_30: MovingAveragePoint[];
   metric: string;
   month_boundaries: string[];
+  mixed_plate_scales?: boolean;
 }
 
 export type MatrixCell = Schemas["MatrixCell"];

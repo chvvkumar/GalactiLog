@@ -5,6 +5,7 @@ import { unwrap } from "../../api/unwrap";
 import { queryKeys } from "../../api/queryKeys";
 import type { SharedFilters } from "../../pages/AnalysisPage";
 import { ARCSEC } from "../../utils/format";
+import PlateScaleWarning from "./PlateScaleWarning";
 
 const X_LABELS: Record<string, string> = {
   humidity: "Humid.", wind_speed: "Wind", ambient_temp: "Temp",
@@ -66,7 +67,9 @@ const MatrixTab: Component<Props> = (props) => {
   return (
     <div class="bg-theme-surface border border-theme-border rounded-[var(--radius-md)] shadow-[var(--shadow-sm)] p-4">
       <h3 class="text-base font-medium text-theme-text-primary mb-3">Correlation Matrix</h3>
-      <p class="text-xs text-theme-text-tertiary mb-3">Pearson r for all metric pairs. Click a cell to explore in the Correlation tab.</p>
+      <p class="text-xs text-theme-text-tertiary mb-3">Pearson r for each environment metric (columns) against each quality metric (rows). Cells with fewer than 10 paired frames show n/a. Click a cell to explore in the Correlation tab.</p>
+
+      <PlateScaleWarning show={dataQuery.data?.mixed_plate_scales} />
 
       {dataQuery.isFetching && !dataQuery.data && (
         <div class="text-sm text-theme-text-secondary py-8 text-center">Computing correlations...</div>
@@ -99,17 +102,17 @@ const MatrixTab: Component<Props> = (props) => {
                           <td
                             class="p-1.5 text-center cursor-pointer hover:ring-1 hover:ring-theme-accent transition-shadow rounded-sm"
                             style={{ "background-color": rToColor(cell()?.pearson_r ?? null), "min-width": "42px" }}
-                            title={cell()?.pearson_r !== null
+                            title={cell()?.pearson_r != null
                               ? `r=${cell()!.pearson_r!.toFixed(3)} (N=${cell()!.n_points})`
                               : `Insufficient data (N=${cell()?.n_points || 0})`}
                             onClick={() => {
-                              if (cell()?.pearson_r !== null) {
+                              if (cell()?.pearson_r != null) {
                                 window.dispatchEvent(new CustomEvent("analysis-navigate", { detail: { tab: "correlation", x: xm, y: ym } }));
                               }
                             }}
                           >
                             <span class="text-theme-text-primary text-tiny">
-                              {cell()?.pearson_r !== null ? cell()!.pearson_r!.toFixed(2) : "\u2014"}
+                              {cell()?.pearson_r != null ? cell()!.pearson_r!.toFixed(2) : "n/a"}
                             </span>
                           </td>
                         );

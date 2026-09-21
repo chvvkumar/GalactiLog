@@ -13,9 +13,9 @@ import type { TimeSeriesResponse } from "../../api/types";
 import TimeSeriesChart from "./TimeSeriesChart";
 import { MIN_GROUP, type MetricBaseline } from "../../utils/frameQuality";
 import { metricOptions } from "../../utils/metricLabels";
-
 // Higher-is-better metrics flip z-score polarity so "worse than baseline" stays positive.
-const HIGHER_IS_BETTER = new Set(["detected_stars", "sky_quality"]);
+import { HIGHER_IS_BETTER } from "./metricPolarity";
+import PlateScaleWarning from "./PlateScaleWarning";
 
 // Robust median + MAD computed over the displayed values, matching the util's
 // definition (MAD = median(|x - median|)). Returns null when too sparse or uniform.
@@ -94,6 +94,7 @@ const TimeSeriesTab: Component<Props> = (props) => {
           <button class={toggleClass(smoothing() === "ma30")} onClick={() => setSmoothing("ma30")}>30-Night MA</button>
         </div>
       </div>
+      <PlateScaleWarning show={dataQuery.data?.mixed_plate_scales} />
       <div style={{ height: "500px" }} class="relative">
         <TimeSeriesChart
           data={dataQuery.data as TimeSeriesResponse | undefined}

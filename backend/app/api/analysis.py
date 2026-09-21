@@ -5,7 +5,7 @@ from collections import defaultdict
 from datetime import date as date_type
 
 from fastapi import APIRouter, Depends, Query, HTTPException
-from sqlalchemy import select, func, distinct, and_
+from sqlalchemy import select, func, distinct, and_, Numeric, cast
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
@@ -25,6 +25,7 @@ from app.schemas.analysis import (
     MatrixCell,
     MatrixResponse,
     MovingAveragePoint,
+    SkippedGroup,
     SummaryStats,
     TimeSeriesPoint,
     TimeSeriesResponse,
@@ -45,6 +46,10 @@ _ANALYSIS_CACHE_TTL = 300  # 5 minutes
 # of thousands of frames; the point set is downsampled to this cap for the
 # response payload while trend/stats stay computed over the full set.
 _CORRELATION_POINT_CAP = 5000
+
+# Deterministic row order for every select that feeds a figure, so float sums,
+# the downsample stride and group emission order repeat between identical requests.
+_ROW_ORDER = (Image.session_date, Image.id)
 
 # ── Metric map ──────────────────────────────────────────────────────────
 
@@ -170,6 +175,26 @@ async def _apply_filters(
     return q
 
 
+async def _has_mixed_plate_scales(
+    session: AsyncSession,
+    telescope: str | None,
+    camera: str | None,
+    filter_used: str | None,
+    date_from: str | None,
+    date_to: str | None,
+) -> bool:
+    """True when the filtered LIGHT frames span more than one plate scale."""
+    # Rounded to 2 decimals so header jitter within one optical train does not
+    # count as a second plate scale. NULL plate scales are ignored.
+    q = (
+        select(distinct(func.round(cast(Image.arcsec_per_pixel, Numeric), 2)))
+        .where(Image.image_type == "LIGHT")
+        .where(Image.arcsec_per_pixel.is_not(None))
+    )
+    q = await _apply_filters(q, session, telescope, camera, filter_used, date_from, date_to)
+    return len((await session.execute(q)).scalars().all()) > 1
+
+
 async def _resolve_target_names(
     session: AsyncSession, target_ids: set,
 ) -> dict:
@@ -223,37 +248,35 @@ def _compute_box_plot(values: list[float], group_name: str) -> BoxPlotGroup | No
     )
 
 
-def _is_outlier_iqr(x: float, y: float, xs: list[float], ys: list[float]) -> bool:
-    """Check if a point is an outlier on either axis using IQR method."""
-    for vals, val in [(xs, x), (ys, y)]:
-        s = sorted(vals)
-        n = len(s)
-        q1 = statistics.median(s[: n // 2])
-        q3 = statistics.median(s[(n + 1) // 2 :])
-        iqr = q3 - q1
-        if val < q1 - 1.5 * iqr or val > q3 + 1.5 * iqr:
-            return True
-    return False
+def _iqr_fences(vals: list[float]) -> tuple[float, float]:
+    """Lower and upper 1.5*IQR outlier fences for one axis."""
+    s = sorted(vals)
+    n = len(s)
+    q1 = statistics.median(s[: n // 2])
+    q3 = statistics.median(s[(n + 1) // 2 :])
+    iqr = q3 - q1
+    return q1 - 1.5 * iqr, q3 + 1.5 * iqr
 
 
-def _pearson_r(xs: list[float], ys: list[float]) -> float:
+def _pearson_r(xs: list[float], ys: list[float]) -> float | None:
+    """Pearson r, or None when undefined (n < 3 or a constant axis)."""
     n = len(xs)
     if n < 3:
-        return 0.0
+        return None
     mx = sum(xs) / n
     my = sum(ys) / n
     num = sum((x - mx) * (y - my) for x, y in zip(xs, ys))
     dx = math.sqrt(sum((x - mx) ** 2 for x in xs))
     dy = math.sqrt(sum((y - my) ** 2 for y in ys))
     if dx < 1e-12 or dy < 1e-12:
-        return 0.0
+        return None
     return num / (dx * dy)
 
 
-def _spearman_rho(xs: list[float], ys: list[float]) -> float:
+def _spearman_rho(xs: list[float], ys: list[float]) -> float | None:
     n = len(xs)
     if n < 3:
-        return 0.0
+        return None
 
     def _rank(vals):
         indexed = sorted(range(n), key=lambda i: vals[i])
@@ -272,6 +295,50 @@ def _spearman_rho(xs: list[float], ys: list[float]) -> float:
     rx = _rank(xs)
     ry = _rank(ys)
     return _pearson_r(rx, ry)
+
+
+# Two-sided 95% Student t critical values for df 1..30; 1.96 above that.
+_T_CRIT_95 = [
+    12.706, 4.303, 3.182, 2.776, 2.571, 2.447, 2.365, 2.306, 2.262, 2.228,
+    2.201, 2.179, 2.160, 2.145, 2.131, 2.120, 2.110, 2.101, 2.093, 2.086,
+    2.080, 2.074, 2.069, 2.064, 2.060, 2.056, 2.052, 2.048, 2.045, 2.042,
+]
+
+
+def _t_crit_95(df: int) -> float:
+    return _T_CRIT_95[df - 1] if 1 <= df <= 30 else 1.96
+
+
+def _pct_lower(med_a: float, med_b: float) -> float:
+    """Percent by which the smaller median is lower than the larger one."""
+    denom = max(abs(med_a), abs(med_b))
+    return abs(med_a - med_b) / denom * 100 if denom else 0.0
+
+
+def _histogram_bins(values: list[float], n_bins: int) -> list[tuple[float, float, int]]:
+    """Equal-width (start, end, count) bins. The last bin ends exactly at the
+    maximum and is closed on the right, so the counts always sum to len(values)."""
+    v_min, v_max = min(values), max(values)
+    bin_width = (v_max - v_min) / n_bins if v_max > v_min else 1.0
+    edges = [v_min + i * bin_width for i in range(n_bins + 1)]
+    if v_max > v_min:
+        edges[-1] = v_max
+    bins = []
+    for i in range(n_bins):
+        b_start, b_end = edges[i], edges[i + 1]
+        last = i == n_bins - 1
+        count = sum(1 for v in values if b_start <= v < b_end or (last and v == b_end))
+        bins.append((b_start, b_end, count))
+    return bins
+
+
+def _join_target_names(names: list[str]) -> str | None:
+    """Tooltip label for a night: sorted names, at most three, then "+N more"."""
+    names = sorted(names)
+    if not names:
+        return None
+    label = ", ".join(names[:3])
+    return f"{label} +{len(names) - 3} more" if len(names) > 3 else label
 
 
 def _compute_trend(points: list[CorrelationPoint]) -> TrendLine | None:
@@ -302,7 +369,7 @@ def _compute_trend(points: list[CorrelationPoint]) -> TrendLine | None:
     # Confidence band (95%) at evenly spaced x points
     mean_x = sum_x / n
     se = math.sqrt(ss_res / (n - 2)) if n > 2 and ss_res > 0 else 0
-    t_val = 1.96 if n > 30 else 2.0
+    t_val = _t_crit_95(n - 2)
 
     x_sorted = sorted(xs)
     x_min, x_max = x_sorted[0], x_sorted[-1]
@@ -319,12 +386,14 @@ def _compute_trend(points: list[CorrelationPoint]) -> TrendLine | None:
         upper.append(ConfidenceBandPoint(x=round(bx, 6), y=round(y_hat + margin, 6)))
         lower.append(ConfidenceBandPoint(x=round(bx, 6), y=round(y_hat - margin, 6)))
 
+    pearson = _pearson_r(xs, ys)
+    spearman = _spearman_rho(xs, ys)
     return TrendLine(
         slope=round(slope, 6),
         intercept=round(intercept, 6),
         r_squared=round(r_squared, 4),
-        pearson_r=round(_pearson_r(xs, ys), 4),
-        spearman_rho=round(_spearman_rho(xs, ys), 4),
+        pearson_r=round(pearson, 4) if pearson is not None else None,
+        spearman_rho=round(spearman, 4) if spearman is not None else None,
         confidence_upper=upper,
         confidence_lower=lower,
     )
@@ -406,7 +475,7 @@ async def get_correlation(
             .where(Image.capture_date.is_not(None))
         )
         q = await _apply_filters(q, session, telescope, camera, filter_used, date_from, date_to)
-        rows = (await session.execute(q)).all()
+        rows = (await session.execute(q.order_by(*_ROW_ORDER))).all()
 
         if granularity == "frame":
             target_ids = {r.resolved_target_id for r in rows if r.resolved_target_id}
@@ -438,12 +507,15 @@ async def get_correlation(
         # Outlier detection
         all_xs = [p[0] for p in raw_points]
         all_ys = [p[1] for p in raw_points]
+        if len(raw_points) >= 4:
+            x_lo, x_hi = _iqr_fences(all_xs)
+            y_lo, y_hi = _iqr_fences(all_ys)
 
         points = [
             CorrelationPoint(
                 x=x, y=y, date=d,
                 target_id=str(tid) if tid is not None else None,
-                outlier=_is_outlier_iqr(x, y, all_xs, all_ys) if len(raw_points) >= 4 else False,
+                outlier=(x < x_lo or x > x_hi or y < y_lo or y > y_hi) if len(raw_points) >= 4 else False,
             )
             for x, y, d, tid in raw_points
         ]
@@ -460,6 +532,11 @@ async def get_correlation(
         # stride, which preserves the overall shape and keeps outliers spread
         # across the range. sampled_count/total_count let the client note that
         # it is showing a subset.
+        mixed = (
+            (x_metric in _PIXEL_METRICS or y_metric in _PIXEL_METRICS)
+            and await _has_mixed_plate_scales(session, telescope, camera, filter_used, date_from, date_to)
+        )
+
         total_count = len(points)
         if total_count > _CORRELATION_POINT_CAP:
             step = total_count / _CORRELATION_POINT_CAP
@@ -478,6 +555,7 @@ async def get_correlation(
             target_names={str(tid): name for tid, name in target_names.items()},
             total_count=total_count,
             sampled_count=len(returned_points),
+            mixed_plate_scales=mixed,
         ).model_dump()
 
     data = await cached_json(cache_key, _ANALYSIS_CACHE_TTL, _compute)
@@ -515,7 +593,7 @@ async def get_distribution(
             .where(Image.capture_date.is_not(None))
         )
         q = await _apply_filters(q, session, telescope, camera, filter_used, date_from, date_to)
-        rows = (await session.execute(q)).all()
+        rows = (await session.execute(q.order_by(*_ROW_ORDER))).all()
 
         if granularity == "session":
             groups: dict[tuple, list[float]] = defaultdict(list)
@@ -532,19 +610,14 @@ async def get_distribution(
 
         # Sturges' rule for bin count
         n_bins = max(1, int(math.ceil(math.log2(len(values)) + 1)))
-        v_min, v_max = min(values), max(values)
-        bin_width = (v_max - v_min) / n_bins if v_max > v_min else 1.0
+        bins = [
+            HistogramBin(bin_start=round(b_start, 6), bin_end=round(b_end, 6), count=count)
+            for b_start, b_end, count in _histogram_bins(values, n_bins)
+        ]
 
-        bins = []
-        for i in range(n_bins):
-            b_start = v_min + i * bin_width
-            b_end = b_start + bin_width
-            count = sum(1 for v in values if (b_start <= v < b_end) or (i == n_bins - 1 and v == b_end))
-            bins.append(HistogramBin(bin_start=round(b_start, 6), bin_end=round(b_end, 6), count=count))
-
-        # Skewness (Fisher)
-        mean = stats.mean
-        std = stats.std_dev
+        # Skewness (Fisher), from the full-precision mean and sample std dev
+        mean = statistics.fmean(values)
+        std = statistics.stdev(values)
         n = len(values)
         if std > 0 and n > 2:
             skewness = (n / ((n - 1) * (n - 2))) * sum(((v - mean) / std) ** 3 for v in values)
@@ -556,11 +629,10 @@ async def get_distribution(
             stats=stats,
             metric=metric,
             skewness=round(skewness, 4),
+            mixed_plate_scales=metric in _PIXEL_METRICS and await _has_mixed_plate_scales(session, telescope, camera, filter_used, date_from, date_to),
         ).model_dump()
 
     data = await cached_json(cache_key, _ANALYSIS_CACHE_TTL, _compute)
-    if data is None:
-        raise HTTPException(400, "Not enough data points for distribution")
     return DistributionResponse(**data)
 
 
@@ -594,7 +666,7 @@ async def get_boxplot(
         if group_by in ("equipment", "filter"):
             extra_cols = [Image.telescope, Image.camera, Image.filter_used]
         elif group_by == "month":
-            extra_cols = [func.to_char(Image.capture_date, "YYYY-MM").label("month_grp")]
+            extra_cols = [func.to_char(Image.session_date, "YYYY-MM").label("month_grp")]
         else:  # target
             extra_cols = [Image.resolved_target_id]
 
@@ -605,7 +677,7 @@ async def get_boxplot(
             .where(Image.capture_date.is_not(None))
         )
         q = await _apply_filters(q, session, telescope, camera, filter_used, date_from, date_to)
-        rows = (await session.execute(q)).all()
+        rows = (await session.execute(q.order_by(*_ROW_ORDER))).all()
 
         # Load alias maps for normalization
         filter_map, cam_map, tel_map = await load_alias_maps(session)
@@ -646,12 +718,21 @@ async def get_boxplot(
             grouped = resolved_groups
 
         groups = []
+        skipped = []
         for name, vals in sorted(grouped.items()):
             bp = _compute_box_plot(vals, name)
             if bp:
                 groups.append(bp)
+            else:
+                skipped.append(SkippedGroup(group_name=name, count=len(vals)))
 
-        return BoxPlotResponse(groups=groups, metric=metric, group_by=group_by).model_dump()
+        return BoxPlotResponse(
+            groups=groups,
+            metric=metric,
+            group_by=group_by,
+            skipped_groups=skipped,
+            mixed_plate_scales=metric in _PIXEL_METRICS and await _has_mixed_plate_scales(session, telescope, camera, filter_used, date_from, date_to),
+        ).model_dump()
 
     data = await cached_json(cache_key, _ANALYSIS_CACHE_TTL, _compute)
     return BoxPlotResponse(**data)
@@ -691,7 +772,7 @@ async def get_timeseries(
             .where(Image.capture_date.is_not(None))
         )
         q = await _apply_filters(q, session, telescope, camera, filter_used, date_from, date_to)
-        rows = (await session.execute(q)).all()
+        rows = (await session.execute(q.order_by(*_ROW_ORDER))).all()
 
         nightly: dict[str, dict] = defaultdict(lambda: {"vals": [], "target_ids": set()})
         for r in rows:
@@ -709,8 +790,9 @@ async def get_timeseries(
         points = []
         for night in sorted_nights:
             g = nightly[night]
-            tid_list = list(g["target_ids"])
-            target_name = tnames.get(tid_list[0]) if tid_list else None
+            target_name = _join_target_names(
+                [tnames[tid] for tid in g["target_ids"] if tnames.get(tid)]
+            )
             points.append(TimeSeriesPoint(
                 date=night,
                 value=round(statistics.median(g["vals"]), 6),
@@ -749,6 +831,7 @@ async def get_timeseries(
             ma_30=ma_30,
             metric=metric,
             month_boundaries=month_boundaries,
+            mixed_plate_scales=metric in _PIXEL_METRICS and await _has_mixed_plate_scales(session, telescope, camera, filter_used, date_from, date_to),
         ).model_dump()
 
     data = await cached_json(cache_key, _ANALYSIS_CACHE_TTL, _compute)
@@ -812,7 +895,13 @@ async def get_matrix(
             else:
                 cells.append(MatrixCell(x_metric=xm, y_metric=ym, pearson_r=None, n_points=n_points))
 
-        return MatrixResponse(cells=cells, x_metrics=X_METRICS, y_metrics=Y_METRICS).model_dump()
+        # Y_METRICS always includes the pixel-domain hfr, so always evaluate.
+        return MatrixResponse(
+            cells=cells,
+            x_metrics=X_METRICS,
+            y_metrics=Y_METRICS,
+            mixed_plate_scales=await _has_mixed_plate_scales(session, telescope, camera, filter_used, date_from, date_to),
+        ).model_dump()
 
     data = await cached_json(cache_key, _MATRIX_CACHE_TTL, _compute)
     return MatrixResponse(**data)
@@ -867,7 +956,7 @@ async def get_compare(
         else:
             q = q.where(Image.filter_used == group)
 
-        rows = (await session.execute(q)).all()
+        rows = (await session.execute(q.order_by(*_ROW_ORDER))).all()
         vals = [float(r.val) for r in rows]
         arcsec_vals = [
             float(r.val) * float(r.scale)
@@ -888,12 +977,7 @@ async def get_compare(
     stats_b = _compute_summary_stats(vals_b)
 
     def _pct_verdict(med_a: float, med_b: float, unit: str = "") -> str:
-        if med_a != 0:
-            pct_diff = abs(med_a - med_b) / abs(med_a) * 100
-        elif med_b != 0:
-            pct_diff = abs(med_a - med_b) / abs(med_b) * 100
-        else:
-            pct_diff = 0
+        pct_diff = _pct_lower(med_a, med_b)
         if med_a < med_b:
             return f"{group_a} has {pct_diff:.0f}% lower median{unit} than {group_b} (N={stats_a.count} vs N={stats_b.count})"
         elif med_b < med_a:
@@ -916,7 +1000,7 @@ async def get_compare(
             verdict = (
                 f"{group_a} and {group_b} cannot be compared: {metric} is measured in pixels "
                 "and one or both groups lack the plate-scale headers (XPIXSZ/FOCALLEN) "
-                "needed to convert to arcseconds"
+                "needed to convert to arcseconds."
             )
     else:
         verdict = _pct_verdict(stats_a.median, stats_b.median)
