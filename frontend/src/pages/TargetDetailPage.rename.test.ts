@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from "vitest";
 
 // Tests for handleRename validation feedback (UX-6)
 // and clipboard failure path (UX-12)
@@ -27,9 +27,9 @@ function makeHandleRename(
 }
 
 describe("handleRename validation (UX-6)", () => {
-  let showToast: ReturnType<typeof vi.fn>;
-  let setEditing: ReturnType<typeof vi.fn>;
-  let saveIdentity: ReturnType<typeof vi.fn>;
+  let showToast: Mock<(...args: any[]) => any>;
+  let setEditing: Mock<(...args: any[]) => any>;
+  let saveIdentity: Mock<(...args: any[]) => any>;
   let handleRename: ReturnType<typeof makeHandleRename>;
 
   beforeEach(() => {
@@ -137,7 +137,7 @@ describe("object-type inline editor save", () => {
 
 // Simulate the clipboard failure handling from copyMultiSessionAstrobinCsv (UX-12)
 describe("clipboard failure toast (UX-12)", () => {
-  let showToast: ReturnType<typeof vi.fn>;
+  let showToast: Mock<(...args: any[]) => any>;
 
   beforeEach(() => {
     showToast = vi.fn();
