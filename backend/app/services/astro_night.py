@@ -14,6 +14,17 @@ import numpy as np
 from astropy.coordinates import EarthLocation, AltAz, get_sun
 from astropy.time import Time
 import astropy.units as u
+from astropy.utils import iers
+
+# The Celery worker runs in a container with no outbound DNS, so IERS_Auto can
+# never refresh the Earth-orientation table and falls back to the copy bundled
+# with astropy-iers-data. Once that copy's predictive data is more than 30 days
+# old, any date beyond it raises ValueError (ref #2573, broke backfill_dark_hours
+# on every run). Dark hours only need the sun's altitude to a fraction of a
+# degree, and the bundled predictions are good to milliseconds of UT1-UTC, so
+# skip the doomed download and accept the aged table.
+iers.conf.auto_download = False
+iers.conf.auto_max_age = None
 
 # Sample every 10 minutes across 24h = 144 points
 _SAMPLES_PER_DAY = 144
