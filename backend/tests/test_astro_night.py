@@ -62,3 +62,18 @@ class TestDarkHoursForWeek:
         hours = dark_hours_for_week(2025, 1, 33.0, -117.0)
         assert isinstance(hours, float)
         assert hours > 0.0
+
+
+def test_offline_far_future_does_not_raise():
+    """Offline worker with a stale bundled IERS table must still compute.
+
+    Production (ref #2573) raised astropy's IERS_Auto ValueError once the
+    bundled finals2000A predictive data passed 30 days old, because the app
+    container has no DNS. Forcing auto_download off reproduces that path
+    whenever the installed astropy-iers-data is itself more than 30 days old.
+    """
+    from datetime import timedelta
+    from astropy.utils import iers
+    with iers.conf.set_temp("auto_download", False):
+        hours = dark_hours_for_night(date.today() + timedelta(days=400), 38.9, -77.0)
+    assert 0.0 <= hours <= 24.0
