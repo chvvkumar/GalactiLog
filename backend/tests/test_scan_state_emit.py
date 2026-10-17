@@ -57,20 +57,21 @@ def test_check_complete_sync_stopped_ingest_reports_stop_not_failures():
     counted as cancelled, not failed. When the counters reach total the scan
     ends as stopped (scan_stopped, no scan_complete, no maintenance cascade)
     and the summary says how many files were skipped."""
-    import app.worker.tasks as tasks_mod
     from app.services.scan_state import check_complete_sync, SCAN_CANCEL_KEY
     r = _redis(total=10, completed=6, failed=0)
     r.hgetall.return_value["cancelled"] = "4"
-    tasks_mod.smart_rebuild_targets.apply_async.reset_mock()
     emit_calls = []
 
     def fake_emit(session, *, redis, category, severity, event_type, message, **kw):
         emit_calls.append((event_type, message))
 
     mock_session = MagicMock()
+    # Patched rather than relying on the module-level MagicMock stand-in for
+    # app.worker.tasks: in the full suite the real module is already imported.
     with patch("app.services.scan_state.emit_sync", fake_emit), \
          patch("app.services.scan_state.create_engine"), \
-         patch("app.services.scan_state._SyncSession") as ms:
+         patch("app.services.scan_state._SyncSession") as ms, \
+         patch("app.worker.tasks.smart_rebuild_targets") as rebuild:
         ms.return_value.__enter__ = lambda s, *a: mock_session
         ms.return_value.__exit__ = lambda s, *a: None
         check_complete_sync(r)
@@ -79,7 +80,7 @@ def test_check_complete_sync_stopped_ingest_reports_stop_not_failures():
     assert emit_calls[0][1] == "Scan stopped by user: 6 files processed, 4 skipped"
     assert r.hset.call_args_list[0].kwargs["mapping"]["state"] == "complete"
     assert any(SCAN_CANCEL_KEY in c.args for c in r.delete.call_args_list)
-    tasks_mod.smart_rebuild_targets.apply_async.assert_not_called()
+    rebuild.apply_async.assert_not_called()
 
 
 def test_check_complete_sync_no_emit_when_in_progress():
