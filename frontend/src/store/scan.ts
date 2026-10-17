@@ -84,7 +84,10 @@ export function phd2Phase(
 
 const [scanStatus, setScanStatus] = createSignal<ScanStatus>({ ...defaultStatus });
 const [scanError, setScanError] = createSignal<string | null>(null);
-const [stopping, setStopping] = createSignal(false);
+const [stopRequested, setStopping] = createSignal(false);
+// True from the click until the server reports the drain finished, whichever
+// tab pressed Stop: the server flag is what every poller sees.
+const stopping = () => stopRequested() || !!scanStatus().cancel_requested;
 
 // When this client first saw the guide-log flag set, so the stall guard has a
 // reference even against a backend that sends no timestamp. Cleared the

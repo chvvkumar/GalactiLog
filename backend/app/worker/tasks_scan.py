@@ -38,6 +38,7 @@ from app.services.scan_state import (
     increment_skipped_calibration_sync,
     start_scanning_sync, set_ingesting_sync, set_idle_sync,
     set_discovered_sync, is_cancel_requested_sync, clear_cancel_sync, set_cancelled_sync,
+    increment_cancelled_sync,
     check_complete_sync, dispatch_pending_rescan_sync, arm_pending_rescan_sync,
     add_skipped_path_sync, get_skipped_paths_sync, clear_skipped_paths_sync,
     rebuild_skipped_paths_sync,
@@ -748,7 +749,7 @@ def ingest_file(self, fits_path: str, include_calibration: bool = True) -> dict:
     path = Path(fits_path)
 
     if is_cancel_requested_sync(_redis):
-        increment_failed_sync(_redis, file_path=fits_path, error="Scan cancelled")
+        increment_cancelled_sync(_redis)
         return {"status": "cancelled", "file": fits_path}
 
     logger.info("Ingesting: %s", path.name)

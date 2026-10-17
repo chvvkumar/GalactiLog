@@ -438,6 +438,10 @@ export interface ScanStatus {
   total: number;
   completed: number;
   failed: number;
+  // Queued ingest tasks skipped because Stop was pressed. Not failures.
+  cancelled?: number;
+  // Stop pressed; state still reads "ingesting" while the queue drains.
+  cancel_requested?: boolean;
   csv_enriched: number;
   discovered: number;
   started_at: number | null;

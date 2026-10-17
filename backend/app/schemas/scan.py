@@ -60,6 +60,10 @@ class ScanStateResponse(BaseModel):
     total: int
     completed: int
     failed: int
+    # Queued ingest tasks skipped because Stop was pressed; not failures.
+    cancelled: int = 0
+    # Stop pressed and the queued ingest tasks are still draining.
+    cancel_requested: bool = False
     started_at: float | None = None
     completed_at: float | None = None
     csv_enriched: int = 0
