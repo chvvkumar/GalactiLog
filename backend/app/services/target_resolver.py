@@ -37,6 +37,33 @@ def normalize_sql_expr(column_expr: str) -> str:
     return NORMALIZE_SQL.format(col=column_expr)
 
 
+def _unique_alias_match(alias: str, session: Session) -> Target | None:
+    """The one live target carrying ``alias``, or None.
+
+    Aliases are not unique across targets: an identity match appends the
+    incoming name to the target it matched, so a name that once created an
+    unresolved standalone target can later also land on the real one. Two
+    hits is no match, not an error - scalar_one_or_none raised
+    MultipleResultsFound here and every frame naming the object failed to
+    ingest. The exact primary-name tier below decides instead, and duplicate
+    detection is what merges the pair.
+    """
+    rows = session.execute(
+        select(Target).where(
+            Target.merged_into_id.is_(None),
+            Target.aliases.any(alias),
+        )
+    ).scalars().all()
+    if len(rows) == 1:
+        return rows[0]
+    if len(rows) > 1:
+        logger.warning(
+            "Alias %r is carried by %d live targets (%s); ignoring it for lookup",
+            alias, len(rows), ", ".join(t.primary_name for t in rows[:5]),
+        )
+    return None
+
+
 def find_target_by_name(object_name: str, session: Session) -> Target | None:
     """Search for an existing target by normalized name in aliases, then primary_name.
 
@@ -46,24 +73,14 @@ def find_target_by_name(object_name: str, session: Session) -> Target | None:
     normalized = normalize_object_name(object_name)
 
     # Search aliases array (GIN-indexed, fast)
-    target = session.execute(
-        select(Target).where(
-            Target.merged_into_id.is_(None),
-            Target.aliases.any(normalized),
-        )
-    ).scalar_one_or_none()
+    target = _unique_alias_match(normalized, session)
     if target:
         return target
 
     # Try with panel suffix stripped
     stripped = _PANEL_RE.sub("", normalized).strip()
     if stripped != normalized:
-        target = session.execute(
-            select(Target).where(
-                Target.merged_into_id.is_(None),
-                Target.aliases.any(stripped),
-            )
-        ).scalar_one_or_none()
+        target = _unique_alias_match(stripped, session)
         if target:
             return target
 

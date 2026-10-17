@@ -11,7 +11,7 @@ class TestFindTargetByName:
         mock_session = MagicMock()
         mock_target = MagicMock()
         mock_target.id = "target-123"
-        mock_session.execute.return_value.scalar_one_or_none.return_value = mock_target
+        mock_session.execute.return_value.scalars.return_value.all.return_value = [mock_target]
 
         result = find_target_by_name("NGC 7000", mock_session)
         assert result is not None
@@ -21,10 +21,31 @@ class TestFindTargetByName:
         from app.services.target_resolver import find_target_by_name
 
         mock_session = MagicMock()
+        mock_session.execute.return_value.scalars.return_value.all.return_value = []
         mock_session.execute.return_value.scalar_one_or_none.return_value = None
 
         result = find_target_by_name("NONEXISTENT", mock_session)
         assert result is None
+
+    def test_an_alias_shared_by_two_targets_falls_through_to_primary_name(self):
+        """Production had "QUESTION MARK GALAXY" on both an unresolved
+        standalone target and on M 51. scalar_one_or_none raised
+        MultipleResultsFound, and every image naming it failed to ingest
+        after three retries. An ambiguous alias is no match at all; the exact
+        primary-name tier decides, and duplicate detection merges the pair."""
+        from app.services.target_resolver import find_target_by_name
+
+        mock_session = MagicMock()
+        by_name = MagicMock()
+        by_name.id = "standalone"
+        mock_session.execute.return_value.scalars.return_value.all.return_value = [
+            MagicMock(primary_name="Question Mark Galaxy"),
+            MagicMock(primary_name="M 51 - Whirlpool"),
+        ]
+        mock_session.execute.return_value.scalar_one_or_none.return_value = by_name
+
+        result = find_target_by_name("Question Mark Galaxy", mock_session)
+        assert result is by_name
 
 
 class TestResolveTarget:
@@ -170,8 +191,9 @@ class TestFindTargetByNameNormalization:
         mock_session = MagicMock()
         mock_target = MagicMock()
         mock_target.id = "target-456"
-        # First call (aliases) returns None, second call (primary_name) returns target
-        mock_session.execute.return_value.scalar_one_or_none.side_effect = [None, mock_target]
+        # The alias tiers miss; the primary_name tier returns the target.
+        mock_session.execute.return_value.scalars.return_value.all.return_value = []
+        mock_session.execute.return_value.scalar_one_or_none.return_value = mock_target
 
         result = find_target_by_name("ngc  7000", mock_session)
         assert result is not None
