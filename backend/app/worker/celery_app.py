@@ -73,6 +73,10 @@ celery_app.conf.update(
         "auto-scan-tick": {
             "task": "app.worker.tasks.auto_scan_tick",
             "schedule": 60.0,
+            # Same backlog problem as drain-app-logs below: a scan holds every
+            # worker slot, beat keeps publishing, and each unexpired tick is a
+            # queued task (and a monitor row) until the scan ends.
+            "options": {"expires": 55},
         },
         "prune-activity-events": {
             "task": "app.worker.prune_activity.prune_activity_events",

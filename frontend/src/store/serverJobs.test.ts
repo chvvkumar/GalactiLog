@@ -4,7 +4,7 @@ vi.mock("../api/generated/client", () => ({
   apiClient: { GET: vi.fn() },
 }));
 
-import { taskLabel, serverJobToActiveJob, type ServerJob } from "./serverJobs";
+import { taskLabel, serverJobToActiveJob, collapseQueued, type ServerJob } from "./serverJobs";
 import { waitingLabel } from "../components/JobMonitor";
 
 describe("taskLabel", () => {
@@ -71,5 +71,38 @@ describe("waitingLabel", () => {
   it("falls back to queue age once the eta has passed", () => {
     const withEta = { ...job, etaMs: 1_500_000 };
     expect(waitingLabel(withEta, 1_600_000)).toBe("queued 10m ago");
+  });
+});
+
+describe("collapseQueued", () => {
+  const enrich = (task_id: string, state = "queued"): ServerJob => ({
+    task_id,
+    name: "app.worker.tasks.enrich_new_target_task",
+    state,
+    queued_at: 1_000,
+  });
+
+  it("folds same-name queued rows into one counted row, keeps running rows separate", () => {
+    const rows = collapseQueued([
+      enrich("r1", "running"),
+      enrich("r2", "running"),
+      enrich("q1"),
+      enrich("q2"),
+      enrich("q3"),
+      { task_id: "other", name: "recompute_session_dates", state: "queued", queued_at: 1_000 },
+    ]);
+    expect(rows.map((j) => j.label)).toEqual([
+      "Enriching new target",
+      "Enriching new target",
+      "Enriching new target × 3",
+      "Recomputing session dates",
+    ]);
+    expect(rows[2].id).toBe("celery:q1");
+    expect(rows[2].state).toBe("waiting");
+  });
+
+  it("leaves a lone queued row unchanged", () => {
+    const [row] = collapseQueued([enrich("q1")]);
+    expect(row.label).toBe("Enriching new target");
   });
 });

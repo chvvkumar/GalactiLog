@@ -34,7 +34,6 @@ const TASK_LABELS: Record<string, string> = {
   "app.worker.tasks.load_reference_catalogs_if_empty": "Loading reference catalogs",
   "app.worker.tasks.enrich_new_target_task": "Enriching new target",
   "app.worker.tasks.backfill_catalog_identity": "Repairing catalog links",
-  "app.worker.tasks.auto_scan_tick": "Auto-scan check",
   "app.worker.drain_logs.drain_app_logs": "Collecting app logs",
   "app.worker.prune_activity.prune_activity_events": "Pruning activity feed",
   "app.worker.prune_activity.prune_refresh_tokens": "Pruning login sessions",
@@ -67,7 +66,36 @@ export function serverJobToActiveJob(j: ServerJob): ActiveJob {
   };
 }
 
-export const serverJobs = (): ActiveJob[] => serverJobsRaw().map(serverJobToActiveJob);
+// Fan-out tasks (one enrich_new_target_task per target created by a scan)
+// queue dozens of identical rows behind the scan. Fold the queued rows of
+// each task name into one counted row; running rows stay separate, there
+// are at most worker-concurrency of them. Input is already sorted running
+// first, longest-queued first, so the folded row keeps the oldest id and
+// queued_at.
+export function collapseQueued(rows: ServerJob[]): ActiveJob[] {
+  const out: ActiveJob[] = [];
+  const queued = new Map<string, { job: ActiveJob; count: number }>();
+  for (const row of rows) {
+    const job = serverJobToActiveJob(row);
+    if (row.state === "running") {
+      out.push(job);
+      continue;
+    }
+    const seen = queued.get(row.name);
+    if (seen) {
+      seen.count += 1;
+    } else {
+      queued.set(row.name, { job, count: 1 });
+      out.push(job);
+    }
+  }
+  queued.forEach(({ job, count }) => {
+    if (count > 1) job.label = `${job.label} × ${count}`;
+  });
+  return out;
+}
+
+export const serverJobs = (): ActiveJob[] => collapseQueued(serverJobsRaw());
 
 export async function refreshServerJobs(): Promise<void> {
   try {
