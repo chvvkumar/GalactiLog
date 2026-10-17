@@ -190,6 +190,67 @@ def test_per_file_progress_is_reported_from_inside_the_ingest_loop():
     assert loop_at < increment_at < final_at
 
 
+def test_the_pass_has_a_long_time_limit_like_the_other_whole_library_tasks():
+    """A 212-log initial scan was hard-killed at the global 660s ceiling with
+    125 logs checked (about 5s per log on that host)."""
+    from app.worker.celery_app import celery_app
+
+    limits = celery_app.conf.task_annotations["app.worker.tasks.scan_phd2_logs"]
+    assert limits["soft_time_limit"] >= 3600
+    assert limits["time_limit"] > limits["soft_time_limit"]
+
+
+def test_the_soft_time_limit_ends_the_pass_cleanly_with_its_counts(monkeypatch):
+    """SoftTimeLimitExceeded is an Exception, so the per-file guard used to
+    log it as a crashed file and carry on to the next one until the hard
+    kill, which skips every end-of-pass write. The pass must stop at the
+    file it was on and finish normally with what it has."""
+    from unittest.mock import MagicMock
+    from celery.exceptions import SoftTimeLimitExceeded
+    from app.worker import tasks_phd2
+
+    calls = []
+
+    def fake_ingest(db, path, general, **kw):
+        calls.append(path)
+        if len(calls) == 2:
+            raise SoftTimeLimitExceeded()
+        return "ok"
+
+    counts = []
+    events = []
+    monkeypatch.setattr(tasks_phd2, "ingest_phd2_log", fake_ingest)
+    monkeypatch.setattr(tasks_phd2, "Session", lambda engine: MagicMock())
+    monkeypatch.setattr(tasks_phd2, "apply_profile_map", lambda db, m: 0)
+    monkeypatch.setattr(tasks_phd2, "_cleanup_orphans", lambda *a, **kw: 0)
+    monkeypatch.setattr(tasks_phd2, "set_phd2_found_sync", lambda r, found: None)
+    monkeypatch.setattr(tasks_phd2, "increment_phd2_progress_sync", lambda r, **kw: None)
+    monkeypatch.setattr(
+        tasks_phd2, "set_phd2_counts_sync",
+        lambda r, found, ingested, failed: counts.append((found, ingested, failed)),
+    )
+    monkeypatch.setattr(tasks_phd2, "_invalidate_stats_cache", lambda: None)
+    monkeypatch.setattr(tasks_phd2, "_activity_session", lambda: MagicMock())
+    monkeypatch.setattr(
+        tasks_phd2, "_emit_activity_sync",
+        lambda db, **kw: events.append(kw) or 1,
+    )
+    monkeypatch.setattr(
+        tasks_phd2, "_read_settings",
+        lambda: tasks_phd2.GeneralSettings(phd2_scan_enabled=True),
+    )
+
+    result = tasks_phd2._run_phd2_pass(paths=["a.txt", "b.txt", "c.txt"])
+
+    assert calls == ["a.txt", "b.txt"]
+    assert result["status"] == "timed_out"
+    assert result["ingested"] == 1
+    assert counts == [(3, 1, 0)]
+    summary = next(e for e in events if e["event_type"] == "phd2_scan_complete")
+    assert "time limit" in summary["message"]
+    assert "1 of 3" in summary["message"]
+
+
 def test_a_settings_pass_publishes_no_scan_progress(monkeypatch):
     """A settings-triggered pass is not a scan. Writing scan progress from one
     made the panel report a scan that never ran, which is the same reason the

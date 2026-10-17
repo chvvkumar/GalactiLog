@@ -53,6 +53,14 @@ celery_app.conf.update(
             "soft_time_limit": 3600,
             "time_limit": 3720,
         },
+        # One parse plus per-file commit per guide log, around 5s each on the
+        # production host: a 212-log initial scan was hard-killed at 660s with
+        # 125 checked. The pass catches the soft limit and finishes with what
+        # it has; the next scan short-circuits the stored logs and continues.
+        "app.worker.tasks.scan_phd2_logs": {
+            "soft_time_limit": 3600,
+            "time_limit": 3720,
+        },
         # High-frequency beat tasks whose results are never read. Storing a
         # result backend entry for each just accumulates celery-task-meta-*
         # keys in Redis (drain_app_logs alone runs every 5s). Skip the result
