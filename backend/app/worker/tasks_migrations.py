@@ -12,6 +12,7 @@ from app.worker.tasks_common import _sync_engine, _redis, _activity_session
 from app.worker.tasks_target_rebuild import smart_rebuild_targets
 from app.worker.tasks_mosaics import detect_mosaic_panels_task
 from app.services.activity import emit_sync as _emit_activity_sync
+from app.services.upstream import error_details, human_error
 
 logger = logging.getLogger(__name__)
 
@@ -210,8 +211,11 @@ def run_data_migrations(self, from_version: int) -> dict:
                         _emit_activity_sync(
                             _db, redis=_redis, category="migration", severity="error",
                             event_type="data_upgrade_failed",
-                            message=f"{error_msg}. Press Quick Fix to retry.",
-                            details={"version": ver, "error": str(e)},
+                            message=(
+                                f"Data upgrade failed at v{ver} ({desc}): "
+                                f"{human_error(e)}. Press Quick Fix to retry."
+                            ),
+                            details={"version": ver, "error": str(e), **error_details(e)},
                             actor="system",
                         )
                     return {"status": "error", "version": ver, "error": str(e)}
@@ -293,8 +297,8 @@ def load_reference_catalogs_if_empty(self) -> dict:
                     _emit_activity_sync(
                         _db, redis=_redis, category="migration", severity="error",
                         event_type="reference_catalog_load_failed",
-                        message=error_msg,
-                        details={"error": str(e)}, actor="system",
+                        message=f"Reference catalog load failed: {human_error(e)}",
+                        details={"error": str(e), **error_details(e)}, actor="system",
                     )
                 return {"status": "error", "error": str(e)}
 

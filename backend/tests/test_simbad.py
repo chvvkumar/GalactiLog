@@ -13,7 +13,15 @@ from app.services.simbad import (
     _fetch_tap_aliases,
     _get_simbad_id,
     _escape_adql_string,
+    _query_simbad_raw,
+    SIMBAD_TAP_URLS,
+    SIMBAD_SCRIPT_URLS,
 )
+
+
+def _status_error(code: int) -> httpx.HTTPStatusError:
+    req = httpx.Request("GET", "https://simbad.cds.unistra.fr/x")
+    return httpx.HTTPStatusError("err", request=req, response=httpx.Response(code, request=req))
 
 
 def test_normalize_object_name():
@@ -416,6 +424,69 @@ class TestFetchTapAliases:
             with pytest.raises(httpx.HTTPError):
                 _fetch_tap_aliases("M 31")
 
+    def test_tap_falls_back_to_harvard_on_cds_404(self):
+        bad = MagicMock()
+        bad.raise_for_status = MagicMock(side_effect=_status_error(404))
+        good = MagicMock()
+        good.text = "id\nM 31\n"
+        good.raise_for_status = MagicMock()
+
+        mock_client = MagicMock()
+        mock_client.get = MagicMock(side_effect=[bad, good])
+        mock_client.__enter__ = MagicMock(return_value=mock_client)
+        mock_client.__exit__ = MagicMock(return_value=False)
+
+        with patch("app.services.simbad.httpx.Client", return_value=mock_client):
+            result = _fetch_tap_aliases("M 31")
+
+        assert result == ["M 31"]
+        urls = [c.args[0] for c in mock_client.get.call_args_list]
+        assert urls == SIMBAD_TAP_URLS
+        assert "simbad.harvard.edu" in urls[1]
+
+
+class TestQuerySimbadRawFallback:
+    @staticmethod
+    def _client(post, get=None):
+        mock_client = MagicMock()
+        mock_client.post = post
+        mock_client.get = get or MagicMock()
+        mock_client.__enter__ = MagicMock(return_value=mock_client)
+        mock_client.__exit__ = MagicMock(return_value=False)
+        return mock_client
+
+    def test_cds_404_then_harvard_success_no_retry(self):
+        bad = MagicMock()
+        bad.raise_for_status = MagicMock(side_effect=_status_error(404))
+        script_resp = MagicMock()
+        script_resp.text = "::data::\nNGC  7000|HII|314.75|44.37\n"
+        script_resp.raise_for_status = MagicMock()
+        tap_resp = MagicMock()
+        tap_resp.text = 'id\n"NGC 7000"\n'
+        tap_resp.raise_for_status = MagicMock()
+
+        client = self._client(MagicMock(side_effect=[bad, script_resp]),
+                              MagicMock(return_value=tap_resp))
+        with patch("app.services.simbad.httpx.Client", return_value=client):
+            result = _query_simbad_raw("NGC 7000")
+
+        assert result["main_id"] == "NGC  7000"
+        assert result["raw_aliases"] == ["NGC 7000"]
+        urls = [c.args[0] for c in client.post.call_args_list]
+        assert urls == SIMBAD_SCRIPT_URLS
+
+    def test_both_mirrors_failing_raises_with_both_hosts(self):
+        bad = MagicMock()
+        bad.raise_for_status = MagicMock(side_effect=_status_error(404))
+        client = self._client(MagicMock(return_value=bad))
+        with patch("app.services.simbad.httpx.Client", return_value=client):
+            with pytest.raises(httpx.HTTPError) as exc:
+                _query_simbad_raw("NGC 7000")
+
+        assert "simbad.cds.unistra.fr" in str(exc.value)
+        assert "simbad.harvard.edu" in str(exc.value)
+        assert client.post.call_count == 2
+
 
 class TestResolveTargetNameCached:
     def test_negative_cache_no_mapped_name_returns_none(self):
@@ -528,7 +599,7 @@ class TestResolveTargetNameCachedRetry:
             assert mock_query.call_count == 2
             assert get_cached_simbad("NGC 7000", session)["main_id"] == "NGC 7000"
 
-    def test_transient_failure_exhausting_retries_negative_caches(self):
+    def test_transient_failure_exhausting_retries_is_not_negative_cached(self):
         from app.database import sync_engine
         from sqlalchemy.orm import Session
         from app.services.simbad import resolve_target_name_cached, get_cached_simbad
@@ -545,7 +616,7 @@ class TestResolveTargetNameCachedRetry:
             session.commit()
 
             assert result is None
-            assert get_cached_simbad("TRANSIENTFAIL", session) == {"_negative": True}
+            assert get_cached_simbad("TRANSIENTFAIL", session) is None
 
     def test_retry_fires_end_to_end_through_real_query_simbad_raw(self):
         """Prove the retry actually reaches the HTTP layer: mock httpx.Client
@@ -566,9 +637,11 @@ class TestResolveTargetNameCachedRetry:
         tap_resp.raise_for_status = MagicMock()
 
         mock_client = MagicMock()
-        # Attempt 1: sim-script POST raises a transient network error.
-        # Attempt 2: sim-script POST succeeds.
-        mock_client.post = MagicMock(side_effect=[httpx.ConnectError("boom"), script_resp])
+        # Attempt 1: both mirrors fail with a transient network error.
+        # Attempt 2: the first mirror succeeds.
+        mock_client.post = MagicMock(side_effect=[
+            httpx.ConnectError("boom"), httpx.ConnectError("boom"), script_resp,
+        ])
         # TAP alias GET (only reached on the successful attempt).
         mock_client.get = MagicMock(return_value=tap_resp)
         mock_client.__enter__ = MagicMock(return_value=mock_client)
@@ -584,7 +657,7 @@ class TestResolveTargetNameCachedRetry:
             assert result is not None
             assert result["catalog_id"] == "NGC 7000"
             assert result["common_name"] == "North America Nebula"
-            assert mock_client.post.call_count == 2
+            assert mock_client.post.call_count == 3
             assert get_cached_simbad("NGC 7000", session)["main_id"] == "NGC  7000"
 
 

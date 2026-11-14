@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import uuid
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -24,6 +25,9 @@ from app.services.target_merge import (
 )
 from app.services.cache import invalidate_stats_and_analysis_cache
 from app.services.mosaic_detection import recompute_panel_membership_for_images
+from app.services.upstream import human_error
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/targets", tags=["merges"])
 
@@ -107,8 +111,8 @@ async def orphan_preview(
 ):
     """Preview metadata for creating a target from an unresolved OBJECT name."""
     import asyncio
-    from app.services.simbad import normalize_object_name, resolve_target_name_cached
-    from app.services.sesame import resolve_sesame_cached
+    from app.services.simbad import normalize_object_name
+    from app.services.target_resolver import lookup_catalogs
     from sqlalchemy.orm import Session as SyncSession
     from app.database import sync_engine
 
@@ -124,9 +128,12 @@ async def orphan_preview(
             # Clear negative caches so the name gets a fresh attempt
             cc.clear_negative(sync_db, "simbad", normalized)
             cc.clear_negative(sync_db, "sesame", normalized)
-            result = resolve_target_name_cached(source, sync_db)
+            # SIMBAD, then Sesame; a failing SIMBAD does not stop Sesame.
+            result, _ = lookup_catalogs(source, sync_db)
             if result is None:
-                result = resolve_sesame_cached(source, sync_db)
+                # "No answer" is not "no match": during an outage report the
+                # outage (502 via the global handler) instead of resolved=false.
+                cc.raise_if_outage("simbad", "sesame", key=source)
             return result
 
     simbad_result = await asyncio.to_thread(_resolve_sync)
@@ -261,8 +268,11 @@ def _enrich_new_target(target_id) -> None:
                     sync_db.commit()
                 enrich_target_from_sac(sync_db, db_target)
                 sync_db.commit()
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning(
+            "Catalog enrichment for new target %s was skipped: %s",
+            target_id, human_error(exc), exc_info=True,
+        )
 
 
 @router.post("/orphan-create", response_model=OrphanCreateResponse)
@@ -651,11 +661,6 @@ async def update_target_identity(
 
         all_names = [lookup_name] + list(target.aliases or [])
 
-        async with async_redis() as redis:
-            for name in all_names:
-                n = normalize_object_name(name)
-                await redis.srem("target_resolver:negative", n)
-
         def _resolve_sync():
             from app.services import catalog_cache as cc
             with SyncSession(sync_engine) as sync_db:
@@ -663,9 +668,22 @@ async def update_target_identity(
                     n = normalize_object_name(name)
                     cc.clear_negative(sync_db, "simbad", n)
                     cc.clear_negative(sync_db, "sesame", n)
-                return resolve_target_name_cached(lookup_name, sync_db)
+                result = resolve_target_name_cached(lookup_name, sync_db)
+                if result is None:
+                    # "No answer" is not "no match". Raising here, before any
+                    # commit, rolls back the cache clears above and leaves the
+                    # target (name lock included) exactly as it was.
+                    cc.raise_if_outage("simbad", key=lookup_name)
+                return result
 
         result = await asyncio.to_thread(_resolve_sync)
+
+        # Only after the lookup was actually answered, so an outage changes
+        # nothing.
+        async with async_redis() as redis:
+            for name in all_names:
+                n = normalize_object_name(name)
+                await redis.srem("target_resolver:negative", n)
 
         if result:
             target.primary_name = result.get("primary_name") or target.primary_name

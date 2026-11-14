@@ -13,9 +13,19 @@ from typing import Any
 
 import httpx
 
+from app.services.upstream import request_with_fallback
+
 logger = logging.getLogger(__name__)
 
-SESAME_URL = "https://cds.unistra.fr/cgi-bin/nph-sesame"
+# Tried in order. The IDIA entry is the mirror CDS itself redirects to when
+# its own endpoint is down; it answers the same /-ox/NV query with the same
+# XML schema. The CfA mirror (vizier.cfa.harvard.edu) is deliberately absent:
+# it returns HTTP 200 "Nothing found" for objects only NED resolves (M 31,
+# M 42), which would be cached as a false negative.
+SESAME_URLS = [
+    "https://cds.unistra.fr/cgi-bin/nph-sesame",
+    "https://vizier.idia.ac.za/viz-bin/nph-sesame",
+]
 
 
 def _query_sesame_raw(
@@ -31,11 +41,10 @@ def _query_sesame_raw(
     or None if no match.
     """
     encoded_name = object_name.replace(" ", "+")
-    url = f"{SESAME_URL}/-ox/{resolvers}?{encoded_name}"
+    urls = [f"{base}/-ox/{resolvers}?{encoded_name}" for base in SESAME_URLS]
     try:
         with httpx.Client(timeout=15.0) as client:
-            resp = client.get(url)
-            resp.raise_for_status()
+            resp = request_with_fallback(client, "GET", urls, service="sesame")
 
         root = ET.fromstring(resp.text)
 
@@ -98,8 +107,8 @@ def resolve_sesame_cached(
 
     Routed through catalog_cache's get_or_fetch so a transient SESAME
     failure (timeout, connection error, 5xx, 429) is retried with backoff
-    and, if every attempt fails, negative-cached and swallowed (returns
-    None) rather than propagating -- matching pre-port behavior for
+    and, if every attempt fails, swallowed (returns None) rather than
+    propagating -- matching pre-port behavior for
     callers (api/merges.py's orphan_preview, the duplicate-detection
     worker task, filename_resolver.py, target_resolver.py) that never
     handled an exception from this function. A non-transient failure

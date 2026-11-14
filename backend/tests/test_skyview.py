@@ -111,6 +111,19 @@ class TestFetchReferenceThumbnail:
 
         assert result is None
 
+    def test_failure_log_is_readable_and_keeps_raw_error(self, tmp_path, caplog):
+        import httpx
+        target = self._make_target()
+        client = self._make_client(raise_exc=httpx.ConnectTimeout("raw detail"))
+        with patch("app.services.skyview.httpx.Client", return_value=client), \
+             caplog.at_level("WARNING", logger="app.services.skyview"):
+            result = fetch_reference_thumbnail(target, tmp_path)
+
+        assert result is None
+        record = caplog.records[-1]
+        assert "SkyView is unavailable: skyview.gsfc.nasa.gov timed out" in record.getMessage()
+        assert record.exc_info is not None
+
     def test_creates_output_dir(self, tmp_path):
         target = self._make_target()
         nested_dir = tmp_path / "a" / "b"

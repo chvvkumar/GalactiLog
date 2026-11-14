@@ -20,6 +20,7 @@ from app.services.orphan_cleanup import (
     thumbnail_referenced as _thumbnail_referenced_impl,
 )
 from app.services.thumbnail import generate_thumbnail
+from app.services.upstream import error_details, human_error
 from app.services.xisf_parser import extract_xisf_metadata, generate_xisf_thumbnail
 from app.services.session_date import (
     compute_session_date,
@@ -38,6 +39,7 @@ from app.services.scan_state import (
     increment_skipped_calibration_sync,
     start_scanning_sync, set_ingesting_sync, set_idle_sync,
     set_discovered_sync, is_cancel_requested_sync, clear_cancel_sync, set_cancelled_sync,
+    increment_cancelled_sync,
     check_complete_sync, dispatch_pending_rescan_sync, arm_pending_rescan_sync,
     add_skipped_path_sync, get_skipped_paths_sync, clear_skipped_paths_sync,
     rebuild_skipped_paths_sync,
@@ -693,15 +695,18 @@ def _do_ingest(fits_path: str, include_calibration: bool = True) -> dict:
                         image_ids=[image_id],
                     ))
                 session.commit()
-        except Exception:
+        except Exception as exc:
             logger.warning("Failed to create filename candidate for %s", path.name, exc_info=True)
             try:
                 with _activity_session() as _db:
                     _emit_activity_sync(
                         _db, redis=_redis, category="scan", severity="warning",
                         event_type="filename_candidate_failed",
-                        message=f"Filename candidate resolution failed for {path.name}",
-                        details={"path": str(path)}, actor="system",
+                        message=(
+                            f"Filename candidate resolution failed for {path.name}: "
+                            f"{human_error(exc)}"
+                        ),
+                        details={"path": str(path), **error_details(exc)}, actor="system",
                     )
             except Exception:
                 logger.debug(
@@ -748,7 +753,7 @@ def ingest_file(self, fits_path: str, include_calibration: bool = True) -> dict:
     path = Path(fits_path)
 
     if is_cancel_requested_sync(_redis):
-        increment_failed_sync(_redis, file_path=fits_path, error="Scan cancelled")
+        increment_cancelled_sync(_redis)
         return {"status": "cancelled", "file": fits_path}
 
     logger.info("Ingesting: %s", path.name)

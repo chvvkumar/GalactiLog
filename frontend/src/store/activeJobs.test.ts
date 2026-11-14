@@ -67,6 +67,27 @@ describe("activeJobs percent-to-fraction conversion", () => {
     expect(scanJob?.progress).toBeUndefined();
   });
 
+  it("shows a stopping row, counting cancelled files, once a stop is requested", () => {
+    wire(
+      {
+        ...baseScanStatus,
+        state: "ingesting",
+        total: 100,
+        completed: 40,
+        failed: 0,
+        cancelled: 10,
+        cancel_requested: true,
+      },
+      baseRebuildStatus
+    );
+
+    const scanJob = activeJobs().find((j) => j.category === "scan");
+    expect(scanJob?.label).toBe("Stopping scan");
+    expect(scanJob?.subLabel).toBe("50 files left to skip");
+    expect(scanJob?.progress).toBeCloseTo(0.5, 5);
+    expect(scanJob?.cancelable).toBe(false);
+  });
+
   it("converts rebuild envelope percent (0-100) to a 0-1 progress fraction", () => {
     wire(baseScanStatus, {
       ...baseRebuildStatus,

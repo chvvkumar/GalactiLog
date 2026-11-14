@@ -73,6 +73,14 @@ class ScanStateSnapshot:
     failed: int
     started_at: float | None
     completed_at: float | None
+    # Queued ingest_file tasks that returned at once because Stop was
+    # pressed. Counted apart from ``failed`` so the summary of a stopped scan
+    # does not report tens of thousands of failures.
+    cancelled: int = 0
+    # True while the Stop flag is set: the queued ingest tasks are still
+    # draining and ``state`` still reads "ingesting". Filled in by
+    # get_scan_state like pending_rescan; not a hash field.
+    cancel_requested: bool = False
     csv_enriched: int = 0
     discovered: int = 0
     removed: int = 0
@@ -129,6 +137,8 @@ class ScanStateSnapshot:
             "total": self.total,
             "completed": self.completed,
             "failed": self.failed,
+            "cancelled": self.cancelled,
+            "cancel_requested": self.cancel_requested,
             "started_at": self.started_at,
             "completed_at": self.completed_at,
             "csv_enriched": self.csv_enriched,
@@ -173,6 +183,7 @@ def parse_snapshot(data: dict | None) -> ScanStateSnapshot:
         total=int(data.get("total", 0)),
         completed=int(data.get("completed", 0)),
         failed=int(data.get("failed", 0)),
+        cancelled=int(data.get("cancelled", 0) or 0),
         started_at=float(data["started_at"]) if data.get("started_at") else None,
         completed_at=float(data["completed_at"]) if data.get("completed_at") else None,
         csv_enriched=int(data.get("csv_enriched", 0)),
@@ -231,6 +242,7 @@ async def get_scan_state(r: aioredis.Redis) -> ScanStateSnapshot:
         # race in and dispatch a duplicate scan (AUD-016).
         snap.state = "scanning"
     snap.pending_rescan = await r.exists(SCAN_PENDING_KEY) == 1
+    snap.cancel_requested = await r.exists(SCAN_CANCEL_KEY) == 1
     return snap
 
 
@@ -352,7 +364,10 @@ async def set_complete_if_done(r: aioredis.Redis) -> None:
 
 async def request_cancel(r: aioredis.Redis) -> None:
     """Set the cancel flag so the worker stops processing."""
-    await r.set(SCAN_CANCEL_KEY, "1", ex=600)  # auto-expire after 10 min
+    # Backstop only: the next run_scan clears the flag itself. It has to
+    # outlive the drain of every ingest_file already queued (~250/s observed
+    # on a 96k-file scan), or ingestion silently resumes mid-drain.
+    await r.set(SCAN_CANCEL_KEY, "1", ex=3600)
 
 
 async def reset_scan(r: aioredis.Redis) -> None:
@@ -426,6 +441,13 @@ def increment_failed_sync(r: sync_redis.Redis, file_path: str = "", error: str =
     check_complete_sync(r)
 
 
+def increment_cancelled_sync(r: sync_redis.Redis) -> None:
+    """A queued ingest_file skipped because Stop was pressed."""
+    r.hincrby(SCAN_KEY, "cancelled", 1)
+    r.set(SCAN_PROGRESS_KEY, str(time.time()))
+    check_complete_sync(r)
+
+
 def arm_pending_rescan_sync(r: sync_redis.Redis, include_calibration: bool) -> None:
     """Queue a follow-up scan from the worker side (see SCAN_PENDING_KEY).
 
@@ -496,7 +518,7 @@ def check_complete_sync(r: sync_redis.Redis) -> None:
     if snap.state != "ingesting" or snap.total <= 0:
         return
     kind = data.get("kind", "scan")
-    step = snap.completed + snap.failed
+    step = snap.completed + snap.failed + snap.cancelled
     if step < snap.total:
         # Not done yet - just move the envelope's step forward so the
         # frontend progress bar tracks completed+failed incrementally
@@ -505,6 +527,9 @@ def check_complete_sync(r: sync_redis.Redis) -> None:
             r, SCAN_KEY, task=kind, step=step, total_steps=snap.total,
             message=_ingest_progress_message(kind, step, snap.total),
         )
+        return
+    if snap.cancelled:
+        _finish_stopped_sync(r, snap)
         return
     r.hset(SCAN_KEY, mapping={
         "state": "complete",
@@ -661,6 +686,46 @@ def check_complete_sync(r: sync_redis.Redis) -> None:
     # turn: everything copied in after this run's single-pass walk started is
     # only visible to a fresh walk.
     dispatch_pending_rescan_sync(r)
+
+
+def _finish_stopped_sync(r: sync_redis.Redis, snap: ScanStateSnapshot) -> None:
+    """End an ingest that drained after Stop: the ingest-phase twin of the
+    discovery-phase cancel in run_scan. Same activity, same no-cascade rule:
+    the user asked for the work to stop, so the post-scan maintenance chain
+    waits for the next scan."""
+    from app.services.progress_envelope import set_progress
+    parts = [f"{snap.completed} file{'s' if snap.completed != 1 else ''} processed"]
+    if snap.failed:
+        parts.append(f"{snap.failed} failed")
+    parts.append(f"{snap.cancelled} skipped")
+    msg = "Scan stopped by user: " + ", ".join(parts)
+    set_cancelled_sync(r)
+    set_progress(
+        r, SCAN_KEY, task="scan", step=snap.total, total_steps=snap.total,
+        message=msg,
+    )
+    try:
+        from app.config import settings as _cfg
+        _engine = create_engine(
+            _cfg.database_url.replace("+asyncpg", "+psycopg2"),
+            pool_pre_ping=True,
+        )
+        with _SyncSession(_engine) as _db:
+            emit_sync(
+                _db, redis=r, category="scan", severity="info",
+                event_type="scan_stopped", message=msg,
+                details={
+                    "completed": snap.completed, "failed": snap.failed,
+                    "cancelled": snap.cancelled, "total": snap.total,
+                },
+                actor="system",
+            )
+    except Exception:
+        logger.exception("scan_state: failed to emit scan_stopped activity")
+    try:
+        r.delete("galactilog:stats:cache", "galactilog:fits_keys")
+    except Exception:
+        logger.debug("scan_state: Redis stats cache invalidation failed", exc_info=True)
 
 
 def start_scanning_sync(r: sync_redis.Redis) -> None:

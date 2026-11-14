@@ -342,7 +342,7 @@ class TestEnrichTargetFromVizierRetrySemantics:
     def test_transient_error_exhausts_retries_and_returns_false(self):
         """A persistent transient failure (e.g. a timeout or 5xx) must not
         crash target enrichment. get_or_fetch retries per its backoff policy
-        and, once attempts are exhausted, negative-caches the result -- so
+        and, once attempts are exhausted, returns None -- so
         enrich_target_from_vizier degrades to False instead of raising,
         exactly as hyperleda/gaia do for the same failure class.
         """
@@ -361,7 +361,7 @@ class TestEnrichTargetFromVizierRetrySemantics:
         assert result is False
         # Retried up to the wrapper's max attempts, not just once.
         assert mock_query.call_count == cc.DEFAULT_MAX_ATTEMPTS
-        # Negative result still cached and committed (own mini-transaction).
+        # enrich still closes its own mini-transaction.
         session.commit.assert_called_once()
 
     def test_non_transient_error_propagates_uncaught(self):

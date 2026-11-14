@@ -11,13 +11,8 @@ from typing import Any
 from sqlalchemy import text as sa_text
 from sqlalchemy.orm import Session
 
-from app.services.target_resolver import find_target_by_name
-from app.services.simbad import (
-    COMMON_NAME_MAP,
-    normalize_object_name,
-    resolve_target_name_cached,
-)
-from app.services.sesame import resolve_sesame_cached
+from app.services.target_resolver import find_target_by_name, lookup_catalogs
+from app.services.simbad import COMMON_NAME_MAP, normalize_object_name
 
 logger = logging.getLogger(__name__)
 
@@ -72,10 +67,8 @@ def resolve_filename_candidate(
                 return _result(target, method="space_insert", confidence=0.9)
 
     # 4. SIMBAD / SESAME
-    simbad_result = resolve_target_name_cached(extracted_name, session)
-    if not simbad_result:
-        simbad_result = resolve_sesame_cached(extracted_name, session)
-    session.commit()
+    # A catalog outage is logged there and falls through to trigram below.
+    simbad_result, _ = lookup_catalogs(extracted_name, session)
 
     if simbad_result:
         catalog_id = simbad_result.get("catalog_id")

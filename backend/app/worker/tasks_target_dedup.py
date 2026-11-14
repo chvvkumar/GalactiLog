@@ -3,17 +3,21 @@ backfill_catalog_identity."""
 import logging
 import time
 
+import httpx
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from app.services import catalog_cache as cc
+from app.services.activity import emit_sync as _emit_activity_sync
 from app.services.target_resolver import resolve_target, match_target_by_identity
 from app.services.simbad import (
     normalize_object_name, resolve_target_name_cached,
 )
+from app.services.upstream import error_details, human_error
 from app.services.simbad_repair import repair_corrupted_simbad_cache
 from app.services.mosaic_detection import recompute_panel_membership_for_images_sync
 from app.worker.celery_app import celery_app
-from app.worker.tasks_common import _sync_engine, _redis
+from app.worker.tasks_common import _sync_engine, _redis, _activity_session
 from app.services.scan_state import (
     clear_cancel_sync, is_cancel_requested_sync,
     set_rebuild_running_sync, set_rebuild_progress_sync, set_rebuild_complete_sync,
@@ -65,6 +69,12 @@ def detect_duplicate_targets(parent_activity_id: int | None = None):
 
         candidates_found = 0
         orphan_count = 0
+        # Names skipped because SIMBAD could not be reached. They get no
+        # candidate (and so no permanent "no match" row) and are retried on
+        # the next run.
+        skipped_names: list[str] = []
+        skip_exc: Exception | None = None
+        skip_reason: str | None = None
 
         for obj_name, img_count in unresolved:
             if not obj_name or obj_name in existing_names:
@@ -73,7 +83,19 @@ def detect_duplicate_targets(parent_activity_id: int | None = None):
             matched = False
 
             # Strategy 1: SIMBAD resolution - resolve the name and match against existing targets
-            simbad_result = resolve_target_name_cached(obj_name, db)
+            try:
+                simbad_result = resolve_target_name_cached(obj_name, db)
+            except (cc.NonTransientError, httpx.HTTPError) as exc:
+                skipped_names.append(obj_name)
+                skip_exc = skip_exc or exc
+                skip_reason = skip_reason or human_error(exc)
+                continue
+            if simbad_result is None:
+                outage = cc.outage("simbad")
+                if outage:
+                    skipped_names.append(obj_name)
+                    skip_reason = skip_reason or outage
+                    continue
             if simbad_result:
                 catalog_id = simbad_result.get("catalog_id")
                 simbad_aliases = [normalize_object_name(a) for a in simbad_result.get("aliases", [])]
@@ -178,6 +200,26 @@ def detect_duplicate_targets(parent_activity_id: int | None = None):
                 orphan_count += 1
 
         db.commit()
+
+        if skipped_names:
+            logger.warning("detect_duplicates: skipped %d names, SIMBAD unavailable: %s",
+                           len(skipped_names), skip_reason)
+            with _activity_session() as _adb:
+                _emit_activity_sync(
+                    _adb, redis=_redis, category="enrichment", severity="warning",
+                    event_type="duplicate_detection_skipped",
+                    message=(
+                        f"Duplicate detection skipped {len(skipped_names)} object names "
+                        f"because SIMBAD is unavailable: {skip_reason}. "
+                        f"They will be checked on the next run."
+                    ),
+                    details={
+                        "skipped": len(skipped_names),
+                        "example_names": skipped_names[:10],
+                        **(error_details(skip_exc) if skip_exc is not None else {}),
+                    },
+                    actor="system",
+                )
 
         # --- Pass 2: Detect active targets sharing the same normalized name or overlapping aliases ---
         # Re-fetch existing candidate names after the commit above so we skip
@@ -363,7 +405,11 @@ def backfill_catalog_identity(self) -> dict:
             return {"status": "cancelled", **details}
 
         with Session(_sync_engine) as session:
-            resolved = resolve_target_name_cached(obj_name, session)
+            try:
+                resolved = resolve_target_name_cached(obj_name, session)
+            except (cc.NonTransientError, httpx.HTTPError) as exc:
+                logger.warning("backfill: skipping '%s': %s", obj_name, human_error(exc))
+                resolved = None
             session.commit()
             target = match_target_by_identity(resolved, obj_name, session) if resolved else None
             if target is not None:

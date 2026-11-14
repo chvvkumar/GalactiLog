@@ -115,11 +115,8 @@ class TestNoMatch:
             "app.services.filename_resolver.COMMON_NAME_MAP",
             {},
         ), patch(
-            "app.services.filename_resolver.resolve_target_name_cached",
-            return_value=None,
-        ), patch(
-            "app.services.filename_resolver.resolve_sesame_cached",
-            return_value=None,
+            "app.services.filename_resolver.lookup_catalogs",
+            return_value=(None, True),
         ):
             # Also mock the trigram query to raise (extension not installed)
             mock_session.execute.side_effect = Exception("pg_trgm not available")
@@ -131,3 +128,34 @@ class TestNoMatch:
         assert result["suggested_target_id"] is None
         assert result["suggested_target_name"] is None
         assert result["extracted_name"] == "xyzzy"
+
+
+class TestCatalogOutage:
+    def test_catalog_errors_fall_through_to_trigram(self, mock_session):
+        """A SIMBAD/Sesame failure must not raise out of the resolver: on the
+        scan path that was a filename_candidate_failed warning per file and
+        no candidate row, and it failed the whole detection task."""
+        from app.services.catalog_cache import NonTransientError
+
+        target_id = uuid.uuid4()
+        mock_session.execute.return_value.first.return_value = (
+            target_id, "NGC 7000", 0.8,
+        )
+
+        with patch(
+            "app.services.filename_resolver.find_target_by_name",
+            return_value=None,
+        ), patch(
+            "app.services.filename_resolver.COMMON_NAME_MAP",
+            {},
+        ), patch(
+            "app.services.target_resolver.resolve_target_name_cached",
+            side_effect=NonTransientError("SIMBAD returned HTTP 404"),
+        ), patch(
+            "app.services.target_resolver.resolve_sesame_cached",
+            side_effect=NonTransientError("Sesame returned HTTP 404"),
+        ):
+            result = resolve_filename_candidate("NGC 700", mock_session)
+
+        assert result["method"] == "trigram"
+        assert result["suggested_target_id"] == str(target_id)

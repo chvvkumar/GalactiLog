@@ -6,11 +6,14 @@ Usage:
 
 import logging
 
+import httpx
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models import Target
+from app.services import catalog_cache as cc
+from app.services.upstream import error_details, human_error
 from app.services.simbad import (
     normalize_object_name,
     normalize_catalog_id,
@@ -37,6 +40,33 @@ def normalize_sql_expr(column_expr: str) -> str:
     return NORMALIZE_SQL.format(col=column_expr)
 
 
+def _unique_alias_match(alias: str, session: Session) -> Target | None:
+    """The one live target carrying ``alias``, or None.
+
+    Aliases are not unique across targets: an identity match appends the
+    incoming name to the target it matched, so a name that once created an
+    unresolved standalone target can later also land on the real one. Two
+    hits is no match, not an error - scalar_one_or_none raised
+    MultipleResultsFound here and every frame naming the object failed to
+    ingest. The exact primary-name tier below decides instead, and duplicate
+    detection is what merges the pair.
+    """
+    rows = session.execute(
+        select(Target).where(
+            Target.merged_into_id.is_(None),
+            Target.aliases.any(alias),
+        )
+    ).scalars().all()
+    if len(rows) == 1:
+        return rows[0]
+    if len(rows) > 1:
+        logger.warning(
+            "Alias %r is carried by %d live targets (%s); ignoring it for lookup",
+            alias, len(rows), ", ".join(t.primary_name for t in rows[:5]),
+        )
+    return None
+
+
 def find_target_by_name(object_name: str, session: Session) -> Target | None:
     """Search for an existing target by normalized name in aliases, then primary_name.
 
@@ -46,24 +76,14 @@ def find_target_by_name(object_name: str, session: Session) -> Target | None:
     normalized = normalize_object_name(object_name)
 
     # Search aliases array (GIN-indexed, fast)
-    target = session.execute(
-        select(Target).where(
-            Target.merged_into_id.is_(None),
-            Target.aliases.any(normalized),
-        )
-    ).scalar_one_or_none()
+    target = _unique_alias_match(normalized, session)
     if target:
         return target
 
     # Try with panel suffix stripped
     stripped = _PANEL_RE.sub("", normalized).strip()
     if stripped != normalized:
-        target = session.execute(
-            select(Target).where(
-                Target.merged_into_id.is_(None),
-                Target.aliases.any(stripped),
-            )
-        ).scalar_one_or_none()
+        target = _unique_alias_match(stripped, session)
         if target:
             return target
 
@@ -180,8 +200,17 @@ def _create_target(
         session.flush()
         session.commit()
         if target.size_major is None:
-            enrich_target_from_vizier(session, target)
-            session.commit()
+            # Best-effort: the target row is already committed, and a VizieR
+            # outage must not fail the ingest of the file that named it.
+            # (OpenNGC and SAC are local tables, no network.)
+            try:
+                enrich_target_from_vizier(session, target)
+                session.commit()
+            except (cc.NonTransientError, httpx.HTTPError) as exc:
+                logger.warning(
+                    "Size lookup for new target %s skipped, it can be filled in later: %s",
+                    target.primary_name, human_error(exc), exc_info=True,
+                )
         enrich_target_from_sac(session, target)
         session.commit()
         new_id = str(target.id)
@@ -210,6 +239,53 @@ def _create_target(
         return str(existing.id) if existing else None
 
 
+def lookup_catalogs(
+    object_name: str, session: Session,
+) -> tuple[dict | None, bool]:
+    """Resolve a name via SIMBAD, then Sesame. Returns (result, confirmed_no_match).
+
+    The single catalog lookup for both the OBJECT path (resolve_target) and
+    the filename path (filename_resolver). A lookup returning None is
+    ambiguous: the service may have answered "no such object", or it may be
+    down (catalog_cache returns None for an outage and stores nothing).
+    confirmed_no_match is True only when every service left a negative
+    catalog_cache row for this name, which only a real answer does. Callers
+    must not record a negative unless it is True.
+
+    A service that raises (NonTransientError for a 4xx, or a raw httpx error)
+    is logged and skipped, so one service being down neither fails the caller
+    nor stops the next service from being asked.
+    """
+    normalized = normalize_object_name(object_name)
+    confirmed = True
+    for source, lookup in (
+        ("simbad", resolve_target_name_cached),
+        ("sesame", resolve_sesame_cached),
+    ):
+        try:
+            result = lookup(object_name, session)
+        except (cc.NonTransientError, httpx.HTTPError) as exc:
+            logger.warning(
+                "Catalog lookup for %r skipped, the name stays unresolved for now: %s (%s)",
+                object_name, human_error(exc), error_details(exc)["error_chain"],
+            )
+            confirmed = False
+            continue
+        session.commit()  # Persist cache entry
+        if result is not None:
+            return result, False
+        # ponytail: checks the name's own key only. A name SIMBAD rejected
+        # under its mapped key reads as unconfirmed, costing a few cached DB
+        # reads per file. Check the mapped key too if that shows up in scans.
+        if cc.get_cached(session, source, normalized) is not cc.NEGATIVE:
+            confirmed = False
+    # While a source is marked unavailable get_or_fetch answers None without
+    # asking it, so an older negative row proves nothing about this lookup.
+    if cc.outage("simbad") or cc.outage("sesame"):
+        confirmed = False
+    return None, confirmed
+
+
 def resolve_target(
     object_name: str, session: Session, *, redis=None,
 ) -> str | None:
@@ -220,7 +296,8 @@ def resolve_target(
     2. Search existing targets by alias/primary_name
     3. Query SIMBAD (with persistent DB cache)
     4. Create target if SIMBAD resolves
-    5. Add to negative cache if SIMBAD fails
+    5. Add to negative cache if the catalogs answered and found nothing.
+       An outage (no answer) is never negative-cached.
 
     Returns target.id as string, or None if unresolvable.
     """
@@ -235,18 +312,14 @@ def resolve_target(
     if existing:
         return str(existing.id)
 
-    # Resolve via SIMBAD (uses persistent DB cache)
-    result = resolve_target_name_cached(object_name, session)
-    session.commit()  # Persist cache entry
-
-    # Fallback: try SESAME (queries NED + VizieR) when SIMBAD fails
-    if result is None:
-        result = resolve_sesame_cached(object_name, session)
-        session.commit()
+    # Resolve via SIMBAD, falling back to SESAME (NED + VizieR). Both use the
+    # persistent DB cache.
+    result, confirmed_no_match = lookup_catalogs(object_name, session)
 
     if result is None:
-        # Only names that did NOT resolve to any identity are negative-cached.
-        if redis:
+        # Only names the catalogs answered "no match" for are negative-cached.
+        # After an outage the next file must ask again.
+        if redis and confirmed_no_match:
             redis.sadd(NEGATIVE_CACHE_KEY, normalized)
             redis.expire(NEGATIVE_CACHE_KEY, NEGATIVE_CACHE_TTL)
         return None

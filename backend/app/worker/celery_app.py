@@ -53,6 +53,14 @@ celery_app.conf.update(
             "soft_time_limit": 3600,
             "time_limit": 3720,
         },
+        # One parse plus per-file commit per guide log, around 5s each on the
+        # production host: a 212-log initial scan was hard-killed at 660s with
+        # 125 checked. The pass catches the soft limit and finishes with what
+        # it has; the next scan short-circuits the stored logs and continues.
+        "app.worker.tasks.scan_phd2_logs": {
+            "soft_time_limit": 3600,
+            "time_limit": 3720,
+        },
         # High-frequency beat tasks whose results are never read. Storing a
         # result backend entry for each just accumulates celery-task-meta-*
         # keys in Redis (drain_app_logs alone runs every 5s). Skip the result
@@ -73,6 +81,10 @@ celery_app.conf.update(
         "auto-scan-tick": {
             "task": "app.worker.tasks.auto_scan_tick",
             "schedule": 60.0,
+            # Same backlog problem as drain-app-logs below: a scan holds every
+            # worker slot, beat keeps publishing, and each unexpired tick is a
+            # queued task (and a monitor row) until the scan ends.
+            "options": {"expires": 55},
         },
         "prune-activity-events": {
             "task": "app.worker.prune_activity.prune_activity_events",
@@ -182,6 +194,7 @@ def _emit_task_event(event_type, severity, task_name, task_id, exc):
     from sqlalchemy.orm import Session
     from app.config import get_sync_redis
     from app.services.activity import emit_sync
+    from app.services.upstream import error_details, human_error
     redis = get_sync_redis()
     verb = "failed" if event_type == "task_failure" else "retrying"
     try:
@@ -189,8 +202,11 @@ def _emit_task_event(event_type, severity, task_name, task_id, exc):
             emit_sync(
                 s, redis=redis, category="system", severity=severity,
                 event_type=event_type,
-                message=f"Task {task_name} {verb}: {type(exc).__name__}",
-                details={"task": task_name, "task_id": str(task_id), "error": str(exc)[:500]},
+                message=f"Background task '{task_name}' {verb}: {human_error(exc)}",
+                details={
+                    "task": task_name, "task_id": str(task_id), "error": str(exc)[:500],
+                    **error_details(exc),
+                },
                 actor="system",
             )
     except Exception:

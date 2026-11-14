@@ -65,18 +65,37 @@ export function scanStatusToJob(
   // backend hasn't sent a percent yet (e.g. mixed-deploy rolling upgrade
   // window). Discovery ("scanning") has no fixed total, so it stays
   // indeterminate regardless of the envelope, matching prior behavior.
+  const done = s.completed + s.failed + (s.cancelled ?? 0);
   const progress =
     s.state !== "ingesting"
       ? undefined
       : s.percent !== undefined
       ? Math.min(1, s.percent / 100)
       : s.total > 0
-      ? Math.min(1, (s.completed + s.failed) / s.total)
+      ? Math.min(1, done / s.total)
       : undefined;
+
+  // Stop only sets a flag; every ingest task already queued still has to be
+  // dequeued and skipped, minutes on a large library. Say so, and take the
+  // Stop button away: a second click is a no-op.
+  if (s.cancel_requested) {
+    return {
+      id: "scan",
+      category: "scan",
+      label: "Stopping scan",
+      subLabel:
+        s.total > 0
+          ? `${Math.max(0, s.total - done).toLocaleString()} files left to skip`
+          : undefined,
+      progress,
+      startedAt,
+      cancelable: false,
+    };
+  }
 
   const fileLabel =
     s.state === "ingesting" && s.total > 0
-      ? `${(s.completed + s.failed).toLocaleString()} / ${s.total.toLocaleString()} files`
+      ? `${done.toLocaleString()} / ${s.total.toLocaleString()} files`
       : s.discovered > 0
       ? `${s.discovered.toLocaleString()} files found`
       : undefined;

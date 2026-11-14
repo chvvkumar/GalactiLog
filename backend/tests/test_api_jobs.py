@@ -88,6 +88,20 @@ def test_scan_and_rebuild_families_are_suppressed():
     assert "app.worker.tasks.correlate_phd2_images" not in SUPPRESSED_TASKS
 
 
+def test_beat_heartbeats_are_suppressed_and_expire():
+    # Beat publishes these regardless of worker load. During a scan every
+    # slot is busy ingesting, so without an expiry each tick queues behind
+    # the scan and the monitor fills with one row per minute of scan time.
+    from app.worker.celery_app import celery_app
+    for name in (
+        "app.worker.drain_logs.drain_app_logs",
+        "app.worker.tasks.auto_scan_tick",
+    ):
+        assert name in SUPPRESSED_TASKS
+    tick = celery_app.conf.beat_schedule["auto-scan-tick"]
+    assert tick["options"]["expires"] < tick["schedule"]
+
+
 @pytest.mark.asyncio
 async def test_list_jobs_returns_running_before_queued(r):
     running = _tid()

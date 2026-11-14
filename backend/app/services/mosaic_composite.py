@@ -20,6 +20,7 @@ from astropy.wcs import WCS
 from app.models.image import Image
 from app.services.activity import emit as _emit_activity
 from app.services.thumbnail import _read_binned
+from app.services.upstream import error_details, human_error
 from app.services.coordinates import _parse_ra, _parse_coord
 from app.services.units import arcsec_per_pixel
 from app.services.stretch import (
@@ -788,8 +789,8 @@ async def build_mosaic_composite(
                 category="mosaic",
                 severity="error",
                 event_type="mosaic_composite_failed",
-                message=f"Mosaic composite generation failed: {exc}",
-                details={"error": str(exc), "mosaic_id": str(mosaic_id)},
+                message=f"Mosaic composite generation failed: {human_error(exc)}",
+                details={"error": str(exc), "mosaic_id": str(mosaic_id), **error_details(exc)},
                 actor="system",
             )
         except Exception:

@@ -6,7 +6,13 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-SIMBAD_TAP_URL = "https://simbad.cds.unistra.fr/simbad/sim-tap/sync"
+from app.services.upstream import request_with_fallback
+
+# CDS first, Harvard mirror second.
+SIMBAD_MIRRORS = ("https://simbad.cds.unistra.fr", "https://simbad.harvard.edu")
+SIMBAD_TAP_URLS = [f"{m}/simbad/sim-tap/sync" for m in SIMBAD_MIRRORS]
+SIMBAD_SCRIPT_URLS = [f"{m}/simbad/sim-script" for m in SIMBAD_MIRRORS]
+SIMBAD_TAP_URL = SIMBAD_TAP_URLS[0]  # kept for importers
 
 
 def _escape_adql_string(value: str) -> str:
@@ -213,8 +219,8 @@ def _fetch_tap_aliases(object_name: str) -> list[str]:
     query = f"SELECT id FROM ident JOIN basic ON ident.oidref = basic.oid WHERE basic.main_id = '{_escape_adql_string(sanitized)}'"
     try:
         with httpx.Client(timeout=15.0) as client:
-            resp = client.get(
-                SIMBAD_TAP_URL,
+            resp = request_with_fallback(
+                client, "get", SIMBAD_TAP_URLS, service="simbad",
                 params={
                     "request": "doQuery",
                     "lang": "adql",
@@ -223,7 +229,6 @@ def _fetch_tap_aliases(object_name: str) -> list[str]:
                 },
                 timeout=15.0,
             )
-            resp.raise_for_status()
             lines = resp.text.strip().splitlines()
             # First line is the header ("id"), skip it
             if len(lines) <= 1:
@@ -256,12 +261,11 @@ def _query_simbad_raw(object_name: str) -> dict[str, Any] | None:
                 format object "%MAIN_ID|%OTYPELIST|%COO(d;A)|%COO(d;D)"
                 query id {sanitized}
             """
-            resp = client.post(
-                "https://simbad.cds.unistra.fr/simbad/sim-script",
+            resp = request_with_fallback(
+                client, "post", SIMBAD_SCRIPT_URLS, service="simbad",
                 data={"script": script},
                 timeout=15.0,
             )
-            resp.raise_for_status()
 
             text = resp.text
             if "::error::" in text:
