@@ -5124,6 +5124,16 @@ export interface components {
              * Changed Files
              * @default 0
              */
+            /**
+             * Cancel Requested
+             * @default false
+             */
+            cancel_requested: boolean;
+            /**
+             * Cancelled
+             * @default 0
+             */
+            cancelled: number;
             changed_files: number;
             /** Completed */
             completed: number;

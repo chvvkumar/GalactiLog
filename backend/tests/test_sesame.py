@@ -126,6 +126,35 @@ class TestQuerySesameRaw:
         assert result is not None
         assert result["main_id"] == "some object"
 
+    def test_mirror_answers_when_primary_fails(self):
+        import httpx
+        good = MagicMock()
+        good.text = _SESAME_XML_HIT
+        client = _make_client("")
+        client.get = MagicMock(side_effect=[httpx.ConnectError("down"), good])
+        with patch("app.services.sesame.httpx.Client", return_value=client):
+            result = _query_sesame_raw("M 42", resolvers="NV")
+
+        assert result is not None
+        assert result["main_id"] == "M 42"
+        urls = [call.args[0] for call in client.get.call_args_list]
+        assert urls == [
+            "https://cds.unistra.fr/cgi-bin/nph-sesame/-ox/NV?M+42",
+            "https://vizier.idia.ac.za/viz-bin/nph-sesame/-ox/NV?M+42",
+        ]
+
+    def test_all_mirrors_failing_raises_naming_both_hosts(self):
+        import httpx
+        client = _make_client("", raise_error=httpx.ConnectError("down"))
+        with patch("app.services.sesame.httpx.Client", return_value=client):
+            with pytest.raises(httpx.HTTPError) as excinfo:
+                _query_sesame_raw("M 42")
+
+        message = str(excinfo.value)
+        assert "cds.unistra.fr" in message
+        assert "vizier.idia.ac.za" in message
+        assert client.get.call_count == 2
+
 
 # ---------------------------------------------------------------------------
 # get_cached_sesame and save_sesame_cache (database tests)
@@ -278,8 +307,8 @@ class TestResolveSesameNegativeCache:
 # orphan_preview, the duplicate-detection worker task, filename_resolver.py,
 # target_resolver.py), none of which ever handled an exception from this
 # function pre-port. It's routed through catalog_cache.get_or_fetch, which
-# retries transient errors with backoff and negative-caches+swallows once
-# retries are exhausted (returns None), while a non-transient 4xx (other
+# retries transient errors with backoff and swallows once retries are
+# exhausted (returns None, nothing cached), while a non-transient 4xx (other
 # than 429) raises NonTransientError uncaught -- the same semantics
 # enrich_target_from_vizier/hyperleda/gaia already have.
 # ---------------------------------------------------------------------------
@@ -300,10 +329,11 @@ class TestResolveSesameErrorHandling:
             session.query(CatalogCache).filter(CatalogCache.source == "sesame").delete()
             session.commit()
 
-    def test_transient_http_error_does_not_propagate_and_negative_caches(self):
+    def test_transient_http_error_does_not_propagate_and_is_not_cached(self):
         """A transient httpx.HTTPError (e.g. a SESAME timeout) exhausting
-        retries must not propagate -- resolve_sesame_cached swallows it,
-        returns None, and negative-caches so the next call short-circuits."""
+        retries must not propagate -- resolve_sesame_cached swallows it and
+        returns None. No negative row is written: an outage says nothing
+        about whether the object exists, so the next call asks again."""
         import httpx
         from app.database import sync_engine
         from sqlalchemy.orm import Session
@@ -318,7 +348,7 @@ class TestResolveSesameErrorHandling:
             session.commit()
 
             assert result is None
-            assert get_cached_sesame("TRANSIENTFAIL", session) == {"_negative": True}
+            assert get_cached_sesame("TRANSIENTFAIL", session) is None
 
     def test_non_transient_http_status_error_propagates(self):
         """A non-transient 4xx (other than 429) raises NonTransientError

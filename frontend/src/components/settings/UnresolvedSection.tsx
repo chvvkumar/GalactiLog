@@ -2,6 +2,7 @@ import { Component, For, Show, createSignal, createEffect, on } from "solid-js";
 import type { Accessor } from "solid-js";
 import { apiClient } from "../../api/generated/client";
 import { unwrap } from "../../api/unwrap";
+import { getErrorMessage } from "../../utils/errors";
 import { showToast } from "../Toast";
 import { useAuth } from "../AuthProvider";
 import type { MergeCandidateResponse, OrphanPreviewResponse } from "../../api/types";
@@ -18,6 +19,7 @@ interface PreviewState {
   loading: boolean;
   data: OrphanPreviewResponse | null;
   error: boolean;
+  message?: string;
 }
 
 const UnresolvedSection: Component<UnresolvedSectionProps> = (props) => {
@@ -65,10 +67,10 @@ const UnresolvedSection: Component<UnresolvedSectionProps> = (props) => {
                 [c.source_name]: { loading: false, data: res, error: false },
               }));
             })
-            .catch(() => {
+            .catch((e: unknown) => {
               setPreviews((prev) => ({
                 ...prev,
-                [c.source_name]: { loading: false, data: null, error: true },
+                [c.source_name]: { loading: false, data: null, error: true, message: getErrorMessage(e, "") || undefined },
               }));
             });
         }
@@ -166,9 +168,14 @@ const UnresolvedSection: Component<UnresolvedSectionProps> = (props) => {
                           </Show>
                         </Show>
                         <Show when={preview() && !preview()!.loading && preview()!.error}>
-                          <span class="text-xs text-theme-text-tertiary">
+                          <span class="text-xs text-theme-text-tertiary" title={preview()!.message}>
                             Lookup failed
                           </span>
+                          <Show when={preview()!.message}>
+                            <div class="text-xs text-theme-text-tertiary break-words">
+                              {preview()!.message}
+                            </div>
+                          </Show>
                         </Show>
                       </div>
                     </div>

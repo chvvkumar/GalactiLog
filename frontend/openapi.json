@@ -7438,6 +7438,16 @@
       "ScanStateResponse": {
         "description": "Response for /scan/status - scan state snapshot with optional failed_files.",
         "properties": {
+          "cancel_requested": {
+            "default": false,
+            "title": "Cancel Requested",
+            "type": "boolean"
+          },
+          "cancelled": {
+            "default": 0,
+            "title": "Cancelled",
+            "type": "integer"
+          },
           "changed_files": {
             "default": 0,
             "title": "Changed Files",

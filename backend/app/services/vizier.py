@@ -9,13 +9,16 @@ import httpx
 from sqlalchemy.orm import Session
 
 from app.services import catalog_cache as cc
+from app.services.upstream import request_with_fallback
 
 if TYPE_CHECKING:
     from app.models.target import Target
 
 logger = logging.getLogger(__name__)
 
-VIZIER_TAP_URL = "https://tapvizier.cds.unistra.fr/TAPVizieR/tap/sync"
+# Tried in order. No verified mirror: vizier.cfa.harvard.edu and
+# vizier.idia.ac.za both return HTTP 404 for /TAPVizieR/tap/sync.
+VIZIER_TAP_URLS = ["https://tapvizier.cds.unistra.fr/TAPVizieR/tap/sync"]
 
 # Maps catalog_id prefix pattern -> (vizier_catalog_id, adql_table, number_column)
 _CATALOG_MAP: list[tuple[re.Pattern, str, str, str]] = [
@@ -282,8 +285,11 @@ def query_vizier(catalog_id: str) -> dict[str, Any] | None:
     viz_id = result[0]
 
     with httpx.Client(timeout=15.0) as client:
-        resp = client.post(
-            VIZIER_TAP_URL,
+        resp = request_with_fallback(
+            client,
+            "POST",
+            VIZIER_TAP_URLS,
+            service="vizier",
             data={
                 "REQUEST": "doQuery",
                 "LANG": "ADQL",
@@ -291,7 +297,6 @@ def query_vizier(catalog_id: str) -> dict[str, Any] | None:
                 "QUERY": adql,
             },
         )
-        resp.raise_for_status()
         lines = resp.text.strip().splitlines()
         return _parse_vizier_response(viz_id, lines)
 
@@ -346,8 +351,8 @@ def enrich_target_from_vizier(session: Session, target: "Target") -> bool:
     HTTP call is made outside any open transaction to avoid holding DB
     connections during network I/O. A cache-miss fetch goes through the
     cache wrapper's get_or_fetch, so a transient VizieR failure is retried
-    with backoff and, if every attempt fails, negative-cached (returns
-    False) rather than raising; a non-transient failure (e.g. a 4xx) raises
+    with backoff and, if every attempt fails, returns False without
+    caching anything rather than raising; a non-transient failure (e.g. a 4xx) raises
     NonTransientError uncaught, matching hyperleda/gaia.
 
     Returns True if any fields were updated.
@@ -387,7 +392,8 @@ def enrich_target_from_vizier(session: Session, target: "Target") -> bool:
         return updated
 
     # Cache miss or expired - Query VizieR via the cache wrapper (handles
-    # retry/backoff and negative caching). The HTTP call happens outside any
+    # retry/backoff and negative caching of a real "no result"; an outage
+    # caches nothing). The HTTP call happens outside any
     # open transaction. The fetch builds the full cache payload (including
     # the vizier_catalog metadata and the constellation key) so newly
     # cached rows keep the same shape as save_vizier_cache/0017-migrated rows.

@@ -24,10 +24,58 @@ from app.services.scan_state import (
     set_rebuild_cancelled_sync,
 )
 from app.services.activity import emit_sync as _emit_activity_sync
+from app.services.upstream import error_details, human_error, service_label
 
 logger = logging.getLogger(__name__)
 
 SMART_REBUILD_LOCK = "smart_rebuild:lock"
+
+MAX_FAILURE_REASONS = 5
+
+
+def _record_failure(reasons: dict, name: str, exc: Exception) -> None:
+    """Group a per-name lookup failure by its cause (the name is stripped)."""
+    text_ = human_error(exc)
+    key = getattr(exc, "key", None)
+    if key is not None:
+        marker = f"lookup for '{key}' failed: "
+        text_ = text_.split(marker, 1)[-1]
+    entry = reasons.setdefault(text_, {"count": 0, "name": name, "exc": exc})
+    entry["count"] += 1
+
+
+def _observe_outages(outages: dict) -> None:
+    """Remember the first reason seen for each catalog currently marked down.
+
+    The marker is process-wide, not per name, so it is only reported as run
+    context and never as the reason a particular name failed.
+    """
+    for source in ("simbad", "sesame"):
+        if source not in outages:
+            reason = cc.outage(source)
+            if reason:
+                outages[source] = reason
+
+
+def _failure_summary(reasons: dict, outages: dict | None = None) -> tuple[str, list[dict]]:
+    """Return (message suffix, reasons list) for the most common failure causes."""
+    ranked = sorted(reasons.items(), key=lambda kv: -kv[1]["count"])[:MAX_FAILURE_REASONS]
+    items = [
+        {
+            "reason": r, "count": v["count"], "example_name": v["name"],
+            **error_details(v["exc"]),
+        }
+        for r, v in ranked
+    ]
+    suffix = f". Most common reason: {ranked[0][0]}" if ranked else ""
+    for source, reason in (outages or {}).items():
+        suffix += (
+            f". {service_label(source)} was unavailable during this run ({reason}), "
+            f"so some of these names could not be checked and may resolve on a later run."
+        )
+    return suffix, items
+
+
 SMART_REBUILD_LOCK_TTL = 300  # 5 minutes
 
 
@@ -95,6 +143,8 @@ def rebuild_targets(self) -> dict:
 
     resolved = 0
     failed = 0
+    failure_reasons: dict = {}
+    outages: dict = {}
     processed = 0
     timed_out = False
 
@@ -126,6 +176,7 @@ def rebuild_targets(self) -> dict:
                     target_id = resolve_target(obj_name, session, redis=_redis)
             except cc.NonTransientError as exc:
                 target_id = None
+                _record_failure(failure_reasons, obj_name, exc)
                 logger.warning(
                     "rebuild_targets: non-transient resolve failure for '%s', skipping: %s",
                     obj_name, exc,
@@ -146,6 +197,7 @@ def rebuild_targets(self) -> dict:
                 logger.info("rebuild_targets: %s -> %s (%d images)", obj_name, target_id, img_count)
             else:
                 failed += 1
+                _observe_outages(outages)
                 logger.info("rebuild_targets: FAILED %s (%d images)", obj_name, img_count)
 
             processed = i + 1
@@ -198,12 +250,20 @@ def rebuild_targets(self) -> dict:
             actor="system",
         )
     if failed > 0:
+        reason_suffix, reason_items = _failure_summary(failure_reasons, outages)
         with _activity_session() as _db:
             _emit_activity_sync(
                 _db, redis=_redis, category="enrichment", severity="warning",
                 event_type="enrichment_query_failed",
-                message=f"Full Rebuild: enrichment failed for {failed} of {total} object names",
-                details={"failed_targets": failed, "total": total}, actor="system",
+                message=(
+                    f"Full Rebuild: enrichment failed for {failed} of {total} object names"
+                    f"{reason_suffix}"
+                ),
+                details={
+                    "failed_targets": failed, "total": total, "reasons": reason_items,
+                    **({"outages": outages} if outages else {}),
+                },
+                actor="system",
             )
     logger.info("rebuild_targets: done - resolved=%d, failed=%d", resolved, failed)
     return {"status": "complete", **details}
@@ -256,6 +316,8 @@ def retry_unresolved(self) -> dict:
 
     resolved = 0
     failed = 0
+    failure_reasons: dict = {}
+    outages: dict = {}
     processed = 0
     timed_out = False
 
@@ -288,6 +350,7 @@ def retry_unresolved(self) -> dict:
                     target_id = resolve_target(obj_name, session, redis=_redis)
             except cc.NonTransientError as exc:
                 target_id = None
+                _record_failure(failure_reasons, obj_name, exc)
                 logger.warning(
                     "retry_unresolved: non-transient resolve failure for '%s', skipping: %s",
                     obj_name, exc,
@@ -308,6 +371,7 @@ def retry_unresolved(self) -> dict:
                 logger.info("retry_unresolved: %s -> %s (%d images)", obj_name, target_id, img_count)
             else:
                 failed += 1
+                _observe_outages(outages)
 
             processed = i + 1
             if (i + 1) % 5 == 0 or i + 1 == total:
@@ -354,12 +418,20 @@ def retry_unresolved(self) -> dict:
             details=details, actor="system",
         )
     if failed > 0:
+        reason_suffix, reason_items = _failure_summary(failure_reasons, outages)
         with _activity_session() as _db:
             _emit_activity_sync(
                 _db, redis=_redis, category="enrichment", severity="warning",
                 event_type="enrichment_query_failed",
-                message=f"Retry Unresolved: enrichment failed for {failed} of {total} object names",
-                details={"failed_targets": failed, "total": total}, actor="system",
+                message=(
+                    f"Retry Unresolved: enrichment failed for {failed} of {total} object names"
+                    f"{reason_suffix}"
+                ),
+                details={
+                    "failed_targets": failed, "total": total, "reasons": reason_items,
+                    **({"outages": outages} if outages else {}),
+                },
+                actor="system",
             )
     logger.info("retry_unresolved: done - resolved=%d, failed=%d", resolved, failed)
     return {"status": "complete", **details}

@@ -83,6 +83,16 @@ from app.api.deps import get_current_user, require_admin
 from app.models.user import User
 
 
+@pytest.fixture(autouse=True)
+def _clear_catalog_outages():
+    """catalog_cache's outage marker is module-level; keep it from leaking between tests."""
+    from app.services import catalog_cache
+
+    catalog_cache.clear_outages()
+    yield
+    catalog_cache.clear_outages()
+
+
 @pytest.fixture
 def mock_session():
     return AsyncMock()

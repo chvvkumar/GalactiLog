@@ -53,12 +53,18 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from app.models.catalog_cache import CatalogCache
+from app.services.upstream import describe_http_error, service_label
 
 logger = logging.getLogger(__name__)
 
 # Sentinel returned by get_cached() to mean "cached negative result", distinct
 # from both a positive payload (dict) and a cache miss (None).
 NEGATIVE: Literal["_negative"] = "_negative"
+
+# Private sentinel returned by _fetch_with_retry when every attempt failed
+# transiently (an upstream outage), as opposed to fetch() returning None
+# ("queried fine, no result"). get_or_fetch writes no cache row for it.
+_FETCH_FAILED = object()
 
 # --- Defaults ----------------------------------------------------------
 # Retry: 3 total fetch() attempts, sleeping backoff_base_seconds * 2**n
@@ -90,7 +96,148 @@ class NonTransientError(Exception):
     exception is an ``httpx.HTTPStatusError`` whose response status is a 4xx
     other than 429, wraps it in a NonTransientError, and re-raises it
     immediately without consuming a retry attempt or writing a cache row.
+
+    ``str()`` of the error is a human readable sentence naming the service
+    and the lookup key. ``source`` and ``key`` identify the lookup, and
+    ``original`` is the underlying exception (also set as ``__cause__``) for
+    callers that want the raw detail, e.g. via ``upstream.error_chain``.
     """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        source: str | None = None,
+        key: str | None = None,
+        original: BaseException | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.source = source
+        self.key = key
+        self.original = original
+
+
+class CatalogOutageError(NonTransientError):
+    """Raised by raise_if_outage when a source is currently marked as down.
+
+    Lets a caller that got None from get_or_fetch tell "the service is
+    unavailable" apart from "no such object".
+    """
+
+
+def _human_reason(source: str, exc: BaseException) -> str:
+    """Human text for a failed fetch against *source*."""
+    if hasattr(exc, "attempts"):
+        # Raised by upstream.request_with_fallback: already a human sentence.
+        lines = str(exc).splitlines()
+        if lines:
+            return lines[0]
+    return f"{service_label(source)} {describe_http_error(exc)}"
+
+
+def _non_transient(source: str, key: str, exc: BaseException) -> NonTransientError:
+    """Build the NonTransientError for a failed (source, key) fetch."""
+    return NonTransientError(
+        f"{service_label(source)} lookup for '{key}' failed: {_human_reason(source, exc)}",
+        source=source, key=key, original=exc,
+    )
+
+
+# --- Outage marker / circuit breaker -------------------------------------
+# How long a source stays marked after a failed fetch. While marked,
+# get_or_fetch skips the network on a cache miss instead of repeating the
+# whole retry chain for every key. Once the cooldown is over the next cache
+# miss is a single-attempt probe (no retries, no backoff). Worst case for a
+# timeout-style outage: one probe across two mirrors at 15 s each is about
+# 30 s of waiting per 300 s cooldown, i.e. roughly 30 s in every 330 s per
+# source per process.
+OUTAGE_COOLDOWN_SECONDS = 300
+
+# source -> (time.monotonic() deadline, human reason, original exception).
+# An entry past its deadline is kept as "suspect": outage() no longer reports
+# it, but it makes the next fetch a probe. Only a successful fetch or
+# clear_outages() removes an entry.
+# ponytail: per-process state, each worker process learns about an outage
+# separately (one failed retry chain per process per cooldown); move the
+# marker to Redis if that matters.
+_OUTAGES: dict[str, tuple[float, str, BaseException]] = {}
+
+
+# Non-transient statuses that say "this particular request was rejected"
+# (bad request, payload too large, URI too long, unprocessable) rather than
+# "the service is down". One malformed key must not mark a whole source as
+# down, so these never set the outage marker. Every other non-transient
+# status (401, 403, 404, 410, ...) does: each catalog client calls a fixed
+# query endpoint with the object in the parameters, so those mean the
+# endpoint itself is missing or blocked, which is what a CDS outage page
+# (404 on every path) looks like.
+_REQUEST_SPECIFIC_STATUS = frozenset({400, 413, 414, 422})
+
+
+def _is_request_specific(exc: BaseException) -> bool:
+    """True if *exc* is about this one request, not the health of the service.
+
+    For a failure from upstream.request_with_fallback (carries ``attempts``)
+    every mirror's answer must be request-specific.
+    """
+    attempts = getattr(exc, "attempts", None)
+    originals = [original for _, original in attempts] if attempts else [exc]
+    return all(
+        isinstance(original, httpx.HTTPStatusError)
+        and original.response.status_code in _REQUEST_SPECIFIC_STATUS
+        for original in originals
+    )
+
+
+def _mark_outage(source: str, exc: BaseException) -> None:
+    _OUTAGES[source] = (
+        time.monotonic() + OUTAGE_COOLDOWN_SECONDS, _human_reason(source, exc), exc,
+    )
+
+
+def _current_outage(source: str) -> tuple[float, str, BaseException] | None:
+    entry = _OUTAGES.get(source)
+    if entry is None or time.monotonic() >= entry[0]:
+        # Expired entries stay in the dict as "suspect" (see _OUTAGES).
+        return None
+    return entry
+
+
+def outage(source: str) -> str | None:
+    """Human reason *source* is currently marked as down, or None.
+
+    A source is marked for OUTAGE_COOLDOWN_SECONDS when a fetch exhausts its
+    transient retries or fails non-transiently for a reason that is not
+    specific to that one request, and unmarked by the next successful fetch.
+    Returns None once the cooldown is over, even before a fetch has proven
+    the service is back, so callers do not report an outage that may have
+    ended.
+    """
+    entry = _current_outage(source)
+    return entry[1] if entry else None
+
+
+def raise_if_outage(*sources: str, key: str | None = None) -> None:
+    """Raise CatalogOutageError for the first of *sources* marked as down.
+
+    Call after a lookup came back empty to turn "None because the service is
+    unavailable" into an error instead of reporting "not found".
+    """
+    for source in sources:
+        entry = _current_outage(source)
+        if entry is None:
+            continue
+        _, reason, original = entry
+        subject = f"lookup for '{key}'" if key is not None else "lookup"
+        raise CatalogOutageError(
+            f"{service_label(source)} {subject} could not be completed: {reason}",
+            source=source, key=key, original=original,
+        ) from original
+
+
+def clear_outages() -> None:
+    """Forget every outage marker (tests, or an explicit "retry now")."""
+    _OUTAGES.clear()
 
 
 def _is_transient(exc: BaseException) -> bool:
@@ -167,35 +314,49 @@ def _fetch_with_retry(
     retry_on: tuple[type[BaseException], ...],
     source: str,
     key: str,
-) -> dict[str, Any] | None:
+) -> dict[str, Any] | object | None:
     """Call fetch() up to max_attempts times, retrying transient failures.
 
     Returns the payload (or None for "queried, genuinely no result") on
-    success. If every attempt raises a transient exception, returns None
-    (treated as a failed lookup -> caller stores a negative row, same as
-    today's "any failure means negative-cache it" behavior). A non-transient
+    success. If every attempt raises a transient exception, returns the
+    private ``_FETCH_FAILED`` sentinel: the upstream service is unreachable,
+    which says nothing about whether the object exists, so the caller must
+    not cache anything. A non-transient
     exception (an httpx.HTTPStatusError with a 4xx status other than 429)
     aborts immediately -- no further attempts, nothing cached -- by raising
-    NonTransientError from the original exception.
+    NonTransientError from the original exception, with a human readable
+    message and the source, key and original exception attached.
+
+    Exhausted transient retries always mark *source* as down (see
+    ``outage``). A non-transient failure marks it too, unless the failure is
+    request-specific (see ``_REQUEST_SPECIFIC_STATUS``). A successful fetch
+    clears the mark.
     """
     last_exc: BaseException | None = None
     for attempt in range(max_attempts):
         try:
-            return fetch()
+            payload = fetch()
+            _OUTAGES.pop(source, None)
+            return payload
         except retry_on as exc:
             last_exc = exc
             if not _is_transient(exc):
                 logger.warning(
                     "%s/%s: non-transient fetch failure, not retrying: %s", source, key, exc,
                 )
-                raise NonTransientError(str(exc)) from exc
+                if not _is_request_specific(exc):
+                    _mark_outage(source, exc)
+                raise _non_transient(source, key, exc) from exc
             remaining = max_attempts - attempt - 1
             if remaining <= 0:
                 logger.warning(
-                    "%s/%s: fetch failed after %d attempt(s), giving up: %s",
-                    source, key, max_attempts, exc,
+                    "%s/%s: fetch failed after %d attempt(s), giving up, result not cached: "
+                    "%s %s (%s)",
+                    source, key, max_attempts,
+                    service_label(source), describe_http_error(exc), exc,
                 )
-                return None
+                _mark_outage(source, exc)
+                return _FETCH_FAILED
             delay = backoff_base_seconds * (2 ** attempt)
             logger.warning(
                 "%s/%s: fetch attempt %d/%d failed (%s), retrying in %.1fs",
@@ -205,7 +366,8 @@ def _fetch_with_retry(
     # Unreachable in practice (loop always returns or raises), but keeps
     # type-checkers happy and guards against max_attempts <= 0.
     if last_exc is not None:
-        raise NonTransientError(str(last_exc)) from last_exc
+        _mark_outage(source, last_exc)
+        raise _non_transient(source, key, last_exc) from last_exc
     return None
 
 
@@ -227,8 +389,17 @@ def get_or_fetch(
     - Cache hit (fresh negative row): returns None, no fetch() call.
     - Cache miss or expired row: calls fetch() with retry/backoff (see
       _fetch_with_retry), stores the result (positive payload dict, or a
-      negative row if fetch() returned None or every attempt transiently
-      failed), and returns it.
+      negative row if fetch() returned None), and returns it.
+    - Every attempt failed transiently (upstream outage): returns None,
+      writes NO cache row, and marks *source* as down for
+      OUTAGE_COOLDOWN_SECONDS.
+    - Cache miss while *source* is marked as down: returns None at once, with
+      no fetch() call, no sleep and no cache row. Cache hits are still served.
+      Callers that must tell this None from "no such object" call
+      ``raise_if_outage(source, key=key)`` or check ``outage(source)``.
+    - Cache miss after the cooldown, before any success: the fetch is a probe
+      with a single attempt (no retries, no sleeps) whatever *max_attempts*
+      says. Failure marks the source again; success restores normal behavior.
 
     fetch() must return a payload dict on success, or None to mean "queried
     successfully, no data found" (stored as a negative row). It should raise
@@ -239,13 +410,24 @@ def get_or_fetch(
 
     A non-transient failure (NonTransientError) propagates to the caller
     uncaught -- nothing is cached, since it likely indicates a bug or a bad
-    request rather than "this object doesn't exist."
+    request rather than "this object doesn't exist." Unless the status says
+    only this request was rejected (400, 413, 414, 422), it also marks
+    *source* as down, so later cache misses within the cooldown return None.
     """
     cached = get_cached(session, source, key, positive_ttl=positive_ttl, negative_ttl=negative_ttl)
     if cached is NEGATIVE:
         return None
     if cached is not None:
         return cached
+
+    reason = outage(source)
+    if reason is not None:
+        logger.debug("%s/%s: skipping fetch, source marked as down: %s", source, key, reason)
+        return None
+    if source in _OUTAGES:
+        # Cooldown over but no success since: probe with a single attempt so
+        # a continuing outage costs one request, not a full retry chain.
+        max_attempts = 1
 
     payload = _fetch_with_retry(
         fetch,
@@ -255,6 +437,8 @@ def get_or_fetch(
         source=source,
         key=key,
     )
+    if payload is _FETCH_FAILED:
+        return None
     save_cached(session, source, key, payload)
     return payload
 

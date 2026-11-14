@@ -8,12 +8,15 @@ from typing import TYPE_CHECKING
 import httpx
 from celery.exceptions import SoftTimeLimitExceeded
 
+from app.services.upstream import describe_http_error, request_with_fallback
+
 if TYPE_CHECKING:
     from app.models.target import Target
 
 logger = logging.getLogger(__name__)
 
-SKYVIEW_URL = "https://skyview.gsfc.nasa.gov/current/cgi/runquery.pl"
+# Tried in order. No known mirror.
+SKYVIEW_URLS = ["https://skyview.gsfc.nasa.gov/current/cgi/runquery.pl"]
 
 
 def _compute_fov(target: Target) -> float:
@@ -55,8 +58,9 @@ def fetch_reference_thumbnail(
 
     try:
         with httpx.Client(timeout=30.0) as client:
-            resp = client.get(SKYVIEW_URL, params=params)
-            resp.raise_for_status()
+            resp = request_with_fallback(
+                client, "GET", SKYVIEW_URLS, service="SkyView", params=params,
+            )
         filepath.write_bytes(resp.content)
         return filename
     except SoftTimeLimitExceeded:
@@ -65,6 +69,12 @@ def fetch_reference_thumbnail(
         # its terminal "complete" state instead of being swallowed here as a
         # fetch failure and later dying at the hard limit (AUD-003).
         raise
-    except Exception:
-        logger.warning("Failed to fetch SkyView thumbnail for target %s", target.id, exc_info=True)
+    except Exception as exc:
+        # An exhausted request_with_fallback already carries a readable
+        # "SkyView is unavailable: <host> <reason>" message; anything else
+        # (disk write, unexpected error) gets a short phrase.
+        reason = str(exc) if isinstance(exc, httpx.HTTPError) else f"SkyView {describe_http_error(exc)}"
+        logger.warning(
+            "No SkyView thumbnail for target %s: %s", target.id, reason, exc_info=True,
+        )
         return None

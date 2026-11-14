@@ -57,6 +57,9 @@ SUPPRESSED_TASKS = frozenset({
     # and while a scan holds the worker pool its backlog would otherwise fill
     # the panel with tens of rows that represent no user-visible work.
     "app.worker.drain_logs.drain_app_logs",
+    # Same class: a 60s heartbeat that nearly always returns at once. The
+    # scan it may dispatch is reported by the scan-status envelope.
+    "app.worker.tasks.auto_scan_tick",
 })
 
 

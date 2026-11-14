@@ -24,8 +24,8 @@ const CreateTargetFromOrphanModal: Component<Props> = (props) => {
         .POST("/api/targets/orphan-preview", { body: { source_name: props.candidate.source_name } })
         .then(unwrap);
       setPreview(res);
-    } catch {
-      showToast("Failed to load preview", "error");
+    } catch (e: unknown) {
+      showToast(getErrorMessage(e, "Failed to load preview"), "error");
     } finally {
       setLoadingPreview(false);
     }

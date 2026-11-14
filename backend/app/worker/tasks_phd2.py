@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import NamedTuple
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from celery.exceptions import SoftTimeLimitExceeded
 from sqlalchemy import func, insert, select
 from sqlalchemy.orm import Session
 
@@ -961,6 +962,8 @@ def _run_phd2_pass(
     # to avoid; the end-of-pass counts write settles the remainder.
     checked_batch = 0
     CHECKED_FLUSH_EVERY = 25
+    looked_at = 0
+    timed_out = False
 
     with Session(_sync_engine) as db:
         for path in candidates:
@@ -970,6 +973,7 @@ def _run_phd2_pass(
             # about anything the user can see.
             file_pointing: list[PointingSample] = []
             checked_batch += 1
+            looked_at += 1
             flush = 0
             if checked_batch >= CHECKED_FLUSH_EVERY:
                 flush, checked_batch = checked_batch, 0
@@ -978,6 +982,19 @@ def _run_phd2_pass(
                     db, path, general, tz_name=tz_name, force=force,
                     pointing=file_pointing,
                 )
+            except SoftTimeLimitExceeded:
+                # Must precede the catch-all below, which would log this as
+                # one crashed file and carry on until the hard kill, losing
+                # every end-of-pass write. Each ingested log is already
+                # committed; the next scan short-circuits those as unchanged
+                # and picks up from here.
+                logger.warning(
+                    "phd2: time limit reached after %d of %d guide logs",
+                    looked_at, found,
+                )
+                db.rollback()
+                timed_out = True
+                break
             except Exception:  # noqa: BLE001 - one bad file must not stop the pass
                 logger.exception("phd2: ingest crashed for %s", path)
                 db.rollback()
@@ -1133,6 +1150,11 @@ def _run_phd2_pass(
             f"PHD2 logs: {ingested} ingested, {empty} empty, {failed} failed, "
             f"{removed} removed of {found} found"
         )
+        if timed_out:
+            message += (
+                f" (stopped at the time limit after {looked_at - 1} of {found};"
+                " the next scan continues from there)"
+            )
         event_type = "phd2_scan_complete"
     else:
         message = (
@@ -1247,7 +1269,8 @@ def _run_phd2_pass(
 
     logger.info("phd2: %s", message)
     return {
-        "status": "complete", "found": found, "ingested": ingested,
+        "status": "timed_out" if timed_out else "complete",
+        "found": found, "ingested": ingested,
         "empty": empty, "failed": failed, "removed": removed,
         "timezone_warnings": len(suspicious),
         "sidereal_warnings": len(sidereal),
