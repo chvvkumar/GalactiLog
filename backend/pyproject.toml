@@ -15,6 +15,9 @@ dependencies = [
     "pydantic-settings>=2.7.0,<3.0.0",
     "celery[redis]>=5.4.0,<6.0.0",
     "redis>=5.2.0,<6.0.0",
+    # kombu 5.7.0 refuses redis-py older than 6.1 at connect time. Remove this
+    # cap together with raising the redis pin above.
+    "kombu<5.7.0",
     "fitsio>=1.2.0,<2.0.0",
     "xisf>=0.9.5,<1.0.0",
     "Pillow>=13.0.0,<14.0.0",
