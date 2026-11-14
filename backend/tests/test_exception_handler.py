@@ -49,6 +49,37 @@ async def test_unhandled_exception_handler_returns_500_envelope():
     assert body == {"detail": "Internal server error"}
 
 
+@pytest.mark.asyncio
+async def test_upstream_catalog_failure_returns_502_with_readable_detail(monkeypatch):
+    """An upstream catalog failure is a 502 whose detail names the cause."""
+    from contextlib import asynccontextmanager
+    from unittest.mock import AsyncMock
+    from app.main import create_app
+    from app.services.catalog_cache import NonTransientError
+
+    async def fake_emit(session, **kw):
+        return 1
+
+    @asynccontextmanager
+    async def fake_session():
+        yield AsyncMock()
+
+    monkeypatch.setattr("app.services.activity.emit", fake_emit)
+    monkeypatch.setattr("app.main.async_session", fake_session)
+
+    handler = create_app().exception_handlers.get(Exception)
+    mock_request = MagicMock()
+    mock_request.method = "POST"
+    mock_request.url.path = "/api/targets/orphan-preview"
+
+    human = "SIMBAD lookup for 'IC 1396' failed: SIMBAD returned HTTP 404 (Not Found)"
+    exc = NonTransientError(human, source="simbad", key="IC 1396")
+    response = await handler(mock_request, exc)
+
+    assert response.status_code == 502
+    assert json.loads(response.body) == {"detail": human}
+
+
 # ---------------------------------------------------------------------------
 # End-to-end test: handler fires through the full middleware stack
 # ---------------------------------------------------------------------------

@@ -9,6 +9,7 @@ import httpx
 from sqlalchemy.orm import Session
 
 from app.services import catalog_cache as cc
+from app.services.upstream import request_with_fallback
 
 if TYPE_CHECKING:
     from app.models.target import Target
@@ -20,7 +21,10 @@ logger = logging.getLogger(__name__)
 # the $objname virtual column and of=csv output are both non-functional).
 # Use the ledacat.cgi endpoint which returns structured HTML with
 # parameter/value table rows that can be reliably parsed.
-HYPERLEDA_URL = "http://atlas.obs-hp.fr/hyperleda/ledacat.cgi"
+#
+# Tried in order. No known mirror. Plain http on purpose: the host does not
+# accept connections on port 443.
+HYPERLEDA_URLS = ["http://atlas.obs-hp.fr/hyperleda/ledacat.cgi"]
 
 _GALAXY_TYPES: frozenset[str] = frozenset({
     "G", "GiG", "GiC", "BiC", "Sy1", "Sy2", "LINER", "AGN",
@@ -81,8 +85,9 @@ def query_hyperleda(catalog_id: str) -> dict[str, Any] | None:
     name = _hyperleda_name(catalog_id)
 
     with httpx.Client(timeout=15.0, follow_redirects=True) as client:
-        resp = client.get(HYPERLEDA_URL, params={"o": name})
-        resp.raise_for_status()
+        resp = request_with_fallback(
+            client, "GET", HYPERLEDA_URLS, service="hyperleda", params={"o": name},
+        )
 
     html = resp.text
 
@@ -161,7 +166,7 @@ def enrich_target_from_hyperleda(session: Session, target: "Target") -> bool:
         return updated
 
     # Query HyperLEDA via the cache wrapper (handles retry/backoff and
-    # negative caching). The HTTP call happens outside any open transaction.
+    # negative caching of a real "no record"; an outage caches nothing). The HTTP call happens outside any open transaction.
     def fetch() -> dict[str, Any] | None:
         return query_hyperleda(target.catalog_id)
 

@@ -9,6 +9,7 @@ import httpx
 from sqlalchemy.orm import Session
 
 from app.services import catalog_cache as cc
+from app.services.upstream import request_with_fallback
 
 if TYPE_CHECKING:
     from app.models.target import Target
@@ -18,7 +19,8 @@ logger = logging.getLogger(__name__)
 # Minimal wrapper for cached payload to maintain attribute access compatibility
 _CachedPayload = namedtuple("_CachedPayload", ["distance_pc"])
 
-GAIA_TAP_URL = "https://gea.esac.esa.int/tap-server/tap/sync"
+# Tried in order. No known mirror.
+GAIA_TAP_URLS = ["https://gea.esac.esa.int/tap-server/tap/sync"]
 
 _CLUSTER_CODES: frozenset[str] = frozenset({
     "OpC", "GlC", "Cl*", "As*", "OCl", "GCl", "C*G",
@@ -82,8 +84,11 @@ def query_cluster_distance(
     )
 
     with httpx.Client(timeout=30.0) as client:
-        resp = client.post(
-            GAIA_TAP_URL,
+        resp = request_with_fallback(
+            client,
+            "POST",
+            GAIA_TAP_URLS,
+            service="gaia",
             data={
                 "REQUEST": "doQuery",
                 "LANG": "ADQL",
@@ -91,7 +96,6 @@ def query_cluster_distance(
                 "QUERY": adql,
             },
         )
-        resp.raise_for_status()
 
     lines = resp.text.strip().splitlines()
     if len(lines) < 2:

@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import urlparse
 
+import httpx
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -17,6 +18,7 @@ from app.api.v1 import v1_app
 from app.api.metrics_endpoint import router as metrics_router
 from app.metrics import PrometheusMiddleware, start_queue_depth_probe, register_celery_collector
 from app.schemas.error import ErrorEnvelope
+from app.services.upstream import error_details, human_error
 
 logger = logging.getLogger(__name__)
 
@@ -230,6 +232,36 @@ def create_app() -> FastAPI:
             request.method,
             request.url.path,
         )
+        where = f"{request.method} {request.url.path}"
+        # upstream_cause is set only for a catalog failure found in the
+        # exception's cause chain: a catalog_cache.NonTransientError, or the
+        # httpx error request_with_fallback raises (marked by ``attempts``),
+        # which only catalog clients use. It is the one piece of exception
+        # text that reaches the client, and both are built from service
+        # names, catalog mirror hostnames, HTTP status phrases and the
+        # looked-up object name. A bare httpx error is deliberately excluded:
+        # its host could be a private one, so it stays a generic 500.
+        upstream_cause = None
+        message = f"{where} failed: {type(exc).__name__}"
+        try:
+            from app.services.catalog_cache import NonTransientError
+            link, seen = exc, set()
+            while link is not None and id(link) not in seen:
+                seen.add(id(link))
+                if isinstance(link, NonTransientError) or (
+                    isinstance(link, httpx.HTTPError) and hasattr(link, "attempts")
+                ):
+                    upstream_cause = human_error(link)
+                    break
+                link = link.__cause__
+            if upstream_cause:
+                message = f"{upstream_cause} ({where})"
+            else:
+                extra = human_error(exc).removeprefix(type(exc).__name__).lstrip(": ").strip()
+                if extra:
+                    message = f"{message}: {extra}"
+        except Exception:
+            logger.warning("Failed to describe unhandled exception", exc_info=True)
         # Emit a curated api_error event on a fresh session so it commits
         # independently of the request that failed. The full traceback is
         # captured separately into app_logs by the root-logger handler above.
@@ -242,16 +274,23 @@ def create_app() -> FastAPI:
             async with async_session() as s:
                 await emit(
                     s, category="system", severity="error", event_type="api_error",
-                    message=f"{request.method} {request.url.path} failed: {type(exc).__name__}",
+                    message=message,
                     details={
                         "method": request.method,
                         "path": str(request.url.path),
                         "exception": str(exc)[:500],
+                        # Raw error and cause chain, kept for debugging.
+                        **error_details(exc),
                     },
                     actor=actor,
                 )
         except Exception:
             logger.warning("Failed to emit api_error activity event", exc_info=True)
+        if upstream_cause:
+            return JSONResponse(
+                status_code=502,
+                content=ErrorEnvelope(detail=upstream_cause).model_dump(),
+            )
         return JSONResponse(
             status_code=500,
             content=ErrorEnvelope(detail="Internal server error").model_dump(),

@@ -490,3 +490,125 @@ async def test_rename_target_invalidates_stats_and_analysis_cache(admin_user):
 
     assert mock_redis.delete.await_args_list[0].args == (STATS_CACHE_KEY, GUIDING_STATS_CACHE_KEY)
     assert set(mock_redis.delete.await_args_list[1].args) == set(analysis_keys)
+
+
+# ---------------------------------------------------------------------------
+# Catalog outage: "no answer" must not read as "no match"
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(autouse=True)
+def _no_leftover_outage_marks():
+    """Outage marks are per-process state; keep them from leaking between tests."""
+    from app.services import catalog_cache as cc
+    cc.clear_outages()
+    yield
+    cc.clear_outages()
+
+
+def _mark_simbad_down():
+    import httpx
+    from app.services import catalog_cache as cc
+    cc._mark_outage("simbad", httpx.ReadTimeout("The read operation timed out"))
+
+
+async def _noop_emit(session, **kw):
+    return 1
+
+
+async def _orphan_preview(admin_user, lookup_result):
+    """POST /orphan-preview with the catalog lookup stubbed to *lookup_result*."""
+    mock_session = AsyncMock()
+    no_image = MagicMock()
+    no_image.scalar_one_or_none.return_value = None
+    mock_session.execute = AsyncMock(return_value=no_image)
+    redis_cm, _ = _fake_async_redis_cm()
+
+    _override_session(mock_session)
+    app.dependency_overrides[require_admin] = lambda: admin_user
+    try:
+        with patch("app.api.merges.async_redis", redis_cm), \
+             patch("sqlalchemy.orm.Session", return_value=_FakeSyncSession()), \
+             patch("app.services.catalog_cache.clear_negative", return_value=0), \
+             patch("app.services.target_resolver.lookup_catalogs", return_value=lookup_result), \
+             patch("app.services.activity.emit", _noop_emit):
+            async with AsyncClient(
+                transport=ASGITransport(app=app, raise_app_exceptions=False),
+                base_url="http://test",
+            ) as client:
+                return await client.post(
+                    "/api/targets/orphan-preview", json={"source_name": "IC 1396"},
+                )
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_orphan_preview_reports_outage_instead_of_no_match(admin_user):
+    _mark_simbad_down()
+    resp = await _orphan_preview(admin_user, (None, False))
+
+    assert resp.status_code == 502, resp.text
+    assert resp.json()["detail"].startswith(
+        "SIMBAD lookup for 'IC 1396' could not be completed: "
+    )
+
+
+@pytest.mark.asyncio
+async def test_orphan_preview_returns_sesame_result_while_simbad_is_down(admin_user):
+    _mark_simbad_down()
+    resp = await _orphan_preview(admin_user, ({"primary_name": "IC 1396"}, False))
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["resolved"] is True
+
+
+@pytest.mark.asyncio
+async def test_orphan_preview_genuine_no_match_is_still_200(admin_user):
+    resp = await _orphan_preview(admin_user, (None, True))
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["resolved"] is False
+
+
+@pytest.mark.asyncio
+async def test_re_resolve_during_outage_changes_nothing(admin_user):
+    """An unanswered re-resolve is a 502 and leaves the target as it was:
+    name still locked, nothing committed, fast-reject set untouched."""
+    target = _make_target(name="My Locked Name", aliases=["IC 1396"])
+    target.catalog_id = None
+    target.common_name = None
+    target.name_locked = True
+
+    mock_session = AsyncMock()
+    mock_session.get = AsyncMock(return_value=target)
+    redis_cm, mock_redis = _fake_async_redis_cm()
+
+    _mark_simbad_down()
+    _override_session(mock_session)
+    app.dependency_overrides[require_admin] = lambda: admin_user
+    try:
+        with patch("app.api.merges.async_redis", redis_cm), \
+             patch("app.services.cache.async_redis", redis_cm), \
+             patch("sqlalchemy.orm.Session", return_value=_FakeSyncSession()), \
+             patch("app.services.catalog_cache.clear_negative", return_value=0), \
+             patch("app.services.simbad.resolve_target_name_cached", return_value=None), \
+             patch("app.services.activity.emit", _noop_emit):
+            async with AsyncClient(
+                transport=ASGITransport(app=app, raise_app_exceptions=False),
+                base_url="http://test",
+            ) as client:
+                resp = await client.put(
+                    f"/api/targets/{target.id}/identity", json={"re_resolve": True},
+                )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert resp.status_code == 502, resp.text
+    assert resp.json()["detail"].startswith(
+        "SIMBAD lookup for 'My Locked Name' could not be completed: "
+    )
+    assert target.name_locked is True
+    assert target.primary_name == "My Locked Name"
+    mock_session.commit.assert_not_awaited()
+    mock_redis.srem.assert_not_awaited()
+    mock_redis.delete.assert_not_awaited()

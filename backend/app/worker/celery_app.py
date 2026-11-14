@@ -194,6 +194,7 @@ def _emit_task_event(event_type, severity, task_name, task_id, exc):
     from sqlalchemy.orm import Session
     from app.config import get_sync_redis
     from app.services.activity import emit_sync
+    from app.services.upstream import error_details, human_error
     redis = get_sync_redis()
     verb = "failed" if event_type == "task_failure" else "retrying"
     try:
@@ -201,8 +202,11 @@ def _emit_task_event(event_type, severity, task_name, task_id, exc):
             emit_sync(
                 s, redis=redis, category="system", severity=severity,
                 event_type=event_type,
-                message=f"Task {task_name} {verb}: {type(exc).__name__}",
-                details={"task": task_name, "task_id": str(task_id), "error": str(exc)[:500]},
+                message=f"Background task '{task_name}' {verb}: {human_error(exc)}",
+                details={
+                    "task": task_name, "task_id": str(task_id), "error": str(exc)[:500],
+                    **error_details(exc),
+                },
                 actor="system",
             )
     except Exception:

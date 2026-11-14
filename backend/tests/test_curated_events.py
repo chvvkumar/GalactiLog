@@ -93,6 +93,199 @@ async def test_5xx_handler_still_returns_500_when_emit_fails(monkeypatch):
     assert resp.status_code == 500
 
 
+async def _run_handler(monkeypatch, method, path, exc):
+    """Call the 5xx handler with emit stubbed; return (response, emit kwargs)."""
+    from app.main import create_app
+
+    handler = create_app().exception_handlers.get(Exception)
+    captured = {}
+
+    async def fake_emit(session, **kw):
+        captured.update(kw)
+        return 1
+
+    @asynccontextmanager
+    async def fake_session():
+        yield AsyncMock()
+
+    monkeypatch.setattr("app.services.activity.emit", fake_emit)
+    monkeypatch.setattr("app.main.async_session", fake_session)
+
+    request = MagicMock()
+    request.method = method
+    request.url.path = path
+    request.state.user = None
+    return await handler(request, exc), captured
+
+
+def _simbad_both_mirrors_down():
+    """NonTransientError as catalog_cache builds it when both SIMBAD mirrors fail."""
+    import httpx
+    from app.services import catalog_cache as cc
+    from app.services.upstream import request_with_fallback
+
+    class FakeClient:
+        def post(self, url, **kw):
+            req = httpx.Request("POST", url)
+            if "cds.unistra.fr" in url:
+                resp = httpx.Response(404, request=req)
+                raise httpx.HTTPStatusError(
+                    f"Client error '404 Not Found' for url '{url}'", request=req, response=resp,
+                )
+            raise httpx.ReadTimeout("The read operation timed out", request=req)
+
+    urls = [
+        "https://simbad.cds.unistra.fr/simbad/sim-tap/sync",
+        "https://simbad.harvard.edu/simbad/sim-tap/sync",
+    ]
+    try:
+        request_with_fallback(FakeClient(), "POST", urls, service="simbad")
+    except httpx.HTTPError as exc:
+        err = cc._non_transient("simbad", "IC 1396", exc)
+        err.__cause__ = exc
+        return err
+    raise AssertionError("request_with_fallback did not raise")
+
+
+@pytest.mark.asyncio
+async def test_5xx_handler_upstream_failure_is_readable_502(monkeypatch):
+    import json
+
+    exc = _simbad_both_mirrors_down()
+    resp, captured = await _run_handler(monkeypatch, "POST", "/api/targets/orphan-preview", exc)
+
+    expected = (
+        "SIMBAD lookup for 'IC 1396' failed: SIMBAD is unavailable: "
+        "simbad.cds.unistra.fr returned HTTP 404 (Not Found); "
+        "simbad.harvard.edu timed out"
+    )
+    assert resp.status_code == 502
+    assert json.loads(resp.body) == {"detail": expected}
+    # The message leads with the cause, not the route or the class name.
+    assert captured["message"] == f"{expected} (POST /api/targets/orphan-preview)"
+    assert captured["severity"] == "error"
+    assert captured["event_type"] == "api_error"
+
+    details = captured["details"]
+    assert details["method"] == "POST"
+    assert details["path"] == "/api/targets/orphan-preview"
+    assert details["exception_type"] == "NonTransientError"
+    assert details["exception"] == str(exc)[:500]
+    # The raw httpx text survives in the chain for debugging, but never
+    # reaches the client.
+    assert "ReadTimeout: The read operation timed out" in details["error_chain"]
+    assert "read operation" not in resp.body.decode()
+    json.dumps(details)
+
+
+@pytest.mark.asyncio
+async def test_5xx_handler_bare_httpx_error_stays_generic_500(monkeypatch):
+    """A bare httpx error may name a private host, so the client gets nothing."""
+    import json
+    import httpx
+
+    req = httpx.Request("GET", "http://nina.lan:1888/v2/api?secret=1")
+    exc = httpx.ConnectError("[Errno 111] Connection refused", request=req)
+    resp, captured = await _run_handler(monkeypatch, "GET", "/api/x", exc)
+
+    assert resp.status_code == 500
+    assert json.loads(resp.body) == {"detail": "Internal server error"}
+    # The admin-only activity log still gets the readable cause.
+    assert captured["message"].startswith("GET /api/x failed: ConnectError")
+    assert "nina.lan" in captured["message"]
+    assert captured["details"]["exception_type"] == "ConnectError"
+
+
+@pytest.mark.asyncio
+async def test_5xx_handler_fallback_failure_in_cause_chain_is_502(monkeypatch):
+    """An ``attempts`` error from request_with_fallback is a catalog failure,
+    even when a route wrapped it in something else."""
+    import json
+
+    fallback_exc = _simbad_both_mirrors_down().__cause__
+    assert hasattr(fallback_exc, "attempts")
+    expected = (
+        "SIMBAD is unavailable: simbad.cds.unistra.fr returned HTTP 404 (Not Found); "
+        "simbad.harvard.edu timed out"
+    )
+
+    resp, captured = await _run_handler(monkeypatch, "GET", "/api/x", fallback_exc)
+    assert resp.status_code == 502
+    assert json.loads(resp.body) == {"detail": expected}
+    assert captured["message"] == f"{expected} (GET /api/x)"
+    json.dumps(captured["details"])
+
+    wrapped = RuntimeError("internal text that must not leak")
+    wrapped.__cause__ = fallback_exc
+    resp, captured = await _run_handler(monkeypatch, "GET", "/api/x", wrapped)
+    assert resp.status_code == 502
+    assert json.loads(resp.body) == {"detail": expected}
+    assert captured["details"]["exception_type"] == "RuntimeError"
+
+
+@pytest.mark.asyncio
+async def test_5xx_handler_non_upstream_cause_chain_stays_500(monkeypatch):
+    """A cause chain with no catalog failure in it never opens the 502 path,
+    even when a link is a bare httpx error."""
+    import json
+    import httpx
+
+    for cause in (
+        KeyError("inner secret"),
+        httpx.ReadTimeout("timed out", request=httpx.Request("GET", "http://nina.lan/x")),
+    ):
+        exc = RuntimeError("outer secret")
+        exc.__cause__ = cause
+        resp, captured = await _run_handler(monkeypatch, "GET", "/api/x", exc)
+
+        assert resp.status_code == 500
+        assert json.loads(resp.body) == {"detail": "Internal server error"}
+        assert captured["message"].startswith("GET /api/x failed: RuntimeError")
+        assert type(cause).__name__ in captured["details"]["error_chain"]
+
+
+@pytest.mark.asyncio
+async def test_5xx_handler_catalog_outage_error_is_502(monkeypatch):
+    """CatalogOutageError (a lookup that got no answer) reads as a 502."""
+    import json
+    import httpx
+    from app.services import catalog_cache as cc
+
+    cc.clear_outages()
+    cc._mark_outage("simbad", httpx.ReadTimeout("The read operation timed out"))
+    try:
+        with pytest.raises(cc.CatalogOutageError) as raised:
+            cc.raise_if_outage("simbad", "sesame", key="IC 1396")
+    finally:
+        cc.clear_outages()
+
+    resp, captured = await _run_handler(
+        monkeypatch, "POST", "/api/targets/orphan-preview", raised.value,
+    )
+    assert resp.status_code == 502
+    detail = json.loads(resp.body)["detail"]
+    assert detail.startswith("SIMBAD lookup for 'IC 1396' could not be completed: ")
+    assert captured["message"] == f"{detail} (POST /api/targets/orphan-preview)"
+    assert captured["details"]["exception_type"] == "CatalogOutageError"
+
+
+@pytest.mark.asyncio
+async def test_5xx_handler_generic_error_keeps_prefix_and_hides_text(monkeypatch):
+    import json
+
+    resp, captured = await _run_handler(monkeypatch, "POST", "/api/targets", ValueError("bad input"))
+
+    assert resp.status_code == 500
+    assert json.loads(resp.body) == {"detail": "Internal server error"}
+    assert captured["message"].startswith("POST /api/targets failed: ValueError")
+    assert "bad input" in captured["message"]
+    details = captured["details"]
+    assert details["exception_type"] == "ValueError"
+    assert details["exception"] == "bad input"
+    assert "bad input" in details["error_chain"]
+    json.dumps(details)
+
+
 # ---------------------------------------------------------------------------
 # Task 12: Celery task_failure / task_retry signal emits
 # ---------------------------------------------------------------------------
